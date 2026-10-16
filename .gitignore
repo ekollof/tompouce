@@ -1,0 +1,8 @@
+*.o
+strudelterm
+tests/test_pattern
+tests/test_harmony
+tests/test_strudel
+nohup.out
+assets/banks/
+strudelterm-song.json

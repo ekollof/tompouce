@@ -1,0 +1,821 @@
+#include "mcp.h"
+#include "common.h"
+#include "track.h"
+#include "scheduler.h"
+#include "audio.h"
+#include "ai.h"
+#include "tui.h"
+#include "midi.h"
+#include "banks.h"
+#include "songfile.h"
+#include <cjson/cJSON.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
+
+extern char current_code[];
+FILE *mcp_out_stream = NULL;
+int mcp_input_fd = -1;
+static int mcp_listen_fd = -1;
+static int mcp_port_bound = 0;
+static char mcp_init_code[65536] = {0};
+
+void mcp_set_init_code(const char *code) {
+    if (code) snprintf(mcp_init_code, sizeof(mcp_init_code), "%s", code);
+}
+
+#define MCP_MAX_FRAME (1024 * 1024)
+static char mcp_pending[MCP_MAX_FRAME + 1];
+static size_t mcp_pending_len = 0;
+static int mcp_frame_drop = 0;
+
+static void mcp_take_line(char **out, size_t nl) {
+    mcp_pending[nl] = 0;
+    *out = strdup_safe(mcp_pending);
+    size_t rest = mcp_pending_len - (nl + 1);
+    if (rest > 0) memmove(mcp_pending, mcp_pending + nl + 1, rest);
+    mcp_pending_len = rest;
+}
+
+int mcp_read_frame(int fd, char **out) {
+    char tmp[8192];
+    *out = NULL;
+    for (;;) {
+        /* try to extract a complete line from the pending buffer */
+        if (mcp_frame_drop) {
+            char *nl = memchr(mcp_pending, '\n', mcp_pending_len);
+            if (nl) {
+                size_t pos = (size_t)(nl - mcp_pending);
+                size_t rest = mcp_pending_len - (pos + 1);
+                if (rest > 0) memmove(mcp_pending, mcp_pending + pos + 1, rest);
+                mcp_pending_len = rest;
+                mcp_frame_drop = 0;
+                continue;
+            }
+            mcp_pending_len = 0;
+        } else {
+            char *nl = memchr(mcp_pending, '\n', mcp_pending_len);
+            if (nl) {
+                mcp_take_line(out, (size_t)(nl - mcp_pending));
+                return 1;
+            }
+        }
+        ssize_t r = read(fd, tmp, sizeof(tmp));
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+            return -1;
+        }
+        if (r == 0) {
+            if (mcp_pending_len > 0 && !mcp_frame_drop) {
+                mcp_pending[mcp_pending_len] = 0;
+                *out = strdup_safe(mcp_pending);
+                mcp_pending_len = 0;
+                return 1;
+            }
+            return -1;
+        }
+        for (ssize_t i = 0; i < r; i++) {
+            if (mcp_frame_drop) {
+                if (tmp[i] == '\n') { mcp_frame_drop = 0; mcp_pending_len = 0; }
+                continue;
+            }
+            if (mcp_pending_len >= MCP_MAX_FRAME) {
+                mcp_frame_drop = 1;
+                mcp_pending_len = 0;
+                continue;
+            }
+            mcp_pending[mcp_pending_len++] = tmp[i];
+        }
+    }
+}
+
+static void send_json(cJSON *obj) {
+    FILE *out = mcp_out_stream ? mcp_out_stream : stdout;
+    char *s = cJSON_PrintUnformatted(obj);
+    if (s) {
+        fputs(s, out);
+        fputc('\n', out);
+        fflush(out);
+        free(s);
+    }
+    cJSON_Delete(obj);
+}
+
+static int session_name_ok(const char *n) {
+    if (!n) return 0;
+    size_t L = strlen(n);
+    if (L == 0 || L > 64) return 0;
+    for (size_t i = 0; i < L; i++) {
+        char c = n[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-')) return 0;
+    }
+    return 1;
+}
+
+static void session_base(char *base, size_t n) {
+    user_dir(base, n, "XDG_CONFIG_HOME", "strudelterm/sessions",
+             ".config/strudelterm/sessions");
+}
+
+static void session_path(const char *name, char *out, size_t outlen) {
+    char base[1024];
+    if (!out || outlen == 0) return;
+    out[0] = 0;
+    session_base(base, sizeof(base));
+    if (!base[0]) return;
+    mkdir_p(base);
+    int n = snprintf(out, outlen, "%s/%s.json", base, name);
+    if (n < 0 || (size_t)n >= outlen) out[0] = 0;
+}
+
+static void handle_session(cJSON *args, char *out, size_t outlen, int *iserr) {
+    cJSON *a = args ? cJSON_GetObjectItem(args, "action") : NULL;
+    const char *act = (a && cJSON_IsString(a)) ? a->valuestring : "";
+    if (strcmp(act, "list") == 0) {
+        char base[1024];
+        session_base(base, sizeof(base));
+        DIR *dp = base[0] ? opendir(base) : NULL;
+        size_t pos = 0;
+        out[0] = 0;
+        if (dp) {
+            struct dirent *de;
+            while ((de = readdir(dp)) != NULL && pos < outlen - 70) {
+                size_t L = strlen(de->d_name);
+                if (L < 6 || L - 5 >= 72) continue;
+                if (strcmp(de->d_name + L - 5, ".json") != 0) continue;
+                char nm[72];
+                memcpy(nm, de->d_name, L - 5);
+                nm[L - 5] = 0;
+                if (!session_name_ok(nm)) continue;
+                int w = snprintf(out + pos, outlen - pos, "%s\n", nm);
+                if (w < 0) break;
+                pos += (size_t)w;
+            }
+            closedir(dp);
+        }
+        if (pos == 0) snprintf(out, outlen, "%s", "(no sessions)");
+        return;
+    }
+    cJSON *nm = args ? cJSON_GetObjectItem(args, "name") : NULL;
+    const char *name = (nm && cJSON_IsString(nm)) ? nm->valuestring : "";
+    if (!session_name_ok(name)) {
+        snprintf(out, outlen, "%s", "bad name (a-z 0-9 _ -)");
+        *iserr = 1;
+        return;
+    }
+    char path[2048];
+    session_path(name, path, sizeof(path));
+    if (!path[0]) {
+        snprintf(out, outlen, "%s", "no session dir");
+        *iserr = 1;
+        return;
+    }
+    if (strcmp(act, "save") == 0) {
+        int n = songfile_save(path, current_code, audio_get_bpm(), 1);
+        if (n > 0) snprintf(out, outlen, "saved %s (%d track%s)", name, n, n == 1 ? "" : "s");
+        else { snprintf(out, outlen, "%s", "save failed"); *iserr = 1; }
+    } else if (strcmp(act, "load") == 0) {
+        char tmp[65536];
+        double b = 0;
+        int n = songfile_load(path, tmp, sizeof(tmp), &b, 1);
+        if (n < 0) { snprintf(out, outlen, "%s", "load failed"); *iserr = 1; return; }
+        int apply = (b > 0);
+        if (apply) {
+            if (strncmp(tmp, "bpm ", 4) == 0 || strncmp(tmp, "bpm\t", 4) == 0 ||
+                strstr(tmp, "\nbpm ") || strstr(tmp, "\nbpm\t")) apply = 0;
+        }
+        /* songfile_load already replaced the list + engine; follow in UI */
+        scheduler_song_follow();
+        if (apply) audio_set_bpm(b);
+        snprintf(out, outlen, "loaded %s (%d track%s)", name, n, n == 1 ? "" : "s");
+    } else if (strcmp(act, "delete") == 0) {
+        if (unlink(path) == 0) snprintf(out, outlen, "deleted %s", name);
+        else { snprintf(out, outlen, "%s", "not found"); *iserr = 1; }
+    } else {
+        snprintf(out, outlen, "%s", "Unknown action (save/load/list/delete)");
+        *iserr = 1;
+    }
+}
+
+static void handle_health(char *out, size_t outlen) {
+    int av = audio_active_voices();
+    snprintf(out, outlen,
+        "playing=%s stream=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s",
+        audio_is_playing() ? "yes" : "no",
+        audio_is_stream_active() ? "up" : "down",
+        audio_get_bpm(), audio_time_now(), av, event_queue_depth(), track_count,
+        scheduler_song_pos() + 1, scheduler_song_count(),
+        banks_ready() ? "ready" : "indexing", banks_count(),
+        midi_ready() ? "up" : "down");
+}
+
+static cJSON *text_result(const char *text, int is_error) {
+    cJSON *res = cJSON_CreateObject();
+    cJSON *content = cJSON_AddArrayToObject(res, "content");
+    cJSON *item = cJSON_CreateObject();
+    cJSON_AddStringToObject(item, "type", "text");
+    cJSON_AddStringToObject(item, "text", text ? text : "");
+    cJSON_AddItemToArray(content, item);
+    if (is_error) cJSON_AddBoolToObject(res, "isError", 1);
+    return res;
+}
+
+void handle_request(cJSON *req) {
+    cJSON *id = cJSON_GetObjectItem(req, "id");
+    cJSON *method = cJSON_GetObjectItem(req, "method");
+    if (!method || !cJSON_IsString(method)) return;
+    const char *m = method->valuestring;
+    cJSON *params = cJSON_GetObjectItem(req, "params");
+
+    /* notifications: no response */
+    if (strncmp(m, "notifications/", 14) == 0) return;
+
+    if (strcmp(m, "initialize") == 0) {
+        cJSON *res = cJSON_CreateObject();
+        cJSON_AddStringToObject(res, "protocolVersion", "2024-11-05");
+        cJSON *caps = cJSON_AddObjectToObject(res, "capabilities");
+        cJSON_AddObjectToObject(caps, "tools");
+        cJSON_AddObjectToObject(caps, "resources");
+        cJSON *info = cJSON_AddObjectToObject(res, "serverInfo");
+        cJSON_AddStringToObject(info, "name", "strudelterm");
+        cJSON_AddStringToObject(info, "version", "0.1.0");
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+        if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+        cJSON_AddItemToObject(resp, "result", res);
+        send_json(resp);
+        return;
+    }
+    if (strcmp(m, "ping") == 0) {
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+        if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+        cJSON_AddObjectToObject(resp, "result");
+        send_json(resp);
+        return;
+    }
+    if (strcmp(m, "tools/list") == 0) {
+        cJSON *tools = cJSON_CreateArray();
+#define ADDTOOL(name, desc, schema_json) do { \
+        cJSON *t = cJSON_CreateObject(); \
+        cJSON_AddStringToObject(t, "name", name); \
+        cJSON_AddStringToObject(t, "description", desc); \
+        cJSON *sc = cJSON_Parse(schema_json); \
+        cJSON_AddItemToObject(t, "inputSchema", sc); \
+        cJSON_AddItemToArray(tools, t); \
+    } while(0)
+        ADDTOOL("music_set_code", "Replace and evaluate StrudelTerm code.",
+            "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\"}},\"required\":[\"code\"]}");
+        ADDTOOL("music_evaluate", "Evaluate current code buffer.", "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_play", "Start playback.", "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_stop", "Stop playback.", "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_set_bpm", "Set tempo BPM.", "{\"type\":\"object\",\"properties\":{\"bpm\":{\"type\":\"number\"}},\"required\":[\"bpm\"]}");
+        ADDTOOL("music_get_status", "Get playback status, bpm, track count, console tail.", "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_get_code", "Get current code.", "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_get_console", "Get recent console log lines.", "{\"type\":\"object\",\"properties\":{\"lines\":{\"type\":\"number\"}}}");
+        ADDTOOL("music_ai", "Ask AI to generate code from a prompt; result is loaded and evaluated.",
+            "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"}},\"required\":[\"prompt\"]}");
+        ADDTOOL("music_song", "Song mode: play track buffers in sequence, one per cycle.",
+            "{\"type\":\"object\",\"properties\":{\"enabled\":{\"type\":\"boolean\"}}}");
+        ADDTOOL("music_track", "Song tracks: copy/next/prev/hold/list/goto/move/remove.",
+            "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"index\":{\"type\":\"number\"},\"to\":{\"type\":\"number\"}},\"required\":[\"action\"]}");
+        ADDTOOL("music_session", "Composition sessions (save/load/list/delete).",
+            "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}},\"required\":[\"action\"]}");
+        ADDTOOL("music_health", "Engine diagnostics (audio, voices, queue, index).",
+            "{\"type\":\"object\",\"properties\":{}}");
+#undef ADDTOOL
+        cJSON *res = cJSON_CreateObject();
+        cJSON_AddItemToObject(res, "tools", tools);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+        if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+        cJSON_AddItemToObject(resp, "result", res);
+        send_json(resp);
+        return;
+    }
+    if (strcmp(m, "tools/call") == 0) {
+        cJSON *name = cJSON_GetObjectItem(params, "name");
+        cJSON *args = cJSON_GetObjectItem(params, "arguments");
+        if (!name || !cJSON_IsString(name)) {
+            cJSON *err = cJSON_CreateObject();
+            cJSON_AddNumberToObject(err, "code", -32602);
+            cJSON_AddStringToObject(err, "message", "Missing tool name");
+            cJSON *resp = cJSON_CreateObject();
+            cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+            if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+            cJSON_AddItemToObject(resp, "error", err);
+            send_json(resp);
+            return;
+        }
+        const char *tname = name->valuestring;
+        char out[65536]; out[0] = 0;
+        int iserr = 0;
+        if (strcmp(tname, "music_set_code") == 0) {
+            cJSON *code = args ? cJSON_GetObjectItem(args, "code") : NULL;
+            if (code && cJSON_IsString(code)) {
+                track_load_from_code(code->valuestring);
+                snprintf(out, sizeof(out), "Loaded %d tracks.", track_count);
+            } else { snprintf(out, sizeof(out), "Missing code"); iserr = 1; }
+        } else if (strcmp(tname, "music_evaluate") == 0) {
+            track_load_from_code(current_code);
+            snprintf(out, sizeof(out), "Evaluated %d tracks.", track_count);
+        } else if (strcmp(tname, "music_play") == 0) {
+            audio_toggle_play(1); scheduler_start();
+            snprintf(out, sizeof(out), "Playing.");
+        } else if (strcmp(tname, "music_stop") == 0) {
+            audio_toggle_play(0);
+            snprintf(out, sizeof(out), "Stopped.");
+        } else if (strcmp(tname, "music_set_bpm") == 0) {
+            cJSON *b = args ? cJSON_GetObjectItem(args, "bpm") : NULL;
+            if (b && (cJSON_IsNumber(b)) && isfinite(b->valuedouble)) {
+                audio_set_bpm(b->valuedouble);
+                snprintf(out, sizeof(out), "BPM set to %.0f.", audio_get_bpm());
+            } else { snprintf(out, sizeof(out), "Missing or invalid bpm"); iserr=1; }
+        } else if (strcmp(tname, "music_song") == 0) {
+            cJSON *e = args ? cJSON_GetObjectItem(args, "enabled") : NULL;
+            if (e && (cJSON_IsTrue(e) || cJSON_IsFalse(e))) {
+                scheduler_song_set(cJSON_IsTrue(e) ? 1 : 0);
+                scheduler_song_follow();
+            }
+            else if (!e) { snprintf(out, sizeof(out), "Missing enabled"); iserr=1; }
+            if (!iserr) {
+                int si = scheduler_song_pos();
+                int n = scheduler_song_count();
+                if (scheduler_song_on() && si >= 0)
+                    snprintf(out, sizeof(out), "song on: track %d/%d", si + 1, n);
+                else snprintf(out, sizeof(out), "song off (%d tracks)", n);
+            }
+        } else if (strcmp(tname, "music_track") == 0) {
+            cJSON *a = args ? cJSON_GetObjectItem(args, "action") : NULL;
+            const char *act = (a && cJSON_IsString(a)) ? a->valuestring : "";
+            if (strcmp(act, "copy") == 0) {
+                int idx = scheduler_track_copy(current_code);
+                scheduler_song_follow();
+                if (idx >= 0) snprintf(out, sizeof(out), "copied to track %d/%d", idx + 1, scheduler_song_count());
+                else { snprintf(out, sizeof(out), "copy failed"); iserr=1; }
+            } else if (strcmp(act, "next") == 0) {
+                scheduler_track_next();
+                scheduler_song_follow();
+                snprintf(out, sizeof(out), "track %d/%d", scheduler_song_pos() + 1, scheduler_song_count());
+            } else if (strcmp(act, "prev") == 0) {
+                scheduler_track_prev();
+                scheduler_song_follow();
+                snprintf(out, sizeof(out), "track %d/%d", scheduler_song_pos() + 1, scheduler_song_count());
+            } else if (strcmp(act, "hold") == 0) {
+                scheduler_song_hold_toggle();
+                snprintf(out, sizeof(out), scheduler_song_hold() ? "hold on" : "hold off");
+            } else if (strcmp(act, "goto") == 0) {
+                cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
+                int n = scheduler_song_count();
+                if (ix && cJSON_IsNumber(ix) && isfinite(ix->valuedouble) &&
+                    (int)ix->valuedouble >= 0 && (int)ix->valuedouble < n) {
+                    scheduler_track_goto((int)ix->valuedouble);
+                    scheduler_song_follow();
+                    snprintf(out, sizeof(out), "track %d/%d", scheduler_song_pos() + 1, n);
+                } else { snprintf(out, sizeof(out), "bad index"); iserr=1; }
+            } else if (strcmp(act, "list") == 0) {
+                int n = scheduler_song_count();
+                size_t pos = 0;
+                out[0] = 0;
+                for (int i = 0; i < n; i++) {
+                    char prev[128];
+                    scheduler_track_preview(i, prev, sizeof(prev));
+                    int w = snprintf(out + pos, sizeof(out) - pos, "%c%d: %.100s\n",
+                        i == scheduler_song_pos() ? '*' : ' ', i, prev);
+                    if (w < 0 || pos + (size_t)w >= sizeof(out)) break;
+                    pos += (size_t)w;
+                }
+                if (n == 0) snprintf(out, sizeof(out), "(no tracks)");
+            } else if (strcmp(act, "move") == 0) {
+                cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
+                cJSON *to = args ? cJSON_GetObjectItem(args, "to") : NULL;
+                if (ix && cJSON_IsNumber(ix) && to && cJSON_IsNumber(to) &&
+                    isfinite(ix->valuedouble) && isfinite(to->valuedouble) &&
+                    scheduler_track_move((int)ix->valuedouble, (int)to->valuedouble)) {
+                    scheduler_song_follow();
+                    snprintf(out, sizeof(out), "moved, now track %d/%d",
+                        scheduler_song_pos() + 1, scheduler_song_count());
+                } else { snprintf(out, sizeof(out), "bad index"); iserr=1; }
+            } else if (strcmp(act, "remove") == 0) {
+                cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
+                if (ix && cJSON_IsNumber(ix) && isfinite(ix->valuedouble) &&
+                    scheduler_track_remove((int)ix->valuedouble)) {
+                    scheduler_song_follow();
+                    snprintf(out, sizeof(out), "removed, %d left", scheduler_song_count());
+                } else { snprintf(out, sizeof(out), "bad index"); iserr=1; }
+            } else { snprintf(out, sizeof(out), "Unknown action (copy/next/prev/hold/list/goto/move/remove)"); iserr=1; }
+        } else if (strcmp(tname, "music_session") == 0) {
+            handle_session(args, out, sizeof(out), &iserr);
+        } else if (strcmp(tname, "music_health") == 0) {
+            handle_health(out, sizeof(out));
+        } else if (strcmp(tname, "music_get_status") == 0) {
+            int si = scheduler_song_pos();
+            int n = scheduler_song_count();
+            char song[64] = {0};
+            if (scheduler_song_on() && si >= 0)
+                snprintf(song, sizeof(song), " song=%d/%d%s", si + 1, n,
+                    scheduler_song_hold() ? ":HOLD" : "");
+            else if (n > 0)
+                snprintf(song, sizeof(song), " tracks=%d", n);
+            snprintf(out, sizeof(out), "playing=%s bpm=%.0f voices=%d%s\ncurrent_code_bytes=%d",
+                audio_is_playing()?"yes":"no", audio_get_bpm(), track_count, song,
+                (int)strlen(current_code));
+        } else if (strcmp(tname, "music_get_code") == 0) {
+            snprintf(out, sizeof(out), "%s", current_code);
+        } else if (strcmp(tname, "music_get_console") == 0) {
+            cJSON *ln = args ? cJSON_GetObjectItem(args, "lines") : NULL;
+            int n = (ln && cJSON_IsNumber(ln)) ? (int)ln->valuedouble : 20;
+            if (n < 1) n = 1;
+            if (n > 100) n = 100;
+            int cnt = console_count_get();
+            int start = (cnt <= n) ? 0 : (cnt - n);
+            size_t pos = 0;
+            for (int i = start; i < cnt; i++) {
+                const char *l = console_line(i);
+                if (l) {
+                    size_t ll = strlen(l);
+                    if (pos + ll + 2 < sizeof(out)) {
+                        memcpy(out+pos, l, ll); pos += ll; out[pos++] = '\n'; out[pos]=0;
+                    }
+                }
+            }
+            if (pos == 0) snprintf(out, sizeof(out), "%s", "(no console output)");
+        } else if (strcmp(tname, "music_ai") == 0) {
+            cJSON *pr = args ? cJSON_GetObjectItem(args, "prompt") : NULL;
+            if (pr && cJSON_IsString(pr)) {
+                char ctx[65536];
+                strncpy(ctx, current_code, 65535); ctx[65535]=0;
+                ai_request_async(pr->valuestring, ctx);
+                char *r = NULL;
+                int waited = 0;
+                while (waited < 120000) {
+                    r = ai_poll_result();
+                    if (r) break;
+                    usleep(200000);
+                    waited += 200;
+                }
+                if (r) {
+                    track_load_from_code(r);
+                    snprintf(out, sizeof(out), "AI generated and loaded code:\n%s", r);
+                    free(r);
+                } else {
+                    snprintf(out, sizeof(out), "AI timed out.");
+                    iserr = 1;
+                }
+            } else { snprintf(out, sizeof(out), "Missing prompt"); iserr=1; }
+        } else {
+            snprintf(out, sizeof(out), "Unknown tool: %s", tname);
+            iserr = 1;
+        }
+        cJSON *result = text_result(out, iserr);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+        if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+        cJSON_AddItemToObject(resp, "result", result);
+        send_json(resp);
+        return;
+    }
+    if (strcmp(m, "resources/list") == 0) {
+        cJSON *resources = cJSON_CreateArray();
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddStringToObject(r, "uri", "strudel://code");
+        cJSON_AddStringToObject(r, "name", "current_code");
+        cJSON_AddItemToArray(resources, r);
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddStringToObject(t, "uri", "strudel://tracks");
+        cJSON_AddStringToObject(t, "name", "song_tracks");
+        cJSON_AddItemToArray(resources, t);
+        cJSON *res = cJSON_CreateObject();
+        cJSON_AddItemToObject(res, "resources", resources);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+        if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+        cJSON_AddItemToObject(resp, "result", res);
+        send_json(resp);
+        return;
+    }
+    if (strcmp(m, "resources/read") == 0) {
+        cJSON *uri = params ? cJSON_GetObjectItem(params, "uri") : NULL;
+        const char *u = (uri && cJSON_IsString(uri)) ? uri->valuestring : "";
+        if (strcmp(u, "strudel://code") == 0) {
+            cJSON *contents = cJSON_CreateArray();
+            cJSON *c = cJSON_CreateObject();
+            cJSON_AddStringToObject(c, "uri", u);
+            cJSON_AddStringToObject(c, "mimeType", "text/plain");
+            cJSON_AddStringToObject(c, "text", current_code);
+            cJSON_AddItemToArray(contents, c);
+            cJSON *res = cJSON_CreateObject();
+            cJSON_AddItemToObject(res, "contents", contents);
+            cJSON *resp = cJSON_CreateObject();
+            cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+            if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+            cJSON_AddItemToObject(resp, "result", res);
+            send_json(resp);
+            return;
+        }
+        if (strcmp(u, "strudel://tracks") == 0) {
+            cJSON *arr = cJSON_CreateArray();
+            int n = scheduler_song_count();
+            int pos = scheduler_song_pos();
+            for (int i = 0; i < n; i++) {
+                char prev[128];
+                scheduler_track_preview(i, prev, sizeof(prev));
+                cJSON *t = cJSON_CreateObject();
+                cJSON_AddNumberToObject(t, "index", i);
+                cJSON_AddBoolToObject(t, "active", i == pos ? 1 : 0);
+                cJSON_AddStringToObject(t, "preview", prev);
+                cJSON_AddItemToArray(arr, t);
+            }
+            cJSON *c = cJSON_CreateObject();
+            cJSON_AddStringToObject(c, "uri", u);
+            cJSON_AddStringToObject(c, "mimeType", "application/json");
+            char *js = cJSON_PrintUnformatted(arr);
+            cJSON_Delete(arr);
+            cJSON_AddStringToObject(c, "text", js ? js : "[]");
+            if (js) free(js);
+            cJSON *contents = cJSON_CreateArray();
+            cJSON_AddItemToArray(contents, c);
+            cJSON *res = cJSON_CreateObject();
+            cJSON_AddItemToObject(res, "contents", contents);
+            cJSON *resp = cJSON_CreateObject();
+            cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+            if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+            cJSON_AddItemToObject(resp, "result", res);
+            send_json(resp);
+            return;
+        }
+    }
+
+    /* method not found */
+    cJSON *err = cJSON_CreateObject();
+    cJSON_AddNumberToObject(err, "code", -32601);
+    cJSON_AddStringToObject(err, "message", "Method not found");
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+    if (id) cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id,1));
+    cJSON_AddItemToObject(resp, "error", err);
+    send_json(resp);
+}
+
+static void mcp_reset_pending(void) {
+    mcp_pending_len = 0;
+    mcp_frame_drop = 0;
+}
+
+static void mcp_drop_client(void) {
+    if (mcp_out_stream && mcp_out_stream != stdout) {
+        fclose(mcp_out_stream);
+        mcp_out_stream = NULL;
+    }
+    if (mcp_input_fd >= 0) {
+        close(mcp_input_fd);
+        mcp_input_fd = -1;
+    }
+    mcp_reset_pending();
+}
+
+/* Loopback only. One accepted client at a time; the UI thread polls it. */
+static int mcp_open_listen(int port) {
+    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    if (ls < 0) return -1;
+    int one = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons((uint16_t)port);
+    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(ls, 1) != 0) {
+        close(ls);
+        return -1;
+    }
+    int flags = fcntl(ls, F_GETFL, 0);
+    if (flags >= 0) fcntl(ls, F_SETFL, flags | O_NONBLOCK);
+    mcp_listen_fd = ls;
+    mcp_port_bound = port;
+    log_console("mcp on 127.0.0.1:%d", port);
+    return 0;
+}
+
+void mcp_status(char *out, size_t n) {
+    if (!out || n == 0) return;
+    if (mcp_port_bound > 0)
+        snprintf(out, n, "127.0.0.1:%d%s", mcp_port_bound, mcp_input_fd >= 0 ? "*" : "");
+    else if (mcp_input_fd >= 0)
+        snprintf(out, n, "pipe");
+    else
+        snprintf(out, n, "off");
+}
+
+void mcp_poll(void) {
+    if (mcp_listen_fd >= 0 && mcp_input_fd < 0) {
+        fd_set lfds;
+        FD_ZERO(&lfds);
+        FD_SET(mcp_listen_fd, &lfds);
+        struct timeval tv0 = {0, 0};
+        if (select(mcp_listen_fd + 1, &lfds, NULL, NULL, &tv0) > 0) {
+            int cs = accept(mcp_listen_fd, NULL, NULL);
+            if (cs >= 0) {
+                int flags = fcntl(cs, F_GETFL, 0);
+                if (flags >= 0) fcntl(cs, F_SETFL, flags | O_NONBLOCK);
+                FILE *fout = fdopen(dup(cs), "w");
+                if (!fout) {
+                    close(cs);
+                } else {
+                    if (mcp_out_stream && mcp_out_stream != stdout) fclose(mcp_out_stream);
+                    mcp_out_stream = fout;
+                    mcp_input_fd = cs;
+                    mcp_reset_pending();
+                    log_console("mcp client connected");
+                }
+            }
+        }
+    }
+    if (mcp_input_fd < 0) return;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(mcp_input_fd, &rfds);
+    struct timeval tv = {0, 0};
+    int sel = select(mcp_input_fd + 1, &rfds, NULL, NULL, &tv);
+    if (sel < 0) {
+        if (errno == EINTR) return;
+        mcp_drop_client();
+        return;
+    }
+    if (sel == 0) return;
+    for (;;) {
+        char *frame = NULL;
+        int rr = mcp_read_frame(mcp_input_fd, &frame);
+        if (rr < 0) {
+            free(frame);
+            mcp_drop_client();
+            log_console("mcp client closed");
+            return;
+        }
+        if (rr == 0 || !frame) {
+            free(frame);
+            return;
+        }
+        cJSON *req = cJSON_Parse(frame);
+        if (req) {
+            handle_request(req);
+            cJSON_Delete(req);
+        }
+        free(frame);
+    }
+}
+
+void mcp_run(int ui_mode, int tcp_port) {
+    int ui = ui_mode;
+    /* start audio */
+    audio_init();
+    ai_init();
+    scheduler_init();
+    audio_toggle_play(1);
+    if (mcp_init_code[0] && !ui) track_load_from_code(mcp_init_code);
+
+    if (ui) {
+        if (!isatty(0)) {
+            mcp_input_fd = dup(0);
+            int f = fcntl(mcp_input_fd, F_GETFL, 0);
+            if (f >= 0) fcntl(mcp_input_fd, F_SETFL, f | O_NONBLOCK);
+        } else {
+            mcp_input_fd = -1;
+            int p = tcp_port > 0 ? tcp_port : MCP_DEFAULT_PORT;
+            if (mcp_open_listen(p) != 0)
+                log_console("mcp: listen 127.0.0.1:%d failed", p);
+        }
+        int saved_out = dup(1);
+        mcp_out_stream = fdopen(saved_out, "w");
+        /* reopen stdin/stdout to terminal for UI */
+        freopen("/dev/tty", "r", stdin);
+        freopen("/dev/tty", "w", stdout);
+        tui_init();
+        if (mcp_init_code[0]) tui_load_initial(mcp_init_code);
+        tui_run();
+        tui_shutdown();
+        mcp_drop_client();
+        if (mcp_listen_fd >= 0) {
+            close(mcp_listen_fd);
+            mcp_listen_fd = -1;
+        }
+        return;
+    }
+
+    /* headless */
+    mcp_out_stream = stdout;
+    mcp_input_fd = -1;
+    int stdin_fd = fileno(stdin);
+    int flags = fcntl(stdin_fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(stdin_fd, F_SETFL, flags | O_NONBLOCK);
+    int running = 1;
+    while (running) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(stdin_fd, &rfds);
+        struct timeval tv = { 0, 100000 };
+        int sel = select(stdin_fd + 1, &rfds, NULL, NULL, &tv);
+        if (sel > 0) {
+            for (;;) {
+                char *frame = NULL;
+                int rr = mcp_read_frame(stdin_fd, &frame);
+                if (rr < 0) { running = 0; break; }
+                if (rr == 0) break;
+                cJSON *req = cJSON_Parse(frame);
+                if (req) {
+                    handle_request(req);
+                    cJSON_Delete(req);
+                }
+                free(frame);
+            }
+            if (!running) break;
+        } else if (sel < 0) {
+            if (errno == EINTR) continue;
+            running = 0;
+            break;
+        }
+    }
+    scheduler_shutdown();
+    audio_shutdown();
+    ai_shutdown();
+}
+
+void mcp_run_tcp(int port) {
+    audio_init();
+    ai_init();
+    scheduler_init();
+    audio_toggle_play(1);
+    if (mcp_init_code[0]) track_load_from_code(mcp_init_code);
+
+    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    if (ls < 0) { log_console("tcp: socket failed"); return; }
+    int one = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* local only */
+    addr.sin_port = htons((uint16_t)port);
+    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(ls, 4) != 0) {
+        log_console("tcp: bind/listen %d failed", port);
+        close(ls);
+        return;
+    }
+    log_console("mcp tcp on 127.0.0.1:%d", port);
+    for (;;) {
+        int cs = accept(ls, NULL, NULL);
+        if (cs < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        int flags = fcntl(cs, F_GETFL, 0);
+        if (flags >= 0) fcntl(cs, F_SETFL, flags | O_NONBLOCK);
+        FILE *fout = fdopen(dup(cs), "w");
+        mcp_out_stream = fout ? fout : stdout;
+        int alive = 1;
+        while (alive) {
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(cs, &rfds);
+            struct timeval tv = { 0, 100000 };
+            int sel = select(cs + 1, &rfds, NULL, NULL, &tv);
+            if (sel > 0) {
+                for (;;) {
+                    char *frame = NULL;
+                    int rr = mcp_read_frame(cs, &frame);
+                    if (rr < 0) { alive = 0; break; }
+                    if (rr == 0) break;
+                    cJSON *req = cJSON_Parse(frame);
+                    if (req) {
+                        handle_request(req);
+                        cJSON_Delete(req);
+                    }
+                    free(frame);
+                }
+            } else if (sel < 0) {
+                if (errno == EINTR) continue;
+                alive = 0;
+            }
+        }
+        if (fout) fclose(fout);
+        mcp_out_stream = stdout;
+        close(cs);
+    }
+    close(ls);
+    scheduler_shutdown();
+    audio_shutdown();
+    ai_shutdown();
+}

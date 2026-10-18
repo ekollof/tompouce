@@ -277,6 +277,9 @@ int main(void) {
     dsp_init(&pan_voice.dsp,&params);
     VoiceMix mix = {0};
     route_voice(&pan_voice,1,1,&mix);
+    assert(mix.left==1 && mix.right==1); /* No pan means unity upmix. */
+    pan_voice.has_pan=1; memset(&mix,0,sizeof(mix));
+    route_voice(&pan_voice,1,1,&mix);
     assert(fabs(mix.left-sqrt(.5)) < 1e-9 && fabs(mix.right-sqrt(.5)) < 1e-9);
     pan_voice.smp_channels = 2;
     memset(&mix,0,sizeof(mix));

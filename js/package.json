@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {"build": "node build.mjs"},
   "dependencies": {
+    "@kabelsalat/core": "0.4.0",
+    "@kabelsalat/lib": "0.4.1",
     "@strudel/core": "1.2.6",
     "@strudel/mini": "1.2.6",
     "@strudel/tonal": "1.2.6",

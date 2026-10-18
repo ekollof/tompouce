@@ -2,7 +2,7 @@
 #define CONVOLUTION_H
 #define CONV_BLOCK 128
 #define CONV_FFT 256
-#define CONV_PARTS 512
+#define CONV_PARTS 1024
 typedef struct { float re, im; } ConvComplex;
 typedef struct ConvKernel {
     float head[2][CONV_BLOCK];
@@ -17,6 +17,7 @@ typedef struct {
 } ConvState;
 /* Generator thread only. Immutable cached kernels live for the process. */
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin);
+const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim);
 /* Test/offline builder; normalization follows WebAudio when normalize != 0. */
 ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, int normalize);
 void convolution_kernel_free(ConvKernel *kernel);

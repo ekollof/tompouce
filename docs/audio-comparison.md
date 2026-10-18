@@ -14,6 +14,8 @@ to an alternative Chromium executable. This is an explicit diagnostic, not a
 network-dependent part of `make test`. It creates a disposable browser profile
 and uses Chromium's debugging pipe; it does not connect to an existing browser
 or the running Tompouce MCP/UI session.
+The harness checks `assets/banks` and the standard user-local installation for
+catalogs. Set `TOMPOUCE_BANKS` for another installation root.
 
 `tests/render_audio` builds the real native callback and event/sample resolver
 into a separate executable. It queries the pinned QuickJS runtime one cycle at
@@ -39,22 +41,45 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Current regression gates compare the first 0.6 seconds at zero lag:
+Thirteen regression gates compare at zero lag (no capture shifts or gain
+normalization). The original piano windows remain 0.6 seconds; the new synth
+and generated-room cases check the full two-second capture:
 
 | Case | Minimum normalized correlation | Native/browser RMS ratio |
 | --- | --- | --- |
 | Dry C4 piano | 0.99 | 0.85–1.15 |
 | Arpoon piano with room disabled | 0.99 | 0.85–1.15 |
 | Piano with custom TR909 snare convolution IR | 0.99 | 0.85–1.15 |
+| Sine: default, ADSR, low-pass and explicit center pan (4 cases) | 0.99 | 0.85–1.15 |
+| Saw, square and triangle at 440 Hz (3 cases) | 0.99 | 0.85–1.15 |
+| ZzFX sine and bytebeat (2 cases) | 0.99 | 0.85–1.15 |
+| Piano with seeded generated convolution room | 0.99 | 0.85–1.15 |
 
 The C4 capture lasts two seconds and Arpoon captures four cycles/eight seconds.
 Only the stated window is gated; these checks do not establish full-song
 parity. The observed dry correlations were 0.99999994 and 0.999986 respectively.
-Any non-finite or silent window fails. No best-lag search, time shift, or gain
+Any non-finite capture or silent window fails. Peak levels and full frame counts
+are recorded too. No best-lag search, time shift, or gain
 normalization hides timing/level differences.
 
-The original wet Arpoon piano is captured too, as a diagnostic with no pass
-threshold. Native Schroeder reverb and browser convolution reverb differ;
-browser generated impulses also vary. Observed wet opening correlation was
-approximately 0.93–0.95. A dry pass does not close this reverb gap. The custom
-IR check observed correlation 0.99999997 and native/browser RMS ratio 0.9931.
+The new comparisons exposed and fixed default mono panning attenuation,
+stock periodic-wave normalization and bytebeat quantum startup. Measured
+ZzFX/bytebeat correlations exceed 0.999999; saw/square/triangle exceed 0.999.
+
+Generated native rooms now use convolution with the reference decay, fade and
+gradual low-pass algorithm. The generated-room gate uses an explicit LCG seed
+0xc0ffee in both implementations; it observed correlation 0.9921 and RMS ratio
+1.0311. The seed is part of the case/report, not an implicit replacement for
+ordinary browser randomness. Native rooms use this deterministic seed; ordinary
+browser rooms remain randomized. Custom IR correlation remains 0.99999997.
+
+Original wet Arpoon and stretched piano are also captured as diagnostics with
+no pass threshold. Ordinary wet Arpoon has independent random impulses and
+observed opening correlation around 0.95. Stretched piano currently compares
+native overlap-add grains against the browser phase vocoder and observed
+correlation about 0.08 with RMS ratio 1.016; waveform parity remains open.
+The stretched input starts at 0.25 seconds in both renderers because upstream
+subtracts 40 ms for its worklet and rejects a resulting negative onset. Captures
+are never shifted to conceal this difference.
+
+Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

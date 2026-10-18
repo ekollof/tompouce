@@ -398,7 +398,7 @@ static int ev_display_midi(const AudioEvent *ev) {
 
 void event_queue_clear(void) {
     pthread_mutex_lock(&qlock);
-    while (qhead) { QNode *n = qhead; qhead = qhead->next; free(n); }
+    while (qhead) { QNode *n = qhead; qhead = qhead->next; native_synth_release(n->ev.native_synth); free(n); }
     qcount = 0;
     if (++qgeneration == 0) qgeneration = 1;
     pthread_mutex_unlock(&qlock);
@@ -412,6 +412,7 @@ void event_queue_push(AudioEvent *ev) {
     QNode *node = malloc(sizeof(QNode));
     if (!node) { pthread_mutex_unlock(&qlock); return; }
     node->ev = *ev;
+    native_synth_retain(node->ev.native_synth);
     // insert sorted by time
     QNode **pp = &qhead;
     while (*pp && (*pp)->ev.time <= ev->time) pp = &(*pp)->next;
@@ -528,8 +529,11 @@ static void *consumer_thread(void *arg) {
                 qcount--;
                 free(n);
                 pthread_mutex_unlock(&qlock);
+                if (ev.osc_only && audio_is_playing() && !osc_output_send(&ev.osc,ev.time-audio_time_now()))
+                    log_console("OSC: output send failed");
                 audio_trigger_event(&ev);
-                if (ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
+                native_synth_release(ev.native_synth);
+                if (!ev.osc_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
                     int vel = (int)(ev.gain * 127.0);
                     int dur = (int)(ev.duration * 1000.0);
                     midi_note(ev.midi_chan, ev.midi_note, vel, dur);
@@ -1272,6 +1276,7 @@ void scheduler_shutdown(void) {
     scheduler_running = 0;
     pthread_join(consumer_tid, NULL);
     pthread_join(generator_tid, NULL);
+    osc_output_shutdown();
     pthread_mutex_lock(&tracks_lock);
     song_clear_all();
     free(song_tracks);

@@ -2,7 +2,7 @@
 
 Tompouce now embeds QuickJS and the upstream Strudel 1.2.6 `core`, `mini`,
 `tonal`, and `transpiler` packages. JavaScript builds and queries patterns;
-the PortAudio callback synthesizes and processes sound in C. Node.js is a
+the native audio callback synthesizes and processes sound in C. Node.js is a
 build tool for updating the bundled libraries, not a runtime dependency.
 
 ## Writing code
@@ -54,8 +54,8 @@ Additional JavaScript modules require an explicit addition to the bundle.
 
 The original `bpm` / `drum` / `notes` / `| transform` line dialect still uses
 the existing forgiving C parser. The first non-comment statement selects the
-language; keep a buffer in one dialect. The C mini parser has not been replaced
-with a generated parser.
+language; keep a buffer in one dialect. This historical parser is marked for
+removal after its examples, editor helpers and tests migrate to JavaScript.
 
 ## Native audio coverage
 
@@ -65,7 +65,7 @@ Aliases registered by upstream Strudel map to the same controls.
 
 | Area | Implemented in C |
 | --- | --- |
-| Sources | sine, triangle, sawtooth, square/pulse, supersaw/unison/stereo spread, white/pink/brown noise, procedural `wt:` tables, local and remote samples |
+| Sources | sine, triangle, sawtooth, square/pulse, supersaw/unison/stereo spread, white/pink/brown noise, procedural `wt:` tables, local and remote samples, ZzFX, bytebeat, bounded Kabelsalat graphs |
 | Harmonics | `partials`, `phases` (32 harmonics, with a Nyquist cutoff) |
 | Amplitude | gain, velocity, amp, busgain, overgain, ADSR, clip/legato, duration, postgain, pan, dry |
 | Filters | low/high/band-pass, their Q values and ADSR/depth envelopes, fanchor, 12 dB / 24 dB filters and nonlinear low-pass ladder, vowel/formant filtering |
@@ -76,6 +76,7 @@ Aliases registered by upstream Strudel map to the same controls.
 | Spatial | chorus, phaser rate/depth/center/sweep, delay/send/time/sync/feedback, reverb/send/roomsize |
 | Samples | sound/bank/index selection, pitch matching, forward/reverse speed, begin/end, looping/loop bounds, cut groups, unit `c`, upstream chop/slice/fit/loopAt transforms |
 | MIDI | note events and midichan through the existing ALSA output |
+| OSC | timestamped UDP `/dirt/play` through `.osc()` |
 
 Native WAV, MP3 and FLAC sampling preserves stereo channels and recorded
 levels. Pitch-keyed maps accept arrays within each region; sample indices
@@ -89,13 +90,15 @@ resampling, keeping note attacks aligned when samples are repitched.
 Files without gapless metadata retain their decoded duration.
 
 Native oscillators now use direct ADSR automation without the legacy
-envelope smoothing stage. Panning follows equal-power mono and stereo
-folding conventions. Saw and pulse discontinuities use polyBLEP corrections,
-and triangle starts at the sine phase. These changes reduce discrepancies;
-the oscillator and effect algorithms still need browser waveform comparisons.
+envelope smoothing stage. Explicit panning follows equal-power mono and stereo
+folding conventions; omitted panning preserves unity upmix. Stock saw/square
+levels match the browser periodic-wave normalization. Saw and pulse discontinuities
+use polyBLEP corrections, and triangle starts at the sine phase. The maintained
+browser comparison covers representative waveforms and effects; broader parameter
+and full-song parity remains unverified.
 
-This is not complete WebAudio/SuperDirt sound parity. Browser-specific synths
-such as ZzFX, bytebeat and Kabelsalat still require native implementations.
+This is not complete WebAudio/SuperDirt sound parity. ZzFX, bytebeat and a bounded
+Kabelsalat graph host are implemented natively (see below).
 Sample pitch compensation and custom convolution impulses are now native
 (see below). Separate orbits and
 ducking are implemented. The native DSP algorithms are not promised to produce
@@ -104,6 +107,73 @@ with its Fourier series and checks ADSR breakpoints. `tests/test_audio.c`
 checks orbit delay time and duck depth.
 It also checks sample release tails, explicit duration gating, reverse
 slices, looping through release, and effects on both stereo channels.
+### ZzFX, bytebeat and Kabelsalat
+
+```js
+note("c3 e3 g3").s('z_sawtooth').zrand(0).slide(.1).zdelay(.05)
+note("c3 e3").s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(0)
+note("c3 e3 g3").K(sine(sFreq).mul(sGate.adsr(.001,.1,.5,.1)).out())
+note(60).s('saw').K(audioin().fold(.5).out())
+```
+
+ZzFX supports `zzfx`, `z_sine`, `z_triangle`, `z_sawtooth`, `z_square`, `z_tan`
+and `z_noise`, the 20-value `.zzfx([...])` parameter array and the corresponding
+named controls. Its internal envelope is applied once; ordinary native effects
+remain available. Random frequency variation is chosen during voice preparation.
+Sounds are limited to 30 seconds, with at most two seconds of internal delay.
+
+Bytebeat provides the 15 upstream presets (`s('bytebeat:N')` or `.n(N)`), custom
+`bbexpr`/`byteBeatExpression` and `bbst`/`byteBeatStartTime`. Arithmetic, bitwise
+operators, comparisons, logical/conditional expressions and standard numeric
+Math functions compile to native operations with JavaScript 32-bit bitwise
+semantics. Its startup follows the reference worklet's 128-frame quantum.
+Assignments, loops, arrays, object access and arbitrary JavaScript functions
+inside a bytebeat expression are rejected; expressions are at most 4,096 bytes.
+
+`K(...)` uses the pinned Kabelsalat graph constructors, including Strudel `S(...)`
+inputs and mini-notation placeholders. `sFreq` resolves per event and `sGate`
+tracks its gate. `audioin()` effects process each input channel independently,
+preserving stereo sample polarity. Sources and effects support stereo output
+channels 0/1, arithmetic/math, ranges, oscillator/noise nodes, ADSR, filters,
+lag/slide/slew, fold/distortion, clocks, triggers, sequences, hold and delay.
+Feedback requires a delay; device input, MIDI/mouse nodes, custom UGens and
+raw JavaScript nodes are unavailable. Unsupported nodes are rejected during
+compilation. This is a native adaptation rather than a complete browser host.
+Graph sources with ADSR nodes keep their own envelope, including release/delay
+time, without a second outer ADSR. Sources without graph ADSR use the native
+default envelope. Effects run after the source envelope; their lifetime is
+currently bounded by the source voice, so browser `fxr` tail behavior is not
+fully reproduced.
+
+Programs have at most 256 operations and 16 inputs per operation. The cache
+holds 256 programs and evicts unreferenced entries; queued events and sounding
+voices keep their programs alive. Graph delay lines allow at most two seconds
+per node and 262,144 total samples per voice. Native voice state is allocated
+before taking the voice lock and has a shared 64 MiB budget. Neither preparation,
+allocation, cache eviction nor JavaScript execution occurs in the callback.
+
+### OSC output
+
+```js
+note("c4 e4 g4").s('superpiano').osc()
+s("bd sd").oschost('127.0.0.1').oscport(57120).osc()
+```
+
+`.osc()` routes a pattern exclusively to native UDP OSC, defaulting to
+127.0.0.1:57120. Each hap becomes a timestamped OSC bundle containing a
+`/dirt/play` message with alternating control names and values, plus `cps`,
+`cycle` and `delta`. Note-name strings become `midinote`; numeric `note` values
+retain upstream OSC semantics. Bank names, room size and cycle-unit speed use
+the upstream conversions. No browser/WebSocket bridge or Node process is needed.
+Use another unmodified pattern branch if local audio is wanted too.
+
+`oschost` accepts `localhost` or literal IPv4/IPv6 addresses; DNS names are
+unavailable. Packets are bounded to 2,048 bytes, 64 primitive key/value pairs,
+48-byte keys and 512-byte string values. Invalid addresses, complex values and
+oversize packets are rejected with a console warning. Preparation runs on the
+generator; nonblocking sends run on the consumer and follow transport stop/start.
+With no local audio backend, a monotonic clock keeps external scheduling moving.
+
 Unimplemented event controls are reported once per program in the console,
 rather than silently claiming that the sound effect exists.
 
@@ -153,15 +223,27 @@ maps, URL policy and decoders. The callback uses an immediate 128-tap head
 plus 128-frame FFT partitions for its tail, preserving zero onset latency.
 Stereo channels remain separate. Impulse changes reset that orbit's tail.
 
-Limits: 65,536 active IR frames (about 1.49 seconds at 44.1 kHz) and 16 cached
+Limits: 131,072 active IR frames (about 2.97 seconds at 44.1 kHz) and 16 cached
 IR/size/speed/offset combinations per process. Excess limits or failed IR
 resolution reject the event and report a console warning; audio is not
 silently truncated or replaced by another reverb. Kernels are immutable and
-retained for the process lifetime. `room` without `ir` retains the existing
-Schroeder reverb, so generated browser reverb parity is still open.
+retained for the process lifetime.
 
-The browser capture harness now checks a custom stereo IR through the real
-callback as well as dry piano; see [audio comparison](audio-comparison.md).
+`room` without `ir` now prepares a stereo convolution impulse with the upstream
+exponential decay, fade-in and gradual low-pass. `roomfade` defaults to .1,
+`roomlp` to 15000 and `roomdim` to 1000. A fixed random seed makes native rooms
+reproducible. These generated impulses have a separate 16-entry cache and fit
+up to about 1.98 seconds of decay (the IR lasts 1.5 times the decay). Longer
+rooms, zero size or an exhausted generated cache retain the native Schroeder
+fallback and report that limit once per program. Explicit `ir` failures still
+reject the event rather than silently substituting another impulse.
+
+The browser capture harness checks dry piano, synths, envelopes, filters,
+panning, ZzFX, bytebeat and seeded generated/custom IRs through the real callback;
+see [audio comparison](audio-comparison.md). No-pan mono sources upmix at unity,
+while explicit panning uses equal-power mono or stereo folding. Stock saw/square
+levels follow the full-partial periodic-table normalization used by
+[Chromium](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/modules/webaudio/periodic_wave_handler.cc).
 
 ## Chromium companion
 

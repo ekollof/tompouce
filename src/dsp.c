@@ -31,7 +31,8 @@ static const Parameter parameters[] = {
     {"hprate",0,0,20000},{"hpdepth",1,0,16},{"hpdepthfrequency",0,0,20000},
     {"hpshape",0,0,4},{"hpdc",-.5,-1,1},{"hpskew",.5,.001,.999},
     {"bprate",0,0,20000},{"bpdepth",1,0,16},{"bpdepthfrequency",0,0,20000},
-    {"bpshape",0,0,4},{"bpdc",-.5,-1,1},{"bpskew",.5,.001,.999}
+    {"bpshape",0,0,4},{"bpdc",-.5,-1,1},{"bpskew",.5,.001,.999},
+    {"roomfade",.1,0,10},{"roomlp",15000,0,22050},{"roomdim",1000,0,22050}
 };
 _Static_assert(sizeof(parameters)/sizeof(parameters[0]) == DSP_FMBASE,
                "DSP parameter names must match their enum indices");
@@ -440,6 +441,13 @@ static double poly_blep(double phase, double step) {
     if (phase < step) { double t = phase/step; return t+t-t*t-1; }
     if (phase > 1-step) { double t = (phase-1)/step; return t*t+t+t+1; }
     return 0;
+}
+
+double dsp_periodic_gain(int waveform) {
+    /* Chromium normalizes its 4096-point periodic table's full-partial peak.
+       These are the reciprocal Fourier peaks, including Gibbs overshoot;
+       keep raw polyBLEP/Kabelsalat/supersaw amplitudes separate. */
+    return waveform==0?.8485424501794022:waveform==1?.8481909356632208:1;
 }
 
 double dsp_oscillator(int waveform, double phase, double frequency, double width) {

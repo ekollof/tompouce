@@ -19,6 +19,8 @@ tests/test_examples
 tests/test_csound
 tests/test_audio
 tests/test_audio_output
+tests/test_native_synth
+tests/test_native_synth_sanitize
 tests/probe_audio_output
 tests/probe_audio_portaudio
 tests/test_terminal_render

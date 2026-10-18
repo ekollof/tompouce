@@ -2,6 +2,52 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Backlog continuation: native synths, OSC and browser QA (2026-10-18)
+
+The historical C statement/mini parser is marked for removal in TODO.md; retain
+it until bundled examples, editor helpers and tests migrate. Its archived roadmap
+is no longer an implementation plan. JavaScript uses the pinned Strudel 1.2.6
+runtime; no upstream package or reference-event upgrades were made.
+
+`js/native-synth.mjs` prepares bounded bytebeat expressions and Kabelsalat graphs;
+`src/native_synth.c` implements their audio in C alongside streaming ZzFX. Explicit
+Kabelsalat dependencies use the already locked 0.4.0/0.4.1 packages. Unsupported
+nodes/expressions reject compilation. Programs have 256 operations, refcounted
+eviction and queued/voice ownership; graph delays and the shared state budget are
+bounded. Voice state allocation/free stays outside the callback and voice lock.
+Graph ADSR sources retain their own envelope; graph effect tails currently remain
+bounded by the source voice. This is an adaptation, not a complete browser host.
+Preserve new source files, the bundled runtime and thirdparty/native-synth licenses;
+the installer includes their notices explicitly.
+
+`src/osc_output.c` prepares bounded native UDP /dirt/play packets on the generator
+and sends timestamped bundles on the consumer. `.osc()` is exclusive external
+output, with literal IP/localhost targets and validated numeric ports; no DNS or
+browser bridge. A monotonic clock allows OSC/MIDI when no local audio backend
+starts. Stop/start and no-output behavior have actual loopback integration tests.
+
+Browser comparisons exposed default mono upmix attenuation, stock saw/square
+normalization and bytebeat AudioParam precision/128-frame startup differences.
+Native generated rooms now use bounded convolution following the reference decay,
+fade and gradual low-pass algorithm, with a reproducible seed. Longer rooms/cache
+exhaustion retain the existing reverb with a console notice. Thirteen maintained
+gates cover synths, ADSR/filter/pan, dry piano, custom and seeded generated rooms.
+Ordinary randomized wet Arpoon and native overlap-add versus browser phase-vocoder
+stretch remain diagnostic; stretch waveform parity remains in TODO.md.
+
+`node scripts/companion-qa.mjs` owns its engine, bridge, disposable Chromium and
+private Pulse-compatible null sink, verifying the stream route before applying
+nonzero gain. Real CodeMirror input/apply, tempo, voices, search, stop/play and
+desktop/mobile layouts pass. Inspected full-page captures and report are under
+/tmp/tompouce-companion-qa (temporary evidence). Native warning-as-error/Csound
+suite, all 31 examples/1,207 references, ASan/UBSan synth checks, all 67 PTY cases
+(~57 FPS), OSC integration, installer and companion tests pass. User engines,
+source, playback and desktop configuration were not changed by these checks.
+Updated the actual ~/.local/bin/tompouce installation with --skip-deps
+--skip-banks --no-browser, retaining private Csound and existing banks. Installed
+OSC/no-audio integration and real companion QA also pass. Restart normally to
+load this executable; no user engine was restarted automatically.
+
 ### Continuous, colored spectrum (2026-10-18)
 
 Spectrum history now fills observed time intervals independently of pixel width,

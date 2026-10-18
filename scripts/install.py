@@ -35,6 +35,9 @@ RUNTIME_FILES = [
     'thirdparty/STRUDEL-LICENSE', 'thirdparty/quickjs/LICENSE',
     'thirdparty/tree-sitter-javascript/LICENSE', 'thirdparty/strudel-csound/README.md',
     'thirdparty/minimp3.h', 'thirdparty/dr_flac.h',
+    'thirdparty/native-synth/README.md', 'thirdparty/native-synth/LICENSE-ZzFX',
+    'thirdparty/native-synth/LICENSE-Strudel', 'thirdparty/native-synth/LICENSE-Kabelsalat',
+    'thirdparty/native-synth/LICENSE-Apache-2.0',
 ]
 
 

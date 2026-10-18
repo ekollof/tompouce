@@ -1,5 +1,32 @@
 # TODO.md
 
+## Current work (2026-10-18)
+
+- [ ] Remove the historical hand-written C statement/mini parser and legacy
+      line dialect after migrating bundled examples, editor helpers and tests.
+      The upstream JavaScript Strudel runtime is the supported direction; do
+      not implement the historical parser roadmap below. Keep the old parser
+      working until its users and dependent code have a migration path.
+- [x] Add native ZzFX, bytebeat and bounded Kabelsalat source/effect graphs with
+      preparation outside the callback and no audio-thread JavaScript.
+- [x] Extend maintained browser/native audio comparisons to synths, effects,
+      time-stretch and reverb; distinguish regression gates from measured
+      algorithm differences.
+- [x] Complete visual QA of the Chromium companion against an owned test engine.
+      `node scripts/companion-qa.mjs` verifies a private silent sink before
+      applying sound; desktop/mobile captures and a report stay under /tmp.
+- [x] Add native UDP OSC `/dirt/play` output for external music engines, with
+      timetags, bounded validated messages and no browser/Node bridge.
+- [ ] Match browser phase-vocoder time-stretch waveforms more closely. Native
+      overlap-add compensation remains a deliberate algorithm difference;
+      the maintained stretched-piano capture records it without claiming parity.
+
+Current evidence: 13 browser/native gates cover oscillators, ADSR, filters,
+explicit/default panning, dry piano, custom/generated rooms, ZzFX and bytebeat.
+Generated room comparison uses an explicit shared random seed. Ordinary wet
+Arpoon and granular/phase-vocoder differences remain diagnostic captures.
+No musical source or running user process was changed by this work.
+
 ## Terminal graphics (2026-10-18)
 
 - [x] Add native punchcard, spiral, pitchwheel, spectrum, wordfall and tscope alias, with Kitty graphics and braille/ASCII fallback.
@@ -83,8 +110,9 @@ convolution, and selected a Chromium companion tab for visuals and controls.
 Implemented: browser capture harness, installed VCSL/mridangam default maps,
 confined local imports, native sample pitch compensation/custom convolution,
 and the loopback companion. See `docs/javascript.md` for limits and
-`docs/audio-comparison.md` for measured comparisons. ZzFX, bytebeat and
-Kabelsalat remain later work; generic browser APIs remain out of scope.
+`docs/audio-comparison.md` for measured comparisons. Native ZzFX, bytebeat and
+bounded Kabelsalat support have since shipped; generic browser APIs remain
+out of scope.
 The old machine's live MCP
 process must stay untouched; reconnect to the actual destination endpoint
 instead of assuming the old session or temporary browser exists there.
@@ -183,7 +211,8 @@ Next verification:
       replacing the old Dirt file; `misc` has delay send .5. The toms
       preserve their stereo channels. Bass/chord filters and fractional
       pitch pairs remain intact. No live source or playback changes made.
-- [ ] Compare the restarted engine's audio with browser playback.
+- [x] Compare the restarted engine's audio with browser playback; the maintained
+      harness now includes 13 gated cases plus wet/stretch diagnostics.
 - [x] Add a browser audio capture/comparison harness; event agreement
       and native DSP regression checks do not establish audio parity.
 
@@ -235,8 +264,8 @@ Deferred feature backlog after fidelity verification (separate scope):
       effects/master processing; Csound isolation and static file previews
       remain outside this implementation. Up to 32 sites; stale generations
       and unapplied editor changes cannot show another pattern’s samples.
-- [ ] ZzFX, bytebeat, and Kabelsalat. Browser synths. Do not evaluate
-      their programs inside the audio callback.
+- [x] Native ZzFX, bytebeat and bounded Kabelsalat graphs. Programs are prepared
+      outside the audio callback; playback uses only C. See the current list.
 - [x] Confined local JavaScript imports under the config modules directory.
       Static/dynamic ES imports, bundled dependencies and sibling imports
       work; traversal, symlinks and files over 256 KiB are refused. Remote
@@ -249,8 +278,7 @@ transpiler 1.2.6 in embedded QuickJS, with a native C audio host. The old lists
 below describe gaps in the **hand-written C statement parser**, not the new
 JavaScript runtime. That parser remains available for the legacy line dialect.
 See `docs/javascript.md` for tested coverage and the remaining native audio
-work (specialized synths, stretching, convolution, and
-browser-only integrations). Full WebAudio/SuperDirt sound parity is not done.
+work and native host limits. Full WebAudio/SuperDirt sound parity is not done.
 
 ## Roadmap (do not lose this)
 
@@ -296,17 +324,19 @@ the constructs are a small fixed set of calls and dotted methods.
 
 ### Historical legacy C parser roadmap
 
-The unchecked items in this section describe the optional legacy C dialect.
-They are not the current JavaScript runtime's product gap list. JavaScript
+**Marked for removal.** This is an archived reference, not an implementation
+backlog. Migrate dependencies before removing the legacy dialect and parser.
+
+The archived items in this section describe the legacy C dialect
+scheduled for removal, not future implementation work. JavaScript
 already uses upstream constructors, transforms, alignment, signals, multiline
 statements and source locations; see `docs/javascript.md`. Keep this record
-for work on the legacy parser, without treating it as unfinished JS support.
+for migration/removal reference, without treating it as unfinished JS support.
 
-Goal: a line copied from strudel.cc should parse and do the same
-musical thing. The parser stays hand-written. Do not generate it
-from Peggy or Bison: a typo must keep a partial pattern plus
-`pattern_last_error()`. Read the grammars below as the spec, then
-grow `src/pattern.c` and `src/strudel.c` to match them.
+Former goal (superseded by the upstream JavaScript runtime): a line copied from
+strudel.cc should parse and do the same musical thing through a forgiving,
+hand-written parser. Preserve partial patterns and `pattern_last_error()` while
+the legacy dialect remains supported; do not expand its feature set.
 
 Canonical references (the GitHub wiki is archived and stale; the
 manual now lives on the site, and the repo moved to Codeberg):
@@ -358,22 +388,22 @@ Shipped calls and methods:
 - [x] Mini-notation listed under **Now** (`* ! @ / ?`, postfix
       euclid, `{}`, in-pattern `|`)
 
-Sugar the manual treats as part of the grammar, still open:
+Archived grammar gaps:
 
-- [ ] `"` and backticks are mini-notation. `'` is a plain string
+- (Archived) `"` and backticks are mini-notation. `'` is a plain string
       (`.scale('C minor')` must not be parsed as a pattern).
       Backticks may span lines.
-- [ ] Bare note names outside quotes (`c4`, `bb2`, `fs3`) are
+- (Archived) Bare note names outside quotes (`c4`, `bb2`, `fs3`) are
       strings, as the transpiler does.
-- [ ] Several top-level statements play together. `$:` marks a
+- (Archived) Several top-level statements play together. `$:` marks a
       statement the REPL should play; two `$:` lines are parallel,
       which our one-track-per-line model already is once each line
       is active. Two statements on one line are not.
-- [ ] A hap is one value with many controls. `.cutoff(sine.range
+- (Archived) A hap is one value with many controls. `.cutoff(sine.range
       (200,1000))` changes the filter of the same events, rather
       than a second track. Alignment (`in`/`squeeze`/…) applies
       when a control is itself a pattern.
-- [ ] Mark the sounding step in the code row. Peggy stores
+- (Archived) Mark the sounding step in the code row. Peggy stores
       `location()` on atoms; `patternifyAST` calls `withLoc`.
       We do not.
 
@@ -495,35 +525,35 @@ Not this slice: the experimental `h()` tail (`op $`, `setbpm`,
 `hush`). `^` is stored for a later stepwise `pace`; it does not
 yet take an LCM of a stack. `withLoc` highlighting is still open.
 
-Still to implement, in roughly this order:
+Archived feature gaps (not scheduled for implementation):
 
-- [ ] Pattern constructors: `stack`, `cat` / `slowcat` / `seq`,
+- (Archived) Pattern constructors: `stack`, `cat` / `slowcat` / `seq`,
       `arrange`, `silence`, `pure`, `polyrhythm`. Several different
       calls on one line (`stack(s("bd"), note("c"))`) count here.
-- [ ] Time warps: `.early` `.late` `.hurry` `.ply` `.palindrome`
+- (Archived) Time warps: `.early` `.late` `.hurry` `.ply` `.palindrome`
       `.linger` `.zoom` `.compress` `.reset` `.segment` `.swing`
       `.swingBy` `.inside` `.outside` `.chunk` `.fastChunk`.
-- [ ] Conditional structure: `.when` `.if` `.lastOf` `.firstOf`
+- (Archived) Conditional structure: `.when` `.if` `.lastOf` `.firstOf`
       `.every` `.often` `.rarely` `.sometimesBy` `.someCycles`
       `.struct` `.mask` `.off` `.jux` `.juxBy` `.superimpose`
       `.echo` `.stut` `.iter`.
-- [ ] Arithmetic on patterns: `.add` `.sub` `.mul` `.div` `.range`
+- (Archived) Arithmetic on patterns: `.add` `.sub` `.mul` `.div` `.range`
       `.round` `.floor` `.ceil`. Mini euclid arguments that are
       patterns are shipped (`bd(<3 5>,8)`).
-- [ ] Pitch: `.scaleTranspose` `.transpose` as methods (the `|`
+- (Archived) Pitch: `.scaleTranspose` `.transpose` as methods (the `|`
       forms already exist). Chord voicings beyond the current ireal set.
-- [ ] Sample controls: `.speed` (including `-1`), `.begin` `.end`
+- (Archived) Sample controls: `.speed` (including `-1`), `.begin` `.end`
       `.loop` `.loopAt` `.cut` `.clip` `.unit` `.gain` already
       shipped. `samples(...)` / `samples('github:…')` / `samples(url)`
       load a map and fetch each file into `~/.cache/tompouce/web`
       the first time it plays (http/https only).
-- [ ] Filters and color: `.hpf` `.bpf` `.lpq` `.resonance` `.vowel`
+- (Archived) Filters and color: `.hpf` `.bpf` `.lpq` `.resonance` `.vowel`
       `.crush` `.coarse` `.shape` `.postgain` `.distort`, FM
       (`.fm` `.fmdecay` `.fmenv`), phaser, tremolo.
-- [ ] Delay extras: `.delaytime` `.delayfeedback`. `.roomsize`.
-- [ ] Signals as arguments: `sine` `saw` `square` `tri` `rand`
+- (Archived) Delay extras: `.delaytime` `.delayfeedback`. `.roomsize`.
+- (Archived) Signals as arguments: `sine` `saw` `square` `tri` `rand`
       `irand` `perlin`, chained with `.range` `.seg` `.slow`.
-- [ ] Mondo notation (`#`).
+- (Archived) Mondo notation (`#`).
 - [x] Dirt/Strudel sample *names* (`hh`, `sd`, `casio`, …) as a
       default map, not only `| bank` / `.bank()` against indexed dirs.
       Code is in `src/websamp.c` (side table, not `web_names`): local
@@ -539,12 +569,13 @@ Still to implement, in roughly this order:
       and stereo-effect bugs. The user restarted, and read-only MCP
       confirms the new samples and misc delay .5. Browser audio
       comparison remains open.
-- [ ] Quoted patterns that span editor lines. Loading already joins
+- (Archived) Quoted patterns that span editor lines. Loading already joins
       an open quote; the editor is still one buffer, not a REPL cell.
 
 ### Later notes
 - General MIDI program names are not a goal until the sample-name map is.
-- OSC output is still deferred. ALSA `| midi CH` is shipped.
+- Native OSC is shipped for JavaScript via `.osc()`; no new legacy-parser OSC
+  syntax is planned. ALSA `| midi CH` remains until the legacy dialect is removed.
 
 ### Shipped earlier
 
@@ -560,7 +591,7 @@ Still to implement, in roughly this order:
 - [x] Euclidean rhythms (`euclid(k,n)`), rotors, `every(n, ...)`. (`euclid(k,n,tok[,rot])`, `every(n,X)`; rot = rotation arg)
 - [x] Effects chain: reverb, delay, lowpass, distortion. (`fx drive/cutoff/delay/verb` master chain)
 - [x] `stack`, `cycle`, `shuffle`, `chunk`, `degrade`. (`| shuffle`, `| degrade`; multi-line already stacks; cycle/chunk deferred)
-- [x] MIDI output (OSC/MIDI) for external instruments. (ALSA `| midi CH`; OSC deferred)
+- [x] MIDI and OSC output for external instruments. (ALSA `| midi CH`; JavaScript `.osc()`)
 
 ## Audio engine
 - [x] MP3/FLAC decode in sampler (vendored minimp3/dr_flac): unlocks

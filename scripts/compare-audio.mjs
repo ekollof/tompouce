@@ -9,6 +9,13 @@ import { StringDecoder } from 'node:string_decoder';
 
 const out = path.resolve(process.argv[2] ?? '/tmp/tompouce-comparison');
 await fs.mkdir(out, { recursive: true });
+const nativeEnvironment={...process.env};
+if (!nativeEnvironment.TOMPOUCE_BANKS && !nativeEnvironment.STRUDELTERM_BANKS) {
+  for (const candidate of ['assets/banks',path.join(os.homedir(),'.local/lib/tompouce/assets/banks')]) {
+    try { await fs.access(path.join(candidate,'dough-samples/piano.json')); nativeEnvironment.TOMPOUCE_BANKS=path.resolve(candidate); break; }
+    catch(error) {if(error.code!=='ENOENT')throw error;}
+  }
+}
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'tompouce-browser-'));
 const browser = spawn(process.env.CHROMIUM ?? 'chromium', [
   '--headless', '--no-first-run', '--disable-gpu', '--remote-debugging-pipe',
@@ -72,9 +79,22 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    { name: 'sine-440', code: `note(69).s('sine').gain(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-adsr', code: `note(69).s('sine').gain(.5).attack(.02).decay(.1).sustain(.4).release(.2).clip(.25)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-lowpass', code: `note(69).s('sine').gain(.5).lpf(800).lpq(1)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-pan-center', code: `note(69).s('sine').gain(.5).pan(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-c4-dry', code: `note(60).s('piano').clip(1).gain(.5)`, sound: 'piano', cycles: 1, cps: .5, window: .6, correlation: .99 },
     { name: 'arpoon-without-room', code: arpoon.code.trimEnd() + '.room(0)', sound: 'piano', cycles: 4, cps: .5, window: .6, correlation: .99 },
     { name: 'piano-custom-ir', code: `note(60).s('piano').clip(.25).ir("RolandTR909_sd:0").room(1).roomsize(.2).dry(0)`, sound: 'piano', cycles: 1, cps: .5, window: .6, correlation: .99 },
+    { name: 'piano-generated-room-seeded', code: `note(60).s('piano').clip(.25).room(.5).roomsize(1)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99, randomSeed: 0xc0ffee },
+    // A real onset at 0.25s avoids the upstream stretcher's negative-onset
+    // rejection at zero (its graph schedules 40ms early). No captures shift.
+    { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: null },
+    { name: 'zzfx-sine', code: `note(69).s('z_sine').zrand(0).gain(.5).attack(.01).decay(.04).sustain(.5).release(.1).clip(.25)`, sound: 'z_sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'bytebeat', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'saw-440', code: `note(69).s('sawtooth').gain(.5)`, sound: 'sawtooth', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'square-440', code: `note(69).s('square').gain(.5)`, sound: 'square', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'triangle-440', code: `note(69).s('triangle').gain(.5)`, sound: 'triangle', cycles: 1, cps: .5, window: 2, correlation: .99 },
     // Different reverb algorithms and randomized browser impulses: record
     // evidence, without inventing a universal acceptance threshold.
     { name: 'arpoon-opening', code: arpoon.code, sound: 'piano', cycles: 4, cps: .5, window: .6, correlation: null },
@@ -101,10 +121,11 @@ try {
     await evaluate(transpiler.outputFiles[0].text);
     const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native.f32`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
-    const rendered = spawnSync('./tests/render_audio', [request, native], { encoding: 'utf8', timeout: 120000 });
+    const rendered = spawnSync('./tests/render_audio', [request, native], { encoding: 'utf8', timeout: 120000,env:nativeEnvironment });
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
+      if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
       const selected=pattern.filterValues(v=>v.s===spec.sound);
       const haps=selected.queryArc(0,spec.cycles,{_cps:spec.cps}).filter(h=>h.hasOnset());
@@ -158,7 +179,15 @@ function compare(native, wav, seconds) {
   if (channels !== 2 || rate !== 44100 || !data || !((format === 1 && bits === 16) || (format === 3 && bits === 32))) throw new Error(`Unsupported WAV ${format}/${bits}/${channels}/${rate}`);
   const samples = Math.round(seconds * rate) * channels;
   if (native.length < samples * 4 || data.length < samples * bits / 8) throw new Error('Capture too short');
-  let xy = 0, xx = 0, yy = 0, error = 0;
+  let xy = 0, xx = 0, yy = 0, error = 0, nativePeak=0, browserPeak=0;
+  for(let i=0;i<native.length/4;i++) {
+    const x=native.readFloatLE(i*4); if(!Number.isFinite(x))throw new Error('Non-finite native capture');
+    nativePeak=Math.max(nativePeak,Math.abs(x));
+  }
+  for(let i=0;i<data.length/(bits/8);i++) {
+    const y=format===1?data.readInt16LE(i*2)/32768:data.readFloatLE(i*4);
+    if(!Number.isFinite(y))throw new Error('Non-finite browser capture'); browserPeak=Math.max(browserPeak,Math.abs(y));
+  }
   for (let i = 0; i < samples; i++) {
     const x = native.readFloatLE(i * 4), y = format === 1 ? data.readInt16LE(i * 2) / 32768 : data.readFloatLE(i * 4);
     if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Non-finite audio');
@@ -166,5 +195,6 @@ function compare(native, wav, seconds) {
   }
   if (!xx || !yy) throw new Error('Silent capture');
   return { correlation: xy / Math.sqrt(xx*yy), rmsRatio: Math.sqrt(xx/yy), rmsError: Math.sqrt(error/samples),
-    windowSeconds: seconds, lagFrames: 0, nativeFrames: native.length / 8, browserFrames: data.length / (bits / 8) / 2 };
+    windowSeconds: seconds, lagFrames: 0, nativePeak,browserPeak,
+    nativeFrames: native.length / 8, browserFrames: data.length / (bits / 8) / 2 };
 }

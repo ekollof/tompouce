@@ -44,10 +44,12 @@ int sounds_search(int category, const char *query, SoundInfo *out, int capacity)
         snprintf(rows[used].name,sizeof(rows[used].name),"%.63s",imported[i].name);
         rows[used].category = SOUND_USER; rows[used++].slots = imported[i].slots;
     }
-    const char *synths[] = {"sine","triangle","sawtooth","square","pulse","supersaw","white","pink","brown"};
+    const char *synths[] = {"sine","triangle","sawtooth","square","pulse","supersaw","white","pink","brown",
+        "zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise","bytebeat"};
     for (size_t i = 0; i < sizeof(synths)/sizeof(synths[0]) && used < LIMIT; i++) {
         snprintf(rows[used].name,sizeof(rows[used].name),"%s",synths[i]);
-        rows[used].category = SOUND_SYNTHS; rows[used].pitched = 1; rows[used++].slots = 1;
+        rows[used].category = SOUND_SYNTHS; rows[used].pitched = 1;
+        rows[used++].slots = !strcmp(synths[i],"bytebeat")?15:1;
     }
     /* wt_init is called at engine startup; catalog lookup never mutates it. */
     for (int i = 0; i < wt_count() && used < LIMIT; i++) {

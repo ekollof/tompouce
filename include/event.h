@@ -3,6 +3,8 @@
 #include "common.h"
 #include "dsp.h"
 #include "convolution.h"
+#include "native_synth.h"
+#include "osc_output.h"
 
 #define INST_SINE 0
 #define INST_SAW 1
@@ -19,6 +21,7 @@
 #define INST_PINK 12
 #define INST_BROWN 13
 #define INST_ADDITIVE 14
+#define INST_NATIVE 15
 
 /* Strudel effect buses. Orbit 1 is the JS default. Legacy events use 0. */
 #define N_ORBITS 12
@@ -28,6 +31,8 @@ typedef struct {
     unsigned generation; /* 0 = legacy; JS generation must match the queue */
     unsigned scope_mask; /* visualization call sites attached to this pattern */
     int csound_only;     /* scheduled by native renderer; retain UI note history */
+    int osc_only;
+    OscOutputMessage osc;
     double time;        // absolute seconds
     double duration;    // seconds
     int inst;           // for note tracks
@@ -43,6 +48,8 @@ typedef struct {
     double freq;        // for note
     double gain;
     double pan;
+    int has_pan;
+    double waveform_gain;
     double dec;         /* decay seconds, <0 default */
     double sus;         /* sustain 0..1, <0 default */
     double pw;          /* pulse width, <0 default square */
@@ -56,6 +63,7 @@ typedef struct {
     double smp_speed;   /* 0 = natural 1; negative reverses the buffer */
     double stretch;     /* native pitch factor; 0 = disabled/legacy, 1 = unity */
     const ConvKernel *ir_kernel; /* immutable, prepared outside audio callback */
+    const NativeSynth *native_synth; /* immutable native program, prepared by generator */
     double delay_send;  /* 0 dry; >0 feeds this event's orbit delay */
     double delay_time;  /* <0 leave the orbit time; else seconds */
     double delay_fb;    /* <0 leave the orbit feedback; else 0..0.98 */

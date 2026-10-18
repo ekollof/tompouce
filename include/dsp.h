@@ -1,6 +1,7 @@
 #ifndef DSP_H
 #define DSP_H
 #include <cjson/cJSON.h>
+double dsp_periodic_gain(int waveform);
 
 /* Resolved event controls. No JS, allocation, or locks in these algorithms. */
 enum {
@@ -19,6 +20,7 @@ enum {
     DSP_LPRATE, DSP_LPDEPTH, DSP_LPDEPTHFREQ, DSP_LPSHAPE, DSP_LPDC, DSP_LPSKEW,
     DSP_HPRATE, DSP_HPDEPTH, DSP_HPDEPTHFREQ, DSP_HPSHAPE, DSP_HPDC, DSP_HPSKEW,
     DSP_BPRATE, DSP_BPDEPTH, DSP_BPDEPTHFREQ, DSP_BPSHAPE, DSP_BPDC, DSP_BPSKEW,
+    DSP_ROOMFADE, DSP_ROOMLP, DSP_ROOMDIM,
     DSP_FMBASE, /* 8 operators: index, ratio, A, D, S, R, envelope type, waveform */
     DSP_COUNT = DSP_FMBASE + 8 * 8
 };

@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
         if (*sound->valuestring && strcmp(text_control(value,"s"),sound->valuestring)) continue;
         AudioEvent event;
         if (!js_audio_event(hap,0,1/cps->valuedouble,&event)) continue;
-        if (!resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0)) {
+        if (!resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0 && !event.native_synth)) {
             fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
         }
         events[used++] = event;

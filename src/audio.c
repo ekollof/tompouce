@@ -74,6 +74,8 @@ void audio_fx_set(const char *name, double v) {
     else if (strcmp(name, "verb") == 0) fx_verb = v;
 }
 static double audio_time = 0.0;
+static double silent_clock_origin;
+static int silent_clock;
 static Voice voices[MAX_VOICES];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
 static CsoundProgram *csound_program;
@@ -144,7 +146,7 @@ int audio_scope_copy(float *out, int n) {
 }
 
 
-double audio_time_now(void){ return audio_time; }
+double audio_time_now(void){ return silent_clock?now_seconds()-silent_clock_origin:audio_time; }
 void audio_set_bpm(double b){ if (!isfinite(b)) return; if (b<20) b=20; if (b>400) b=400; bpm=b; }
 double audio_get_bpm(void){ return bpm; }
 double audio_sec_per_beat(void){ return 60.0/bpm; }
@@ -215,9 +217,10 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     for (int i = 0; i < N_PATTERN_SCOPES; i++) if (ev->scope_mask&(1u<<i)) pattern_scope_generation[i] = ev->generation;
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
-    if (ev->dsp.enabled && ev->inst == INST_SUPERSAW) dsp_init(&v->dsp_right,&ev->dsp);
+    if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE)) dsp_init(&v->dsp_right,&ev->dsp);
     v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
+    v->native_program=ev->native_synth;
     v->inst = ev->is_drum ? ev->inst : ev->inst;
     // if drum token, map
     if (ev->is_drum) {
@@ -240,6 +243,8 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->freq = ev->freq > 0 ? ev->freq : 440.0;
     v->amp = ev->gain > 0 ? ev->gain : 0.8;
     v->pan = ev->pan;
+    v->has_pan=ev->has_pan;
+    v->waveform_gain=ev->waveform_gain>0?ev->waveform_gain:1;
     v->start_time = audio_time; // trigger now
     v->note_off_time = audio_time + (ev->duration > 0 ? ev->duration : 0.25);
     v->gate_end = v->note_off_time;
@@ -574,8 +579,25 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit) {
 }
 
 void audio_trigger_event(AudioEvent *ev) {
-    if (ev->csound_only) return;
+    if (ev->csound_only || ev->osc_only) return;
     if (!playing) return; // still trigger? allow
+    NativeSynthState *prepared=ev->native_synth?native_synth_state_new(ev->native_synth):NULL;
+    NativeSynthState *prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
+    if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
+    if (ev->native_synth && !prepared) {
+        NativeSynthState *retired[MAX_VOICES*2]; int count=0;
+        pthread_mutex_lock(&voice_lock);
+        for (int i=0;i<MAX_VOICES;i++) if (!voices[i].active && voices[i].native_state) {
+            retired[count++]=voices[i].native_state; voices[i].native_state=NULL;
+            if (voices[i].native_right) { retired[count++]=voices[i].native_right; voices[i].native_right=NULL; }
+        }
+        pthread_mutex_unlock(&voice_lock);
+        for (int i=0;i<count;i++) native_synth_state_free(retired[i]);
+        prepared=native_synth_state_new(ev->native_synth);
+        prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
+        if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
+    }
+    if (ev->native_synth && !prepared) { log_console("native synth: state memory budget exceeded"); return; }
     pthread_mutex_lock(&voice_lock);    // find free voice
     if (ev->dsp.enabled && ev->dsp.p[DSP_CUT] > 0) {
         for (int i = 0; i < MAX_VOICES; i++)
@@ -600,9 +622,15 @@ void audio_trigger_event(AudioEvent *ev) {
             }
         }
     }
+    NativeSynthState *previous=voices[chosen].native_state;
+    NativeSynthState *previous_right=voices[chosen].native_right;
     trigger_voice(&voices[chosen], ev);
+    voices[chosen].native_state=prepared;
+    voices[chosen].native_right=prepared_right;
     dbg_push(&voices[chosen], chosen);
     pthread_mutex_unlock(&voice_lock);
+    native_synth_state_free(previous);
+    native_synth_state_free(previous_right);
 }
 
 typedef struct {
@@ -610,12 +638,21 @@ typedef struct {
 } VoiceMix;
 
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
+    if (native_synth_effect(v->native_program)) {
+        double ignored, input_r=r;
+        native_synth_process(v->native_state,v->age,v->gate_end-v->start_time,v->freq,v->start_time,
+                             l,l,&l,&ignored);
+        native_synth_process(v->native_right,v->age,v->gate_end-v->start_time,v->freq,v->start_time,
+                             input_r,input_r,&ignored,&r);
+    }
     double left = v->pan <= 0 ? 1 : 1-v->pan;
     double right = v->pan >= 0 ? 1 : 1+v->pan;
     if (v->dsp.control.enabled) {
-        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW;
+        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW || native_synth_stereo(v->native_program);
         double pan = fmax(-1,fmin(1,v->pan));
-        if (!stereo) {
+        if (!v->has_pan) {
+            /* With no pan control, WebAudio upmixes mono at unity. */
+        } else if (!stereo) {
             l *= cos((pan+1)*M_PI/4); r *= sin((pan+1)*M_PI/4);
         } else if (pan <= 0) {
             l += r*cos((pan+1)*M_PI/2); r *= sin((pan+1)*M_PI/2);
@@ -795,6 +832,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 if (orbit < 0 || orbit >= N_ORBITS) orbit = 0;
                 VoiceMix *vm = &mixes[orbit];
                 double age = V->age;
+                if (V->inst==INST_NATIVE) {
+                    double gate=V->gate_end-V->start_time, left=0,right=0;
+                    int own_envelope=native_synth_enveloped(V->native_program);
+                    double env=own_envelope?1:dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
+                    double tail=native_synth_tail(V->native_program);
+                    if ((tail>=0 && age>=gate+fmax(V->vrel,tail)) ||
+                        !native_synth_process(V->native_state,age,gate,V->freq,V->start_time,0,0,&left,&right)) {
+                        V->active=0; continue;
+                    }
+                    V->env=env;
+                    left=dsp_process(&V->dsp,left*env*V->amp,age,gate);
+                    right=dsp_process(&V->dsp_right,right*env*V->amp,age,gate);
+                    route_voice(V,left,right,vm); V->age+=dt; continue;
+                }
                 // envelope
                 double env = 0;
                 // ADSR (for synth). For drums use custom.
@@ -1030,7 +1081,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     V->phase += phaseinc;
                     if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
                     V->age += dt;
-                    double smp = sample * env * amp;
+                    double smp = sample * env * amp * (V->waveform_gain>0?V->waveform_gain:1);
                     /* Superdough oscillator sources have a fixed 0.3 gain
                        before the amplitude envelope and effects. */
                     if (V->dsp.control.enabled) { smp *= .3; amp *= .3; }
@@ -1176,11 +1227,17 @@ void audio_init(void) {
     midi_init();
     memset(voices, 0, sizeof(voices));
     playing = 1;
-    (void)audio_output_start(render_output,audio_block_frames);
+    silent_clock=!audio_output_start(render_output,audio_block_frames);
+    if (silent_clock) silent_clock_origin=now_seconds()-audio_time;
 }
 void audio_shutdown(void) {
     midi_shutdown();
     audio_output_stop();
+    silent_clock=0;
+    for (int i=0;i<MAX_VOICES;i++) {
+        native_synth_state_free(voices[i].native_state); voices[i].native_state=NULL;
+        native_synth_state_free(voices[i].native_right); voices[i].native_right=NULL;
+    }
     audio_set_csound(NULL);
 }
 void audio_toggle_play(int on) { playing = on ? 1 : 0; }
@@ -1207,6 +1264,7 @@ const char *audio_inst_name(int inst) {
         case INST_PINK: return "pink";
         case INST_BROWN: return "brown";
         case INST_ADDITIVE: return "additive";
+        case INST_NATIVE: return "native";
         default: return "?";
     }
 }

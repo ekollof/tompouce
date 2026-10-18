@@ -80,7 +80,10 @@ execution still needs testing on those distributions.
 
 ## Components
 
-- `src/audio.c` — PortAudio real-time synth + drum voices
+- `src/audio.c` — native real-time synth + drum voices
+- `src/audio_output.c` — PipeWire/PulseAudio/JACK/ALSA output selection
+- `src/native_synth.c` — ZzFX, bytebeat and bounded Kabelsalat playback
+- `src/osc_output.c` — timestamped native UDP OSC output
 - `src/pattern.c` — mini-notation parser (`* ! @ / ?`, euclid, `{}`, `<>`, rests)
 - `src/strudel.c` — statement lines (`note("c e").s("saw").lpf(800)`, `setcpm`)
 - `src/slider.c` — `slider()` live values (source text stays put)
@@ -153,6 +156,19 @@ source editing, press F2, type `/companion`, and press Enter. Stop its helper
 with `/companion stop`; it also exits with the engine. The companion is
 loopback-only; audio stays native. Standalone launching via
 `python3 scripts/companion.py --open` remains available.
+
+Native ZzFX (`s('z_sine')` and related sounds), bytebeat (`s('bytebeat').bbexpr('t')`)
+and Kabelsalat graphs (`note(60).K(sine(sFreq).mul(.1).out())`) run without a browser.
+Append `.osc()` to route a pattern to SuperDirt or another OSC receiver over UDP,
+defaulting to `127.0.0.1:57120`; `.oschost()` and `.oscport()` select the destination.
+These patterns use external output exclusively and also work with no local audio
+device. See [native synthesis and OSC](docs/javascript.md#zzfx-bytebeat-and-kabelsalat)
+for syntax, supported nodes and resource bounds.
+
+`node scripts/companion-qa.mjs` checks the real companion in a disposable Chromium
+session against an owned engine. It requires a PulseAudio-compatible server to
+create a private silent sink, verifies the route before applying sound, and
+captures desktop/mobile layouts under `/tmp/tompouce-companion-qa`.
 
 The companion and F6 share a categorized sound catalog with sample counts,
 search, and source snippet insertion. In F6, choose **import-sounds**, type or

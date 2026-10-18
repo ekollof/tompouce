@@ -4,8 +4,10 @@ import * as mini from '@strudel/mini';
 import * as tonal from '@strudel/tonal';
 import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
+import { installNative, prepareNative } from './native-synth.mjs';
 
 Object.assign(globalThis, core, mini, tonal);
+installNative(core);
 const { transpiler } = transpileModule;
 const modules = { '@strudel/core': core, '@strudel/mini': mini, '@strudel/tonal': tonal, '@strudel/transpiler': transpileModule };
 globalThis.__strudelModules = modules;
@@ -269,6 +271,8 @@ for (let i = 1; i <= 9; i++) {
 }
 globalThis.all = (fn) => { allTransforms.push(fn); return core.silence; };
 globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
+core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
+globalThis.osc = pattern=>pattern.osc();
 globalThis.cpm = core.register('cpm', (value, pattern) => pattern._fast(Number(value) / 60 / ((tempo ?? initialBpm) / 240)));
 modules['@strudel/core'] = { ...core, cpm: globalThis.cpm };
 globalThis.setcps = globalThis.setCps = (v) => {
@@ -439,7 +443,9 @@ globalThis.__query = (begin, end, cps, probes = false) => {
     for (const item of values) {
       if (events.length >= 4096) throw new Error('Pattern exceeds 4096 events per query');
       const mask=(hap.context?.scopeMask ?? 0) | (probes ? hap.context?.probeMask ?? 0 : 0);
-      events.push({ begin: at, end: finish, value: item, locations: locs, scopeMask:mask >>> 0 });
+      const frequency=item.workletSrc===undefined?440:Number.isFinite(item.freq)?item.freq:
+        440*Math.pow(2,(core.valueToMidi({note:36,...item})-69)/12);
+      events.push({ begin: at, end: finish, value: prepareNative(item,frequency), locations: locs, scopeMask:mask >>> 0 });
     }
   }
   return JSON.stringify(events);

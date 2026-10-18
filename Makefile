@@ -41,6 +41,9 @@ SRC += src/terminal_graphics.c
 SRC += src/visual.c
 SRC += src/visual_render.c
 SRC += src/audio_output.c
+SRC += src/native_synth.c
+SRC += src/osc_output.c
+SRC += src/reverb_impulse.c
 QJS_OBJ = $(addprefix thirdparty/quickjs/,quickjs.o cutils.o libregexp.o libunicode.o dtoa.o)
 TSJS_OBJ = thirdparty/tree-sitter-javascript/src/parser.o thirdparty/tree-sitter-javascript/src/scanner.o
 OBJ = $(SRC:.c=.o) $(QJS_OBJ) $(TSJS_OBJ)
@@ -75,9 +78,11 @@ clean:
 	rm -f thirdparty/strudel-csound/presets.inc
 	rm -f tests/render_audio
 	rm -f tests/test_audio_output tests/probe_audio_output tests/probe_audio_portaudio
+	rm -f tests/test_native_synth tests/test_native_synth_sanitize
 	rm -f $(SRC:.c=.d) tests/*.d tests/test_dsp tests/test_examples tests/test_csound tests/test_audio
-test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/test_websamp tests/test_editor tests/test_terminal_render tests/test_javascript tests/test_dsp tests/test_examples tests/test_csound tests/test_audio tests/test_terminal_graphics tests/test_audio_output
+test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/test_websamp tests/test_editor tests/test_terminal_render tests/test_javascript tests/test_dsp tests/test_examples tests/test_csound tests/test_audio tests/test_terminal_graphics tests/test_audio_output tests/test_native_synth
 	./tests/test_audio_output
+	./tests/test_native_synth
 	./tests/test_pattern
 	./tests/test_harmony
 	./tests/test_strudel
@@ -101,6 +106,10 @@ tests/probe_audio_portaudio: tests/probe_audio_output.c src/audio_output.c src/c
 test-audio-backends: tests/test_audio_output tests/probe_audio_output tests/probe_audio_portaudio
 	./tests/test_audio_output
 	python3 tests/test_audio_backends.py
+tests/test_native_synth: tests/test_native_synth.c src/audio.c src/js_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ))
+	$(CC) $(CFLAGS) -o $@ tests/test_native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ)) $(LDFLAGS) $(LIBS)
+tests/test_native_synth_sanitize: tests/test_native_synth.c src/audio.c src/js_audio.c src/native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o,$(OBJ))
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer -o $@ tests/test_native_synth.c src/native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/render_audio: tests/render_audio.c src/audio.c src/js_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/render_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/test_csound: tests/test_csound.c $(filter-out src/main.o,$(OBJ))

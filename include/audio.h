@@ -7,6 +7,9 @@ void audio_set_reference_mode(int on);
 #include "event.h"
 
 typedef struct Voice {
+    NativeSynthState *native_state;
+    NativeSynthState *native_right;
+    const NativeSynth *native_program;
     DspState dsp;
     DspState dsp_right;
     int active;
@@ -16,6 +19,8 @@ typedef struct Voice {
     double phase;
     double amp;
     double pan;
+    int has_pan;
+    double waveform_gain;
     double start_time;
     double note_off_time;
     double env;        // current env level

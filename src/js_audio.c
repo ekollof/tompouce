@@ -18,6 +18,7 @@ static const char *text_control(const cJSON *value, const char *name) {
 }
 
 static int oscillator(const char *s) {
+    if (native_synth_sound(s)) return INST_NATIVE;
     if (!strcmp(s,"sine")) return INST_SINE;
     if (!strcmp(s,"saw") || !strcmp(s,"sawtooth")) return INST_SAW;
     if (!strcmp(s,"square") || !strcmp(s,"pulse")) return INST_SQUARE;
@@ -73,6 +74,7 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
         * control(v,"busgain",1,0,16) * control(v,"overgain",1,0,16);
     if (ev->gain <= 0) return 0;
     ev->pan = control(v,"pan",.5,0,1) * 2 - 1;
+    ev->has_pan=cJSON_HasObjectItem(v,"pan");
     const char *envelope_names[4] = {"attack","decay","sustain","release"};
     const double envelope_defaults[4] = {.001,.05,.6,.01};
     double envelope[4];
@@ -119,18 +121,24 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
     if (cJSON_HasObjectItem(v,"delaysync")) ev->delay_time = control(v,"delaysync",.1875,0,64)*seconds;
     const char *sound = text_control(v,"s");
+    ev->waveform_gain=(!strcmp(sound,"saw") || !strcmp(sound,"sawtooth"))?dsp_periodic_gain(0):
+        !strcmp(sound,"square")?dsp_periodic_gain(1):1;
     const cJSON *note = cJSON_GetObjectItemCaseSensitive(v,"note");
     double midi = midi_value(note);
     int inst = oscillator(sound);
     ev->inst = inst >= 0 ? inst : INST_TRI;
     ev->is_drum = !note && inst < 0;
     if (!*sound) ev->is_drum = 0;
-    if (ev->dsp.n_partials) { ev->inst = INST_ADDITIVE; ev->is_drum = 0; }
+    if (ev->dsp.n_partials) { ev->inst = INST_ADDITIVE; ev->is_drum = 0; ev->waveform_gain=1; }
     if (ev->is_drum) ev->inst = INST_HH;
+    const cJSON *native=cJSON_GetObjectItemCaseSensitive(v,"_nativeProgram");
+    if (native && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(native,"effect"))) {
+        ev->inst=INST_NATIVE; ev->is_drum=0;
+    }
     ev->freq = control(v,"freq",440*pow(2,(midi-69)/12),.01,SR*.45);
     ev->freq *= pow(2,control(v,"detune",0,-9600,9600)/1200);
     if (ev->is_drum) ev->freq = 0;
-    snprintf(ev->token,sizeof(ev->token),"%.63s",*sound ? sound : "triangle");
+    snprintf(ev->token,sizeof(ev->token),"%.63s",*sound ? sound : native?"kabelsalat":"triangle");
     if (ev->inst == INST_WT) ev->wt = wt_find(sound+3);
     const cJSON *channel = cJSON_GetObjectItemCaseSensitive(v,"midichan");
     if (cJSON_IsNumber(channel) && isfinite(channel->valuedouble) && channel->valuedouble >= 1 && channel->valuedouble <= 16) {
@@ -157,7 +165,13 @@ static void sample_bank_name(const char *sound, char *out, size_t n) {
 }
 
 static int resolve_sample(AudioEvent *ev, const cJSON *value) {
+    if (ev->inst==INST_NATIVE || cJSON_HasObjectItem(value,"_nativeProgram")) {
+        ev->native_synth=native_synth_prepare(value,ev->freq,ev->duration);
+        if (!ev->native_synth) { log_console("native synth: unsupported program or preparation limit exceeded"); return 0; }
+    }
     const cJSON *ir = cJSON_GetObjectItemCaseSensitive(value,"ir");
+    if (!ir && ev->dsp.p[DSP_ROOM]>0)
+        ev->ir_kernel=convolution_prepare_reverb(ev->dsp.p[DSP_SIZE],ev->dsp.p[DSP_ROOMFADE],ev->dsp.p[DSP_ROOMLP],ev->dsp.p[DSP_ROOMDIM]);
     if (ir && ev->dsp.p[DSP_ROOM] > 0) {
         if (!cJSON_IsString(ir) || !ir->valuestring[0]) return 0;
         char token[256];
@@ -174,7 +188,7 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
         }
     }
     const char *sound = text_control(value,"s"), *bank = text_control(value,"bank");
-    if (!*sound || oscillator(sound) >= 0 || ev->dsp.n_partials) return 1;
+    if (!*sound || oscillator(sound) >= 0 || ev->dsp.n_partials || (ev->native_synth && !native_synth_effect(ev->native_synth))) return 1;
     double midi = ev->is_drum ? -1 : fmax(0,fmin(127,69+12*log2(ev->freq/440)));
     double n = floor(control(value,"n",0,-1000000,1000000)+.5);
     char token[256];
@@ -235,6 +249,16 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
     const cJSON *hap;
     cJSON_ArrayForEach(hap,haps) {
         const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap,"value");
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
+            AudioEvent ev;
+            if (js_audio_event(hap,origin,seconds,&ev)) {
+                double cycle=control(hap,"begin",0,-1e12,1e12);
+                if (osc_output_prepare(&ev.osc,value,cycle,1/seconds,ev.duration)) {
+                    ev.osc_only=1; ev.generation=generation; event_queue_push(&ev);
+                } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
+            }
+            continue;
+        }
         const cJSON *field;
         cJSON_ArrayForEach(field,value) {
             const char *name = field->string;
@@ -243,7 +267,9 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
                 "attack","decay","sustain","release","speed","detune","delay","delaytime",
                 "delayfeedback","midichan","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
                 "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
-                "duckdepth","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",NULL};
+                "duckdepth","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
+                "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
+                "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
             int implemented = 0;
             for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
             if (!implemented) javascript_warn_control(program,name);
@@ -258,11 +284,15 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
             continue;
         }
         if (!resolve_sample(&ev,value)) {
+            native_synth_release(ev.native_synth);
             if (cJSON_HasObjectItem(value,"ir"))
                 javascript_warn_control(program,"ir (sample unavailable or convolution limit exceeded)");
             continue;
         }
+        if (ev.dsp.p[DSP_ROOM]>0 && !ev.ir_kernel && !cJSON_HasObjectItem(value,"ir"))
+            javascript_warn_control(program,"generated room (IR duration/cache limit; using native Schroeder fallback)");
         event_queue_push(&ev);
+        native_synth_release(ev.native_synth);
     }
     cJSON_Delete(haps);
 }

@@ -200,12 +200,29 @@ browser catalog is not bundled.
 uses pitch factor `1+x`, negative `x` uses `max(0,1+x/4)`. For example,
 `.speed(.5).stretch(1)` plays a sample at half speed while compensating its
 pitch upward by an octave. Duration still follows sample transport and the
-event envelope. Native samples use four waveform-aligned Hann grains with
-fixed voice storage; both stereo channels share grain positions. Oscillators
-apply the equivalent pitch factor before synthesis. This is an overlap-add
-implementation, not bit-identical browser phase-vocoder output. Transients,
-noise and extreme shifts can sound different. No worklet or JavaScript runs
-in the callback.
+event envelope. Native samples now use the reference's 2048-frame phase vocoder,
+128-frame hop, peak regions, phase correction and Float32 Hann overlap-add.
+The sample envelope precedes the vocoder, and ordinary effects follow it.
+Preparation accounts for the reference's 40 ms source anticipation and quantum
+disconnect at the end; the musical event and highlight times stay unchanged.
+Output begins at the musical onset, so earlier low-level precursors are omitted.
+
+The generator prepares immutable stereo PCM with a 90-second input-lifetime
+limit, a 128 MiB/128-buffer cache and eviction of unreferenced entries. Queued
+events and voices retain their buffers. Preparation-limit failures report a
+console error. New source/pitch variants require preparation; gain and ordinary
+effect changes reuse the same PCM. No FFT, allocation, decoding or JavaScript
+runs in the callback. Reverse playback, slices, looping, envelopes and source
+pitch modulation are included in preparation. Oscillators retain their direct
+pitch-factor implementation rather than passing through a vocoder.
+
+Maintained browser comparisons pass for half/fractional-speed compensation,
+upward shifting, reverse playback, loops and envelope/filter ordering. Downward
+shifting shared PCM also passes. Independently decoded MP3s can differ more:
+the reference reads intermediate real-FFT bins in its last downward peak region,
+amplifying small decoder differences. The original piano-down capture remains a
+diagnostic, alongside broader unverified sound parity. See
+[audio comparison](audio-comparison.md) for evidence and limits.
 
 `ir` selects a registered sample as the orbit's convolution impulse:
 

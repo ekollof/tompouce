@@ -41,7 +41,7 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Thirteen regression gates compare at zero lag (no capture shifts or gain
+Twenty regression gates compare at zero lag (no capture shifts or gain
 normalization). The original piano windows remain 0.6 seconds; the new synth
 and generated-room cases check the full two-second capture:
 
@@ -54,6 +54,8 @@ and generated-room cases check the full two-second capture:
 | Saw, square and triangle at 440 Hz (3 cases) | 0.99 | 0.85–1.15 |
 | ZzFX sine and bytebeat (2 cases) | 0.99 | 0.85–1.15 |
 | Piano with seeded generated convolution room | 0.99 | 0.85–1.15 |
+| Stretched piano: half/fractional speed, upward shift, reverse, loop, envelope/filter (6 cases) | 0.99 | 0.85–1.15 |
+| Downward-stretched shared PCM fixture | 0.99 | 0.85–1.15 |
 
 The C4 capture lasts two seconds and Arpoon captures four cycles/eight seconds.
 Only the stated window is gated; these checks do not establish full-song
@@ -73,13 +75,37 @@ gradual low-pass algorithm. The generated-room gate uses an explicit LCG seed
 ordinary browser randomness. Native rooms use this deterministic seed; ordinary
 browser rooms remain randomized. Custom IR correlation remains 0.99999997.
 
-Original wet Arpoon and stretched piano are also captured as diagnostics with
+Original wet Arpoon and downward-stretched MP3 piano are also captured as diagnostics with
 no pass threshold. Ordinary wet Arpoon has independent random impulses and
-observed opening correlation around 0.95. Stretched piano currently compares
+observed opening correlation around 0.95. The stretched-piano capture compared
 native overlap-add grains against the browser phase vocoder and observed
-correlation about 0.08 with RMS ratio 1.016; waveform parity remains open.
+correlation about 0.08 before the native phase-vocoder replacement. It now
+correlates above 0.9999 with RMS ratio 0.9999. It uses the matrix's existing
+0.99 correlation threshold, gating the entire two-second capture including
+onset and ending.
 The stretched input starts at 0.25 seconds in both renderers because upstream
 subtracts 40 ms for its worklet and rejects a resulting negative onset. Captures
 are never shifted to conceal this difference.
+
+Native preparation follows the reference's envelope-before-vocoder order,
+2048/128 window/hop, peak regions, Float32 accumulation and quantum graph
+disconnect. Early precursors before the musical onset are omitted. Fractional
+speed, upward pitch, reverse, actual loop wraps and envelope/filter ordering
+have separate gates. Native input lifetime is bounded to 90 seconds, with a
+128 MiB/128-buffer cache. FFT and preparation run outside the callback.
+
+Downward MP3 piano remains diagnostic (correlation about 0.97). Feeding the
+browser-decoded piano to the native renderer gave 0.9999, isolating the remaining
+difference to decoded input: the reference's final downward peak region reads
+intermediate upper-half real-FFT bins and amplifies small decoding differences.
+The maintained downward DSP gate therefore uses identical generated PCM16 WAV
+bytes in both players. Its source hash is recorded in the report, and the WAV
+and confined native catalog are retained under the artifact directory's
+`fixture-banks`. The browser uses that exact WAV in a disposable Blob sample.
+The original independently decoded MP3 capture remains visible; this controlled
+gate does not establish MP3 decoder or full-song parity.
+
+Use `TOMPOUCE_COMPARE_FILTER=stretch` to select the stretch cases while iterating;
+omit it to run the full matrix.
 
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

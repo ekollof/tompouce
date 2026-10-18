@@ -175,6 +175,11 @@ static void check_visual_edit_highlights(void) {
 int main(void) {
     SLutf8_enable(1);
     SLtt_get_terminfo();
+    /* Cell assertions below use an 80x24 backing screen. right_geom reads
+       S-Lang's dimensions, so setting only the editor's cols/rows leaves this
+       test dependent on the invoking terminal's real ioctl geometry. */
+    SLtt_Screen_Cols=80;
+    SLtt_Screen_Rows=24;
     assert(SLsmg_init_smg() == 0);
     SLtt_set_color(2,NULL,"yellow","black");
     SLtt_set_color(3,NULL,"brightcyan","black");

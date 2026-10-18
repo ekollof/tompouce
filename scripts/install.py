@@ -38,6 +38,8 @@ RUNTIME_FILES = [
     'thirdparty/native-synth/README.md', 'thirdparty/native-synth/LICENSE-ZzFX',
     'thirdparty/native-synth/LICENSE-Strudel', 'thirdparty/native-synth/LICENSE-Kabelsalat',
     'thirdparty/native-synth/LICENSE-Apache-2.0',
+    'thirdparty/native-synth/LICENSE-Phaze',
+    'thirdparty/native-synth/LICENSE-FFT',
 ]
 
 

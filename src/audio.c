@@ -9,6 +9,7 @@
 #include "sampler.h"
 #include "midi.h"
 #include "convolution.h"
+#include "stretch.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the S-Lang
@@ -304,7 +305,9 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->smpstep = 1.0;
     v->smp_gate = ev->smp_gate;
     v->stretch_factor = ev->stretch > 0 ? ev->stretch : 1;
-    for (int i = 0; i < 4; i++) v->grain_age[i] = 1024;
+    v->stretch_buffer=ev->stretch_buffer;
+    stretch_retain(v->stretch_buffer);
+    if (v->stretch_buffer) v->age=.04;
     if (ev->smp >= 0) {
         smp_get_stereo(ev->smp, &v->smpbuf, &v->smplen,&v->smp_channels);
         if (ev->dsp.enabled && v->smp_channels == 2)
@@ -624,6 +627,7 @@ void audio_trigger_event(AudioEvent *ev) {
     }
     NativeSynthState *previous=voices[chosen].native_state;
     NativeSynthState *previous_right=voices[chosen].native_right;
+    const StretchBuffer *previous_stretch=voices[chosen].stretch_buffer;
     trigger_voice(&voices[chosen], ev);
     voices[chosen].native_state=prepared;
     voices[chosen].native_right=prepared_right;
@@ -631,6 +635,7 @@ void audio_trigger_event(AudioEvent *ev) {
     pthread_mutex_unlock(&voice_lock);
     native_synth_state_free(previous);
     native_synth_state_free(previous_right);
+    stretch_release(previous_stretch);
 }
 
 typedef struct {
@@ -766,46 +771,6 @@ static double source_value(const Voice *v, double position, int channel) {
     return a+(b-a)*fraction;
 }
 
-/* Four Hann grains with waveform-aligned starts. Transport and pitch have
-   separate rates; both channels share the alignment and grain positions.
-   Fixed work/storage, no decoder/cache access or allocation here. */
-static void stretch_sample(Voice *v, double step, double *left, double *right) {
-    double pitch_step = step*v->stretch_factor;
-    if ((v->stretch_tick & 255u) == 0) {
-        unsigned slot = (v->stretch_tick/256u)&3u;
-        double start = v->smppos;
-        unsigned previous = (slot+3u)&3u;
-        if (v->grain_age[previous] < 1024) {
-            double reference = v->grain_pos[previous], best = 0;
-            /* Bound the search in source frames, independent of speed. */
-            for (int offset = -192; offset <= 192; offset += 4) {
-                double candidate = v->smppos+offset, xy = 0, xx = 0, yy = 0;
-                if (candidate < 0 || candidate >= v->smplen) continue;
-                for (int j = 0; j < 32; j++) {
-                    double a = source_value(v,reference+j*pitch_step,0);
-                    double b = source_value(v,candidate+j*pitch_step,0);
-                    xy += a*b; xx += a*a; yy += b*b;
-                }
-                double score = xx*yy > 1e-20 ? xy/sqrt(xx*yy)-abs(offset)*.00001 : 0;
-                if (score > best) { best = score; start = candidate; }
-            }
-        }
-        v->grain_pos[slot] = start; v->grain_age[slot] = 0;
-    }
-    *left = *right = 0;
-    double weight_sum = 0;
-    for (int i = 0; i < 4; i++) {
-        if (v->grain_age[i] >= 1024) continue;
-        double weight = .5-.5*cos(2*M_PI*v->grain_age[i]/1024.0);
-        *left += weight*source_value(v,v->grain_pos[i],0);
-        *right += weight*source_value(v,v->grain_pos[i],1);
-        weight_sum += weight;
-        v->grain_age[i]++; v->grain_pos[i] += pitch_step;
-    }
-    if (weight_sum > 1e-12) { *left /= weight_sum; *right /= weight_sum; }
-    v->stretch_tick++;
-}
-
 /* Audio callback */
 static int pa_callback(const void *input, void *output, unsigned long frameCount,
                        const PaStreamCallbackTimeInfo *timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
@@ -832,6 +797,16 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 if (orbit < 0 || orbit >= N_ORBITS) orbit = 0;
                 VoiceMix *vm = &mixes[orbit];
                 double age = V->age;
+                if (V->stretch_buffer) {
+                    const float *pcm=stretch_pcm(V->stretch_buffer);
+                    if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) { V->active=0; continue; }
+                    double gate=V->gate_end-V->start_time;
+                    double left=pcm[(size_t)V->stretch_frame*2]*V->amp;
+                    double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp;
+                    V->env=dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
+                    route_voice(V,dsp_process(&V->dsp,left,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
+                    V->stretch_frame++; V->smppos+=V->smpstep; V->age+=dt; continue;
+                }
                 if (V->inst==INST_NATIVE) {
                     double gate=V->gate_end-V->start_time, left=0,right=0;
                     int own_envelope=native_synth_enveloped(V->native_program);
@@ -884,7 +859,6 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     double left = source_value(V,V->smppos,0), right = source_value(V,V->smppos,1);
                     double transport = V->smpstep*dsp_pitch_multiplier(&V->dsp.control,age,V->gate_end-V->start_time);
-                    if (V->stretch_factor > 0 && V->stretch_factor != 1) stretch_sample(V,transport,&left,&right);
                     double s = left*V->amp*g;
                     if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
                         right *= V->amp*g;
@@ -1237,6 +1211,7 @@ void audio_shutdown(void) {
     for (int i=0;i<MAX_VOICES;i++) {
         native_synth_state_free(voices[i].native_state); voices[i].native_state=NULL;
         native_synth_state_free(voices[i].native_right); voices[i].native_right=NULL;
+        stretch_release(voices[i].stretch_buffer); voices[i].stretch_buffer=NULL;
     }
     audio_set_csound(NULL);
 }

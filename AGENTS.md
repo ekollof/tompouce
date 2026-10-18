@@ -2,6 +2,61 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Terminal-render test geometry (2026-10-18)
+
+The user's `make test` abort was tests/test_terminal_render.c:230, confirmed from
+the SIGABRT core for PID 330778. Its cell assertions assumed an 80x24 screen,
+but right_geom reloaded the caller's 174x52 dimensions from S-Lang. Setting only
+the editor's cols/rows did not constrain its backing screen. The harness now sets
+SLtt_Screen_Cols/Rows after terminfo and before S-Lang initialization. The new
+tests/test_terminal_render_pty.py runs it in owned 80x24, 174x52, 60x16 and 240x72
+PTYs with isolated state, and is included in `make test`. The 174x52 reproduction
+failed before the fix and all four sizes pass afterward. Extracted diagnostic
+core copies were deleted. Full `make -j4 test` passes, including Csound and all
+1,207 reference events. Production rendering and the user's app were untouched.
+
+### Sample phase-vocoder stretching (2026-10-18)
+
+`src/stretch.c` replaces the sample grain stretcher with the pinned reference's
+2048-frame peak-region vocoder, 128-frame hop and Float32 Hann overlap-add. The
+generator prepares immutable stereo PCM before queueing; audio only reads it and
+runs existing effects. No FFT/decoding/allocation/JS runs in the callback. Sample
+ADSR and pitch modulation precede the vocoder; ordinary effects follow it. Native
+preparation accounts for source anticipation and quantum graph disconnect, while
+musical event/highlight times stay unchanged. Low-level precursors before the
+musical onset are omitted. Oscillator stretching retains direct pitch scaling.
+
+Prepared PCM has a 90-second input-lifetime limit and a 128 MiB/128-buffer cache.
+Atomic references keep queued/sounding buffers valid; unreferenced entries can be
+evicted. Gain/filter/effect changes reuse source PCM. Refusal reports a console
+error. Preserve include/stretch.h, src/stretch.c and the new Phaze/FFT licenses;
+the installer explicitly retains both notices. Strudel versions and event
+baselines remain unchanged.
+
+Original stretched-piano correlation improved from 0.0805 to 0.9999 without
+capture shifts or normalization. The maintained matrix now includes compensation,
+fractional speed, upward shift, reverse, actual loop wraps, envelope/filter order
+and downward shared PCM. Independent MP3 downward shifting remains diagnostic at
+~0.97: using browser-decoded piano in the native renderer gave ~0.9999, confirming
+input sensitivity. The reference's last downward peak region reads intermediate
+upper-half real-FFT bins; the native real transform retains that layout. A shared
+generated PCM16 WAV gate isolates DSP from MP3 decoding, recording its source hash.
+Do not loosen thresholds or claim complete MP3/full-song parity.
+
+Callback tests exercise compensated pitch, reverse playback, exact stereo polarity,
+duration, cache reuse/eviction and queue/voice ownership; ASan/UBSan includes the
+callback and vocoder. Sanitizers also exposed an old test fixture with one float
+where the sampler contract requires interleaved stereo; the fixture now has two.
+See docs/audio-comparison.md and TODO.md for the remaining decoder investigation.
+The user's engine/source/playback and desktop settings remain untouched.
+Validation passed: warning-as-error native/Csound suite and all 31 examples /
+1,207 event references; callback/vocoder ASan/UBSan; all 67 PTY cases (~56 FPS);
+all 20 browser audio gates; OSC and installer tests. An owned Pulse null-sink
+engine also scheduled stretched piano notes with active voice snapshots after
+its silent route was verified. Updated ~/.local/bin/tompouce through the installer
+with --skip-deps --skip-banks --no-browser, preserving private Csound and banks.
+Restart normally to load the new executable; no user engine was restarted.
+
 ### Backlog continuation: native synths, OSC and browser QA (2026-10-18)
 
 The historical C statement/mini parser is marked for removal in TODO.md; retain

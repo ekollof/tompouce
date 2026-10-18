@@ -4,6 +4,7 @@
 #include "track.h"
 #include "pattern.h"
 #include "audio.h"
+#include "stretch.h"
 #include "common.h"
 #include "sampler.h"
 #include "banks.h"
@@ -398,7 +399,7 @@ static int ev_display_midi(const AudioEvent *ev) {
 
 void event_queue_clear(void) {
     pthread_mutex_lock(&qlock);
-    while (qhead) { QNode *n = qhead; qhead = qhead->next; native_synth_release(n->ev.native_synth); free(n); }
+    while (qhead) { QNode *n = qhead; qhead = qhead->next; native_synth_release(n->ev.native_synth); stretch_release(n->ev.stretch_buffer); free(n); }
     qcount = 0;
     if (++qgeneration == 0) qgeneration = 1;
     pthread_mutex_unlock(&qlock);
@@ -413,6 +414,7 @@ void event_queue_push(AudioEvent *ev) {
     if (!node) { pthread_mutex_unlock(&qlock); return; }
     node->ev = *ev;
     native_synth_retain(node->ev.native_synth);
+    stretch_retain(node->ev.stretch_buffer);
     // insert sorted by time
     QNode **pp = &qhead;
     while (*pp && (*pp)->ev.time <= ev->time) pp = &(*pp)->next;
@@ -533,6 +535,7 @@ static void *consumer_thread(void *arg) {
                     log_console("OSC: output send failed");
                 audio_trigger_event(&ev);
                 native_synth_release(ev.native_synth);
+                stretch_release(ev.stretch_buffer);
                 if (!ev.osc_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
                     int vel = (int)(ev.gain * 127.0);
                     int dur = (int)(ev.duration * 1000.0);

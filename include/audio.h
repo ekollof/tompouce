@@ -61,8 +61,8 @@ typedef struct Voice {
     double smpstep; // advance per output sample (1 = original pitch)
     int smp_gate;   // respect note duration + release (melodic banks)
     double stretch_factor;
-    double grain_pos[4];
-    unsigned grain_age[4], stretch_tick;
+    const StretchBuffer *stretch_buffer;
+    unsigned stretch_frame;
     char token[24]; /* printable label for music_debug; not a path */
     // drum-specific
     double age;

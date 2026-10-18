@@ -27,6 +27,8 @@
 #define N_ORBITS 12
 #define N_PATTERN_SCOPES 32
 
+typedef struct StretchBuffer StretchBuffer;
+
 typedef struct {
     unsigned generation; /* 0 = legacy; JS generation must match the queue */
     unsigned scope_mask; /* visualization call sites attached to this pattern */
@@ -62,6 +64,7 @@ typedef struct {
     double smp_end;     /* <=0 whole sample; else fraction of length */
     double smp_speed;   /* 0 = natural 1; negative reverses the buffer */
     double stretch;     /* native pitch factor; 0 = disabled/legacy, 1 = unity */
+    const StretchBuffer *stretch_buffer;
     const ConvKernel *ir_kernel; /* immutable, prepared outside audio callback */
     const NativeSynth *native_synth; /* immutable native program, prepared by generator */
     double delay_send;  /* 0 dry; >0 feeds this event's orbit delay */

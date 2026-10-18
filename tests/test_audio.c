@@ -31,6 +31,7 @@ static int sample_fixture(void) {
 }
 
 static Voice *start_sample(AudioEvent *event) {
+    for (int i=0;i<MAX_VOICES;i++) stretch_release(voices[i].stretch_buffer);
     memset(voices, 0, sizeof(voices));
     audio_trigger_event(event);
     assert(voices[0].active);
@@ -148,23 +149,33 @@ static void test_stretch(void) {
     assert(hap && js_audio_event(hap,0,2,&event));
     assert(event.stretch == 2 && event.smp_speed == .5);
     cJSON_Delete(hap);
+    hap=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"piano\",\"stretch\":-4}}");
+    assert(hap && !js_audio_event(hap,0,2,&event)); cJSON_Delete(hap);
     int frames = 22050;
-    float *source = malloc((size_t)frames*2*sizeof(*source));
-    assert(source);
-    for (int i = 0; i < frames; i++) {
-        source[i*2] = (float)(.25*sin(2*M_PI*440*i/SR));
-        source[i*2+1] = -2*source[i*2];
+    char path[]="/tmp/tompouce-stretch-XXXXXX.wav";
+    int fd=mkstemps(path,4); assert(fd>=0);
+    unsigned char header[44]={'R','I','F','F',0,0,0,0,'W','A','V','E','f','m','t',' ',16,0,0,0,
+        1,0,2,0,68,172,0,0,16,177,2,0,4,0,16,0,'d','a','t','a',0,0,0,0};
+    unsigned bytes=(unsigned)frames*4;
+    for (int i=0;i<4;i++) { header[4+i]=(unsigned char)((bytes+36)>>(i*8)); header[40+i]=(unsigned char)(bytes>>(i*8)); }
+    assert(write(fd,header,sizeof(header))==(ssize_t)sizeof(header));
+    for (int i=0;i<frames;i++) {
+        int left=(int)(8191*sin(2*M_PI*440*i/SR)),right=-2*left;
+        unsigned char sample[4]={(unsigned char)left,(unsigned char)((unsigned)left>>8),(unsigned char)right,(unsigned char)((unsigned)right>>8)};
+        assert(write(fd,sample,sizeof(sample))==(ssize_t)sizeof(sample));
     }
+    assert(close(fd)==0); int sample=smp_acquire_abs(path,60); assert(sample>=0); assert(unlink(path)==0);
     for (int reverse = 0; reverse < 2; reverse++) {
-        memset(voices,0,sizeof(voices));
-        Voice *v = &voices[0];
-        v->active = 1; v->smpbuf = source; v->smplen = frames; v->smp_channels = 2;
-        v->smppos = reverse ? frames-1 : 0; v->smpstep = reverse ? -.5 : .5;
-        v->stretch_factor = 2;
-        for (int i = 0; i < 4; i++) v->grain_age[i] = 1024;
-        v->amp = .1; v->vsus = 1; v->smp_end = 1; v->gate_end = audio_time+10;
-        DspParams params; dsp_params_init(&params); params.enabled = 1;
-        dsp_init(&v->dsp,&params); dsp_init(&v->dsp_right,&params);
+        memset(&event,0,sizeof(event));
+        event.smp=sample; event.smp_speed=reverse?-.5:.5; event.stretch=2;
+        event.time=.25; event.gain=.1; event.sus=1; event.rel=.01;
+        dsp_params_init(&event.dsp); event.dsp.enabled=1;
+        event.stretch_buffer=stretch_prepare(&event); assert(event.stretch_buffer);
+        const StretchBuffer *again=stretch_prepare(&event); assert(again==event.stretch_buffer); stretch_release(again);
+        AudioEvent filtered=event; filtered.gain=.2; filtered.dsp.p[DSP_LPF]=800;
+        again=stretch_prepare(&filtered); assert(again==event.stretch_buffer); stretch_release(again);
+        Voice *v=start_sample(&event); stretch_release(event.stretch_buffer);
+        assert(v->stretch_buffer && stretch_frames(v->stretch_buffer)>40000 && stretch_frames(v->stretch_buffer)<44100);
         double previous = 0; int crossings = 0;
         for (int i = 0; i < frames*2; i++) {
             float output[2]; pa_callback(NULL,output,1,NULL,0,NULL);
@@ -176,7 +187,25 @@ static void test_stretch(void) {
         double frequency = crossings/.8;
         assert(frequency > 430 && frequency < 450);
     }
-    free(source);
+    stretch_release(voices[0].stretch_buffer); voices[0].stretch_buffer=NULL;
+    event.stretch=18; assert(!stretch_prepare(&event));
+    event.stretch=2; event.time=1e308; assert(!stretch_prepare(&event)); event.time=.25;
+    event.stretch=2; event.dsp.p[DSP_VIB]=NAN; assert(!stretch_prepare(&event));
+    event.dsp.p[DSP_VIB]=0; event.smp_speed=.5; event.smp_gate=1; event.duration=.1;
+    event.stretch_buffer=stretch_prepare(&event); assert(event.stretch_buffer);
+    /* Only the queue owns this PCM while more than a full cache of variants
+       are prepared. After dequeue, the sounding voice must keep it alive. */
+    event_queue_clear(); event_queue_push(&event); stretch_release(event.stretch_buffer);
+    for (int i=0;i<160;i++) {
+        AudioEvent variant=event; variant.time=.5+i/SR;
+        const StretchBuffer *buffer=stretch_prepare(&variant); assert(buffer); stretch_release(buffer);
+    }
+    Voice *v=start_sample(&event); event_queue_clear();
+    float output[2048]; pa_callback(NULL,output,1024,NULL,0,NULL);
+    double energy=0;
+    for (int i=0;i<2048;i++) { assert(isfinite(output[i])); energy+=output[i]*output[i]; }
+    assert(energy>1e-5);
+    stretch_release(v->stretch_buffer); v->stretch_buffer=NULL;
 }
 
 static void test_pattern_scopes(void) {
@@ -303,9 +332,9 @@ int main(void) {
     memset(voices,0,sizeof(voices));
     orbits_ensure();
     orbit_dt[4] = 32 / SR; orbit_fb[4] = 0;
-    float impulse = 1;
+    float impulse[2] = {1,1};
     voices[0].active = 1; voices[0].orbit = 4;
-    voices[0].smpbuf = &impulse; voices[0].smplen = 1; voices[0].smp_channels = 1;
+    voices[0].smpbuf = impulse; voices[0].smplen = 1; voices[0].smp_channels = 1;
     voices[0].smpstep = 1; voices[0].smp_end = 1; voices[0].amp = .5;
     voices[0].delay_send = 1; voices[0].note_off_time = 10; voices[0].gate_end = 10;
     float delayed[80];

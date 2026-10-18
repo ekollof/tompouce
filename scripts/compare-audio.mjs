@@ -9,6 +9,22 @@ import { StringDecoder } from 'node:string_decoder';
 
 const out = path.resolve(process.argv[2] ?? '/tmp/tompouce-comparison');
 await fs.mkdir(out, { recursive: true });
+// Exact shared PCM isolates the vocoder from independently decoded MP3s.
+// The reference's downward peak regions amplify tiny decoder differences.
+const fixture=Buffer.alloc(44+44100*4);
+fixture.write('RIFF');fixture.writeUInt32LE(fixture.length-8,4);fixture.write('WAVEfmt ',8);
+fixture.writeUInt32LE(16,16);fixture.writeUInt16LE(1,20);fixture.writeUInt16LE(2,22);
+fixture.writeUInt32LE(44100,24);fixture.writeUInt32LE(176400,28);fixture.writeUInt16LE(4,32);fixture.writeUInt16LE(16,34);
+fixture.write('data',36);fixture.writeUInt32LE(fixture.length-44,40);
+for(let i=0;i<44100;i++) {
+  const t=i/44100,fade=Math.min(1,t/.003)*Math.exp(-t*2);
+  const x=Math.round(6000*fade*(Math.sin(2*Math.PI*440*t)+.4*Math.sin(2*Math.PI*1271*t)+.2*Math.sin(2*Math.PI*7123*t)));
+  fixture.writeInt16LE(x,44+i*4);fixture.writeInt16LE(-2*x,46+i*4);
+}
+const fixtureRoot=path.join(out,'fixture-banks');
+await fs.mkdir(path.join(fixtureRoot,'Dirt-Samples'),{recursive:true});
+await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/stretch.wav'),fixture);
+await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/strudel.json'),JSON.stringify({stretch_fixture:['stretch.wav']}));
 const nativeEnvironment={...process.env};
 if (!nativeEnvironment.TOMPOUCE_BANKS && !nativeEnvironment.STRUDELTERM_BANKS) {
   for (const candidate of ['assets/banks',path.join(os.homedir(),'.local/lib/tompouce/assets/banks')]) {
@@ -89,7 +105,14 @@ try {
     { name: 'piano-generated-room-seeded', code: `note(60).s('piano').clip(.25).room(.5).roomsize(1)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99, randomSeed: 0xc0ffee },
     // A real onset at 0.25s avoids the upstream stretcher's negative-onset
     // rejection at zero (its graph schedules 40ms early). No captures shift.
-    { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: null },
+    { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-fractional', code: `note(60).s('piano').speed(.75).stretch(1/3).clip(.25).late(.137)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-up', code: `note(60).s('piano').stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down', code: `note(60).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: null },
+    { name: 'pcm-stretch-down', code: `s('stretch_fixture').stretch(-2).clip(.25).late(.125)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-reverse', code: `note(60).s('piano').speed(-.5).stretch(1).begin(.98).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-loop', code: `note(60).s('piano').speed(.5).stretch(1).loop(1).loopBegin(.005).loopEnd(.01).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-envelope-filter', code: `note(60).s('piano').speed(.5).stretch(1).attack(.03).decay(.08).sustain(.4).release(.12).lpf(1600).lpq(.7).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'zzfx-sine', code: `note(69).s('z_sine').zrand(0).gain(.5).attack(.01).decay(.04).sustain(.5).release(.1).clip(.25)`, sound: 'z_sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'bytebeat', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'saw-440', code: `note(69).s('sawtooth').gain(.5)`, sound: 'sawtooth', cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -108,7 +131,7 @@ try {
     const bytes=await (await fetch(s.src)).arrayBuffer();
     return {url:s.src,sha256:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(b=>b.toString(16).padStart(2,'0')).join('')};
   }))`);
-  for (const spec of cases) {
+  for (const spec of cases.filter(spec=>!process.env.TOMPOUCE_COMPARE_FILTER || spec.name.includes(process.env.TOMPOUCE_COMPARE_FILTER))) {
     const page = await call('Target.createTarget', { url: 'https://strudel.cc/' }, null);
     session = (await call('Target.attachToTarget', { targetId: page.targetId, flatten: true }, null)).sessionId;
     let initialized = false;
@@ -121,10 +144,12 @@ try {
     await evaluate(transpiler.outputFiles[0].text);
     const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native.f32`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
-    const rendered = spawnSync('./tests/render_audio', [request, native], { encoding: 'utf8', timeout: 120000,env:nativeEnvironment });
+    const rendered = spawnSync('./tests/render_audio', [request, native], { encoding: 'utf8', timeout: 120000,
+      env:spec.fixture?{...nativeEnvironment,TOMPOUCE_BANKS:fixtureRoot}:nativeEnvironment });
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
+      if(spec.fixture){const bytes=Uint8Array.from(atob(${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({stretch_fixture:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
       const selected=pattern.filterValues(v=>v.s===spec.sound);
@@ -152,7 +177,7 @@ try {
     const metrics = compare(nativeBytes, wav, spec.window);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
-    report.cases.push({ ...spec, codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
+    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(fixture)}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
     console.log(spec.name, JSON.stringify(metrics), passed === null ? 'DIAGNOSTIC' : passed ? 'PASS' : 'FAIL');
     await call('Target.closeTarget', { targetId: page.targetId }, null);
   }

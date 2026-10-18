@@ -4,6 +4,7 @@
 #include "sampler.h"
 #include "websamp.h"
 #include "wavetable.h"
+#include "stretch.h"
 #include <ctype.h>
 
 static double control(const cJSON *value, const char *name, double initial, double min, double max) {
@@ -109,7 +110,7 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
     if (cJSON_HasObjectItem(v,"stretch")) {
         double shift = control(v,"stretch",0,-4,16);
         ev->stretch = fmax(0,1+(shift < 0 ? shift*.25 : shift));
-        if (ev->stretch == 0) { ev->stretch = 1; ev->gain = 0; }
+        if (ev->stretch == 0) return 0;
     }
     ev->smp_end = control(v,"end",1,0,1);
     ev->pw = control(v,"pw",.5,.01,.99);
@@ -236,6 +237,12 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
             smp_get(ev->smp,&buffer,&length);
             if (buffer && length > 0) ev->smp_speed *= length/SR;
         }
+        if (ev->stretch>0) {
+            ev->stretch_buffer=stretch_prepare(ev);
+            if (!ev->stretch_buffer) {
+                log_console("stretch: preparation duration or memory limit exceeded"); return 0;
+            }
+        }
     }
     return 1;
 }
@@ -285,6 +292,7 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
         }
         if (!resolve_sample(&ev,value)) {
             native_synth_release(ev.native_synth);
+            stretch_release(ev.stretch_buffer);
             if (cJSON_HasObjectItem(value,"ir"))
                 javascript_warn_control(program,"ir (sample unavailable or convolution limit exceeded)");
             continue;
@@ -293,6 +301,7 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
             javascript_warn_control(program,"generated room (IR duration/cache limit; using native Schroeder fallback)");
         event_queue_push(&ev);
         native_synth_release(ev.native_synth);
+        stretch_release(ev.stretch_buffer);
     }
     cJSON_Delete(haps);
 }

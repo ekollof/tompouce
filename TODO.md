@@ -17,14 +17,17 @@
       applying sound; desktop/mobile captures and a report stay under /tmp.
 - [x] Add native UDP OSC `/dirt/play` output for external music engines, with
       timetags, bounded validated messages and no browser/Node bridge.
-- [ ] Match browser phase-vocoder time-stretch waveforms more closely. Native
-      overlap-add compensation remains a deliberate algorithm difference;
-      the maintained stretched-piano capture records it without claiming parity.
+- [x] Replace sample grain compensation with the reference phase vocoder,
+      prepared outside the callback; gate stretched piano, fractional/upward
+      shifts, reverse/loop/envelope/filter cases and downward shared PCM.
+- [ ] Investigate downward-vocoder sensitivity to independently decoded MP3s.
+      Shared decoded piano/PCM passes, but the separate MP3 decoder path remains
+      a measured diagnostic; do not claim full waveform parity.
 
-Current evidence: 13 browser/native gates cover oscillators, ADSR, filters,
+Current evidence: 20 browser/native gates cover oscillators, ADSR, filters,
 explicit/default panning, dry piano, custom/generated rooms, ZzFX and bytebeat.
 Generated room comparison uses an explicit shared random seed. Ordinary wet
-Arpoon and granular/phase-vocoder differences remain diagnostic captures.
+Arpoon and independently decoded downward-stretched piano remain diagnostic captures.
 No musical source or running user process was changed by this work.
 
 ## Terminal graphics (2026-10-18)
@@ -212,18 +215,19 @@ Next verification:
       preserve their stereo channels. Bass/chord filters and fractional
       pitch pairs remain intact. No live source or playback changes made.
 - [x] Compare the restarted engine's audio with browser playback; the maintained
-      harness now includes 13 gated cases plus wet/stretch diagnostics.
+      harness now includes 20 gated cases plus wet/downward-MP3 diagnostics.
 - [x] Add a browser audio capture/comparison harness; event agreement
       and native DSP regression checks do not establish audio parity.
 
 Deferred feature backlog after fidelity verification (separate scope):
 
-- [x] Sample pitch compensation with independent transport (overlap-add
-      grains), and partitioned stereo convolution with registered sample
+- [x] Sample pitch compensation with independent transport (native prepared
+      phase vocoder), and partitioned stereo convolution with registered sample
       impulses. Native callback tests cover doubled duration at preserved
       pitch in both directions, stereo phase, and convolution against a
       direct reference. Custom IR browser capture passes at correlation
-      0.99999997. Browser phase-vocoder/generated-reverb parity remains open.
+      0.99999997. Representative phase-vocoder/seeded generated-room gates pass;
+      independent MP3 decoding and full-song parity remain open.
 - [x] Installed VCSL/mridangam defaults, with decoded URL path safety checks.
 - [x] Chromium companion for native session visuals and controls. Bridge
       checks use a disposable MCP stub; the live connection was read-only.

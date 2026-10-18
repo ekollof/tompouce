@@ -23,3 +23,9 @@ Generated convolution rooms follow `superdough` 1.2.6 `reverbGen.mjs`,
 Copyright 2014 Alan deLespinasse, Apache-2.0 (`LICENSE-Apache-2.0`). Its
 Strudel wrapper uses the license above. The native generator uses a fixed
 LCG seed for reproducible rooms and retains the decay, fade and low-pass ramp.
+
+Sample stretching in `src/stretch.c` follows the phase-vocoder and overlap-add
+code in superdough 1.2.6 `worklets.mjs` and `ola-processor.js` (Strudel license
+above), originally <https://github.com/olvb/phaze> (`LICENSE-Phaze`, Unlicense).
+The real FFT layout follows Fedor Indutny's fft.js (2017, MIT, `LICENSE-FFT`);
+the native inverse radix-2 FFT is an independent implementation.

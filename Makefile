@@ -44,6 +44,7 @@ SRC += src/audio_output.c
 SRC += src/native_synth.c
 SRC += src/osc_output.c
 SRC += src/reverb_impulse.c
+SRC += src/stretch.c
 QJS_OBJ = $(addprefix thirdparty/quickjs/,quickjs.o cutils.o libregexp.o libunicode.o dtoa.o)
 TSJS_OBJ = thirdparty/tree-sitter-javascript/src/parser.o thirdparty/tree-sitter-javascript/src/scanner.o
 OBJ = $(SRC:.c=.o) $(QJS_OBJ) $(TSJS_OBJ)
@@ -78,7 +79,7 @@ clean:
 	rm -f thirdparty/strudel-csound/presets.inc
 	rm -f tests/render_audio
 	rm -f tests/test_audio_output tests/probe_audio_output tests/probe_audio_portaudio
-	rm -f tests/test_native_synth tests/test_native_synth_sanitize
+	rm -f tests/test_native_synth tests/test_native_synth_sanitize tests/test_audio_sanitize
 	rm -f $(SRC:.c=.d) tests/*.d tests/test_dsp tests/test_examples tests/test_csound tests/test_audio
 test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/test_websamp tests/test_editor tests/test_terminal_render tests/test_javascript tests/test_dsp tests/test_examples tests/test_csound tests/test_audio tests/test_terminal_graphics tests/test_audio_output tests/test_native_synth
 	./tests/test_audio_output
@@ -89,6 +90,7 @@ test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/t
 	./tests/test_websamp
 	./tests/test_editor
 	TERM=xterm-256color ./tests/test_terminal_render
+	python3 tests/test_terminal_render_pty.py
 	./tests/test_terminal_graphics
 	./tests/test_javascript
 	./tests/test_dsp
@@ -97,6 +99,8 @@ test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/t
 	./tests/test_audio
 tests/test_audio: tests/test_audio.c src/audio.c $(filter-out src/main.o src/audio.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/test_audio.c $(filter-out src/main.o src/audio.o,$(OBJ)) $(LDFLAGS) $(LIBS)
+tests/test_audio_sanitize: tests/test_audio.c src/audio.c src/stretch.c $(filter-out src/main.o src/audio.o src/stretch.o,$(OBJ))
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer -o $@ tests/test_audio.c src/stretch.c $(filter-out src/main.o src/audio.o src/stretch.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/test_audio_output: tests/test_audio_output.c src/audio_output.c include/audio_output.h src/common.o
 	$(CC) $(CFLAGS) $(OUTPUT_CFLAGS) -o $@ tests/test_audio_output.c src/common.o $(LDFLAGS) $(LIBS)
 tests/probe_audio_output: tests/probe_audio_output.c src/audio_output.o src/common.o

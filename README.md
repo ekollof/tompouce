@@ -158,7 +158,9 @@ Keys:
 - `Ctrl+P` — play / stop
 - `F1` — toggle language cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
 - `F2` — AI prompt (supports `/bpm N`, `/play`, `/stop`, `/clear`, `/save`, `/load`, `/song`, `/rescan`)
-- `F4` — toggle internals/state pane (bpm, voices, queue, tracks)
+- `F4` — toggle internals/state pane: editor mode, pending evaluation/unsaved
+  changes, undo history, engine generations, graphics/inline status, audio/MIDI,
+  sample-bank index, song/hold state, voices, queue and per-track timing.
 - `F3` — toggle vi-ish editor mode (normal/insert: `hjkl`, `gg/G`, `dd`, `yy`, `p/P`, `x`, `i/a/o/O/I/A`, `0/$`)
 - `Ctrl+Space` — context-aware completion (keywords, notes, drums, transforms, `wt:` tables)
 - `F6` — browse samples, drum-machines, synths, wavetables and user sounds. Type to search; Left/Right changes category; Enter inserts a snippet at the source cursor. Backspace with an empty query returns to categories. The local-banks category preserves folder browsing (`Enter` descends, `Tab` uses a bank).

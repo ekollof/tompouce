@@ -11,6 +11,7 @@
 #include "wavetable.h"
 #include "banks.h"
 #include "sampler.h"
+#include "midi.h"
 #include "songfile.h"
 #include "terminal_graphics.h"
 #include <cjson/cJSON.h>
@@ -3487,7 +3488,7 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
     int w = cols - mid;
     if (w < 0) w = 0;
     int sh = 0;
-    if (show_state && h >= 14 && w >= 30) sh = 10;
+    if (show_state && h >= 14 && w >= 30) sh = h>=30?18:(h>=22?14:10);
     int th = 0;
     if (show_tracks && h - sh >= 16 && w >= 24) {
         int need = scheduler_song_count() + 2;
@@ -3705,6 +3706,15 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
     }
 }
 
+static void state_line(int *row, int maxrow, int col, int width, const char *format, ...) {
+    if (*row>=maxrow) return;
+    char text[256]; va_list args;
+    va_start(args,format); vsnprintf(text,sizeof(text),format,args); va_end(args);
+    int used=draw_text(*row,col,text,width,0);
+    if (used<width) blank_inner(*row,col+used,width-used);
+    (*row)++;
+}
+
 static void draw_state_at(int r0, int c0, int h, int w) {
     if (h < 5 || w < 20) return;
     SLsmg_draw_box(r0, c0, h, w);
@@ -3718,6 +3728,8 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     int av = 0; int by[10] = {0};
     audio_voice_stats(&av, by);
     const char *mode = (input_mode == 1) ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:N" : "VI:I") : "INS");
+    state_line(&row,maxrow,c0+1,w-2,"mode=%s wrap=%s mouse=%s selection=%s",mode,
+        editor_wrap?"on":"off",mouse_enabled?"on":"off",sel_active?(sel_linewise?"lines":"text"):"none");
     snprintf(b, sizeof(b), "bpm %.0f %s t=%.1fs beat=%.3fs cyc=%.3fs",
         audio_get_bpm(), audio_is_playing() ? "PLAY" : "STOP",
         now, audio_sec_per_beat(), audio_sec_per_cycle());
@@ -3757,6 +3769,34 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         if (used < w - 2) blank_inner(row, c0+1+used, w-2-used);
         row++;
     }
+    if (h>=14) {
+        int js=0, compiled=0; unsigned generation=0;
+        pthread_mutex_lock(&tracks_lock);
+        compiled=track_count;
+        for (int i=0;i<track_count;i++) if (tracks[i].javascript) js++;
+        if (track_count) generation=tracks[0].compile_generation;
+        pthread_mutex_unlock(&tracks_lock);
+        state_line(&row,maxrow,c0+1,w-2,"engine=%s js=%d native=%d gen=%u queue-gen=%u",
+            js?"QuickJS/Strudel":"native parser",js,compiled-js,generation,event_queue_generation());
+        char *text=editor_flatten();
+        state_line(&row,maxrow,c0+1,w-2,"source=%s file=%s bytes=%zu lines=%d",
+            !text?"unknown":(!strcmp(text,cstr(current_code))?"evaluated":"pending F5"),
+            !text?"unknown":(editor_clean && !strcmp(text,editor_clean)?"saved":"unsaved"),
+            text?strlen(text):0,code_line_count);
+        free(text);
+        state_line(&row,maxrow,c0+1,w-2,"history undo=%d redo=%d cursor=L%d byte=%d",undo_n,redo_n,cur_line+1,cur_col);
+        const char *graphics=graphics_disabled?"braille (forced)":graphics_supported?"Kitty":
+            graphics_probe_pending?"probing":"braille";
+        state_line(&row,maxrow,c0+1,w-2,"graphics=%s cell=%dx%d target=%s",graphics,graphics_cell_width,
+            graphics_cell_height,graphics_supported && !graphics_disabled?"60fps":"20fps UI");
+        state_line(&row,maxrow,c0+1,w-2,"inline=%s lines=%d images=%d/%d footer=%s F12=%s",
+            inline_visuals?"on":"off",inline_count,graphics_pending_count,GRAPHICS_IMAGES,
+            editor_scope?"enabled":"off",show_viz?"on":"off");
+        state_line(&row,maxrow,c0+1,w-2,"audio=%s %.0fHz stereo MIDI=%s banks=%s:%d",
+            audio_is_stream_active()?"up":"down",SR,midi_ready()?"up":"down",banks_ready()?"ready":"indexing",banks_count());
+        state_line(&row,maxrow,c0+1,w-2,"song=%s hold=%s position=%d/%d",scheduler_song_on()?"on":"off",
+            scheduler_song_hold()?"on":"off",scheduler_song_pos()+1,scheduler_song_count());
+    }
     /* per-track lines */
     pthread_mutex_lock(&tracks_lock);
     int n = track_count;
@@ -3775,7 +3815,6 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     }
     pthread_mutex_unlock(&tracks_lock);
     while (row < maxrow) { blank_inner(row, c0+1, w-2); row++; }
-    (void)mode;
 }
 
 static void draw_tracks_at(int r0, int c0, int h, int w) {

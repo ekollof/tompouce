@@ -2,6 +2,35 @@
 #include "../src/tui.c"
 #include <assert.h>
 
+static void state_text(char *out, size_t size) {
+    size_t at=0;
+    for (int r=1;r<19;r++) {
+        for (int c=0;c<78 && at+1<size;c++) {
+            SLsmg_Char_Type cell; SLsmg_gotorc(r,c); assert(SLsmg_char_at(&cell)==0);
+            out[at++]=cell.nchars && cell.wchars[0]<128?(char)cell.wchars[0]:' ';
+        }
+        if (at+1<size) out[at++]='\n';
+    }
+    out[at]=0;
+}
+
+static void check_state_modes(void) {
+    replace_code_with("note('c4').gain(0)");
+    char *code=editor_flatten(); assert(code && current_code_set(code)); free(code);
+    mark_editor_clean();
+    vi_mode=vi_normal=1; input_mode=0; graphics_disabled=1;
+    SLsmg_cls(); draw_state_at(1,0,18,78);
+    char text[1600]; state_text(text,sizeof(text));
+    assert(strstr(text,"mode=VI:N") && strstr(text,"source=evaluated") && strstr(text,"file=saved"));
+    assert(strstr(text,"graphics=braille (forced)") && strstr(text,"history undo=") && strstr(text,"song="));
+    assert(editor_replace(0,0,"// pending\n"));
+    input_mode=1;
+    draw_state_at(1,0,18,78); state_text(text,sizeof(text));
+    assert(strstr(text,"mode=PROMPT") && strstr(text,"source=pending F5") && strstr(text,"file=unsaved"));
+    SLsmg_cls(); draw_state_at(1,0,8,30); /* Compact terminal clipping. */
+    input_mode=vi_mode=vi_normal=graphics_disabled=0;
+}
+
 static void check_line(const char *source) {
     SLsmg_cls();
     SLsmg_gotorc(0,0);
@@ -140,6 +169,7 @@ int main(void) {
     }
     check_inline_bindings();
     check_live_mode_highlights();
+    check_state_modes();
     SLsmg_reset_smg();
     puts("terminal highlight cells and indentation ok");
     return 0;

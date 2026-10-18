@@ -238,6 +238,8 @@ check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)
 check("SIGINT cleanup", "", stop_signal=signal.SIGINT)
 check("disable editor scope", "", b'\x1bOQ/scope off\r', expected='', observed=b'editor scope off')
+check("F4 state diagnostics", "note('c4').gain(0)", b'\x1bOS',
+      expected="note('c4').gain(0)", vi=True, observed=b'mode=VI:N')
 check("Tab indentation", "", b'\tX', expected='  X')
 check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')

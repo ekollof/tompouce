@@ -2,6 +2,18 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### F4 diagnostics (2026-10-18)
+
+The state pane now shows editor mode, wrap/mouse/selection, pending evaluation
+and saved/unsaved text, undo/redo depth, JS/native track counts and compile/queue
+generations, graphics capability and cell geometry, inline placements, stream/
+MIDI/bank-index status and song/hold position. Existing timing/voice/queue and
+per-track rows remain. Panel height adapts to available terminal height (10,
+14 or 18 rows). Reads use existing foreground-safe snapshots; no callback work
+was added. Backing-cell tests cover modes, pending/dirty text, forced braille and
+compact clipping; the F4 PTY case verifies actual keyboard activation. Tests
+use isolated settings, and the user's running engine/source remain untouched.
+
 ### Native visual feedback continuation (2026-10-18)
 
 Mixed vertical roll follow-up: screenshots of live Bass fugue showed drum

@@ -89,6 +89,11 @@ make
 
 Requirements: `slang` (S-Lang), `portaudio-2.0`, `libcurl`, `libcjson`, `leveldb`,
 ALSA and `tree-sitter` development libraries.
+Native sound-server support is detected with pkg-config: `libpipewire-0.3`
+(0.3.7+), `libpulse`, and `samplerate` enable PipeWire, PulseAudio and output
+resampling respectively. The installer includes their development packages.
+For a minimal PortAudio build, use `make clean` then
+`make WITH_PIPEWIRE=0 WITH_PULSE=0 WITH_SAMPLERATE=0`.
 `xxd` embeds the committed JavaScript bundle during the build. QuickJS is
 vendored; Node.js is only needed when rebuilding the JavaScript bundle.
 
@@ -106,6 +111,21 @@ expectations, plus native Csound rendering checks. See
 ```sh
 ./tompouce
 ```
+
+Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, skipping unavailable
+backends and cleaning up failed connections before trying the next. PipeWire and
+PulseAudio use their native clients; JACK and ALSA use explicitly selected
+PortAudio host APIs. The engine remains stereo at 44.1 kHz; libsamplerate handles
+JACK/device clocks such as 48 kHz. Without libsamplerate, a backend that cannot
+accept 44.1 kHz is skipped. F4 and MCP `music_health` show the selected backend;
+the console records startup failures. With no usable output, editing and MCP
+remain available with `stream=down backend=none`. Selection occurs at startup.
+
+`make test-audio-backends` checks fallback and cleanup with temporary null ALSA
+devices and disposable silent server streams. Native daemon checks skip when
+their sockets are absent; `TOMPOUCE_TEST_JACK=1 make test-audio-backends` also
+checks a running JACK-compatible server. These checks do not change desktop
+audio configuration or the user's running Tompouce session.
 
 For a Chromium companion with voice activity, transport, tempo, console and
 source editing, press F2, type `/companion`, and press Enter. Stop its helper
@@ -128,8 +148,10 @@ The editor’s bottom mini scope and piano roll can be hidden with F2 →
 restarts. F12 controls the separate large visualization pane.
 
 Append `._scope()`, `._pianoroll()`, `._punchcard()`, `._spiral()`,
-`._pitchwheel()`, `._spectrum()` or `._wordfall()` to a pattern for a visualization
-inline beneath that source line, then evaluate. Scope shows that pattern’s
+`._pitchwheel()`, `._spectrum()` or `._wordfall()` to a playing pattern for a visualization
+inline beneath that source line. Adding, moving or changing a view takes effect
+without F5; musical changes still wait for evaluation. Views also activate when
+loading a song. Scope shows that pattern's
 native voices before shared bus/master effects; spectrum analyzes that same
 isolated signal. Note views follow downstream changes and show
 recent/held/upcoming notes over four cycles on the actual playback timeline.

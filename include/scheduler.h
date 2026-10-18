@@ -78,5 +78,7 @@ int scheduler_song_follow_consume(void);
    Each span is half-open [off, off+len). Returns how many were written. */
 int scheduler_play_spans(double now, int *off, int *len, int max);
 int scheduler_play_styles(double now, int *off, int *len, uint32_t *color, unsigned *flags, int max);
+/* Translate cached JS spans after visual-only editor changes. */
+int scheduler_editor_play_styles(double now, const char *editor, int *off, int *len, uint32_t *color, unsigned *flags, int max);
 
 #endif

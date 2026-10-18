@@ -11,6 +11,16 @@ ring; the audio callback only consumes PCM. Csound events still enter the
 scheduler's note history for visualization. Failed orchestra compilation
 keeps the last playable program, and replacing it releases the old renderer.
 The original C parser path described below remains for the line dialect.
+`audio_output.c` selects native PipeWire, native PulseAudio, PortAudio JACK,
+then PortAudio ALSA at startup. Native connections have bounded setup waits;
+failed attempts are closed before fallback. Every backend calls the same C
+stereo DSP renderer at 44.1 kHz, with an optional preallocated libsamplerate
+converter for other PortAudio device clocks. No JavaScript, sample loading or
+file I/O was added to the DSP callback. F4 and MCP health report the backend.
+Backend references: [PipeWire streams](https://docs.pipewire.org/group__pw__stream.html),
+[PulseAudio threaded loop](https://www.freedesktop.org/software/pulseaudio/doxygen/thread-mainloop_8h.html),
+[PortAudio host APIs](https://files.portaudio.com/docs/v19-doxydocs/portaudio_8h.html),
+and [libsamplerate streaming conversion](https://libsndfile.github.io/libsamplerate/api_full.html).
 See [JavaScript and native audio](javascript.md) for the updated contracts,
 source-location highlighting, limits, coverage, and dependency licenses.
 

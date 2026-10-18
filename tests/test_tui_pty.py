@@ -18,7 +18,7 @@ BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', './tompouce')
 CASE_FILTER = os.environ.get('TOMPOUCE_TEST_FILTER', '')
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     with tempfile.TemporaryDirectory(prefix="tompouce-pty-") as root:
@@ -32,6 +32,11 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                    XDG_CACHE_HOME=root, TOMPOUCE_BANKS=root)
         env.pop('TMUX', None)
         env.pop('STY', None)
+        if load_song:
+            path=root+'/loaded-song.json'
+            with open(path,'w') as song:
+                json.dump({'version':2,'bpm':120,'code':expected,'tracks':[expected],'active':0},song)
+            keys=b'\x1bOQ/load '+path.encode()+b'\r'
         if import_sounds:
             from test_sound_import import audio
             folder = root + '/My Drums'
@@ -83,17 +88,18 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     assert b'\xab\xcd\xef\xff' in pixels, 'scope did not use terminal cyan'
                     assert b'\x11\x22\x33\xff' in pixels, 'axis text did not use foreground'
                 if graphics != 'unsupported':
-                    assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'missing Kitty image')
-                    assert b'i=1414483201,p=1' in output, (name, 'missing first placement')
-                    assert b'i=1414483202,p=1' in output, (name, 'missing second placement')
-                    if name == 'Kitty graphics capability, resize and editor input':
+                    if graphics != 'live':
+                        assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'missing Kitty image')
+                        assert b'i=1414483201,p=1' in output, (name, 'missing first placement')
+                        assert b'i=1414483202,p=1' in output, (name, 'missing second placement')
+                    if name in ('Kitty graphics capability, resize and editor input', 'Kitty spectrum'):
                         start = len(output)
                         started = time.monotonic()
                         drain(.5)
                         elapsed = time.monotonic()-started
                         frames = output[start:].count(b'i=1414483201,p=1')
                         fps = frames/elapsed
-                        print(f'Kitty graphics: {fps:.1f} FPS')
+                        print(f'{name}: {fps:.1f} FPS')
                         assert fps >= 30, (name, 'graphics refresh stalled', fps)
                         assert fps < 80, (name, 'graphics refresh is not paced', fps)
                     # Resizing invalidates placements and keeps images within
@@ -111,6 +117,9 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             if keys:
                 os.write(master, keys)
             drain(.3)
+            if graphics == 'live':
+                assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels')
+                assert b'i=1414483201,p=1' in output, (name, 'live view did not place Kitty image')
             if graphics == 'braille' or name == 'Kitty hide inline cleanup':
                 assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'hidden images survived until exit')
             if import_sounds:
@@ -164,7 +173,10 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     else:
                         raise AssertionError("/companion stop left its helper running")
             if observed is not None:
-                assert observed in output, (name, "expected display value missing")
+                deadline = time.monotonic() + 3
+                while observed not in output and proc.poll() is None and time.monotonic() < deadline:
+                    drain(.05)
+                assert observed in output, (name, "expected display value missing", bytes(output[-2000:]))
             if stop_signal:
                 proc.send_signal(stop_signal)
             else:
@@ -278,6 +290,17 @@ check("inline braille scope", "const melody=note('c4').gain(0); melody._scope()"
       expected="const melody=note('c4').gain(0); melody._scope()", observed=b"scope | pattern output")
 check("inline braille piano roll", 'note("c4 e4 g4").gain(0)._pianoroll()',
       expected='note("c4 e4 g4").gain(0)._pianoroll()', observed=b'piano roll | pattern notes')
+check("inline braille live piano roll without F5", 'note("60 64").gain(0)', b'\x1b[F._pianoroll()',
+      expected='note("60 64").gain(0)._pianoroll()', observed=b'pattern notes')
+check("inline braille live scope without F5", 'note("60").gain(0)', b'\x1b[F._scope()',
+      expected='note("60").gain(0)._scope()', observed=b'pattern output')
+check("inline braille live options without F5", 'note("60 64").gain(0)._pianoroll()',
+      b'\x01\x1b[200~note("60 64").gain(0)._pianoroll({vertical:1})\x1b[201~',
+      expected='note("60 64").gain(0)._pianoroll({vertical:1})', observed=b'piano roll | pattern notes')
+check("inline braille loaded song without F5", 'note(60).gain(0)',
+      expected='note("60 64").gain(0)._pianoroll()', observed=b'pattern notes', load_song=True)
+check("Kitty live piano roll without F5", 'note("60 64").gain(0)', b'\x1b[F._pianoroll()',
+      expected='note("60 64").gain(0)._pianoroll()', graphics='live')
 for visual in ('punchcard', 'spiral', 'pitchwheel', 'spectrum', 'wordfall'):
     visual_code = 'note("60 64 67").gain(0)._'+visual+'()'
     check('inline braille '+visual, visual_code, expected=visual_code,

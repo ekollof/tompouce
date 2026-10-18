@@ -24,9 +24,9 @@ SOURCE = Path(__file__).resolve().parents[1]
 TREE_URL = 'https://codeload.github.com/tree-sitter/tree-sitter/tar.gz/refs/tags/v0.25.10'
 TREE_SHA = 'ad5040537537012b16ef6e1210a572b927c7cdc2b99d1ee88d44a7dcdc3ff44c'
 PACKAGES = {
-    'arch': ['gcc', 'make', 'pkgconf', 'xxd', 'slang', 'portaudio', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
-    'debian': ['build-essential', 'pkg-config', 'xxd', 'libslang2-dev', 'portaudio19-dev', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
-    'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'slang-devel', 'portaudio-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'arch': ['gcc', 'make', 'pkgconf', 'xxd', 'slang', 'portaudio', 'libpipewire', 'libpulse', 'libsamplerate', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
+    'debian': ['build-essential', 'pkg-config', 'xxd', 'libslang2-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'slang-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
     'tompouce', 'README.md', 'scripts/companion.py', 'scripts/sound_import.py',

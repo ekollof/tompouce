@@ -53,10 +53,11 @@ int terminal_graphics_palette_reply(const char *reply) {
 }
 uint32_t terminal_graphics_theme(int role, unsigned alpha) {
     static const uint32_t fallback[]={0xbed2e1ffu,0x607080ffu,0x5ad7f5ffu,0x6eebaaffu,
-        0xffbe50ffu,0xa5b9beffu,0x303d42ffu,0xe6ebf5ffu};
-    if (role<0 || role>GRAPHICS_PLAYHEAD) return 0;
+        0xffbe50ffu,0xa5b9beffu,0x303d42ffu,0xe6ebf5ffu,0x5062d4ffu};
+    if (role<0 || role>GRAPHICS_SPECTRUM_LOW) return 0;
     uint32_t color=fallback[role];
-    int index=role==GRAPHICS_ACTIVE?14:role==GRAPHICS_INACTIVE?10:role==GRAPHICS_ONSET?3:16;
+    int index=role==GRAPHICS_ACTIVE?14:role==GRAPHICS_INACTIVE?10:role==GRAPHICS_ONSET?3:
+        role==GRAPHICS_SPECTRUM_LOW?4:16;
     if (palette_known&(1u<<index)) color=palette[index];
     else if (palette_known&(1u<<16)) color=palette[16];
     if (role==GRAPHICS_KEY_DARK && (palette_known&(1u<<17))) {

@@ -72,6 +72,7 @@ void audio_set_bpm(double bpm);
 double audio_get_bpm(void);
 void audio_set_block(unsigned long n);
 int audio_is_stream_active(void);
+const char *audio_backend_name(void);
 /* master fx chain params (drive/cutoff/delay/verb), each 0..1 */
 void audio_fx_set(const char *name, double v);
 double audio_sec_per_beat(void);

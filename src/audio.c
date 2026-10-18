@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "audio_output.h"
 #include <portaudio.h>
 #include <math.h>
 #include <ctype.h>
@@ -18,7 +19,6 @@ static void alsa_silent(const char *file, int line, const char *func,
 }
 #endif
 
-static PaStream *stream = NULL;
 static double bpm = 120.0;
 static int playing = 0;
 static atomic_int reference_mode;
@@ -1164,37 +1164,31 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
     return paContinue;
 }
 
+static void render_output(float *output, unsigned long frames) {
+    (void)pa_callback(NULL,output,frames,NULL,0,NULL);
+}
+
 void audio_init(void) {
     wt_init();
 #ifdef __linux__
     snd_lib_error_set_handler(alsa_silent);
 #endif
     midi_init();
-    Pa_Initialize();
     memset(voices, 0, sizeof(voices));
-    PaStreamParameters op;
-    memset(&op,0,sizeof(op));
-    op.device = Pa_GetDefaultOutputDevice();
-    op.channelCount = 2;
-    op.sampleFormat = paFloat32;
-    op.suggestedLatency = 0.02;
-    unsigned long frames = audio_block_frames;
-    Pa_OpenStream(&stream, NULL, &op, SR, frames, paClipOff, pa_callback, NULL);
-    Pa_StartStream(stream);
     playing = 1;
+    (void)audio_output_start(render_output,audio_block_frames);
 }
 void audio_shutdown(void) {
     midi_shutdown();
-    if (stream) { Pa_StopStream(stream); Pa_CloseStream(stream); stream=NULL; }
+    audio_output_stop();
     audio_set_csound(NULL);
-    Pa_Terminate();
 }
 void audio_toggle_play(int on) { playing = on ? 1 : 0; }
 int audio_is_playing(void) { return playing; }
 int audio_is_stream_active(void) {
-    if (!stream) return 0;
-    return Pa_IsStreamActive(stream) == 1 ? 1 : 0;
+    return audio_output_active();
 }
+const char *audio_backend_name(void) { return audio_output_name(); }
 
 const char *audio_inst_name(int inst) {
     switch (inst) {

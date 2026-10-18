@@ -226,6 +226,34 @@ static void test_pattern_scopes(void) {
     memset(voices,0,sizeof(voices));
 }
 
+static void test_live_scope_attachment(void) {
+    const char *code="stack(note(60).s('sine').gain(.1),note(72).s('sine').gain(.2))";
+    const char *editor="stack(note(60).s('sine').gain(.1)._scope(),note(72).s('sine').gain(.2))";
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    cJSON *haps=javascript_query_audio(program,0,1,.5);
+    assert(cJSON_GetArraySize(haps)==2);
+    memset(voices,0,sizeof(voices));
+    AudioEvent events[2];
+    for (int i=0;i<2;i++) {
+        assert(js_audio_event(cJSON_GetArrayItem(haps,i),0,2,&events[i]));
+        events[i].generation=701; audio_trigger_event(&events[i]);
+    }
+    float output[512], samples[256]; playing=1;
+    pa_callback(NULL,output,256,NULL,0,NULL);
+    /* Attach after rendering: the already sounding voices and history have
+       their branch tags, so no note/recompile/retrigger is needed. */
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,0,0,2);
+    unsigned mask=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_scope")-editor),VISUAL_SCOPE);
+    assert(mask && (events[0].scope_mask&mask) && !(events[1].scope_mask&mask));
+    assert(audio_pattern_scope_copy(mask,701,samples,256)==256);
+    double energy=0;
+    for (int i=0;i<256;i++) energy+=samples[i]*samples[i];
+    assert(energy>1e-5 && voices[0].active && voices[1].active);
+    cJSON_Delete(haps); javascript_free(program); memset(voices,0,sizeof(voices));
+}
+
 int main(void) {
     /* Exercise the actual callback with opposite-polarity stereo channels.
        Averaging to mono would cancel this signal. No audio device is needed. */
@@ -367,6 +395,7 @@ int main(void) {
     test_convolution();
     test_stretch();
     test_pattern_scopes();
+    test_live_scope_attachment();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");
     return 0;

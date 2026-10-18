@@ -222,9 +222,10 @@ static void handle_session(cJSON *args, char *out, size_t outlen, int *iserr) {
 static void handle_health(char *out, size_t outlen) {
     int av = audio_active_voices();
     snprintf(out, outlen,
-        "playing=%s stream=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s",
+        "playing=%s stream=%s backend=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s",
         audio_is_playing() ? "yes" : "no",
         audio_is_stream_active() ? "up" : "down",
+        audio_backend_name(),
         audio_get_bpm(), audio_time_now(), av, event_queue_depth(), track_count,
         scheduler_song_pos() + 1, scheduler_song_count(),
         banks_ready() ? "ready" : "indexing", banks_count(),

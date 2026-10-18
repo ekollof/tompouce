@@ -56,14 +56,40 @@ static void check_inline_bindings(void) {
     track_count = 1; memset(&tracks[0],0,sizeof(tracks[0]));
     tracks[0].active = 1; tracks[0].javascript = program; tracks[0].compile_generation = 11;
     inline_refresh(); inline_bind_feeds();
+    javascript_update_visuals(program,0,0,2); inline_bind_feeds();
     assert(inline_feeds[1].mask[0] && inline_feeds[2].mask[0]);
     assert(inline_feeds[1].mask[0] != inline_feeds[2].mask[0]);
     assert(inline_feeds[1].generation == 11);
     assert(editor_replace(0,0,"// changed\n"));
     inline_refresh(); inline_bind_feeds();
-    assert(!inline_feeds[2].mask[0] && !inline_feeds[2].generation);
+    javascript_update_visuals(program,0,0,2); inline_bind_feeds();
+    assert(inline_feeds[2].mask[0] && inline_feeds[2].generation==11);
     tracks[0].javascript = NULL; track_count = 0;
     javascript_free(program);
+}
+
+static void check_live_visual_addition(void) {
+    const char *code="$: note(60).gain(0).slow(4); $: note(67).gain(0)";
+    assert(current_code_set(code));
+    char error[512]; cJSON *metadata=NULL;
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    track_count=1; memset(&tracks[0],0,sizeof(tracks[0]));
+    tracks[0].javascript=program; tracks[0].compile_generation=77;
+    tracks[0].next_cycle=123; tracks[0].cycle_index=45;
+    unsigned generation=event_queue_generation();
+    replace_code_with("// pending é\n$: note(60)._pianoroll().gain(0).slow(4); $: note(67).gain(0)._scope()");
+    inline_refresh(); inline_bind_feeds();
+    javascript_update_visuals(program,1,0,2); inline_bind_feeds();
+    unsigned roll=inline_feeds[1].mask[VISUAL_PIANOROLL-1], scope=inline_feeds[1].mask[VISUAL_SCOPE-1];
+    assert(roll && scope && roll!=scope && inline_feeds[1].generation==77);
+    VisualNote notes[64];
+    int count=javascript_live_visual_copy(program,roll,VISUAL_PIANOROLL,notes,64,NULL,NULL);
+    assert(count>0);
+    for (int i=0;i<count;i++) assert(notes[i].pitch==60 && notes[i].end-notes[i].start==8);
+    assert(tracks[0].javascript==program && tracks[0].next_cycle==123 && tracks[0].cycle_index==45);
+    assert(event_queue_generation()==generation && !strcmp(current_code,code));
+    tracks[0].javascript=NULL; track_count=0; javascript_free(program);
 }
 
 static void check_live_mode_highlights(void) {
@@ -106,6 +132,44 @@ static void check_live_mode_highlights(void) {
     audio_toggle_play(0);
     tracks[0].javascript = NULL; track_count = 0;
     javascript_free(program); free(code);
+}
+
+static void check_visual_edit_highlights(void) {
+    const char *code="$: note(\"c4 e4\").gain(0)\n$: note(\"g4 a4\").gain(0)";
+    replace_code_with(code); assert(current_code_set(code));
+    char error[512]; cJSON *metadata=NULL;
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    cJSON *haps=javascript_query(program,0,1); assert(cJSON_IsArray(haps));
+    javascript_cache_spans(program,haps,0,2); cJSON_Delete(haps);
+    track_count=1; memset(&tracks[0],0,sizeof(tracks[0]));
+    tracks[0].active=1; tracks[0].javascript=program; tracks[0].compile_generation=81;
+    audio_toggle_play(1); sel_active=vi_mode=vi_normal=0;
+    replace_code_with("// é♫\n$: note(\"c4 e4\")._scope().gain(0)\n  $: note(\"g4 a4\").gain(0)");
+    inline_refresh(); inline_bind_feeds();
+    javascript_update_visuals(program,.1,0,2); inline_bind_feeds();
+    assert(inline_feeds[1].mask[VISUAL_SCOPE-1]);
+    fill_play_mask(.1);
+    assert(play_rows[1] && play_rows[1][9] && !play_rows[1][12]);
+    assert(play_rows[2] && play_rows[2][11] && !play_rows[2][14]);
+    hl_quote=hl_block_comment=hl_force_comment=0; hl_bias=0;
+    hl_play=play_rows[1]; hl_play_len=(int)strlen(code_lines[1]);
+    SLsmg_gotorc(0,0); (void)draw_hl_line(code_lines[1],70);
+    SLsmg_Char_Type cell;
+    SLsmg_gotorc(0,9); assert(SLsmg_char_at(&cell)==0 && cell.color==10 && cell.wchars[0]=='c');
+    fill_play_mask(1.1);
+    assert(!play_rows[1][9] && play_rows[1][12]);
+    assert(!play_rows[2][11] && play_rows[2][14]);
+    /* Moving/removing a view and changing literal options must preserve the
+       same cached schedule, including spans after the edited source line. */
+    replace_code_with("$: note(\"c4 e4\").gain(0)\n$: note(\"g4 a4\")._scope({thickness:2}).gain(0)");
+    inline_refresh(); inline_bind_feeds(); javascript_update_visuals(program,.1,0,2); inline_bind_feeds();
+    fill_play_mask(.1); assert(play_rows[0][9] && play_rows[1][9]);
+    replace_code_with("$: note(\"c5 e4\").gain(0)\n$: note(\"g4 a4\")._scope().gain(0)");
+    inline_refresh(); inline_bind_feeds(); javascript_update_visuals(program,.1,0,2); inline_bind_feeds();
+    fill_play_mask(.1); assert(!play_rows[0][9] && !play_rows[1][9]);
+    assert(!strcmp(current_code,code));
+    audio_toggle_play(0); tracks[0].javascript=NULL; track_count=0; javascript_free(program);
 }
 
 int main(void) {
@@ -168,7 +232,9 @@ int main(void) {
         }
     }
     check_inline_bindings();
+    check_live_visual_addition();
     check_live_mode_highlights();
+    check_visual_edit_highlights();
     check_state_modes();
     SLsmg_reset_smg();
     puts("terminal highlight cells and indentation ok");

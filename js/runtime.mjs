@@ -37,6 +37,8 @@ let locations = [];
 let visuals = 0;
 let visualSites = [];
 let visualTiles = new Map();
+let visualProbes = [], compiledVisualSites = [], nextProbe = 0, compiledHighlightAst;
+const visualAliases = new Set();
 const visualKinds = {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7};
 const visualKind = name => visualKinds[name?.replace(/^_/, '')] ?? 0;
 const nativeVisualOptions = new Set(('cycles playhead overscan minMidi maxMidi thickness scale pos trigger stretch steady inset size padding '+
@@ -63,6 +65,179 @@ function attachVisual(site, pattern, options = {}) {
   visuals |= 1 << (site.kind-1);
   return pattern.withContext(context => ({...context, scopeMask: (((context?.scopeMask ?? 0) | (1 << site.id)) >>> 0)}));
 }
+
+/* Observe existing branches without reevaluating the user's program when a
+   display is edited. Instrument the transpiled output so mini offsets remain
+   those of the original source. Hidden tags never change musical values. */
+function visualKey(node) {
+  if (!node || typeof node !== 'object') return node;
+  if (node.type==='CallExpression' && node.callee.type==='CallExpression' &&
+      (visualKind(node.callee.callee.name) || visualAliases.has(node.callee.callee.name)) && node.arguments.length===1)
+    return visualKey(node.arguments[0]);
+  if (node.type==='CallExpression' && (visualKind(node.callee.name) || visualAliases.has(node.callee.name)) &&
+      node.arguments.length===1 && node.arguments[0].type!=='ObjectExpression') return visualKey(node.arguments[0]);
+  if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed &&
+      (visualKind(node.callee.property.name) || visualAliases.has(node.callee.property.name) || node.callee.property.name === 'p'))
+    return visualKey(node.callee.object);
+  if (node.type === 'CallExpression' && node.callee.name === 'm' && node.arguments.length === 2 &&
+      node.arguments[0].type === 'Literal') return {type:'Mini', value:node.arguments[0].value};
+  if (node.type === 'Literal' && typeof node.value === 'string' && node.raw?.startsWith('"'))
+    return {type:'Mini', value:node.value};
+  if (node.type === 'TemplateLiteral' && node.expressions.length === 0)
+    return {type:'Mini', value:node.quasis[0].value.raw};
+  const clean = {};
+  for (const key of Object.keys(node).sort()) {
+    if (['start','end','loc','raw'].includes(key)) continue;
+    clean[key] = Array.isArray(node[key]) ? node[key].map(visualKey) : visualKey(node[key]);
+  }
+  return clean;
+}
+const branchKey = node => JSON.stringify(visualKey(node));
+function walkVisualSource(ast, visit) {
+  function walk(node, root) {
+    if (!node || typeof node !== 'object' || !node.type) return;
+    if (node.type === 'CallExpression') {
+      const chain = root ?? node;
+      visit(node, chain);
+      if (node.callee.type === 'MemberExpression') walk(node.callee.object, chain);
+      else walk(node.callee, chain);
+      for (const arg of node.arguments) walk(arg, null);
+      return;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(child => walk(child, null));
+      else if (value && typeof value === 'object') walk(value, null);
+    }
+  }
+  walk(ast, null);
+}
+function observeBranches(output) {
+  const ast = parse(output,{ecmaVersion:2022,allowAwaitOutsideFunction:true,allowReturnOutsideFunction:true});
+  const insertions = [];
+  walkVisualSource(ast,(node,root) => {
+    if (node !== root || node.callee.name === 'm' || visualProbes.length >= 512) return;
+    const id = visualProbes.length, key=branchKey(node);
+    const occurrence=visualProbes.filter(probe => probe.key===key).length;
+    visualProbes.push({key, occurrence, start:node.start, end:node.end, mask:0});
+    const target=node.callee.type==='MemberExpression' && node.callee.property.name==='p' ? node.callee.object : node;
+    insertions.push([target.start,`__observeBranch(${id},`],[target.end,')']);
+  });
+  function bindings(node) {
+    if (!node || typeof node!=='object') return;
+    if (node.type==='VariableDeclarator' && node.id.type==='Identifier' && node.init) {
+      const probe=visualProbes.find(probe => probe.start===node.init.start && probe.end===node.init.end);
+      if (probe) (probe.names ??= []).push(branchKey(node.id));
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(bindings);
+      else if (value && typeof value==='object') bindings(value);
+    }
+  }
+  bindings(ast);
+  for (const [at,text] of insertions.sort((a,b) => b[0]-a[0])) output=output.slice(0,at)+text+output.slice(at);
+  return output;
+}
+globalThis.__observeBranch = (id, value) => {
+  const probe=visualProbes[id];
+  if (!probe || !core.isPattern(value)) return value;
+  if (!probe.mask && nextProbe < 32) probe.mask=(1 << nextProbe++) >>> 0;
+  return probe.mask ? value.withContext(context => ({...context,probeMask:((context?.probeMask ?? 0)|probe.mask) >>> 0})) : value;
+};
+
+/* Parse display requests only: no Function/eval, imports, sliders or sample
+   declarations execute here. Options accept literal data, never user code. */
+function literalOption(node) {
+  if (node?.type === 'Literal' && ['string','number','boolean'].includes(typeof node.value)) return node.value;
+  if (node?.type === 'UnaryExpression' && ['+','-'].includes(node.operator) && typeof node.argument.value === 'number')
+    return node.operator === '-' ? -node.argument.value : node.argument.value;
+  throw new Error('Live visual options require literal values');
+}
+
+function visualDirective(node) {
+  if (node?.type!=='ExpressionStatement') return false;
+  const call=node.expression, arg=call.arguments?.[0];
+  return call.type==='CallExpression' && ['all','each'].includes(call.callee.name) &&
+    (visualKind(arg?.name) || (arg?.type==='CallExpression' && visualKind(arg.callee.name)));
+}
+function highlightNode(node) {
+  if (node?.type!=='CallExpression') return node;
+  const callee=node.callee;
+  if (callee.type==='MemberExpression' && !callee.computed && visualKind(callee.property.name))
+    return highlightNode(callee.object);
+  if (callee.type==='CallExpression' && visualKind(callee.callee.name) && node.arguments.length===1)
+    return highlightNode(node.arguments[0]);
+  if (visualKind(callee.name) && node.arguments.length===1 && node.arguments[0].type!=='ObjectExpression')
+    return highlightNode(node.arguments[0]);
+  return node;
+}
+/* Compare musical syntax before accepting any offsets. Only display calls,
+   comments and layout may differ; never paint old notes on changed music.
+   The map contains literal ranges, in original/editor UTF-16 coordinates. */
+function highlightMapping(ast, editor) {
+  const mapping=[];
+  function compare(a,b) {
+    a=highlightNode(a); b=highlightNode(b);
+    if (a===null || b===null || typeof a!=='object' || typeof b!=='object') return a===b;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false;
+      const left=a.filter(node=>!visualDirective(node)), right=b.filter(node=>!visualDirective(node));
+      return left.length===right.length && left.every((node,i)=>compare(node,right[i]));
+    }
+    if ((a.type==='Literal' && typeof a.value==='string') || (a.type==='TemplateLiteral' && !a.expressions.length)) {
+      if (source.slice(a.start,a.end)!==editor.slice(b.start,b.end)) return false;
+      if (mapping.length<8192) mapping.push([a.start,a.end,b.start,b.end]);
+    }
+    const keys=node=>Object.keys(node).filter(key=>!['start','end','loc'].includes(key) && !(key==='raw' && node.type==='Literal')).sort();
+    const left=keys(a), right=keys(b);
+    return left.length===right.length && left.every((key,i)=>key===right[i] && compare(a[key],b[key]));
+  }
+  return compare(compiledHighlightAst,ast) ? mapping : null;
+}
+globalThis.__configureVisuals = code => {
+  const ast=parse(code,{ecmaVersion:2022,sourceType:'module',allowAwaitOutsideFunction:true});
+  const sites=[], roots=new Map(), occurrences=new Map();
+  walkVisualSource(ast,(node,root) => {
+    const key=branchKey(root);
+    if (!roots.has(root)) {
+      roots.set(root,occurrences.get(key) ?? 0);
+      occurrences.set(key,roots.get(root)+1);
+    }
+    let property=node.callee.type === 'MemberExpression' && !node.callee.computed ? node.callee.property : node.callee;
+    const whole=['all','each'].includes(node.callee.name) && node.arguments[0]?.type==='Identifier';
+    if (whole) property=node.arguments[0];
+    const kind=visualKind(property.name);
+    if (!kind || sites.length >= 32) return;
+    const occurrence=roots.get(root);
+    const original=compiledVisualSites.find(site => site.key===key && site.occurrence===occurrence && site.kind===kind);
+    const candidates=visualProbes.filter(probe => ((probe.key===(whole?'@all':key) && (whole || probe.occurrence===occurrence)) || probe.names?.includes(key)) && probe.mask);
+    const probe=candidates.length===1 ? candidates[0] : undefined;
+    const mask=original ? (1 << original.id) >>> 0 : probe?.mask;
+    if (!mask) return;
+    let options=kind===7 ? {vertical:1,labels:1} : {};
+    if (!whole && node.arguments.length && (node.callee.type==='MemberExpression' || node.arguments[0].type==='ObjectExpression')) {
+      const object=node.arguments[0];
+      if (object.type !== 'ObjectExpression') {
+        if (!original) return;
+        options=original.options;
+      } else {
+        if (object.properties.length > 48) return;
+        try {
+          for (const prop of object.properties) {
+            if (prop.type !== 'Property' || prop.computed || prop.method || prop.kind !== 'init') throw new Error('literal options required');
+            const name=prop.key.name ?? prop.key.value;
+            if (!nativeVisualOptions.has(name)) continue;
+            const value=literalOption(prop.value);
+            if ((typeof value==='number' && !Number.isFinite(value)) || (typeof value==='string' && value.length>128)) throw new Error('invalid option');
+            options[name]=value;
+          }
+        } catch { if (original) options=original.options; else return; }
+      }
+    }
+    sites.push({id:sites.length,offset:property.start,kind,options,mask,key});
+  });
+  visualSites=sites; visualTiles=new Map();
+  return JSON.stringify({sites:sites.map(({key,...site}) => site),highlightMap:highlightMapping(ast,code)});
+};
 let aliases = new Map();
 let orchestraCalls = [];
 let csoundUsed = false;
@@ -161,6 +336,7 @@ core.setCpsFunc(() => (tempo ?? initialBpm) / 240);
 /* Static imports are hoisted; blanking preserves source offsets for mini. */
 function prepare(code) {
   const ast = parse(code, { ecmaVersion: 2022, sourceType: 'module', allowAwaitOutsideFunction: true });
+  compiledHighlightAst=ast;
   const edits = [];
   function visual(property) {
     const kind = visualKind(property.name);
@@ -168,6 +344,7 @@ function prepare(code) {
     if (visualSites.length >= 32) throw new Error('At most 32 inline visualizations are supported');
     const id = visualSites.length;
     const alias = ('v' + String(id).padStart(property.end-property.start-1, '0'));
+    visualAliases.add(alias);
     const site = {id, offset:property.start, kind, options:{}};
     visualSites.push(site); edits.push([property.start,property.end,alias]);
     core.Pattern.prototype[alias] = function (options = {}) { return attachVisual(site,this,options); };
@@ -190,6 +367,14 @@ function prepare(code) {
     }
   }
   visit(ast);
+  const roots=new Map(), occurrences=new Map();
+  walkVisualSource(ast,(node,root) => {
+    const key=branchKey(root);
+    if (!roots.has(root)) { roots.set(root,occurrences.get(key) ?? 0); occurrences.set(key,roots.get(root)+1); }
+    let property=node.callee.type==='MemberExpression' ? node.callee.property : node.callee;
+    if (['all','each'].includes(node.callee.name) && node.arguments[0]?.type==='Identifier') property=node.arguments[0];
+    for (const site of visualSites) if (site.offset===property.start) { site.key=key; site.occurrence=roots.get(root); }
+  });
   /* Same-length aliases keep the upstream mini-notation source offsets intact. */
   for (const [a,b,text] of edits.sort((a,b) => b[0]-a[0])) code = code.slice(0,a)+text+code.slice(b);
   let prefix = '';
@@ -219,20 +404,25 @@ globalThis.__compile = async (code, bpm = 120) => {
   collecting = new Map(); anonymous = 0; eachTransform = undefined; allTransforms = [];
   sampleCalls = []; tempo = undefined; initialBpm = bpm; visuals = 0; visualSites = []; visualTiles = new Map(); aliases = new Map();
   orchestraCalls = []; csoundUsed = false; pianoUsed = false;
+  visualProbes=[]; visualAliases.clear();
   const result = prepare(code);
-  const value = await Function(`"use strict";return (async()=>{${result.output}})()`)();
+  compiledVisualSites=visualSites;
+  nextProbe=visualSites.length;
+  const value = await Function(`"use strict";return (async()=>{${observeBranches(result.output)}})()`)();
   let pattern = collecting.size ? core.stack(...Array.from(collecting.values(), (p) => eachTransform ? eachTransform(p) : p)) : value;
   if (pattern === undefined) pattern = core.silence;
   if (!core.isPattern(pattern)) pattern = core.reify(pattern);
   for (const transform of allTransforms) pattern = transform(pattern);
-  selected = pattern;
+  const whole=visualProbes.length;
+  visualProbes.push({key:'@all',mask:0});
+  selected = __observeBranch(whole,pattern);
   source = code;
   locations = result.miniLocations ?? [];
   if (pianoUsed) sampleCalls.unshift(['https://raw.githubusercontent.com/felixroos/dough-samples/main/piano.json']);
   return JSON.stringify({ bpm: tempo, samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, collecting.size), csound: csoundUsed ? orchestraCalls : null });
 };
 
-globalThis.__query = (begin, end, cps) => {
+globalThis.__query = (begin, end, cps, probes = false) => {
   core.setTime(() => begin);
   cps = Number.isFinite(cps) && cps > 0 ? cps : (tempo ?? initialBpm)/240;
   const haps = selected.queryArc(begin, end, { _cps: cps });
@@ -248,7 +438,8 @@ globalThis.__query = (begin, end, cps) => {
     const values = Array.isArray(value.note) ? value.note.map((note) => ({ ...value, note })) : [value];
     for (const item of values) {
       if (events.length >= 4096) throw new Error('Pattern exceeds 4096 events per query');
-      events.push({ begin: at, end: finish, value: item, locations: locs, scopeMask: hap.context?.scopeMask ?? 0 });
+      const mask=(hap.context?.scopeMask ?? 0) | (probes ? hap.context?.probeMask ?? 0 : 0);
+      events.push({ begin: at, end: finish, value: item, locations: locs, scopeMask:mask >>> 0 });
     }
   }
   return JSON.stringify(events);
@@ -295,7 +486,8 @@ globalThis.__visualQuery = (time, cps) => {
     const haps = pattern.queryArc(begin,end,{_cps:cps});
     if (haps.length > 4096) throw new Error('Visual pattern exceeds 4096 haps');
     for (const hap of haps) {
-      if (!hap.whole || !((hap.context?.scopeMask ?? 0)&(1 << site.id))) continue;
+      const mask=site.mask ?? (1 << site.id);
+      if (!hap.whole || !(((hap.context?.scopeMask ?? 0)|(hap.context?.probeMask ?? 0))&mask)) continue;
       const at = Number(hap.whole.begin), finish = Number(hap.whole.end);
       if (!Number.isFinite(at) || !Number.isFinite(finish)) continue;
       let value = typeof hap.value === 'object' && hap.value !== null ? hap.value : {note:hap.value};

@@ -11,6 +11,89 @@
 
 static cJSON *query(const char *code, JsProgram **program);
 
+static void test_live_visuals(void) {
+    const char *code="globalThis.liveRuns=(globalThis.liveRuns??0)+1; $: note(60+liveRuns).slow(4); $: note(67)";
+    JsProgram *program; cJSON *before=query(code,&program);
+    const char *editor="// é\nglobalThis.liveRuns=99; setcpm(99); while(true){}; $: note(60+liveRuns)._pianoroll({cycles:2,vertical:1}).slow(4); $: note(67)._scope()";
+    javascript_request_visuals(program,editor);
+    javascript_update_visuals(program,1,0,2);
+    unsigned roll=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_pianoroll")-editor),VISUAL_PIANOROLL);
+    unsigned scope=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_scope")-editor),VISUAL_SCOPE);
+    assert(roll && scope && roll!=scope && javascript_visual_revision(program));
+    VisualOptions options; assert(javascript_live_visual_options(program,roll,VISUAL_PIANOROLL,&options));
+    assert(options.cycles==2 && options.vertical);
+    VisualNote notes[64];
+    int count=javascript_live_visual_copy(program,roll,VISUAL_PIANOROLL,notes,64,NULL,NULL);
+    assert(count>0);
+    for (int i=0;i<count;i++) assert(notes[i].pitch==61 && notes[i].end-notes[i].start==8);
+    cJSON *after=javascript_query(program,0,1), *audio=javascript_query_audio(program,0,1,.5);
+    char *a=cJSON_PrintUnformatted(before), *b=cJSON_PrintUnformatted(after);
+    assert(a && b && !strcmp(a,b)); free(a); free(b);
+    assert(((unsigned)cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(audio,0),"scopeMask")->valuedouble&roll)!=0);
+    assert(((unsigned)cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(audio,1),"scopeMask")->valuedouble&roll)==0);
+    cJSON_Delete(audio); cJSON_Delete(before); cJSON_Delete(after); javascript_free(program);
+
+    before=query("const melody=note(60).slow(4); melody",&program);
+    editor="const melody=note(60).slow(4); melody._pianoroll()._punchcard()";
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,1,0,2);
+    roll=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_pianoroll")-editor),VISUAL_PIANOROLL);
+    unsigned card=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_punchcard")-editor),VISUAL_PUNCHCARD);
+    assert(roll && roll==card);
+    count=javascript_live_visual_copy(program,roll,VISUAL_PIANOROLL,notes,64,NULL,NULL);
+    int cards=javascript_live_visual_copy(program,card,VISUAL_PUNCHCARD,notes,64,NULL,NULL);
+    assert(count>0 && count==cards); /* Each view receives one copy, sharing the audio feed. */
+    javascript_request_visuals(program,"const melody=note(60).slow(4); melody");
+    javascript_update_visuals(program,1,0,2);
+    assert(!javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_pianoroll")-editor),VISUAL_PIANOROLL));
+    cJSON_Delete(before); javascript_free(program);
+
+    code="const options={cycles:2,vertical:1}; note(60)._pianoroll(options)";
+    before=query(code,&program);
+    editor="// moved\nconst options={cycles:8,vertical:0}; note(60)._pianoroll(options)";
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,1,0,2);
+    roll=javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_pianoroll")-editor),VISUAL_PIANOROLL);
+    assert(roll && javascript_live_visual_options(program,roll,VISUAL_PIANOROLL,&options));
+    assert(options.cycles==2 && options.vertical); /* Variables retain evaluated values until F5. */
+    cJSON_Delete(before); javascript_free(program);
+}
+
+static void test_visual_highlight_mapping(void) {
+    const char *code="// café♫\nnote(\"c4 e4\").color(\"red blue\").markcss('font-weight:bold')";
+    const char *editor="// 🔊\nnote(\"c4 e4\")._scope({scale:2}).color(\"red blue\").markcss('font-weight:bold')";
+    JsProgram *program; cJSON *haps=query(code,&program);
+    javascript_cache_spans(program,haps,0,2); cJSON_Delete(haps);
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,.1,0,2);
+    int off[8],len[8]; uint32_t colors[8]; unsigned flags[8];
+    int count=javascript_editor_play_styles(program,editor,.1,off,len,colors,flags,8);
+    assert(count>0);
+    int expected=(int)(strstr(editor,"c4 e4")-editor), found=0;
+    for (int i=0;i<count;i++) if (off[i]==expected) {
+        assert(len[i]==2 && colors[i]==0xff0000ffu && (flags[i]&VISUAL_BOLD)); found=1;
+    }
+    assert(found);
+    count=javascript_editor_play_styles(program,editor,1.1,off,len,colors,flags,8); found=0;
+    for (int i=0;i<count;i++) if (off[i]==expected+3) {
+        assert(len[i]==2 && colors[i]==0x0000ffffu && (flags[i]&VISUAL_BOLD)); found=1;
+    }
+    assert(found);
+    const char *changed="// 🔊\nnote(\"c5 e4\")._scope({scale:2}).color(\"red blue\").markcss('font-weight:bold')";
+    javascript_request_visuals(program,changed); javascript_update_visuals(program,.1,0,2);
+    assert(!javascript_editor_play_styles(program,changed,.1,off,len,colors,flags,8));
+    assert(javascript_editor_play_styles(program,code,.1,off,len,colors,flags,8)>0); /* Undo can restore original offsets immediately. */
+    javascript_free(program);
+
+    haps=query("note(`c4 e4`).gain(0)",&program); javascript_cache_spans(program,haps,0,2); cJSON_Delete(haps);
+    editor="all(scope); note(`c4 e4`).gain(0)";
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,.1,0,2);
+    count=javascript_editor_play_styles(program,editor,.1,off,len,colors,flags,8);
+    assert(count==1 && off[0]==(int)(strstr(editor,"c4")-editor) && len[0]==2);
+    /* Musical labels are not display-only; changing .p() must not inherit old spans. */
+    changed="all(scope); note(`c4 e4`).gain(0).p('_muted')";
+    javascript_request_visuals(program,changed); javascript_update_visuals(program,.1,0,2);
+    assert(!javascript_editor_play_styles(program,changed,.1,off,len,colors,flags,8));
+    javascript_free(program);
+}
+
 static void write_module(const char *path, const char *source) {
     FILE *file = fopen(path,"w");
     assert(file && fputs(source,file) >= 0 && fclose(file) == 0);
@@ -88,6 +171,8 @@ static cJSON *query(const char *code, JsProgram **program) {
 }
 
 int main(void) {
+    test_live_visuals();
+    test_visual_highlight_mapping();
     test_local_modules();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);

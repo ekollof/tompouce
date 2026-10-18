@@ -1124,21 +1124,26 @@ int scheduler_play_spans(double now, int *off, int *len, int max) {
 }
 
 int scheduler_play_styles(double now, int *off, int *len, uint32_t *color, unsigned *flags, int max) {
+    return scheduler_editor_play_styles(now,NULL,off,len,color,flags,max);
+}
+
+int scheduler_editor_play_styles(double now, const char *editor, int *off, int *len, uint32_t *color, unsigned *flags, int max) {
     if (!off || !len || max < 1 || !audio_is_playing()) return 0;
     if (color) memset(color,0,(size_t)max*sizeof(*color));
     if (flags) memset(flags,0,(size_t)max*sizeof(*flags));
     int n = 0;
     pthread_mutex_lock(&tracks_lock);
+    int legacy_matches=!editor || !strcmp(editor,current_code);
     int any_solo = 0;
     for (int i = 0; i < track_count; i++)
         if (tracks[i].solo) { any_solo = 1; break; }
     for (int ti = 0; ti < track_count && n < max; ti++) {
         Track *t = &tracks[ti];
         if (t->javascript && t->active && !t->mute && javascript_matches(t->javascript,current_code)) {
-            n += javascript_play_styles(t->javascript,now,off+n,len+n,color?color+n:NULL,flags?flags+n:NULL,max-n);
+            n += javascript_editor_play_styles(t->javascript,editor,now,off+n,len+n,color?color+n:NULL,flags?flags+n:NULL,max-n);
             continue;
         }
-        if (!t->active || t->mute || (any_solo && !t->solo) || !t->pattern) continue;
+        if (!legacy_matches || !t->active || t->mute || (any_solo && !t->solo) || !t->pattern) continue;
         double phase = 0;
         int idx = 0;
         if (!locate_play_cycle(t, now, &phase, &idx)) continue;

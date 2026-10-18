@@ -24,9 +24,13 @@ struct JsProgram {
     JSContext *context;
     double deadline;
     char *source;
-    struct { int offset, kind; unsigned mask; VisualOptions options; } visual_sites[32];
+    struct { int offset, kind, id; unsigned mask; VisualOptions options; } visual_sites[32];
     int nvisual_sites;
-    struct VisualCachedNote { unsigned mask; VisualNote note; } *visual_notes;
+    char *visual_requested, *visual_pending, *visual_source;
+    unsigned visual_revision;
+    struct HighlightRange { int begin, end, target; } *highlight_map;
+    int nhighlight_map;
+    struct VisualCachedNote { unsigned mask; int kind; VisualNote note; } *visual_notes;
     int nvisual_notes, visual_warned;
     double visual_next, visual_origin, visual_seconds;
     struct { double begin, end; int off, len; uint32_t color; unsigned flags; } spans[JS_SPANS];
@@ -169,6 +173,8 @@ void javascript_free(JsProgram *p) {
     if (p->runtime) JS_FreeRuntime(p->runtime);
     free(p->source);
     free(p->visual_notes);
+    free(p->visual_requested); free(p->visual_pending); free(p->visual_source);
+    free(p->highlight_map);
     if (p->lock_ready >= 2) pthread_mutex_destroy(&p->spans_lock);
     if (p->lock_ready >= 1) pthread_mutex_destroy(&p->lock);
     free(p);
@@ -293,6 +299,7 @@ static cJSON *json_value(JSContext *ctx, JSValue value) {
 }
 
 static int utf8_offset(const char *s, int units);
+static int visual_source_matches(const char *compiled, const char *editor);
 
 JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int n) {
     if (metadata) *metadata = NULL;
@@ -308,7 +315,8 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
     p->deadline = now_seconds() + 2.0;
     p->loading_allowed = 1;
     p->source = strdup_safe(code);
-    if (!p->source || !initialize(p, error, n)) { javascript_free(p); return NULL; }
+    p->visual_source = strdup_safe(code);
+    if (!p->source || !p->visual_source || !initialize(p, error, n)) { javascript_free(p); return NULL; }
     JSContext *ctx = p->context;
     JSValue fn = global_function(ctx, "__compile");
     JSValue args[2] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120)};
@@ -339,6 +347,7 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
                 int i = p->nvisual_sites++;
                 p->visual_sites[i].offset = utf8_offset(code,offset->valueint);
                 p->visual_sites[i].kind = kind->valueint;
+                p->visual_sites[i].id = id->valueint;
                 p->visual_sites[i].mask = 1u << id->valueint;
                 visual_options(&p->visual_sites[i].options,kind->valueint,cJSON_GetObjectItemCaseSensitive(site,"options"));
             }
@@ -359,18 +368,18 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
     javascript_free(p); return NULL;
 }
 
-cJSON *javascript_query_cps(JsProgram *p, double begin, double end, double cps) {
+static cJSON *query_events(JsProgram *p, double begin, double end, double cps, int probes) {
     if (!p || !isfinite(begin) || !isfinite(end) || begin < 0 || end <= begin || end - begin > 1.001) return NULL;
     pthread_mutex_lock(&p->lock);
     JS_UpdateStackTop(p->runtime);
     p->deadline = now_seconds() + .2;
     JSContext *ctx = p->context;
     JSValue fn = global_function(ctx, "__query");
-    JSValue args[3] = {JS_NewFloat64(ctx, begin), JS_NewFloat64(ctx, end),JS_NewFloat64(ctx,cps)};
-    JSValue value = JS_Call(ctx, fn, JS_UNDEFINED, 3, args);
+    JSValue args[4] = {JS_NewFloat64(ctx, begin), JS_NewFloat64(ctx, end),JS_NewFloat64(ctx,cps),JS_NewBool(ctx,probes)};
+    JSValue value = JS_Call(ctx, fn, JS_UNDEFINED, 4, args);
     JS_FreeValue(ctx, fn);
     JS_FreeValue(ctx, args[0]); JS_FreeValue(ctx, args[1]);
-    JS_FreeValue(ctx,args[2]);
+    JS_FreeValue(ctx,args[2]); JS_FreeValue(ctx,args[3]);
     cJSON *json = NULL;
     if (JS_IsException(value)) {
         char error[512];
@@ -382,6 +391,14 @@ cJSON *javascript_query_cps(JsProgram *p, double begin, double end, double cps) 
     JS_FreeValue(ctx, value);
     pthread_mutex_unlock(&p->lock);
     return json;
+}
+
+cJSON *javascript_query_cps(JsProgram *p, double begin, double end, double cps) {
+    return query_events(p,begin,end,cps,0);
+}
+
+cJSON *javascript_query_audio(JsProgram *p, double begin, double end, double cps) {
+    return query_events(p,begin,end,cps,1);
 }
 
 cJSON *javascript_query(JsProgram *p, double begin, double end) {
@@ -433,12 +450,31 @@ int javascript_play_spans(const JsProgram *p, double now, int *off, int *len, in
 
 int javascript_play_styles(const JsProgram *p, double now, int *off, int *len,
                            uint32_t *color, unsigned *flags, int max) {
+    return javascript_editor_play_styles(p,NULL,now,off,len,color,flags,max);
+}
+
+int javascript_editor_play_styles(const JsProgram *p, const char *editor, double now, int *off, int *len,
+                                  uint32_t *color, unsigned *flags, int max) {
     int n = 0;
     if (!p) return 0;
     pthread_mutex_lock((pthread_mutex_t *)&p->spans_lock);
+    int identity=!editor || visual_source_matches(p->source,editor);
+    int mapped=editor && visual_source_matches(p->visual_source,editor);
+    if (!identity && !mapped) { pthread_mutex_unlock((pthread_mutex_t *)&p->spans_lock); return 0; }
     for (int i = 0; i < JS_SPANS && n < max; i++) {
         if (p->spans[i].len <= 0 || now < p->spans[i].begin || now >= p->spans[i].end) continue;
-        off[n] = p->spans[i].off; len[n] = p->spans[i].len;
+        int at=p->spans[i].off, length=p->spans[i].len;
+        if (!identity) {
+            int found=0;
+            for (int j=0;j<p->nhighlight_map;j++) {
+                const struct HighlightRange *range=&p->highlight_map[j];
+                if (at>=range->begin && at<=range->end && length<=range->end-at) {
+                    at=range->target+(at-range->begin); found=1; break;
+                }
+            }
+            if (!found) continue;
+        }
+        off[n] = at; len[n] = length;
         if (color) color[n]=p->spans[i].color;
         if (flags) flags[n]=p->spans[i].flags;
         n++;
@@ -453,9 +489,51 @@ int javascript_matches(const JsProgram *p, const char *code) {
 
 unsigned javascript_scope_mask(const JsProgram *p, int offset, int kind) {
     if (!p) return 0;
+    unsigned mask = 0;
+    pthread_mutex_lock((pthread_mutex_t *)&p->spans_lock);
     for (int i = 0; i < p->nvisual_sites; i++)
-        if (p->visual_sites[i].offset == offset && p->visual_sites[i].kind == kind) return p->visual_sites[i].mask;
-    return 0;
+        if (p->visual_sites[i].offset == offset && p->visual_sites[i].kind == kind) mask = p->visual_sites[i].mask;
+    pthread_mutex_unlock((pthread_mutex_t *)&p->spans_lock);
+    return mask;
+}
+
+void javascript_request_visuals(JsProgram *p, const char *source) {
+    if (!p || !source) return;
+    pthread_mutex_lock(&p->spans_lock);
+    if (!p->visual_requested || strcmp(p->visual_requested,source)) {
+        char *requested=strdup_safe(source), *pending=strdup_safe(source);
+        if (requested && pending) {
+            free(p->visual_requested); free(p->visual_pending);
+            p->visual_requested=requested; p->visual_pending=pending;
+        } else { free(requested); free(pending); }
+    }
+    pthread_mutex_unlock(&p->spans_lock);
+}
+
+/* editor_flatten appends a display-only final newline. */
+static int visual_source_matches(const char *compiled, const char *editor) {
+    if (!compiled || !editor) return 0;
+    size_t a=strlen(compiled), b=strlen(editor);
+    return (a==b && !memcmp(compiled,editor,a)) || (b==a+1 && editor[a]=='\n' && !memcmp(compiled,editor,a));
+}
+
+unsigned javascript_visual_revision(JsProgram *p) {
+    if (!p) return 0;
+    pthread_mutex_lock(&p->spans_lock);
+    unsigned revision=p->visual_revision;
+    pthread_mutex_unlock(&p->spans_lock);
+    return revision;
+}
+
+unsigned javascript_live_scope_mask(JsProgram *p, const char *source, int offset, int kind) {
+    if (!p || !source || offset<0) return 0;
+    unsigned mask=0;
+    pthread_mutex_lock(&p->spans_lock);
+    if (visual_source_matches(p->visual_source,source))
+        for (int i=0;i<p->nvisual_sites;i++)
+            if (p->visual_sites[i].offset==offset && p->visual_sites[i].kind==kind) mask=p->visual_sites[i].mask;
+    pthread_mutex_unlock(&p->spans_lock);
+    return mask;
 }
 
 void javascript_warn_control(JsProgram *p, const char *name) {
@@ -466,15 +544,94 @@ void javascript_warn_control(JsProgram *p, const char *name) {
 }
 
 int javascript_visual_options(const JsProgram *p, unsigned mask, VisualOptions *out) {
+    return javascript_live_visual_options(p,mask,0,out);
+}
+
+int javascript_live_visual_options(const JsProgram *p, unsigned mask, int kind, VisualOptions *out) {
     if (!p || !out) return 0;
-    for (int i = 0; i < p->nvisual_sites; i++) if (p->visual_sites[i].mask == mask) {
-        *out = p->visual_sites[i].options; return 1;
+    int found=0;
+    pthread_mutex_lock((pthread_mutex_t *)&p->spans_lock);
+    for (int i = 0; i < p->nvisual_sites; i++) if (p->visual_sites[i].mask == mask && (!kind || p->visual_sites[i].kind==kind)) {
+        *out = p->visual_sites[i].options; found=1; break;
     }
-    return 0;
+    pthread_mutex_unlock((pthread_mutex_t *)&p->spans_lock);
+    return found;
+}
+
+/* Generator only. The UI queues text and reads the resulting metadata. */
+static void configure_visuals(JsProgram *p) {
+    pthread_mutex_lock(&p->spans_lock);
+    char *source=p->visual_pending; p->visual_pending=NULL;
+    pthread_mutex_unlock(&p->spans_lock);
+    if (!source) return;
+    pthread_mutex_lock(&p->lock);
+    JS_UpdateStackTop(p->runtime); p->deadline=now_seconds()+.2;
+    JSContext *ctx=p->context;
+    JSValue fn=global_function(ctx,"__configureVisuals"), arg=JS_NewString(ctx,source);
+    JSValue value=JS_Call(ctx,fn,JS_UNDEFINED,1,&arg);
+    JS_FreeValue(ctx,fn); JS_FreeValue(ctx,arg);
+    cJSON *json=NULL;
+    if (JS_IsException(value)) JS_FreeValue(ctx,JS_GetException(ctx));
+    else json=json_value(ctx,value);
+    JS_FreeValue(ctx,value);
+    pthread_mutex_unlock(&p->lock);
+    const cJSON *sites=cJSON_GetObjectItemCaseSensitive(json,"sites");
+    if (!cJSON_IsArray(sites)) { cJSON_Delete(json); free(source); return; }
+    pthread_mutex_lock(&p->spans_lock);
+    free(p->highlight_map); p->highlight_map=NULL; p->nhighlight_map=0;
+    const cJSON *map=cJSON_GetObjectItemCaseSensitive(json,"highlightMap");
+    int ranges=cJSON_IsArray(map) ? cJSON_GetArraySize(map) : 0;
+    if (ranges>0 && ranges<=8192) p->highlight_map=calloc((size_t)ranges,sizeof(*p->highlight_map));
+    if (p->highlight_map) {
+        const cJSON *range;
+        size_t original_length=strlen(p->source), editor_length=strlen(source);
+        cJSON_ArrayForEach(range,map) {
+            if (!cJSON_IsArray(range) || cJSON_GetArraySize(range)!=4) continue;
+            int units[4], valid=1;
+            for (int i=0;i<4;i++) {
+                const cJSON *value=cJSON_GetArrayItem(range,i);
+                double limit=(double)(i<2 ? original_length : editor_length);
+                if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble<0 ||
+                    value->valuedouble>limit || value->valuedouble>INT_MAX || floor(value->valuedouble)!=value->valuedouble) { valid=0; break; }
+                units[i]=value->valueint;
+            }
+            if (!valid || units[0]>=units[1] || units[2]>=units[3]) continue;
+            int begin=utf8_offset(p->source,units[0]), end=utf8_offset(p->source,units[1]);
+            int target=utf8_offset(source,units[2]), finish=utf8_offset(source,units[3]);
+            if (end-begin!=finish-target || memcmp(p->source+begin,source+target,(size_t)(end-begin))) continue;
+            struct HighlightRange *out=&p->highlight_map[p->nhighlight_map++];
+            out->begin=begin; out->end=end; out->target=target;
+        }
+    }
+    if (!p->visual_notes) p->visual_notes=calloc(VISUAL_CACHE_NOTES,sizeof(*p->visual_notes));
+    if (p->visual_notes) {
+        p->nvisual_sites=p->nvisual_notes=0; p->visual_next=0;
+        const cJSON *site;
+        cJSON_ArrayForEach(site,sites) {
+            const cJSON *offset=cJSON_GetObjectItemCaseSensitive(site,"offset"), *id=cJSON_GetObjectItemCaseSensitive(site,"id");
+            const cJSON *kind=cJSON_GetObjectItemCaseSensitive(site,"kind"), *mask=cJSON_GetObjectItemCaseSensitive(site,"mask");
+            if (p->nvisual_sites==32 || !cJSON_IsNumber(offset) || !cJSON_IsNumber(id) || !cJSON_IsNumber(kind) || !cJSON_IsNumber(mask) ||
+                !isfinite(offset->valuedouble) || offset->valuedouble<0 || offset->valuedouble>(double)strlen(source) || floor(offset->valuedouble)!=offset->valuedouble ||
+                !isfinite(id->valuedouble) || id->valuedouble<0 || id->valuedouble>=32 || floor(id->valuedouble)!=id->valuedouble ||
+                !isfinite(kind->valuedouble) || kind->valuedouble<1 || kind->valuedouble>VISUAL_KINDS || floor(kind->valuedouble)!=kind->valuedouble ||
+                !isfinite(mask->valuedouble) || mask->valuedouble<1 || mask->valuedouble>UINT32_MAX || floor(mask->valuedouble)!=mask->valuedouble) continue;
+            int i=p->nvisual_sites++;
+            p->visual_sites[i].offset=utf8_offset(source,offset->valueint);
+            p->visual_sites[i].id=id->valueint; p->visual_sites[i].kind=kind->valueint;
+            p->visual_sites[i].mask=(unsigned)mask->valuedouble;
+            visual_options(&p->visual_sites[i].options,kind->valueint,cJSON_GetObjectItemCaseSensitive(site,"options"));
+        }
+        free(p->visual_source); p->visual_source=source; source=NULL;
+        if (++p->visual_revision==0) p->visual_revision=1;
+    }
+    pthread_mutex_unlock(&p->spans_lock);
+    cJSON_Delete(json); free(source);
 }
 
 void javascript_update_visuals(JsProgram *p, double now, double origin, double seconds) {
-    if (!p || !p->nvisual_sites || !isfinite(now) || !isfinite(origin) || !isfinite(seconds) || seconds <= 0) return;
+    if (!p) return;
+    configure_visuals(p);
+    if (!p->nvisual_sites || !isfinite(now) || !isfinite(origin) || !isfinite(seconds) || seconds <= 0) return;
     pthread_mutex_lock(&p->lock);
     double wall = now_seconds();
     if (wall < p->visual_next) { pthread_mutex_unlock(&p->lock); return; }
@@ -504,24 +661,29 @@ void javascript_update_visuals(JsProgram *p, double now, double origin, double s
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(hap,"visualId");
         if (!cJSON_IsNumber(id) || !isfinite(id->valuedouble) || id->valuedouble < 0 || id->valuedouble >= 32 ||
             floor(id->valuedouble) != id->valuedouble) continue;
-        unsigned mask = 1u << id->valueint;
-        int known = 0;
-        for (int i = 0; i < p->nvisual_sites; i++) known |= p->visual_sites[i].mask == mask;
+        unsigned mask = 0; int kind=0;
+        for (int i = 0; i < p->nvisual_sites; i++) if (p->visual_sites[i].id==id->valueint) {
+            mask=p->visual_sites[i].mask; kind=p->visual_sites[i].kind;
+        }
         struct VisualCachedNote *note = &p->visual_notes[p->nvisual_notes];
-        if (known && visual_note(&note->note,hap,origin,seconds)) { note->mask = mask; p->nvisual_notes++; }
+        if (mask && visual_note(&note->note,hap,origin,seconds)) { note->mask = mask; note->kind=kind; p->nvisual_notes++; }
     }
     pthread_mutex_unlock(&p->spans_lock);
     cJSON_Delete(json);
 }
 
 int javascript_visual_copy(JsProgram *p, unsigned mask, VisualNote *out, int max, double *origin, double *seconds) {
+    return javascript_live_visual_copy(p,mask,0,out,max,origin,seconds);
+}
+
+int javascript_live_visual_copy(JsProgram *p, unsigned mask, int kind, VisualNote *out, int max, double *origin, double *seconds) {
     if (!p || !out || max < 1) return 0;
     int n = 0;
     pthread_mutex_lock(&p->spans_lock);
     if (origin) *origin = p->visual_origin;
     if (seconds) *seconds = p->visual_seconds > 0 ? p->visual_seconds : 2;
     for (int i = 0; i < p->nvisual_notes && n < max; i++)
-        if (p->visual_notes[i].mask&mask) out[n++] = p->visual_notes[i].note;
+        if ((p->visual_notes[i].mask&mask) && (!kind || p->visual_notes[i].kind==kind)) out[n++] = p->visual_notes[i].note;
     pthread_mutex_unlock(&p->spans_lock);
     return n;
 }

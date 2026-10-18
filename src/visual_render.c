@@ -51,38 +51,72 @@ void terminal_graphics_fft(const float *samples, int count, double rate, float b
             re[v]=re[u]-r; imaginary[v]=imaginary[u]-q; re[u]+=r; imaginary[u]+=q;
         }
     double high=fmin(20000,rate/2), range=log(high/20);
-    for (int i=1;i<=n/2;i++) {
-        double f=(double)i*rate/n; if (f<20 || f>high) continue;
-        int b=(int)(log(f/20)/range*SPECTRUM_BANDS);
-        if (b>=SPECTRUM_BANDS) b=SPECTRUM_BANDS-1;
-        double db=20*log10(fmax(1e-8,2*hypot(re[i],imaginary[i])/sum));
-        if (db>bands[b]) bands[b]=(float)db;
+    if (sum<=0 || range<=0) return;
+    for (int i=1;i<=n/2;i++) re[i]=2*hypot(re[i],imaginary[i])/sum;
+    for (int b=0;b<SPECTRUM_BANDS;b++) {
+        double low_bin=20*exp(range*b/SPECTRUM_BANDS)*n/rate;
+        double high_bin=20*exp(range*(b+1)/SPECTRUM_BANDS)*n/rate;
+        double magnitude=0;
+        int first=(int)fmax(1,ceil(low_bin)), last=(int)fmin(n/2,floor(high_bin));
+        for (int i=first;i<=last;i++) magnitude=fmax(magnitude,re[i]);
+        if (first>last) {
+            /* Narrow bass bands lie between FFT bins: interpolate amplitudes,
+               rather than drawing a false silence stripe at those frequencies. */
+            double bin=clamp(sqrt(low_bin*high_bin),1,n/2);
+            int i=(int)bin, j=i<n/2?i+1:i;
+            magnitude=re[i]+(re[j]-re[i])*(bin-i);
+        }
+        bands[b]=(float)(20*log10(fmax(1e-8,magnitude)));
     }
 }
 
+static uint32_t spectrum_color(double value, const uint32_t ramp[5]) {
+    value=clamp(value,0,1);
+    double at=value*4; int a=(int)at, b=a<4?a+1:a;
+    uint32_t color=(unsigned)round(255*sqrt(value));
+    for (int shift=8;shift<=24;shift+=8) {
+        double x=(ramp[a]>>shift)&255, y=(ramp[b]>>shift)&255;
+        color|=(uint32_t)round(x+(y-x)*(at-a))<<shift;
+    }
+    return color;
+}
+
 static void spectrum(TerminalImage *im, TerminalFeedbackState *state, const VisualOptions *o,
-                     const float *samples, int count, double now, uint32_t color) {
+                     const float *samples, int count, double now, uint32_t color, int explicit_color) {
     if (!state) return;
-    if (!state->count || (o->speed>0 && now-state->last_time>=fmax(1.0/60,4/(o->speed*SPECTRUM_COLUMNS)))) {
+    if (!state->count || o->speed>0) {
+        state->spectrum_span=o->speed>0?4/o->speed:4;
+        state->spectrum_end=now;
+    }
+    double span=state->spectrum_span, step=fmax(1.0/60,span/SPECTRUM_COLUMNS);
+    if (!state->count || (o->speed>0 && now-state->last_time>=step)) {
         terminal_graphics_fft(samples,count,44100,state->levels[state->head]);
         state->times[state->head]=now; state->head=(state->head+1)%SPECTRUM_COLUMNS;
         if (state->count<SPECTRUM_COLUMNS) state->count++;
         state->last_time=now;
     }
     int left=terminal_graphics_plot_left(im), width=im->width-left;
-    double end=o->speed>0?now:state->last_time, span=4/fmax(.125,o->speed);
+    double end=state->spectrum_end;
+    double oldest=state->times[(state->head-state->count+SPECTRUM_COLUMNS)%SPECTRUM_COLUMNS];
+    double coverage=fmax(fmax(.12,step),span/fmax(1,width-1)*o->thickness*.5);
+    const uint32_t ramp[]={terminal_graphics_theme(GRAPHICS_SPECTRUM_LOW,255),
+        terminal_graphics_theme(GRAPHICS_ACTIVE,255),terminal_graphics_theme(GRAPHICS_INACTIVE,255),
+        terminal_graphics_theme(GRAPHICS_ONSET,255),terminal_graphics_theme(GRAPHICS_TEXT,255)};
     for (int x=left;x<im->width;x++) {
         double t=end-span+(x-left)*span/fmax(1,width-1);
+        if (t<oldest) continue;
         int best=-1; double distance=span;
         for (int j=0;j<state->count;j++) {
             int k=(state->head-1-j+SPECTRUM_COLUMNS)%SPECTRUM_COLUMNS;
             double d=fabs(t-state->times[k]); if (d<distance) { best=k; distance=d; }
         }
-        if (best<0 || distance>fmin(.12,span/fmax(1,width-1)*o->thickness*.5)) continue;
+        /* Fill each observed time interval, independent of display resolution.
+           Long periods without observations remain empty rather than fabricated. */
+        if (best<0 || distance>coverage) continue;
         for (int y=0;y<im->height;y++) {
             int b=(im->height-1-y)*SPECTRUM_BANDS/im->height;
             double value=(state->levels[best][b]-o->min_db)/(o->max_db-o->min_db);
-            terminal_graphics_pixel(im,x,y,opacity(color,value));
+            terminal_graphics_pixel(im,x,y,explicit_color?opacity(color,value):spectrum_color(value,ramp));
         }
     }
     if (left) {
@@ -362,8 +396,11 @@ void terminal_graphics_feedback(TerminalImage *im, TerminalFeedbackState *state,
     if (kind==VISUAL_SCOPE) waveform(im,o,samples,sample_count);
     else if (kind==VISUAL_SPECTRUM) {
         uint32_t color=o->has_color?o->color:o->active;
-        for (int i=0;i<count;i++) if (notes[i].start<=now && notes[i].end>now && (notes[i].flags&VISUAL_COLOR)) color=notes[i].color;
-        spectrum(im,state,o,samples,sample_count,now,color);
+        int explicit_color=o->has_color || (o->explicit_colors&1);
+        for (int i=0;i<count;i++) if (notes[i].start<=now && notes[i].end>now && (notes[i].flags&VISUAL_COLOR)) {
+            color=notes[i].color; explicit_color=1;
+        }
+        spectrum(im,state,o,samples,sample_count,now,color,explicit_color);
     } else if (kind==VISUAL_SPIRAL || kind==VISUAL_PITCHWHEEL) polar(im,o,notes,count,kind,now,origin,seconds);
     else roll(im,o,notes,count,now,origin,seconds);
     if (o->smear && state) {

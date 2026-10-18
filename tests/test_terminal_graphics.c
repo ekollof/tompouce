@@ -194,6 +194,75 @@ static void test_feedback(void) {
     image.compact=0;
 }
 
+static void test_spectrum(void) {
+    static TerminalFeedbackState state;
+    float samples[4096],bands[SPECTRUM_BANDS];
+    /* A broadband impulse must not acquire holes from empty logarithmic bins. */
+    memset(samples,0,sizeof(samples)); samples[2048]=1;
+    terminal_graphics_fft(samples,4096,44100,bands);
+    for (int b=0;b<SPECTRUM_BANDS;b++) assert(bands[b]>-70 && bands[b]<-50);
+
+    for (int i=0;i<4096;i++) samples[i]=.5f*(float)sin(6.283185307179586*1000*i/44100);
+    VisualOptions options; visual_options(&options,VISUAL_SPECTRUM,NULL);
+    /* Continuous tone, irregular 20Hz foreground rendering, full and braille sizes. */
+    for (int compact=0;compact<2;compact++) for (int speed=0;speed<3;speed++) {
+        const double speeds[]={.125,1,8}; options.speed=speeds[speed];
+        double span=4/options.speed, now=0;
+        memset(&state,0,sizeof(state));
+        image.width=compact?160:768; image.height=compact?16:128; image.compact=compact;
+        for (int frame=0;now<span+1;frame++) {
+            now+=frame%3==0?.061:.047;
+            terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,samples,4096,now,0,2);
+        }
+        int left=terminal_graphics_plot_left(&image);
+        int band=(int)(log(1000.0/20)/log(1000)*SPECTRUM_BANDS);
+        int y=image.height-1-(int)((band+.5)*image.height/SPECTRUM_BANDS);
+        for (int x=left;x<image.width;x++)
+            assert(image.rgba[((size_t)y*image.width+x)*4+3]>100);
+        /* speed zero freezes both history and its image. */
+        static unsigned char frozen[sizeof(image.rgba)];
+        memcpy(frozen,image.rgba,(size_t)image.width*image.height*4);
+        options.speed=0;
+        terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,samples,4096,now,0,2);
+        assert(!memcmp(frozen,image.rgba,(size_t)image.width*image.height*4));
+        int head=state.head;
+        terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,NULL,0,now+10,0,2);
+        assert(state.head==head && !memcmp(frozen,image.rgba,(size_t)image.width*image.height*4));
+    }
+
+    /* Seed known levels to test hue changes, silence and explicit-color priority. */
+    visual_options(&options,VISUAL_SPECTRUM,NULL); options.speed=0;
+    memset(&state,0,sizeof(state)); state.count=2; state.head=2; state.last_time=4;
+    state.spectrum_span=4; state.spectrum_end=4;
+    state.times[0]=0; state.times[1]=4;
+    for (int b=0;b<SPECTRUM_BANDS;b++) state.levels[0][b]=state.levels[1][b]=-80+b;
+    image.width=200; image.height=128; image.compact=0;
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,NULL,0,4,0,2);
+    const unsigned char *weak=image.rgba+((size_t)95*image.width+image.width-1)*4;
+    const unsigned char *strong=image.rgba+((size_t)31*image.width+image.width-1)*4;
+    assert(weak[3]>0 && strong[3]>weak[3] && memcmp(weak,strong,3));
+    assert(!image.rgba[((size_t)(image.height-1)*image.width+image.width-1)*4+3]);
+    assert(!image.rgba[((size_t)31*image.width+image.width/2)*4+3]); /* Real observation gap. */
+    options.has_color=1; options.color=0x12345680u;
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,NULL,0,4,0,2);
+    assert(weak[0]==0x12 && weak[1]==0x34 && weak[2]==0x56 && weak[3]<128);
+    options.has_color=0; options.explicit_colors=1; options.active=0x345678ffu;
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,NULL,0,4,0,2);
+    assert(strong[0]==0x34 && strong[1]==0x56 && strong[2]==0x78);
+    VisualNote colored={.start=3,.end=5,.flags=VISUAL_COLOR,.color=0xff1234ffu};
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,&colored,1,NULL,0,4,0,2);
+    assert(strong[0]==255 && strong[1]==0x12 && strong[2]==0x34);
+
+    /* No invented pre-start history, and missing audio remains empty. */
+    memset(&state,0,sizeof(state)); visual_options(&options,VISUAL_SPECTRUM,NULL);
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,samples,4096,10,0,2);
+    assert(!image.rgba[((size_t)63*image.width+100)*4+3]);
+    memset(&state,0,sizeof(state));
+    terminal_graphics_feedback(&image,&state,VISUAL_SPECTRUM,&options,NULL,0,NULL,0,10,0,2);
+    for (int y=0;y<image.height;y++) for (int x=GRAPHICS_AXIS_WIDTH;x<image.width;x++)
+        assert(!image.rgba[((size_t)y*image.width+x)*4+3]);
+}
+
 static void test_orientations(void) {
     const int kinds[]={VISUAL_PIANOROLL,VISUAL_PUNCHCARD,VISUAL_WORDFALL};
     const VisualNote note={.start=9,.end=10,.pitch=60,.gain=1,.label="LONG LABEL THAT MUST FIT"};
@@ -229,10 +298,12 @@ static void test_palette(void) {
     assert(terminal_graphics_palette_reply("4;14;rgb:ab/cd/ef"));
     assert(terminal_graphics_palette_reply("4;10;#123456"));
     assert(terminal_graphics_palette_reply("4;3;rgb:f/8/0"));
+    assert(terminal_graphics_palette_reply("4;4;rgb:50/60/70"));
     assert(terminal_graphics_theme(GRAPHICS_TEXT,255)==0x112233ffu);
     assert(terminal_graphics_theme(GRAPHICS_ACTIVE,255)==0xabcdefffu);
     assert(terminal_graphics_theme(GRAPHICS_INACTIVE,191)==0x123456bfu);
     assert(terminal_graphics_theme(GRAPHICS_ONSET,255)==0xff8800ffu);
+    assert(terminal_graphics_theme(GRAPHICS_SPECTRUM_LOW,255)==0x506070ffu);
     unsigned generation=terminal_graphics_palette_generation();
     assert(!terminal_graphics_palette_reply("4;16;rgb:ff/ff/ff"));
     assert(!terminal_graphics_palette_reply("10;rgb:fffff/00/00"));
@@ -301,7 +372,7 @@ int main(int argc, char **argv) {
         terminal_graphics_delete(stdout,77); terminal_graphics_delete(stdout,78);
         return 0;
     }
-    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_orientations(); test_palette();
+    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_spectrum(); test_orientations(); test_palette();
     puts("Kitty waveform, piano roll, clipped chunked transport and capability checks ok");
     return 0;
 }

@@ -228,7 +228,7 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
 
 void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation) {
     double seconds = audio_sec_per_cycle();
-    cJSON *haps = javascript_query_cps(program,cycle_index,cycle_index+1.0,1/seconds);
+    cJSON *haps = javascript_query_audio(program,cycle_index,cycle_index+1.0,1/seconds);
     if (!cJSON_IsArray(haps)) { cJSON_Delete(haps); return; }
     double origin = cycle_start - cycle_index * seconds;
     javascript_cache_spans(program,haps,origin,seconds);

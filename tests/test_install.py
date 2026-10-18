@@ -42,6 +42,12 @@ class InstallerTest(unittest.TestCase):
             self.assertIn('chromium-browser', installer.dependency_command('debian', {'ID': 'ubuntu'}))
             self.assertIn('chromium', installer.dependency_command('debian', {'ID': 'debian'}))
             self.assertNotIn('chromium', installer.dependency_command('arch', {}, False))
+        for family, native in [('arch', ['libpipewire', 'libpulse', 'libsamplerate']),
+                               ('debian', ['libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev']),
+                               ('fedora', ['pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel'])]:
+            command = installer.dependency_command(family, {}, False)
+            for package in native:
+                self.assertIn(package, command)
 
     def test_paths_and_links_refused(self):
         for path in ['/etc/passwd', '../escape.wav', '%2e%2e/escape.wav', 'a\\b.wav', 'a\0.wav']:

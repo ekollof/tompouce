@@ -2,6 +2,100 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Continuous, colored spectrum (2026-10-18)
+
+Spectrum history now fills observed time intervals independently of pixel width,
+removing frame-spacing gaps at both graphics and braille resolutions. Long UI
+observation gaps and actual silence remain empty. Sub-bin logarithmic bass bands
+interpolate FFT magnitudes rather than remaining falsely silent. Default intensity
+colors interpolate terminal blue/cyan/green/yellow/foreground with translucent
+quiet energy; explicit visual and patterned note colors retain priority. All FFT,
+history and color work remains on the foreground thread; audio is unchanged.
+Renderer freeze retains its existing span/end. Raster regressions cover a broadband
+impulse, continuous tone at irregular 20 Hz across three speeds and two resolutions,
+freeze, real gaps, transparency, explicit colors and palette roles. The impulse
+regression failed before the fix. Native/Csound suite and all 1,207 reference events
+passed, along with all 67 PTY cases; Kitty spectrum transmission was about 57 FPS.
+An inspected synthetic raster is /tmp/tompouce-spectrum-preview.png (temporary
+evidence, not a build input). Updated the actual installed command using the
+installer with --skip-deps --skip-banks --no-browser, preserving private Csound.
+The user's live source/process and desktop settings were not changed; restart
+normally to load the new renderer.
+
+### Audio output backend priority (2026-10-18)
+
+`src/audio_output.c` / `include/audio_output.h` now own output startup/shutdown:
+native PipeWire, native PulseAudio, PortAudio JACK, then PortAudio ALSA. Native
+connection waits are bounded to two seconds; each failed attempt closes its
+resources before fallback. PortAudio initialization/open/start errors are checked.
+The same C stereo renderer stays at 44.1 kHz; optional libsamplerate state is
+allocated before startup for other PortAudio device clocks. No JS, sample I/O or
+new allocations were added to the DSP callback. Selection occurs at startup;
+runtime disconnects report inactive rather than silently restarting playback.
+F4 and MCP `music_health` include the selected backend. Make detects optional
+PipeWire/PulseAudio/libsamplerate packages; their distro development packages are
+included in installer plans. PipeWire-specific compiler flags stay on its adapter,
+not on the DSP/editor. Minimal builds can disable the three WITH_* switches.
+`make test-audio-backends` uses owned silent streams and temporary null ALSA
+configs; `TOMPOUCE_TEST_JACK=1` enables a running JACK-server check. Unit tests
+cover priority, failed-open/start cleanup, missing devices and stereo/rate fidelity.
+Validation passed: full warning-as-error native/Csound suite and all 1,207 event
+references, all 67 PTY cases (~57 FPS), actual PipeWire/PulseAudio/JACK/ALSA and
+no-output checks, six installer tests, and a build without optional audio libraries.
+Updated the actual installed command with --skip-deps --skip-banks --no-browser,
+retaining private Csound. The user's live PID/source and desktop audio settings
+were left untouched; restart normally to load this executable.
+
+Routing follow-up: the reported silent PipeWire stream had two active links to
+the analog sink and was unmuted; read-only MCP showed `playing=no`. The user
+started playback and confirmed audio. No production routing change was needed.
+Backend integration tests now inspect two fresh owned silent streams with
+`pw-dump`, asserting playback classification, autoconnect and two active stereo
+links to one audio sink without creating links or changing desktop settings.
+`make test-audio-backends` passed (five integration cases, optional JACK skipped).
+
+### Highlighting after visual edits (2026-10-18)
+
+Adding a scope attached its feed but stopped moving highlights because
+`fill_play_mask` still required exact editor/evaluated text equality. The generator
+now compares musical ASTs while ignoring visual wrappers/directives, comments and
+layout, then publishes original/editor literal ranges. The UI maps cached spans
+through those ranges, including UTF-16/UTF-8 conversion, without running user JS.
+Musical edits and failed evaluation retain the stale-highlight guards. Scope
+addition, relocation, options, later-line offsets, templates, patterned colors,
+bold attributes and advancing notes have native/backing-cell regressions; the new
+scope test failed before the fix. Validation passed: full C/Csound suite and all
+1,207 reference events, 67 PTY cases (~57 FPS), installer startup, and five installed
+no-F5 PTY cases. Updated the actual `~/.local/bin/tompouce` installation with
+`--skip-deps --skip-banks --no-browser`. The live process/source remain untouched;
+the user must restart to load this update.
+
+### Immediate visual activation (2026-10-18)
+
+Visual calls on running JavaScript branches now attach, move, change literal
+options and disappear without F5. Song loading activates existing views normally.
+The runtime observes bounded branches after transpilation, preserving mini source
+offsets and musical event values. Scheduling includes hidden branch tags so new
+scopes can read already sounding voices. UI requests are parsed on the generator;
+they do not execute edited user code, change tempo, clear the queue or reset time.
+Unchanged branches survive comments and unrelated edits. Musical changes and
+options requiring JavaScript still require F5; unmatched branches show waiting.
+Automatic feeds share the existing 32 tap slots with explicit sites. Per-kind
+history stays bounded to 32 foreground caches. See docs/javascript.md for limits.
+Validation: warning-as-error native suite, Csound, all 31 examples / 1,207 reference
+events, actual callback attachment, and 67 PTY cases including new calls, options,
+song loading and Kitty pixels without F5. Graphics transmission measured ~57 FPS.
+The user's live process/source were not restarted or changed; restart normally
+to load the rebuilt executable and bundled runtime.
+Installed-copy follow-up: the shell command resolves to
+`~/.local/bin/tompouce` → `~/.local/lib/tompouce/tompouce`, independently of the
+checkout binary. The installed copy still had “evaluate to attach”; it is now
+updated using `./install.sh --skip-deps --skip-banks --no-browser --jobs 4`,
+retaining its private Csound rpath and existing banks. Installed MCP startup and
+the five no-F5 PTY regressions pass. The existing process retains the old inode
+and must be closed/reopened by the user. For future user-facing fixes, check the
+actual executable path and update that installation, not just the checkout.
+
 ### Expanded vi editing (2026-10-18)
 
 `src/tui_vi.h` is a private implementation included by tui.c after its editor

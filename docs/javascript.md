@@ -218,7 +218,11 @@ Upstream event source locations feed the existing TUI sounding-token
 highlighting, including locations in patterned control arguments. UTF-16
 locations are converted to UTF-8 byte offsets before rendering. Highlight spans
 are cached during scheduling, so drawing the editor does not execute user
-JavaScript again. Patterned `.color()` changes active-token colors; `.markcss()`
+JavaScript again. Adding, moving or changing a visualization preserves moving
+note highlights: the generator maps the original literal offsets to the edited
+source after checking that the musical syntax still matches. Comments and
+whitespace can move those offsets; unapplied musical changes still suppress
+highlighting. Patterned `.color()` changes active-token colors; `.markcss()`
 supports underline, bold and italic terminal attributes (arbitrary browser CSS
 is unavailable). Colors accept common names, hex, RGB(A) and HSL(A).
 
@@ -252,8 +256,13 @@ pitches and supports `edo`, `root` (frequency or note name), `circle`,
 `hapcircles`, `hapRadius`, `margin` and `mode: 'flake'|'polygon'`.
 Spectrum is a scrolling logarithmic-frequency spectrogram with native Hann FFT
 analysis, 20 Hz–20 kHz guides, `min`/`max` dB range and `speed` (zero freezes).
-At speed 1 its time span is four seconds; `thickness` controls each history
-column's pixel width. Scope supports trigger alignment, scale, position, color
+At speed 1 its time span is four seconds. History fills continuously between
+foreground frames; narrow low-frequency bands interpolate FFT magnitudes instead
+of leaving empty stripes. Its default intensity gradient runs from the terminal's
+blue through cyan, green and yellow to foreground, with quiet energy translucent
+and silence transparent. Explicit `color`, `active`/`activeColor` or patterned
+note colors retain a single hue. `thickness` sets a minimum history column width.
+Scope supports trigger alignment, scale, position, color
 and thickness, with automatic amplitude scaling when scale is omitted.
 
 Browser page-background placement, custom canvas contexts, font families,
@@ -275,9 +284,19 @@ Views fill outward during startup; cached tiles refresh as playback continues.
 The cache holds at most 256 tiles/8,192 events, deduplicating held notes across
 tile boundaries while retaining simultaneous identical notes. Waveform scopes
 use only the audio tap and do not consume pattern-query time.
-Excessive queries report a console error and retain the previous view. Re-evaluate
-after adding or moving a call; an unapplied edit shows “evaluate to attach”
-rather than another pattern's audio. Generation tags reject stale waveform data.
+Excessive queries report a console error and retain the previous view.
+Adding, moving, removing or changing a visual call on a running branch takes
+effect without F5. Loading a song activates its views automatically. The generator
+parses display requests and binds them to the existing program; it does not rerun
+the song, change tempo, clear queued notes or reset playback. Comments, whitespace
+and edits elsewhere in the buffer do not detach an unchanged branch. Literal
+visual options update immediately; options that execute JavaScript still require
+F5. Musical edits also require F5. A new or changed musical branch that cannot be
+matched to the playing program shows “waiting for playing pattern”.
+Branches carry bounded observation tags from compilation, so scopes can read
+already sounding voices as soon as they are attached. Existing visual sites and
+these automatic branch feeds share 32 tap slots; reaching the limit can require
+F5 to attach another branch explicitly. Generation tags reject stale waveform data.
 These are live views, not static sample-file previews. Comments and strings do not
 create widgets. Widgets scroll with code but are skipped by editing, selection,
 mouse placement and keyboard movement. UTF-8 terminals use 2×4 braille dots per

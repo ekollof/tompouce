@@ -86,6 +86,7 @@ typedef struct { int offset[VISUAL_KINDS]; unsigned mask[VISUAL_KINDS], generati
 static InlineFeed *inline_feeds;
 static char *inline_source;
 static unsigned inline_bound_generation;
+static unsigned inline_bound_revision;
 static int viz_h = 0;
 static int viz_utf8 = 0;
 static int graphics_disabled, graphics_supported, graphics_probe_pending;
@@ -1271,6 +1272,7 @@ static void inline_walk(TSNode node, const char *source, int depth) {
 static void inline_refresh(void) {
     inline_count = 0;
     inline_bound_generation = 0;
+    inline_bound_revision = UINT_MAX;
     InlineFeed *feeds = calloc((size_t)code_line_count,sizeof(*feeds));
     if (!feeds) { inline_capacity = 0; return; }
     if (code_line_count > inline_capacity) {
@@ -1294,23 +1296,27 @@ static void inline_refresh(void) {
 }
 
 static void inline_bind_feeds(void) {
-    if (!inline_feeds || !inline_source || !inline_count) return;
+    if (!inline_feeds || !inline_source) return;
     pthread_mutex_lock(&tracks_lock);
     Track *track = track_count > 0 ? &tracks[0] : NULL;
     unsigned generation = track && track->javascript ? track->compile_generation : 0;
-    if (!generation || generation != inline_bound_generation) {
-        size_t a = strlen(inline_source), b = strlen(cstr(current_code));
-        while (a && inline_source[a-1] == '\n') a--;
-        while (b && current_code[b-1] == '\n') b--;
-        int matches = generation && a == b && !memcmp(inline_source,cstr(current_code),a);
+    JsProgram *program=generation ? track->javascript : NULL;
+    if (program) javascript_retain(program);
+    pthread_mutex_unlock(&tracks_lock);
+    javascript_request_visuals(program,inline_source);
+    unsigned revision=javascript_visual_revision(program);
+    if (!generation || generation != inline_bound_generation || revision != inline_bound_revision) {
         for (int i = 0; i < code_line_count && i < inline_capacity; i++) {
-            inline_feeds[i].generation = matches ? generation : 0;
-            for (int kind = 0; kind < VISUAL_KINDS; kind++) inline_feeds[i].mask[kind] = matches
-                ? javascript_scope_mask(track->javascript,inline_feeds[i].offset[kind],kind+1) : 0;
+            inline_feeds[i].generation = 0;
+            for (int kind = 0; kind < VISUAL_KINDS; kind++) {
+                inline_feeds[i].mask[kind] = javascript_live_scope_mask(program,inline_source,inline_feeds[i].offset[kind],kind+1);
+                if (inline_feeds[i].mask[kind]) inline_feeds[i].generation=generation;
+            }
         }
         inline_bound_generation = generation;
+        inline_bound_revision = revision;
     }
-    pthread_mutex_unlock(&tracks_lock);
+    javascript_free(program);
 }
 
 static int inline_mask(int line) {
@@ -1914,12 +1920,10 @@ static void fill_play_mask(double now) {
     if (!audio_is_playing()) return;
     char *flat = editor_flatten();
     if (!flat) return;
-    int same = strcmp(flat, cstr(current_code)) == 0;
-    free(flat);
-    if (!same) return;
     int off[192], len[192];
     uint32_t colors[192]; unsigned flags[192];
-    int n = scheduler_play_styles(now, off, len, colors, flags, 192);
+    int n = scheduler_editor_play_styles(now, flat, off, len, colors, flags, 192);
+    free(flat);
     for (int s=0;s<n;s++) {
         if (!(flags[s]&(VISUAL_COLOR|VISUAL_BOLD|VISUAL_UNDERLINE|VISUAL_ITALIC))) { play_ink[s]=10; continue; }
         if (play_ink[s]!=16+s || play_color[s]!=colors[s] || play_flags[s]!=flags[s]) {
@@ -2517,8 +2521,8 @@ static void inline_graphics_clear(void) {
 
 /* Fixed foreground caches, one per compiled attachment; never touched by audio. */
 static TerminalFeedbackState feedback_states[32];
-static unsigned feedback_generations[32];
-static unsigned feedback_palettes[32];
+static struct { unsigned feed, generation, palette, revision, used; int kind; } feedback_keys[32];
+static unsigned feedback_clock;
 static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed, unsigned generation) {
     VisualOptions options; VisualNote notes[GRAPHICS_NOTES]; float samples[4096];
     visual_options(&options,kind,NULL);
@@ -2530,20 +2534,24 @@ static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed
         if (program) javascript_retain(program);
     }
     pthread_mutex_unlock(&tracks_lock);
+    unsigned revision=javascript_visual_revision(program);
     if (program) {
-        javascript_visual_options(program,feed,&options);
-        count=javascript_visual_copy(program,feed,notes,GRAPHICS_NOTES,&origin,&seconds);
+        javascript_live_visual_options(program,feed,kind,&options);
+        count=javascript_live_visual_copy(program,feed,kind,notes,GRAPHICS_NOTES,&origin,&seconds);
         javascript_free(program);
     }
     if (visual_audio_kind(kind)) n=audio_pattern_scope_copy(feed,generation,samples,kind==VISUAL_SCOPE?1024:4096);
-    int slot=0; unsigned bits=feed;
-    while (bits>1) { bits>>=1; slot++; }
+    int slot=0, found=0;
+    for (int i=0;i<32;i++) {
+        if (feedback_keys[i].used && feedback_keys[i].feed==feed && feedback_keys[i].kind==kind) { slot=i; found=1; break; }
+        if (feedback_keys[i].used<feedback_keys[slot].used) slot=i;
+    }
     TerminalFeedbackState *state=&feedback_states[slot];
     unsigned palette=terminal_graphics_palette_generation();
-    if (feedback_generations[slot]!=generation || feedback_palettes[slot]!=palette) {
-        memset(state,0,sizeof(*state)); feedback_generations[slot]=generation;
-        feedback_palettes[slot]=palette;
-    }
+    if (!found || feedback_keys[slot].generation!=generation || feedback_keys[slot].palette!=palette || feedback_keys[slot].revision!=revision)
+        memset(state,0,sizeof(*state));
+    feedback_keys[slot].feed=feed; feedback_keys[slot].kind=kind; feedback_keys[slot].generation=generation;
+    feedback_keys[slot].palette=palette; feedback_keys[slot].revision=revision; feedback_keys[slot].used=++feedback_clock;
     terminal_graphics_feedback(image,state,kind,&options,notes,count,samples,n,audio_time_now(),origin,seconds);
 }
 
@@ -2601,7 +2609,7 @@ static void draw_inline_row(int line, int sub, int row, int col, int width) {
         if (!sub) {
             char title[128];
             const char *name=kind==VISUAL_PIANOROLL?"piano roll":visual_name(kind);
-            snprintf(title,sizeof(title),"%s | %s",name,!feed?"evaluate to attach":
+            snprintf(title,sizeof(title),"%s | %s",name,!feed?"waiting for playing pattern":
                 kind==VISUAL_SCOPE?"pattern output, auto scale":kind==VISUAL_SPECTRUM?"pattern spectrum, 20Hz-20kHz": "pattern notes");
             draw_text(row,col,title,width,8); return;
         }
@@ -3825,8 +3833,8 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         state_line(&row,maxrow,c0+1,w-2,"inline=%s lines=%d images=%d/%d footer=%s F12=%s",
             inline_visuals?"on":"off",inline_count,graphics_pending_count,GRAPHICS_IMAGES,
             editor_scope?"enabled":"off",show_viz?"on":"off");
-        state_line(&row,maxrow,c0+1,w-2,"audio=%s %.0fHz stereo MIDI=%s banks=%s:%d",
-            audio_is_stream_active()?"up":"down",SR,midi_ready()?"up":"down",banks_ready()?"ready":"indexing",banks_count());
+        state_line(&row,maxrow,c0+1,w-2,"audio=%s %s %.0fHz stereo MIDI=%s banks=%s:%d",
+            audio_is_stream_active()?"up":"down",audio_backend_name(),SR,midi_ready()?"up":"down",banks_ready()?"ready":"indexing",banks_count());
         state_line(&row,maxrow,c0+1,w-2,"song=%s hold=%s position=%d/%d",scheduler_song_on()?"on":"off",
             scheduler_song_hold()?"on":"off",scheduler_song_pos()+1,scheduler_song_count());
     }

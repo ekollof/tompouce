@@ -14,7 +14,8 @@
 #define GRAPHICS_NOTES VISUAL_CACHE_NOTES
 #define GRAPHICS_AXIS_WIDTH 72
 enum { GRAPHICS_TEXT, GRAPHICS_GRID, GRAPHICS_ACTIVE, GRAPHICS_INACTIVE,
-       GRAPHICS_ONSET, GRAPHICS_KEY_LIGHT, GRAPHICS_KEY_DARK, GRAPHICS_PLAYHEAD };
+       GRAPHICS_ONSET, GRAPHICS_KEY_LIGHT, GRAPHICS_KEY_DARK, GRAPHICS_PLAYHEAD,
+       GRAPHICS_SPECTRUM_LOW };
 /* UI thread only; OSC replies contain no terminal escape bytes here. */
 int terminal_graphics_palette_probe(FILE *out);
 int terminal_graphics_palette_reply(const char *reply);
@@ -31,7 +32,7 @@ typedef struct { double start, end; int pitch; } GraphicsNote;
 #define SPECTRUM_COLUMNS 256
 #define SPECTRUM_BANDS 64
 typedef struct {
-    double times[SPECTRUM_COLUMNS], last_time;
+    double times[SPECTRUM_COLUMNS], last_time, spectrum_span, spectrum_end;
     float levels[SPECTRUM_COLUMNS][SPECTRUM_BANDS];
     int head, count, width, height, previous_valid;
     unsigned char previous[GRAPHICS_WIDTH*GRAPHICS_HEIGHT*4];

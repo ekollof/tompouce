@@ -289,11 +289,7 @@ static void dbg_token(char *dst, size_t n, const char *src) {
 /* Called under voice_lock at the duck timer or source onset respectively.
    No allocation, decoding, JavaScript or resource destruction occurs here. */
 static double duck_endpoint_number(const char *text) {
-    JSATODTempMem temporary; const char *end;
-    double number=js_atod(text,&end,10,0,&temporary);
-    if (end==text) return NAN;
-    while (isspace((unsigned char)*end)) end++;
-    return *end?NAN:number;
+    return js_number_parse(text);
 }
 
 static void apply_duck(const PendingDuck *pending) {

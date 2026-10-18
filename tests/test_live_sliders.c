@@ -600,6 +600,17 @@ static void test_string_duck_onset(void) {
     }
 }
 
+static void test_javascript_numeric_strings(void) {
+    const char *text[]={"\xc2\xa0.25\xef\xbb\xbf","\xe2\x80\xa8.25\xe2\x80\xa9",
+        "\xe2\x80\x83","\xc2\x85.25","0b10","0o10","0x10","+0x10","-0b1",
+        "0x1.8","0x1p2","Infinity","-Infinity","1_0",""," \t.25\r\n"};
+    const double expected[]={.25,.25,0,NAN,2,8,16,NAN,NAN,NAN,NAN,INFINITY,-INFINITY,NAN,0,.25};
+    for (size_t i=0;i<sizeof(expected)/sizeof(expected[0]);i++) {
+        double actual=js_number_parse(text[i]);
+        assert(isnan(expected[i])?isnan(actual):actual==expected[i]);
+    }
+}
+
 static void test_room_preparation(void) {
     event_queue_clear(); audio_time=0; audio_toggle_play(1);
     assert(track_load_from_code("note(60).gain(0).room(1).roomsize(.1).roomfade(.02).roomlp(9000).roomdim(500).orbit(10)"));
@@ -1016,6 +1027,7 @@ int main(int argc, char **argv) {
     test_invalid_duck_controls();
     test_boolean_duck_onset();
     test_string_duck_onset();
+    test_javascript_numeric_strings();
     test_delay_automation();
     test_room_preparation();
     test_custom_room_schedule();

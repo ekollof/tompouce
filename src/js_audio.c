@@ -71,15 +71,7 @@ static double duck_numeric(const cJSON *value, const char *name, int index, doub
     if (cJSON_IsNull(item)) return 0;
     if (cJSON_IsBool(item)) return array?NAN:(cJSON_IsTrue(item)?1:0);
     if (cJSON_IsNumber(item)) return item->valuedouble;
-    if (cJSON_IsString(item)) {
-        const char *start=item->valuestring;
-        while (isspace((unsigned char)*start)) start++;
-        if (!*start) return 0;
-        char *end; double number=strtod(start,&end);
-        if (end==start) return NAN;
-        while (isspace((unsigned char)*end)) end++;
-        if (!*end) return number;
-    }
+    if (cJSON_IsString(item)) return js_number_parse(item->valuestring);
     return NAN;
 }
 

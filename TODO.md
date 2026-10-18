@@ -40,7 +40,11 @@
       accepted/rejected ramp endpoints using the bundled stack-only number
       formatter/parser, with web PCM and native endpoint/held-gain checks.
 - [ ] Remove or align the 127-byte normalized onset-string limit and verify
-      Unicode whitespace, non-finite/exotic string forms and late callbacks.
+      remaining exotic string forms and late callbacks.
+- [x] Share JavaScript-compatible numeric-string parsing between duck controls
+      and callback endpoints, including Unicode whitespace, binary/octal/hex
+      integers, signed-prefix rejection and non-finite values. Compare the
+      maintained matrix against deployed Strudel's JavaScript conversion.
 - [x] Preserve cancellation and held gain on invalid/negative duck depth,
       and retain an accepted downward ramp when invalid/non-finite attack
       rejects its return. Web PCM and native ramp regressions cover both.

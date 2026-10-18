@@ -174,6 +174,11 @@ async function duckTargetCoercion() {
   await context.startRendering();
   return {targets:results,ordered};
 }
+function numericStringCoercion() {
+  return ['\u00a0.25\ufeff','\u2028.25\u2029','\u2003','\u0085.25',
+    '0b10','0o10','0x10','+0x10','-0b1','0x1.8','0x1p2',
+    'Infinity','-Infinity','1_0','',' \t.25\r\n'].map(text=>String(Number(text)));
+}
 async function effectMethods() {
   const context=new OfflineAudioContext(2,44100,44100);
   setAudioContext(context); setSuperdoughAudioController(null);
@@ -412,6 +417,9 @@ try {
   assert.deepEqual(orbitCreation,{created:[1,9,7],ducked:[9,7]},
     'source orbit creation precedes duck dispatch, including rests and missing sources');
   const targetCoercion=await browser.evaluate('('+duckTargetCoercion.toString()+')()');
+  const numericStrings=await browser.evaluate('('+numericStringCoercion.toString()+')()');
+  assert.deepEqual(numericStrings,['0.25','0.25','0','NaN','2','8','16',
+    'NaN','NaN','NaN','NaN','Infinity','-Infinity','NaN','0','0.25']);
   const invalidDuck=await browser.evaluate('('+invalidDuckControls.toString()+')()');
   invalidDuck.forEach((test,index)=>{
     if(index>=9) {
@@ -475,6 +483,6 @@ try {
   assert(Math.abs(methods.delayAfterReturn.feedback-.75)<1e-7,
     'web delay automation equality behavior changed');
   await fs.mkdir(artifacts,{recursive:true});
-  await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({url:'https://strudel.cc/',capturedAt:new Date().toISOString(),silent,methods,roomReplacement:roomReplacementResult,handoff,delay,automation,short,duck,orbitCreation,targetCoercion,invalidDuck,mapping,clip},null,2)+'\n');
+  await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({url:'https://strudel.cc/',capturedAt:new Date().toISOString(),silent,methods,roomReplacement:roomReplacementResult,handoff,delay,automation,short,duck,orbitCreation,targetCoercion,numericStrings,invalidDuck,mapping,clip},null,2)+'\n');
   console.log(JSON.stringify({silent,delay,duck}));
 } finally {await browser.close();}

@@ -30,6 +30,7 @@ typedef struct {
     int align, edo, circle, hapcircles, polygon, fade, log_spiral, cap;
     uint32_t active, inactive, background, playhead_color, color;
     int has_color;
+    unsigned explicit_colors;
 } VisualOptions;
 
 int visual_kind(const char *name, size_t length);

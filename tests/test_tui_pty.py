@@ -12,6 +12,7 @@ import termios
 import time
 import urllib.request
 import re
+import base64
 
 BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', './tompouce')
 CASE_FILTER = os.environ.get('TOMPOUCE_TEST_FILTER', '')
@@ -70,6 +71,17 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 response = b'OK' if graphics != 'unsupported' else b'ENOTSUP'
                 os.write(master, b'\x1b_Gi=1414483200;' + response + b'\x1b\\')
                 drain(.2)
+                if name == 'Kitty terminal palette':
+                    assert b'\x1b]10;?' in output and b'\x1b]4;14;?' in output
+                    start=len(output)
+                    os.write(master,b'\x1b]10;rgb:1111/2222/3333\x1b\\\x1b]11;rgb:ee/ee/ee\x07'
+                             b'\x1b]4;14;rgb:ab/cd/ef\x1b\\\x1b]4;99;rgb:ff/ff/ff\x07')
+                    drain(.15)
+                    chunks=re.findall(rb'\x1b_G([^;]*);([A-Za-z0-9+/=]*)\x1b\\',bytes(output[start:]))
+                    pixels=b''.join(base64.b64decode(payload) for header,payload in chunks
+                                    if header.startswith((b'a=T,',b'q=2,m=')))
+                    assert b'\xab\xcd\xef\xff' in pixels, 'scope did not use terminal cyan'
+                    assert b'\x11\x22\x33\xff' in pixels, 'axis text did not use foreground'
                 if graphics != 'unsupported':
                     assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'missing Kitty image')
                     assert b'i=1414483201,p=1' in output, (name, 'missing first placement')
@@ -276,6 +288,7 @@ check("companion stop", "note('c4').gain(0)", b"\x1bOQ/companion\r", companion="
 check("legacy vi configuration", "one", b"iX", expected="Xone", vi=True, application="strudelterm")
 check("legacy sound library import", "", import_sounds=True, expected='s("my_drums")', application="strudelterm")
 graphics_code = 'note("c4").gain(0)._scope()\nnote("g4").gain(0)._pianoroll()'
+check('Kitty terminal palette', graphics_code, expected=graphics_code, graphics='supported')
 check('Kitty graphics capability, resize and editor input', graphics_code, b'X', expected='X'+graphics_code, graphics='supported')
 check('Kitty unsupported braille fallback', graphics_code, expected=graphics_code, graphics='unsupported')
 check('Kitty manual braille fallback', graphics_code, b'\x1bOQ/graphics braille\r', expected=graphics_code, graphics='braille')

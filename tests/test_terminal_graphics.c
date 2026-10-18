@@ -222,6 +222,47 @@ static void test_orientations(void) {
         }
 }
 
+static void test_palette(void) {
+    terminal_graphics_palette_reset();
+    assert(terminal_graphics_palette_reply("10;rgb:1111/2222/3333"));
+    assert(terminal_graphics_palette_reply("11;rgb:eeee/eeee/eeee"));
+    assert(terminal_graphics_palette_reply("4;14;rgb:ab/cd/ef"));
+    assert(terminal_graphics_palette_reply("4;10;#123456"));
+    assert(terminal_graphics_palette_reply("4;3;rgb:f/8/0"));
+    assert(terminal_graphics_theme(GRAPHICS_TEXT,255)==0x112233ffu);
+    assert(terminal_graphics_theme(GRAPHICS_ACTIVE,255)==0xabcdefffu);
+    assert(terminal_graphics_theme(GRAPHICS_INACTIVE,191)==0x123456bfu);
+    assert(terminal_graphics_theme(GRAPHICS_ONSET,255)==0xff8800ffu);
+    unsigned generation=terminal_graphics_palette_generation();
+    assert(!terminal_graphics_palette_reply("4;16;rgb:ff/ff/ff"));
+    assert(!terminal_graphics_palette_reply("10;rgb:fffff/00/00"));
+    assert(!terminal_graphics_palette_reply("10;rgb:ff/00/00garbage"));
+    assert(!terminal_graphics_palette_reply("10;rgb:ff/00"));
+    assert(!terminal_graphics_palette_reply("4;-1;#123456"));
+    assert(terminal_graphics_palette_generation()==generation);
+    VisualOptions options; visual_options(&options,VISUAL_SCOPE,NULL);
+    float samples[16]={0}; image.width=200; image.height=48; image.compact=0;
+    terminal_graphics_feedback(&image,NULL,VISUAL_SCOPE,&options,NULL,0,samples,16,0,0,1);
+    const unsigned char *trace=image.rgba+((size_t)24*image.width+90)*4;
+    assert(trace[0]==0xab && trace[1]==0xcd && trace[2]==0xef);
+    cJSON *explicit=cJSON_Parse("{\"active\":\"red\",\"inactive\":\"blue\",\"playheadColor\":\"pink\"}"); assert(explicit);
+    visual_options(&options,VISUAL_SCOPE,explicit); cJSON_Delete(explicit);
+    assert(options.explicit_colors==7);
+    terminal_graphics_feedback(&image,NULL,VISUAL_SCOPE,&options,NULL,0,samples,16,0,0,1);
+    assert(trace[0]==255 && trace[1]==0 && trace[2]==0);
+    visual_options(&options,VISUAL_PITCHWHEEL,NULL);
+    VisualNote red={.start=0,.end=2,.pitch=60,.gain=1,.color=0xff0000ffu,.flags=VISUAL_COLOR};
+    terminal_graphics_feedback(&image,NULL,VISUAL_PITCHWHEEL,&options,&red,1,NULL,0,1,0,1);
+    int red_pixels=0;
+    for (int i=0;i<image.width*image.height;i++)
+        if (image.rgba[i*4]==255 && image.rgba[i*4+1]==0 && image.rgba[i*4+2]==0) red_pixels++;
+    assert(red_pixels>0); /* Pattern colors remain literal, independent of the palette. */
+    assert(terminal_graphics_palette_reply("4;14;rgb:12/34/56"));
+    assert(terminal_graphics_palette_generation()>generation);
+    terminal_graphics_palette_reset();
+    assert(terminal_graphics_theme(GRAPHICS_ACTIVE,255)==0x5ad7f5ffu);
+}
+
 int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--feedback-demo")) {
         static TerminalFeedbackState state;
@@ -260,7 +301,7 @@ int main(int argc, char **argv) {
         terminal_graphics_delete(stdout,77); terminal_graphics_delete(stdout,78);
         return 0;
     }
-    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_orientations();
+    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_orientations(); test_palette();
     puts("Kitty waveform, piano roll, clipped chunked transport and capability checks ok");
     return 0;
 }

@@ -130,9 +130,12 @@ void visual_options(VisualOptions *o, int kind, const cJSON *j) {
     o->log_spiral = boolean(j,"logSpiral",0);
     o->cap = !strcmp(string(j,"cap"),"round") ? 1 : (!strcmp(string(j,"cap"),"square") ? 2 : 0);
     o->active = 0x5ad7f5ffu; o->inactive = 0x6eebaabfu; o->playhead_color = 0xe6ebf596u;
-    visual_color(string(j,"active"),&o->active); visual_color(string(j,"activeColor"),&o->active);
-    visual_color(string(j,"inactive"),&o->inactive); visual_color(string(j,"inactiveColor"),&o->inactive);
-    visual_color(string(j,"background"),&o->background); visual_color(string(j,"playheadColor"),&o->playhead_color);
+    if (visual_color(string(j,"active"),&o->active)) o->explicit_colors|=1;
+    if (visual_color(string(j,"activeColor"),&o->active)) o->explicit_colors|=1;
+    if (visual_color(string(j,"inactive"),&o->inactive)) o->explicit_colors|=2;
+    if (visual_color(string(j,"inactiveColor"),&o->inactive)) o->explicit_colors|=2;
+    visual_color(string(j,"background"),&o->background);
+    if (visual_color(string(j,"playheadColor"),&o->playhead_color)) o->explicit_colors|=4;
     o->has_color = visual_color(string(j,"color"),&o->color);
 }
 

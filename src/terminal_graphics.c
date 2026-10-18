@@ -3,6 +3,70 @@
 #include <string.h>
 #include <ctype.h>
 
+static uint32_t palette[18]; /* ANSI 0..15, default foreground/background */
+static unsigned palette_known, palette_generation;
+void terminal_graphics_palette_reset(void) { palette_known=0; palette_generation++; }
+unsigned terminal_graphics_palette_generation(void) { return palette_generation; }
+int terminal_graphics_palette_probe(FILE *out) {
+    if (!out || fputs("\033]10;?\033\\\033]11;?\033\\",out)==EOF) return 0;
+    for (int i=0;i<16;i++) if (fprintf(out,"\033]4;%d;?\033\\",i)<0) return 0;
+    return 1;
+}
+static int hex_component(const char **text, unsigned *value) {
+    unsigned v=0; int digits=0;
+    while (isxdigit((unsigned char)**text)) {
+        if (++digits>4) return 0;
+        int c=tolower((unsigned char)*(*text)++);
+        v=(v<<4)|(unsigned)(c<='9'?c-'0':c-'a'+10);
+    }
+    if (!digits) return 0;
+    unsigned max=(1u<<(digits*4))-1;
+    *value=(v*255+max/2)/max; return 1;
+}
+int terminal_graphics_palette_reply(const char *reply) {
+    if (!reply || strlen(reply)>96) return 0;
+    const char *p=reply; int index=-1;
+    if (!strncmp(p,"10;",3)) { index=16; p+=3; }
+    else if (!strncmp(p,"11;",3)) { index=17; p+=3; }
+    else if (!strncmp(p,"4;",2)) {
+        p+=2; int value=0,digits=0;
+        while (*p>='0' && *p<='9') { if (++digits>2) return 0; value=value*10+*p++-'0'; }
+        if (!digits || value>15 || *p++!=';') return 0;
+        index=value;
+    }
+    if (index<0) return 0;
+    uint32_t color;
+    if (!strncmp(p,"rgb:",4)) {
+        p+=4; unsigned r,g,b;
+        if (!hex_component(&p,&r) || *p++!='/' || !hex_component(&p,&g) || *p++!='/' ||
+            !hex_component(&p,&b) || *p) return 0;
+        color=(r<<24)|(g<<16)|(b<<8)|255u;
+    } else {
+        size_t n=strlen(p);
+        if (*p!='#' || (n!=4 && n!=7) || !visual_color(p,&color)) return 0;
+    }
+    unsigned bit=1u<<index;
+    if (!(palette_known&bit) || palette[index]!=color) {
+        palette[index]=color; palette_known|=bit; palette_generation++;
+    }
+    return 1;
+}
+uint32_t terminal_graphics_theme(int role, unsigned alpha) {
+    static const uint32_t fallback[]={0xbed2e1ffu,0x607080ffu,0x5ad7f5ffu,0x6eebaaffu,
+        0xffbe50ffu,0xa5b9beffu,0x303d42ffu,0xe6ebf5ffu};
+    if (role<0 || role>GRAPHICS_PLAYHEAD) return 0;
+    uint32_t color=fallback[role];
+    int index=role==GRAPHICS_ACTIVE?14:role==GRAPHICS_INACTIVE?10:role==GRAPHICS_ONSET?3:16;
+    if (palette_known&(1u<<index)) color=palette[index];
+    else if (palette_known&(1u<<16)) color=palette[16];
+    if (role==GRAPHICS_KEY_DARK && (palette_known&(1u<<17))) {
+        uint32_t fg=palette_known&(1u<<16)?palette[16]:fallback[GRAPHICS_TEXT],bg=palette[17];
+        color=0;
+        for (int shift=8;shift<=24;shift+=8) color|=((((fg>>shift)&255)+3*((bg>>shift)&255))/4)<<shift;
+    }
+    return (color&0xffffff00u)|(alpha>255?255:alpha);
+}
+
 int terminal_graphics_probe(FILE *out) {
     return out && fprintf(out,"\033_Gi=%u,s=1,v=1,a=q,t=d,f=24;AAAA\033\\",GRAPHICS_QUERY_ID) > 0;
 }
@@ -54,7 +118,7 @@ static void label(TerminalImage *im, int x, int y, const char *text, int scale) 
         for (int dy = 0; dy < 5; dy++) for (int dx = 0; dx < 3; dx++)
             if (glyph_row((unsigned char)text[i],dy)&(1u<<(2-dx)))
                 for (int py = 0; py < scale; py++) for (int px = 0; px < scale; px++)
-                    pixel(im,x+i*4*scale+dx*scale+px,y+dy*scale+py,190,210,225,255);
+                    terminal_graphics_pixel(im,x+i*4*scale+dx*scale+px,y+dy*scale+py,terminal_graphics_theme(GRAPHICS_TEXT,255));
 }
 
 int terminal_graphics_note_label(int midi, char *out, size_t size) {

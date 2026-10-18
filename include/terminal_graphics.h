@@ -13,6 +13,14 @@
 #define GRAPHICS_IMAGES 8
 #define GRAPHICS_NOTES VISUAL_CACHE_NOTES
 #define GRAPHICS_AXIS_WIDTH 72
+enum { GRAPHICS_TEXT, GRAPHICS_GRID, GRAPHICS_ACTIVE, GRAPHICS_INACTIVE,
+       GRAPHICS_ONSET, GRAPHICS_KEY_LIGHT, GRAPHICS_KEY_DARK, GRAPHICS_PLAYHEAD };
+/* UI thread only; OSC replies contain no terminal escape bytes here. */
+int terminal_graphics_palette_probe(FILE *out);
+int terminal_graphics_palette_reply(const char *reply);
+void terminal_graphics_palette_reset(void);
+unsigned terminal_graphics_palette_generation(void);
+uint32_t terminal_graphics_theme(int role, unsigned alpha);
 
 typedef struct {
     int width, height, compact;

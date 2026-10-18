@@ -2,6 +2,27 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Terminal graphics palette (2026-10-18)
+
+After Kitty capability detection, the foreground UI queries OSC 10/11 and the
+16 ANSI colors using OSC 4, then polls every five seconds. Bounded OSC replies
+accept BEL/ST termination and 1..4-digit RGB channels; only replies within the
+query window can update colors. Input handling consumes these replies before
+editor/undo logic. Foreground palette roles color all production graphics
+defaults, guides, onset marks, labels and keyboard rails; transparent backgrounds
+retain terminal opacity. Explicit visual options and patterned note colors win.
+Unanswered queries retain the original defaults. Palette generations invalidate
+smear/spectrum UI history on changes; no audio-thread changes or desktop config
+edits. Unit tests cover parsing, rejection, fallback and explicit-color priority;
+the Kitty palette PTY test decodes transmitted RGBA and checks actual colors and
+unchanged source. See src/terminal_graphics.c and src/visual_render.c.
+Validation passed: native suite (31 examples/1,207 event references and Csound),
+all 51 PTY cases (~58 FPS), and a real owned Kitty preview whose live palette
+was changed through its isolated remote-control socket. The scope changed to
+magenta and axis text to the new foreground after polling; screenshot evidence
+is /tmp/tompouce-terminal-theme.png. The preview and its socket were closed;
+the user's ws3 app, song and desktop settings were not changed.
+
 ### F4 diagnostics (2026-10-18)
 
 The state pane now shows editor mode, wrap/mouse/selection, pending evaluation

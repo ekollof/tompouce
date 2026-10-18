@@ -94,6 +94,7 @@ typedef struct {
 static InlineGraphic graphics_pending[GRAPHICS_IMAGES], graphics_previous[GRAPHICS_IMAGES];
 static int graphics_pending_count, graphics_previous_count;
 static double graphics_last_frame;
+static double palette_next_query, palette_reply_until;
 #define GRAPHICS_FRAME_SECONDS (1.0/60.0)
 static void inline_graphics_clear(void);
 
@@ -915,6 +916,7 @@ void tui_init(void) {
     SLkp_define_keysym("\033[200~", 2101); /* bracketed paste */
     SLkp_define_keysym("\033[Z", 2102); /* Shift+Tab */
     SLkp_define_keysym("\033_G", 2103); /* Kitty graphics response */
+    SLkp_define_keysym("\033]", 2104); /* OSC palette response */
     SLkp_define_keysym("\033[1;2A", 2110);
     SLkp_define_keysym("\033[1;2B", 2111);
     SLkp_define_keysym("\033[1;2D", 2112);
@@ -2495,6 +2497,7 @@ static void inline_graphics_clear(void) {
 /* Fixed foreground caches, one per compiled attachment; never touched by audio. */
 static TerminalFeedbackState feedback_states[32];
 static unsigned feedback_generations[32];
+static unsigned feedback_palettes[32];
 static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed, unsigned generation) {
     VisualOptions options; VisualNote notes[GRAPHICS_NOTES]; float samples[4096];
     visual_options(&options,kind,NULL);
@@ -2515,8 +2518,10 @@ static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed
     int slot=0; unsigned bits=feed;
     while (bits>1) { bits>>=1; slot++; }
     TerminalFeedbackState *state=&feedback_states[slot];
-    if (feedback_generations[slot]!=generation) {
+    unsigned palette=terminal_graphics_palette_generation();
+    if (feedback_generations[slot]!=generation || feedback_palettes[slot]!=palette) {
         memset(state,0,sizeof(*state)); feedback_generations[slot]=generation;
+        feedback_palettes[slot]=palette;
     }
     terminal_graphics_feedback(image,state,kind,&options,notes,count,samples,n,audio_time_now(),origin,seconds);
 }
@@ -4252,6 +4257,11 @@ static void do_command_or_ai(const char *text) {
 }
 
 void tui_frame(void) {
+    double palette_now=now_seconds();
+    if (graphics_supported && !graphics_disabled && palette_now>=palette_next_query) {
+        terminal_graphics_palette_probe(stdout); fflush(stdout);
+        palette_reply_until=palette_now+.75; palette_next_query=palette_now+5;
+    }
     companion_poll();
     /* live pattern check (only when the buffer changed) */
     {
@@ -4367,6 +4377,22 @@ static void read_graphics_reply(void) {
         graphics_supported = 1; graphics_probe_pending = 0; graphics_redraw = 1;
         log_console("inline visuals: Kitty graphics supported");
     }
+}
+
+static void read_palette_reply(void) {
+    char reply[128]; int n=0,escaped=0,complete=0,bad=0;
+    double deadline=now_seconds()+.1;
+    for (int i=0;i<256 && now_seconds()<deadline;i++) {
+        int c=report_byte(); if (c<0) break;
+        if (escaped) { if (c=='\\') complete=1; else bad=1; break; }
+        if (c==7) { complete=1; break; }
+        if (c==27) { escaped=1; continue; }
+        if (c<32 || c>126 || n>=(int)sizeof(reply)-1) bad=1;
+        else reply[n++]=(char)c;
+    }
+    reply[n]=0;
+    if (complete && !bad && now_seconds()<=palette_reply_until && terminal_graphics_palette_reply(reply))
+        graphics_redraw=1;
 }
 
 static void read_mouse(void) {
@@ -4631,6 +4657,7 @@ void tui_run(void) {
         }
         if (ch == SL_KEY_ERR) continue;
         if (ch == 2103) { read_graphics_reply(); continue; }
+        if (ch == 2104) { read_palette_reply(); continue; }
         undo_tick++;
         if (ch == 2100) { read_mouse(); continue; }
         if (ch == 2101) { read_paste(); continue; }

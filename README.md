@@ -148,6 +148,10 @@ scopes label linear amplitude on the y-axis, using the current auto-scaled
 range. Labels reserve their own gutter so they do not cover the plots.
 Other terminals retain braille. F2 → `/graphics braille` selects braille;
 `/graphics auto` restores automatic detection. This preference persists.
+Graphics defaults follow the terminal palette, including guides and labels.
+Tompouce checks for theme changes every five seconds; explicit pattern and
+visual-option colors take precedence. Terminals that do not answer color
+queries keep the built-in fallback palette, with a transparent background.
 Direct tmux/screen sessions retain braille. The separate F12 pane also retains
 its text display.
 

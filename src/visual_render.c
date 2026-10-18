@@ -195,13 +195,13 @@ static void roll(TerminalImage *im, const VisualOptions *o, const VisualNote *no
         int note=(int)round(o->fold && row<rows?values[row]:low+row);
         if (row<pitch_rows) {
             int pc=(note%12+12)%12,black=pc==1 || pc==3 || pc==6 || pc==8 || pc==10;
-            uint32_t key=black?0x303d42ffu:0xa5b9beffu;
+            uint32_t key=terminal_graphics_theme(black?GRAPHICS_KEY_DARK:GRAPHICS_KEY_LIGHT,255);
             if (o->vertical) {
-                line(im,center,top,center,im->height-1,note%12?0x60708030u:0x60708080u,0);
+                line(im,center,top,center,im->height-1,terminal_graphics_theme(GRAPHICS_GRID,note%12?48:128),0);
                 if (top) for (int x=center-half;x<center+half;x++) for (int y=top-4;y<top-1;y++)
                     terminal_graphics_pixel(im,x,y,key);
             } else {
-                line(im,left,center,im->width-1,center,note%12?0x60708030u:0x60708080u,0);
+                line(im,left,center,im->width-1,center,terminal_graphics_theme(GRAPHICS_GRID,note%12?48:128),0);
                 if (left) for (int y=center-half;y<center+half;y++) for (int x=left-7;x<left-1;x++)
                     terminal_graphics_pixel(im,x,y,key);
             }
@@ -270,7 +270,7 @@ static void roll(TerminalImage *im, const VisualOptions *o, const VisualNote *no
             terminal_graphics_text(im,x0+1,y0,text,1);
         }
     }
-    for (int i=0;i<marked;i++) line(im,onsets[i][0],onsets[i][1],onsets[i][2],onsets[i][3],0xffbe50ffu,0);
+    for (int i=0;i<marked;i++) line(im,onsets[i][0],onsets[i][1],onsets[i][2],onsets[i][3],terminal_graphics_theme(GRAPHICS_ONSET,255),0);
     double p=o->flip_time?1-o->playhead:o->playhead;
     if (o->vertical) line(im,0,top+p*(height-1),im->width-1,top+p*(height-1),o->playhead_color,0);
     else line(im,left+p*(width-1),0,left+p*(width-1),im->height-1,o->playhead_color,0);
@@ -285,11 +285,11 @@ static void polar(TerminalImage *im, const VisualOptions *o, const VisualNote *n
     if (kind==VISUAL_PITCHWHEEL) {
         for (int j=0;j<o->edo;j++) {
             double a=TAU*j/o->edo-TAU/4;
-            line(im,cx+radius*.85*cos(a),cy+radius*.85*sin(a),cx+radius*cos(a),cy+radius*sin(a),0x60708080u,0);
+            line(im,cx+radius*.85*cos(a),cy+radius*.85*sin(a),cx+radius*cos(a),cy+radius*sin(a),terminal_graphics_theme(GRAPHICS_GRID,128),0);
         }
         if (o->circle) for (int j=0;j<180;j++) {
             double a=TAU*j/180,b=TAU*(j+1)/180;
-            line(im,cx+radius*cos(a),cy+radius*sin(a),cx+radius*cos(b),cy+radius*sin(b),0x60708080u,0);
+            line(im,cx+radius*cos(a),cy+radius*sin(a),cx+radius*cos(b),cy+radius*sin(b),terminal_graphics_theme(GRAPHICS_GRID,128),0);
         }
         double angles[GRAPHICS_NOTES]; uint32_t colors[GRAPHICS_NOTES]; int used=0;
         double root=69+12*log2(o->root/440);
@@ -343,6 +343,11 @@ void terminal_graphics_feedback(TerminalImage *im, TerminalFeedbackState *state,
                                 const VisualOptions *o, const VisualNote *notes, int count,
                                 const float *samples, int sample_count, double now, double origin, double seconds) {
     if (!im || !o || im->width<1 || im->width>GRAPHICS_WIDTH || im->height<1 || im->height>GRAPHICS_HEIGHT) return;
+    VisualOptions themed=*o;
+    if (!(themed.explicit_colors&1)) themed.active=terminal_graphics_theme(GRAPHICS_ACTIVE,255);
+    if (!(themed.explicit_colors&2)) themed.inactive=terminal_graphics_theme(GRAPHICS_INACTIVE,191);
+    if (!(themed.explicit_colors&4)) themed.playhead_color=terminal_graphics_theme(GRAPHICS_PLAYHEAD,150);
+    o=&themed;
     if (count<0 || !notes) count=0;
     if (count>GRAPHICS_NOTES) count=GRAPHICS_NOTES;
     if (!isfinite(seconds) || seconds<=0) seconds=2;

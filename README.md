@@ -1,5 +1,8 @@
 # Tompouce
 
+Source: [ekollof/tompouce](https://github.com/ekollof/tompouce) (private repository).
+Access requires a GitHub account with permission to this repository.
+
 Previously named StrudelTerm. Build and run `./tompouce`; the installer places
 the command at `~/.local/bin/tompouce`. New user data uses `tompouce` directories.
 When that directory is absent, existing `strudelterm` settings, sessions,
@@ -13,12 +16,18 @@ A terminal live-coding environment for music, inspired by Strudel, built in C.
 
 ## Install
 
-From a complete project checkout on Linux x86_64:
+Clone the complete project and install on Linux x86_64:
 
 ```sh
+git clone git@github.com:ekollof/tompouce.git
+cd tompouce
 ./install.sh
 ~/.local/bin/tompouce
 ```
+
+Alternatively, use `gh repo clone ekollof/tompouce` with an authenticated GitHub
+CLI. The checkout includes the bundled runtimes, vendored dependencies and
+examples; the installer downloads the sound banks separately.
 
 The installer supports Arch/Omarchy, Debian/Ubuntu and Fedora. Run it as your
 normal user; it uses sudo only for distro packages. It installs build libraries,

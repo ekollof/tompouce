@@ -158,14 +158,14 @@ its text display.
 Keys:
 - `Tab` — indent two spaces (selected lines as a block); `Shift+Tab` — unindent; `Ctrl+Space` — complete a legacy keyword.
 - Type code in the editor (left pane).
-- `F5` or `Ctrl+R` — evaluate code
+- `F5` — evaluate code (`Ctrl+R` also evaluates outside vi normal mode)
 - `Ctrl+P` — play / stop
 - `F1` — toggle language cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
 - `F2` — AI prompt (supports `/bpm N`, `/play`, `/stop`, `/clear`, `/save`, `/load`, `/song`, `/rescan`)
 - `F4` — toggle internals/state pane: editor mode, pending evaluation/unsaved
   changes, undo history, engine generations, graphics/inline status, audio/MIDI,
   sample-bank index, song/hold state, voices, queue and per-track timing.
-- `F3` — toggle vi-ish editor mode (normal/insert: `hjkl`, `gg/G`, `dd`, `yy`, `p/P`, `x`, `i/a/o/O/I/A`, `0/$`)
+- `F3` — toggle vi editor mode; motions, operators and search are listed below
 - `Ctrl+Space` — context-aware completion (keywords, notes, drums, transforms, `wt:` tables)
 - `F6` — browse samples, drum-machines, synths, wavetables and user sounds. Type to search; Left/Right changes category; Enter inserts a snippet at the source cursor. Backspace with an empty query returns to categories. The local-banks category preserves folder browsing (`Enter` descends, `Tab` uses a bank).
 - `F7` — song mode: play track buffers in sequence from track 0 (`/song [on|off|hold]`)
@@ -210,6 +210,30 @@ Defaults are non-modal editing, mouse enabled, and a 60% code pane.
 F3 switches vi mode and saves the choice for future sessions. Vi mode starts
 in normal mode after a restart. Escape leaves vi insert mode
 when vi mode is enabled and clears selections in non-modal mode.
+
+Vi normal mode supports:
+
+- Counts such as `5w`, `3dd`, `2d3w` and `12G` (capped at 9,999).
+- `h/j/k/l`, `w/b/e`, `W/B/E`, `0`, `^`, `$`, `gg`, `G`, `{` and `}`.
+  `^` moves to the first nonblank character. `j/k` and `gj/gk` follow wrapped
+  editor rows, skipping inline visualisations; operator `dj/dk` uses whole lines.
+- `f/F/t/T` plus an ASCII character, `;` to repeat and `,` to reverse the find;
+  `%` matches nested literal parentheses, brackets and braces.
+- `d`, `c` and `y` with motions or text objects: `dw`, `ce`, `y$`, `diw`,
+  `daw`, `ci"`, `da(`, `di[` and `ci{`. Word/WORD, quotes and bracket objects
+  also work in visual selection. Quote objects stay within a logical line.
+- `dd/cc/yy`, `D/C/Y`, `x/X`, `s`, `r`, and counted `p/P`.
+  `c`-operator deletion and following typing form one undo step within the usual
+  typing run; `u` undoes and `Ctrl+R` redoes.
+- `/text` and `?text`, Enter to search, `n/N` to repeat, and `*/#` for a
+  whole-word search. Search is literal, wraps the buffer, and Escape cancels.
+- `i/a/I/A/o/O` and `v/V`; Escape returns to normal mode. Horizontal character
+  motions and deletion respect UTF-8 code-point boundaries.
+
+Application shortcuts (including playback, sliders, track switching, clipboard,
+save/load and Ctrl+D duplication) retain their existing meanings. This is a
+native vi subset: regex search, Ex commands, macros, named registers, marks,
+block visual mode and dot-repeat are not implemented.
 
 Editor regression checks: `make test` covers buffer edits and selection bounds;
 `python3 tests/test_tui_pty.py` checks real terminal input, mouse reports,

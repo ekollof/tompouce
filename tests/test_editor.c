@@ -3,6 +3,77 @@
 #include <assert.h>
 #include <stdlib.h>
 
+static void vi_setup(const char *text) {
+    assert(replace_code_with(text));
+    undo_hist_clear(&undo_s,&undo_n); undo_hist_clear(&redo_s,&redo_n);
+    memset(&vi,0,sizeof(vi)); vi_reset();
+    vi_mode=vi_normal=1; editor_wrap=0; cur_line=cur_col=0; sel_active=0;
+}
+static void vi_keys(const char *keys) {
+    while (*keys) { undo_tick++; assert(vi_handle_normal((unsigned char)*keys++)); }
+}
+static void vi_expect(const char *expected) {
+    char *flat=editor_flatten(); assert(flat);
+    size_t n=strlen(expected);
+    if (strlen(flat)!=n+1 || memcmp(flat,expected,n) || flat[n]!='\n')
+        fprintf(stderr,"vi buffer: wanted [%s], got [%s]\n",expected,flat);
+    assert(strlen(flat)==n+1 && !memcmp(flat,expected,n) && flat[n]=='\n'); free(flat);
+}
+static void test_vi_motions(void) {
+    vi_setup("one.foo  two\n  three four");
+    vi_keys("w"); assert(cur_col==3);
+    vi_keys("w"); assert(cur_col==4);
+    vi_keys("W"); assert(cur_col==9);
+    vi_keys("e"); assert(cur_col==11);
+    vi_keys("bB"); assert(cur_col==0);
+    vi_keys("2G^"); assert(cur_line==1 && cur_col==2);
+    vi_keys("$"); assert(cur_col==11);
+    vi_keys("gg"); assert(cur_line==0 && cur_col==0);
+    vi_setup("one two three four five six seven");
+    vi_keys("2d3w"); vi_expect("seven");
+    vi_keys("u"); vi_expect("one two three four five six seven");
+    vi_keys("\022"); vi_expect("seven");
+    vi_setup("one.two three"); vi_keys("de"); vi_expect(".two three");
+    vi_setup("abc"); vi_keys("$dl"); vi_expect("ab");
+    vi_setup("one two"); vi_keys("cw"); vi_expect(" two"); assert(!vi_normal);
+    vi_setup("foo(\"hello\")"); cur_col=8; vi_keys("ci\""); vi_expect("foo(\"\")"); assert(!vi_normal);
+    vi_setup("note(\"a\\\"b\")"); cur_col=9; vi_keys("ci\""); vi_expect("note(\"\")");
+    vi_setup("foo(abc, [def]) tail"); cur_col=10; vi_keys("di["); vi_expect("foo(abc, []) tail");
+    vi_setup("foo(abc, [def]) tail"); cur_col=10; vi_keys("da("); vi_expect("foo tail");
+    vi_setup("é λ x"); vi_keys("ll"); assert(cur_col==3);
+    vi_keys("h"); assert(cur_col==2);
+    vi_keys("0x"); vi_expect(" λ x");
+    vi_setup("abc, def, ghi"); vi_keys("f,"); assert(cur_col==3);
+    vi_keys(";"); assert(cur_col==8);
+    vi_keys(","); assert(cur_col==3);
+    vi_keys("0dt,"); vi_expect(", def, ghi");
+    vi_setup("abc, def, ghi"); vi_keys("df,"); vi_expect(" def, ghi");
+    vi_setup("foo(a,(b))"); vi_keys("%"); assert(cur_col==9);
+    vi_keys("%"); assert(cur_col==3);
+    vi_setup("one two one\nsomeone one"); vi_keys("/one\r"); assert(cur_col==8);
+    vi_keys("n"); assert(cur_line==1 && cur_col==4);
+    vi_keys("N"); assert(cur_line==0 && cur_col==8);
+    vi_keys("gg*"); assert(cur_col==8);
+    vi_keys("n"); assert(cur_line==1 && cur_col==8);
+    vi_setup("one\ntwo\nthree\nfour"); vi_keys("2dd"); vi_expect("three\nfour");
+    vi_keys("Gdd"); vi_expect("three");
+    vi_setup("one\ntwo\nthree"); vi_keys("2yy");
+    assert(yank_lines && !strcmp(vi_yank,"one\ntwo\n") && cur_line==0);
+    vi_setup("one\nline\n\nthree\n\nlast"); vi_keys("}"); assert(cur_line==2);
+    vi_keys("}"); assert(cur_line==4);
+    vi_keys("{"); assert(cur_line==2);
+    vi_setup("one two"); cur_col=1; selection_start(0); vi_keys("iw");
+    int a,b; selection_bounds(&a,&b); assert(a==0 && b==3);
+    vi_setup("one two"); vi_keys("d\033w"); vi_expect("one two"); assert(cur_col==4);
+    vi_setup("abc"); vi_keys("dfz"); vi_expect("abc"); assert(cur_col==0);
+    vi_keys("99999dw"); vi_expect("");
+    vi_setup("é"); vi_keys("9999w"); assert(cur_col==0);
+    vi_setup("abc\ndef"); vi_keys("cc"); vi_expect("\ndef"); assert(!vi_normal);
+    vi_setup("abc\ndef"); vi_keys("Gcc"); vi_expect("abc\n"); assert(!vi_normal);
+    vi_setup("one\ntwo"); vi_keys("yyG2p"); vi_expect("one\ntwo\none\none");
+    vi_mode=vi_normal=0;
+}
+
 int main(void) {
     graphics_supported = 1;
     assert(queue_inline_graphic(0,1,2,5,6,40,1,123));
@@ -263,6 +334,7 @@ int main(void) {
     assert(dots[0][0] == 255);
     inline_dot(dots,2,4,1,4);
     assert(dots[1][1] == 0);
-    puts("editor and inline braille layout ok");
+    test_vi_motions();
+    puts("editor, vi motions and inline braille layout ok");
     return 0;
 }

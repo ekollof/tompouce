@@ -235,6 +235,17 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
 check("multiline paste and clipboard", "",
       b"\x1b[200~one\ntwo\nthree\x1b[201~\x01\x03\x01\x18\x16", "one\ntwo\nthree")
 check("vi visual lines and startup config", "one\ntwo\nthree", b"Vjyp", "one\ntwo\none\ntwo\nthree", vi=True)
+check("vi counted operators", "one two three four five six seven", b"2d3w", "seven", vi=True)
+check("vi change quoted text", 'note("c4 e4").gain(0)', b'6lci"g4\x1b', 'note("g4").gain(0)', vi=True)
+check("vi change undo transaction", "one two", b"cwX\x1bu", "one two", vi=True)
+check("vi text object delete", "one two three", b"wdiw", "one  three", vi=True)
+check("vi character find delete", "abc, def, ghi", b"df,", " def, ghi", vi=True)
+check("vi buffer search", "one two three", b"/three\rdiw", "one two ", vi=True)
+check("vi unicode cursor boundaries", "é λ x", b"2lx", "é  x", vi=True)
+check("vi unicode insert backspace", "éx", b"A\x7f\x7f", "", vi=True)
+check("vi bracket match", "foo(a,(b))", b"%x", "foo(a,(b)", vi=True)
+check("vi replace characters", "one two", b"3rX", "XXX two", vi=True)
+check("vi counted yank paste", "one two", b"yiw$2p", "one twooneone", vi=True)
 check("persist vi mode on restart", "", b'\x1bOR', expected='', persisted_vi=True)
 check("persist insert mode on restart", "", b'\x1bOR', expected='', vi=True, persisted_vi=False)
 check("vi mode clears regular selection", 'note("c4").gain(0)', b'\x01\x1bOR',

@@ -58,6 +58,9 @@ static double undo_group_time;
 static int vi_mode = 0; /* 0 = insert, 1 = vi-ish normal */
 static int vi_normal = 0;
 static int vi_pending = 0;  /* for dd/yy */
+static void vi_reset(void);
+static int vi_prev(const char *s, int at);
+static int vi_next(const char *s, int at, int n);
 static char yank_blank[] = "";
 static char *vi_yank = yank_blank;
 static int yank_lines;
@@ -442,6 +445,11 @@ static void editor_toggle_mode(void) {
     vi_mode = !vi_mode;
     vi_normal = vi_mode;
     vi_pending = 0;
+    vi_reset();
+    if (vi_normal && cur_line>=0 && cur_line<code_line_count) {
+        int length=(int)strlen(code_lines[cur_line]);
+        if (length && cur_col>=length) cur_col=vi_prev(code_lines[cur_line],length);
+    }
     /* A regular editor selection must not become vi visual mode implicitly.
        Selection paint takes precedence over the moving note highlights. */
     sel_active = 0;
@@ -623,7 +631,11 @@ static void editor_paste(int before) {
             free(text); return;
         }
     }
-    (void)editor_replace(a, b, vi_yank);
+    int characterwise=vi_mode && vi_normal && !yank_lines && !sel_active;
+    if (characterwise && !before)
+        a=b=editor_offset(cur_line,vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line])));
+    if (editor_replace(a, b, vi_yank) && characterwise && cur_col>0)
+        cur_col=vi_prev(code_lines[cur_line],cur_col);
 }
 
 static int grow_add(char **buf, size_t *len, size_t *cap, char c) {
@@ -656,6 +668,7 @@ static int rows_add(char ***rows, int *n, int *cap, char *s) {
 }
 
 static int replace_code_with(const char *txt) {
+    vi_reset();
     const char *p = txt ? txt : "";
     undo_begin(0);
     int rcap = 8, n = 0, oom = 0, ended_nl = 0;
@@ -719,10 +732,18 @@ oom:
 }
 
 static int undo_apply(const struct undo_snap *s) {
+    char *text=strdup_safe(s->text);
+    if (!text) return 0;
+    size_t length=strlen(text);
+    /* editor_flatten adds a terminator newline beyond the editor's lines. */
+    if (length && text[length-1]=='\n') text[length-1]=0;
     undo_suspend++;
-    int ok = replace_code_with(s->text);
+    int end=editor_offset(code_line_count-1,(int)strlen(code_lines[code_line_count-1]));
+    int ok = editor_replace(0,end,text);
     undo_suspend--;
+    free(text);
     if (!ok) return 0;
+    vi_reset();
     cur_line = s->line;
     if (cur_line < 0) cur_line = 0;
     if (cur_line >= code_line_count) cur_line = code_line_count - 1;
@@ -2758,6 +2779,8 @@ static void editor_move_rows(int delta) {
     }
 }
 
+#include "tui_vi.h"
+
 static void draw_code(void) {
     int mid, h, rw, sh, th;
     editor_cur_on = 0;
@@ -3532,6 +3555,11 @@ static const DocLine cheat[] = {
     {0, "A song track holds a whole buffer; F7 steps tracks."},
     {0, "Shift+arrows select; Ctrl+A all; Ctrl+C/X/V copy/cut/paste."},
     {0, "Vi: v/V visual text/lines; y/d copy/cut; p/P paste."},
+    {3, "Vi counts: 5w, 3dd, 2d3w, 12G; u undo, Ctrl+R redo."},
+    {3, "Vi motions: w/b/e W/B/E 0 ^ $ gg G { } %; j/k wrap rows."},
+    {3, "Vi operators: d/c/y + motion; diw daw ci\" da( di[ ci{"},
+    {3, "Vi find: f/F/t/T + character; ; repeat, , reverse."},
+    {3, "Vi search: /text ?text Enter, n/N repeat, */# whole word."},
     {0, "Mouse: click cursor/panes, drag selection or slider bars."},
     {0, ""},
     {1, "Track lines"},
@@ -4575,6 +4603,11 @@ static int read_key(void) {
         if (SLang_input_pending(1) == 0) {
             return 27;
         }
+        /* Escape followed quickly by a normal-mode command is two keys,
+           not an unknown terminal sequence that should swallow the command. */
+        unsigned int next=SLang_getkey();
+        if (next!=0xffff) SLang_ungetkey((unsigned char)next);
+        if (next!='[' && next!='O' && next!='_' && next!=']') return 27;
         SLang_ungetkey(27);
         return SLkp_getkey();
     }
@@ -4659,8 +4692,8 @@ void tui_run(void) {
         if (ch == 2103) { read_graphics_reply(); continue; }
         if (ch == 2104) { read_palette_reply(); continue; }
         undo_tick++;
-        if (ch == 2100) { read_mouse(); continue; }
-        if (ch == 2101) { read_paste(); continue; }
+        if (ch == 2100) { vi_reset(); read_mouse(); continue; }
+        if (ch == 2101) { vi_reset(); read_paste(); continue; }
 
         if (search_mode) {
             int nrows = search_ndirs + (search_path[0] ? 1 : 0);
@@ -4752,15 +4785,16 @@ void tui_run(void) {
         if (pane_focus && ch != 17 && ch != 16 && ch != SL_KEY_NPAGE && ch != SL_KEY_PPAGE &&
             !(ch >= SL_KEY_F(1) && ch <= SL_KEY_F(12))) continue;
         if (ch >= 2110 && ch <= 2115) {
+            vi_reset();
             if (!sel_active) selection_start(0);
             if (ch == 2110 && cur_line > 0) cur_line--;
             if (ch == 2111 && cur_line + 1 < code_line_count) cur_line++;
             if (ch == 2112) {
-                if (cur_col) cur_col--;
+                if (cur_col) cur_col=vi_prev(code_lines[cur_line],cur_col);
                 else if (cur_line) { cur_line--; cur_col = (int)strlen(code_lines[cur_line]); }
             }
             if (ch == 2113) {
-                if (cur_col < (int)strlen(code_lines[cur_line])) cur_col++;
+                if (cur_col < (int)strlen(code_lines[cur_line])) cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line]));
                 else if (cur_line + 1 < code_line_count) { cur_line++; cur_col = 0; }
             }
             if (ch == 2114) cur_col = 0;
@@ -4769,12 +4803,14 @@ void tui_run(void) {
             continue;
         }
         if (ch == 1) { /* Ctrl+A */
+            vi_reset();
             cur_line = cur_col = 0; selection_start(0);
             cur_line = code_line_count - 1; cur_col = (int)strlen(code_lines[cur_line]);
             continue;
         }
-        if (ch == 3 || ch == 24) { selection_copy(ch == 24); continue; }
-        if (ch == 22) { editor_paste(1); continue; }
+        if (ch == 3 || ch == 24) { vi_reset(); selection_copy(ch == 24); continue; }
+        if (ch == 22) { vi_reset(); editor_paste(1); continue; }
+        if (vi_mode && vi_normal && vi_handle_normal(ch)) continue;
         if (vi_mode && vi_normal && (ch == 'v' || ch == 'V')) {
             if (sel_active && sel_linewise == (ch == 'V')) sel_active = 0;
             else { selection_start(ch == 'V'); sel_inclusive = ch == 'v'; }
@@ -4785,9 +4821,6 @@ void tui_run(void) {
         }
         if (vi_mode && vi_normal && (ch == 'p' || ch == 'P')) {
             editor_paste(ch == 'P'); vi_pending = 0; continue;
-        }
-        if (vi_mode && vi_normal && (ch == 'y' || ch == 'd') && vi_pending == ch) {
-            selection_start(1); selection_copy(ch == 'd'); vi_pending = 0; continue;
         }
         if (sel_active && (!vi_mode || !vi_normal) &&
             (ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8 || ch == SL_KEY_DELETE ||
@@ -4942,8 +4975,10 @@ void tui_run(void) {
             snprintf(status_msg, 256, vi_mode ? (vi_normal ? "vi normal" : "vi insert") : "insert mode");
             continue;
         } else if (ch == 27) {
+            if (vi_mode && !vi_normal && cur_col>0) cur_col=vi_prev(code_lines[cur_line],cur_col);
             vi_normal = vi_mode;
             vi_pending = 0;
+            vi_reset();
             snprintf(status_msg, 256, "%s", vi_mode ? "vi normal" : "insert mode");
             continue;
         } else if (ch == SL_KEY_UP) {
@@ -4955,12 +4990,12 @@ void tui_run(void) {
             vi_pending = 0;
             continue;
         } else if (ch == SL_KEY_LEFT) {
-            if (cur_col > 0) cur_col--;
+            if (cur_col > 0) cur_col=vi_prev(code_lines[cur_line],cur_col);
             else if (cur_line > 0) { cur_line--; cur_col = strlen(code_lines[cur_line]); }
             vi_pending = 0;
             continue;
         } else if (ch == SL_KEY_RIGHT) {
-            if (cur_col < (int)strlen(code_lines[cur_line])) cur_col++;
+            if (cur_col < (int)strlen(code_lines[cur_line])) cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line]));
             else if (cur_line < code_line_count-1) { cur_line++; cur_col = 0; }
             vi_pending = 0;
             continue;
@@ -5001,17 +5036,10 @@ void tui_run(void) {
             continue;
         } else if (vi_mode && vi_normal) {
             if (ch == 17) break;
-            /* vi normal mode */
-            if (ch == 'j') { editor_move_rows(1); snprintf(status_msg, 256, "vi normal"); continue; }
-            if (ch == 'k') { editor_move_rows(-1); snprintf(status_msg, 256, "vi normal"); continue; }
-            if (ch == 'h') { if (cur_col > 0) cur_col--; vi_pending=0; continue; }
-            if (ch == 'l') { if (cur_col < (int)strlen(code_lines[cur_line])) cur_col++; vi_pending=0; continue; }
-            if (ch == '0' || ch == '^') { cur_col = 0; vi_pending=0; continue; }
-            if (ch == '$') { cur_col = strlen(code_lines[cur_line]); vi_pending=0; continue; }
-            if (ch == 'u' && !vi_pending) { editor_undo(); continue; }
+            /* Motions/operators are handled by vi_handle_normal above. */
             if (ch == 'i') { vi_normal = 0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'a') { if (cur_col < (int)strlen(code_lines[cur_line])) cur_col++; vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'I') { cur_col = 0; vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+            if (ch == 'a') { cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line])); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+            if (ch == 'I') { cur_col = vi_first_nonblank(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
             if (ch == 'A') { cur_col = strlen(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
             if (ch == 'o') {
                 undo_begin(UNDO_TYPE);
@@ -5040,28 +5068,6 @@ void tui_run(void) {
                 }
                 vi_pending=0; continue;
             }
-            if (ch == 'x') {
-                char *l = code_lines[cur_line];
-                int L = strlen(l);
-                if (cur_col < L) {
-                    undo_begin(UNDO_TYPE);
-                    memmove(l+cur_col, l+cur_col+1, L-cur_col);
-                    undo_commit();
-                }
-                vi_pending=0; continue;
-            }
-            if (ch == 'd') {
-                vi_pending = 'd';
-                continue;
-            }
-            if (ch == 'y') {
-                vi_pending = 'y';
-                continue;
-            }
-            if (ch == 'G') { cur_line = code_line_count-1; cur_col = 0; vi_pending=0; continue; }
-            if (ch == 'g' && vi_pending == 'g') { vi_pending=0; cur_line = 0; cur_col=0; continue; }
-            if (ch == 'g') { vi_pending = 'g'; continue; }
-            if (ch == '$') { cur_col = strlen(code_lines[cur_line]); vi_pending=0; continue; }
             vi_pending = 0;
             continue;
         }
@@ -5070,8 +5076,9 @@ void tui_run(void) {
                 char *l = code_lines[cur_line];
                 int L = strlen(l);
                 undo_begin(UNDO_TYPE);
-                memmove(l+cur_col-1, l+cur_col, L-cur_col+1);
-                cur_col--;
+                int previous=vi_prev(l,cur_col);
+                memmove(l+previous, l+cur_col, (size_t)(L-cur_col+1));
+                cur_col=previous;
                 undo_commit();
             } else if (cur_line > 0) {
                 int prevlen = (int)strlen(code_lines[cur_line - 1]);

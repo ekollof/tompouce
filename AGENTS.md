@@ -2,6 +2,30 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Expanded vi editing (2026-10-18)
+
+`src/tui_vi.h` is a private implementation included by tui.c after its editor
+helpers, keeping all modal state on the UI thread. Preserve this header in
+source transfers; the installer's source copy includes .h files. Counts (up to
+9,999), word/WORD and paragraph/file motions, f/F/t/T and repeats, literal
+bracket matching, d/c/y motions and text objects, counted paste, replacement,
+literal wrapping searches and */# whole-word search are supported. j/k and
+gj/gk retain wrapped-row navigation; operator dj/dk is linewise. Ctrl+R redoes
+in vi normal mode; F5 still evaluates. Existing app shortcuts retain priority.
+Search and find arguments do not edit the musical source. Escape cancels modal
+prefixes, and mode/buffer changes reset them. UTF-8 motions/deletions stay on
+code-point boundaries. c-operator deletion and subsequent typing share undo.
+Undo now strips only editor_flatten's artificial final newline and restores
+through editor_replace, preserving genuine blank lines/tabs. Fast Escape plus
+an ordinary command is read as separate keys rather than discarded by S-Lang.
+Tests exercise exact undo/redo buffers, UTF-8, operator counts, objects and actual
+PTY input; README and F1 cheatsheet list supported keys and remaining vi limits.
+Validation passed: warning-as-error build, native suite including Csound and all
+1,207 published reference events, backing-cell highlight/state tests, and all
+62 PTY cases (~58 FPS for graphics). No running user process or musical source
+was changed. Regex/Ex/macros/registers/marks/block visual/dot-repeat remain outside
+the implemented native vi subset.
+
 ### Terminal graphics palette (2026-10-18)
 
 After Kitty capability detection, the foreground UI queries OSC 10/11 and the

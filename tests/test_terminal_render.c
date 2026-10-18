@@ -1,6 +1,70 @@
-/* Inspect S-Lang's backing cells: no audio, input or screen refresh needed. */
+/* Inspect Notcurses backing cells without audio or a screen refresh. */
 #include "../src/tui.c"
 #include <assert.h>
+
+static void theme_fixture(const char *path, int wal, unsigned seed) {
+    FILE *f=fopen(path,"w"); assert(f);
+    if (wal) {
+        fprintf(f,"{\"special\":{\"foreground\":\"#123456\",\"background\":\"#654321\"},\"colors\":{");
+        for (int i=0;i<16;i++) fprintf(f,"%s\"color%d\":\"#%06x\"",i?",":"",i,seed+(unsigned)i);
+        fputs("}}",f);
+    } else {
+        fputs("foreground = \"#123456\"\nbackground = \"#654321\"\n",f);
+        for (int i=0;i<16;i++) fprintf(f,"color%d = \"#%06x\"\n",i,seed+(unsigned)i);
+    }
+    assert(!fclose(f));
+}
+
+static void check_theme_watch(void) {
+    char named[]="background=\"#000001\"\nforeground=\"#000002\"\nred=\"#000003\"\ngreen=\"#000004\"\nyellow=\"#000005\"\nblue=\"#000006\"\nmagenta=\"#000007\"\ncyan=\"#000008\"\ndark_foreground=\"#000009\"\nbright_red=\"#00000a\"\nbright_green=\"#00000b\"\nbright_yellow=\"#00000c\"\nbright_blue=\"#00000d\"\nbright_magenta=\"#00000e\"\nbright_cyan=\"#00000f\"\nbright_foreground=\"#000010\"\n";
+    uint32_t colors[18]; assert(theme_parse(named,0,colors));
+    assert(colors[0]==1 && colors[15]==16 && colors[16]==2);
+    char bad[]="{\"colors\":{\"color0\":\"#ffffff\"}}";
+    assert(!theme_parse(bad,1,colors));
+    assert(!theme_hex("#12345g",colors));
+    char root[]="/tmp/tompouce-theme-XXXXXX"; assert(mkdtemp(root));
+    char *old_config=getenv("XDG_CONFIG_HOME")?strdup(getenv("XDG_CONFIG_HOME")):NULL;
+    char *old_cache=getenv("XDG_CACHE_HOME")?strdup(getenv("XDG_CACHE_HOME")):NULL;
+    char *old_state=getenv("XDG_STATE_HOME")?strdup(getenv("XDG_STATE_HOME")):NULL;
+    assert(!setenv("XDG_CONFIG_HOME",root,1) && !setenv("XDG_CACHE_HOME",root,1));
+    assert(!setenv("XDG_STATE_HOME",root,1));
+    char omarchy[512], wal[512], replacement[512], linkpath[512], target[512];
+    snprintf(omarchy,sizeof(omarchy),"%s/omarchy/current/theme",root); mkdir_p(omarchy);
+    snprintf(wal,sizeof(wal),"%s/wal",root); mkdir_p(wal);
+    snprintf(omarchy,sizeof(omarchy),"%s/omarchy/current/theme/colors.toml",root);
+    snprintf(wal,sizeof(wal),"%s/wal/colors.json",root);
+    snprintf(replacement,sizeof(replacement),"%s/replacement",root);
+    theme_mode=0; theme_init();
+    uint32_t original=terminal_ansi[3];
+    theme_fixture(wal,1,0x100000);
+    theme_mode=3; theme_poll(1); assert(terminal_ansi[3]==0x100003);
+    theme_fixture(omarchy,0,0x200000);
+    theme_next_poll=0; theme_poll(0); assert(terminal_ansi[3]==0x200003);
+    assert(ncchannels_fg_rgb(terminal_colors[2])==0x20000b); /* keyword yellow */
+    assert(ncchannels_fg_rgb(terminal_colors[0])==0x123456);
+    unsigned revision=theme_revision;
+    theme_poll(1); assert(theme_revision==revision);
+    theme_fixture(replacement,0,0x300000); assert(!rename(replacement,omarchy));
+    theme_next_poll=0; theme_poll(0); assert(terminal_ansi[3]==0x300003);
+    FILE *f=fopen(omarchy,"w"); assert(f); fputs("foreground = \"#ffffff",f); fclose(f);
+    theme_mode=1; theme_poll(1); assert(terminal_ansi[3]==0x300003);
+    assert(!unlink(omarchy));
+    snprintf(linkpath,sizeof(linkpath),"%s/omarchy/current/theme",root);
+    assert(!rmdir(linkpath));
+    snprintf(target,sizeof(target),"%s/alternate",root); assert(!mkdir(target,0700));
+    assert(!symlink(target,linkpath));
+    theme_fixture(omarchy,0,0x400000); theme_next_poll=0; theme_poll(0);
+    assert(terminal_ansi[3]==0x400003);
+    theme_mode=2; theme_poll(1); assert(terminal_ansi[3]==0x100003);
+    theme_mode=0; theme_poll(1); assert(terminal_ansi[3]==original);
+    assert(!unlink(omarchy) && !unlink(linkpath) && !rmdir(target));
+    assert(!unlink(wal)); snprintf(wal,sizeof(wal),"%s/wal",root); assert(!rmdir(wal));
+    snprintf(target,sizeof(target),"%s/omarchy/current",root); assert(!rmdir(target));
+    snprintf(target,sizeof(target),"%s/omarchy",root); assert(!rmdir(target)); assert(!rmdir(root));
+    if (old_config) { setenv("XDG_CONFIG_HOME",old_config,1); free(old_config); } else unsetenv("XDG_CONFIG_HOME");
+    if (old_cache) { setenv("XDG_CACHE_HOME",old_cache,1); free(old_cache); } else unsetenv("XDG_CACHE_HOME");
+    if (old_state) { setenv("XDG_STATE_HOME",old_state,1); free(old_state); } else unsetenv("XDG_STATE_HOME");
+}
 
 static void state_text(char *out, size_t size) {
     size_t at=0;
@@ -175,12 +239,13 @@ static void check_visual_edit_highlights(void) {
 int main(void) {
     SLutf8_enable(1);
     SLtt_get_terminfo();
-    /* Cell assertions below use an 80x24 backing screen. right_geom reads
-       S-Lang's dimensions, so setting only the editor's cols/rows leaves this
-       test dependent on the invoking terminal's real ioctl geometry. */
+    assert(SLsmg_init_smg() == 0);
+    /* Use an owned plane so the harness is independent of physical geometry. */
+    ncplane_options plane_options={.rows=24,.cols=80,.name="render-test"};
+    terminal_plane=ncplane_create(notcurses_stdplane(terminal_nc),&plane_options);
+    assert(terminal_plane);
     SLtt_Screen_Cols=80;
     SLtt_Screen_Rows=24;
-    assert(SLsmg_init_smg() == 0);
     SLtt_set_color(2,NULL,"yellow","black");
     SLtt_set_color(3,NULL,"brightcyan","black");
     SLtt_set_color(5,NULL,"brightblue","black");
@@ -188,6 +253,14 @@ int main(void) {
     SLtt_set_color(8,NULL,"brightgreen","black");
     SLtt_set_color(10,NULL,"black","yellow");
     SLtt_set_color(11,NULL,"black","brightcyan");
+    /* Notcurses owns complete EGCs, including marks sent in separate writes. */
+    SLsmg_gotorc(0,0);
+    SLsmg_write_string("e"); SLsmg_write_string("\xcc\x81");
+    char *egc=ncplane_at_yx(terminal_plane,0,0,NULL,NULL);
+    assert(egc && !strcmp(egc,"e\xcc\x81")); free(egc);
+    SLsmg_gotorc(0,1); SLsmg_write_string("界x");
+    egc=ncplane_at_yx(terminal_plane,0,3,NULL,NULL);
+    assert(egc && !strcmp(egc,"x")); free(egc);
     check_line("  note(\"c4 e4\").gain(.5)");
     check_line("    .gain(.5)");
     check_line("  const melody = note(\"c4\")");
@@ -241,6 +314,7 @@ int main(void) {
     check_live_mode_highlights();
     check_visual_edit_highlights();
     check_state_modes();
+    check_theme_watch();
     SLsmg_reset_smg();
     puts("terminal highlight cells and indentation ok");
     return 0;

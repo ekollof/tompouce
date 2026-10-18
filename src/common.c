@@ -20,7 +20,7 @@ double now_seconds(void) {
 }
 
 /* sanitize terminal-hostile bytes: CR/LF/TAB/controls become spaces
-   (a \r in a ring line would yank the S-Lang cursor into another pane) */
+   (a \r in a ring line would yank the terminal cursor into another pane) */
 static void scrub_line(char *dst, const char *src, size_t n) {
     size_t j = 0;
     for (size_t i = 0; src[i] && j + 1 < n; i++) {
@@ -38,7 +38,7 @@ static void scrub_line(char *dst, const char *src, size_t n) {
 
 static int log_to_stderr = 1;
 
-/* stderr duplicate shares the terminal with the S-Lang UI and would
+/* stderr duplicate shares the terminal with the Notcurses UI and would
    scribble over panes; the UI disables it (ring buffer still shows) */
 void log_console_stderr(int on) { log_to_stderr = on ? 1 : 0; }
 

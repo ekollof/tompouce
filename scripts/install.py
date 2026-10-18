@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -24,9 +25,9 @@ SOURCE = Path(__file__).resolve().parents[1]
 TREE_URL = 'https://codeload.github.com/tree-sitter/tree-sitter/tar.gz/refs/tags/v0.25.10'
 TREE_SHA = 'ad5040537537012b16ef6e1210a572b927c7cdc2b99d1ee88d44a7dcdc3ff44c'
 PACKAGES = {
-    'arch': ['gcc', 'make', 'pkgconf', 'xxd', 'slang', 'portaudio', 'libpipewire', 'libpulse', 'libsamplerate', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
-    'debian': ['build-essential', 'pkg-config', 'xxd', 'libslang2-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
-    'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'slang-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'arch': ['gcc', 'make', 'pkgconf', 'xxd', 'notcurses', 'portaudio', 'libpipewire', 'libpulse', 'libsamplerate', 'fluidsynth', 'soundfont-fluid', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
+    'debian': ['build-essential', 'pkg-config', 'xxd', 'libnotcurses-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libfluidsynth-dev', 'fluid-soundfont-gm', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
     'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py',
@@ -40,6 +41,7 @@ RUNTIME_FILES = [
     'thirdparty/native-synth/LICENSE-Apache-2.0',
     'thirdparty/native-synth/LICENSE-Phaze',
     'thirdparty/native-synth/LICENSE-FFT',
+    'thirdparty/waveforms/NOTICE',
 ]
 
 
@@ -167,7 +169,7 @@ class BankInstaller:
     def save(self):
         atomic_bytes(self.receipt_path, json.dumps(self.receipt, sort_keys=True).encode())
 
-    def download(self, relative, url, audio=False):
+    def download(self, relative, url, audio=False, data=None):
         relative = str(safe_relative(relative))
         path = self.root / relative
         directory(path.parent)
@@ -180,7 +182,8 @@ class BankInstaller:
                 return relative, prior
             if prior and prior.get('sha256') != current:
                 raise ValueError(f'locally modified bank file: {relative}; use another install prefix')
-        data = fetch(url, 128 * 1024 * 1024 if audio else 2 * 1024 * 1024)
+        if data is None:
+            data = fetch(url, 128 * 1024 * 1024 if audio else 2 * 1024 * 1024)
         if audio:
             extension = path.suffix.lower()
             valid = (extension == '.wav' and data[:4] == b'RIFF' and data[8:12] == b'WAVE' or
@@ -194,11 +197,12 @@ class BankInstaller:
         atomic_bytes(path, data)
         return relative, {'url': url, 'sha256': checksum}
 
-    def batch(self, tasks):
+    def batch(self, tasks, contents=None):
         tasks = dict(tasks)
         total = len(tasks)
         with ThreadPoolExecutor(max_workers=self.jobs) as pool:
-            futures = [pool.submit(self.download, path, url, True) for path, url in tasks.items()]
+            futures = [pool.submit(self.download, path, url, True, contents[path] if contents is not None else None)
+                       for path, url in tasks.items()]
             try:
                 for count, future in enumerate(as_completed(futures), 1):
                     path, record = future.result()
@@ -210,6 +214,47 @@ class BankInstaller:
                 for future in futures:
                     future.cancel()
                 self.save()
+
+    @staticmethod
+    def archive_contents(source, wanted):
+        """Read only requested regular files from a checksum-pinned archive.
+
+        Small wavetable banks contain thousands of tiny files; one archive
+        avoids thousands of HTTP round trips while preserving per-file receipts.
+        No archive paths are extracted to disk.
+        """
+        checksum = source['archive_sha256']
+        if not re.fullmatch(r'[0-9a-f]{64}', checksum):
+            raise ValueError('invalid source archive checksum')
+        url = f"https://codeload.github.com/{source['repo']}/tar.gz/{source['commit']}"
+        data = fetch(url, 128 * 1024 * 1024)
+        if hashlib.sha256(data).hexdigest() != checksum:
+            raise ValueError('source archive checksum mismatch')
+        wanted = {str(safe_relative(path)) for path in wanted}
+        prefix = f"{source['repo'].split('/')[-1]}-{source['commit']}/"
+        contents, expanded = {}, 0
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+            for count, member in enumerate(archive):
+                if count >= 200000:
+                    raise ValueError('too many source archive entries')
+                if not member.name.startswith(prefix):
+                    continue
+                path = member.name[len(prefix):]
+                if path not in wanted:
+                    continue
+                if path in contents or not member.isfile() or member.size < 0 or member.size > 128 * 1024 * 1024:
+                    raise ValueError('invalid source archive member')
+                expanded += member.size
+                if expanded > 256 * 1024 * 1024:
+                    raise ValueError('source archive expansion limit exceeded')
+                file = archive.extractfile(member)
+                payload = file.read(member.size + 1)
+                if len(payload) != member.size:
+                    raise ValueError('truncated source archive member')
+                contents[path] = payload
+        if contents.keys() != wanted:
+            raise ValueError('source archive is missing catalog files')
+        return contents
 
     def install(self, lock, all_banks=False):
         used = set()
@@ -223,14 +268,28 @@ class BankInstaller:
             manifest = json.loads((self.root / path).read_text())
             audio_source = lock['sources'][catalog['audio_source']]
             tasks = []
+            remote_paths = {}
             for sample in sorted(set(sample_paths(manifest))):
                 remote = str(PurePosixPath(catalog['audio_prefix']) / sample)
                 for old, new in audio_source.get('path_prefixes', {}).items():
                     if remote.startswith(old):
                         remote = new + remote[len(old):]
                         break
-                tasks.append((str(PurePosixPath(catalog['samples']) / sample), raw_url(audio_source, remote)))
-            self.batch(tasks)
+                destination = str(PurePosixPath(catalog['samples']) / sample)
+                tasks.append((destination, raw_url(audio_source, remote)))
+                remote_paths[destination] = remote
+            contents = None
+            if audio_source.get('archive_sha256'):
+                verified = all((self.root / path).is_file() and not (self.root / path).is_symlink() and
+                               self.receipt.get(path, {}).get('url') == url and
+                               self.receipt.get(path, {}).get('sha256') == digest(self.root / path)
+                               for path, url in tasks)
+                if verified:
+                    contents = {path: b'' for path in remote_paths}  # download rechecks each receipt before using data
+                else:
+                    files = self.archive_contents(audio_source, remote_paths.values())
+                    contents = {path: files[remote] for path, remote in remote_paths.items()}
+            self.batch(tasks, contents)
             used.update([catalog['manifest_source'], catalog['audio_source']])
         # Preserve upstream attribution, including license files inside sample folders.
         for key in sorted(used):
@@ -334,7 +393,7 @@ def main(argv=None):
         parser.error('unsafe Csound prefix')
     lock = json.loads((SOURCE / 'scripts/banks.lock.json').read_text())
     print(f'Install location: {application}\nCommand: {prefix / "bin/tompouce"}', flush=True)
-    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all (~3 GiB)' if args.all_banks else 'core drums, piano and drum machines (~450 MiB)'))
+    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all (~3 GiB)' if args.all_banks else 'core drums, piano, drum machines and AKWF wavetables (~456 MiB)'))
     if family:
         print('System packages: ' + ' '.join(dependency_command(family, release, not args.no_browser)))
     if args.dry_run:
@@ -362,7 +421,8 @@ def main(argv=None):
             if family == 'debian':
                 run(privilege + ['apt-get', 'update'])
             run(privilege + dependency_command(family, release, not args.no_browser))
-        run(['pkg-config', '--exists', 'slang', 'portaudio-2.0', 'libcurl', 'libcjson', 'alsa'])
+        run(['pkg-config', '--atleast-version=3.0.9', 'notcurses-core'])
+        run(['pkg-config', '--exists', 'notcurses-core', 'portaudio-2.0', 'libcurl', 'libcjson', 'alsa'])
         if args.csound_prefix:
             header = csound / 'include/csound/version.h'
             if not header.is_file() or not re.search(r'#define\s+CS_VERSION\s+7\b', header.read_text()):

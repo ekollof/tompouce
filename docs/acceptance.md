@@ -7,7 +7,7 @@ Build: `make clean && make` must finish with zero warnings under
 ## Build and launch
 
 - [ ] `make clean && make` succeeds, no warnings/errors.
-- [ ] `./tompouce` opens the S-Lang UI (status bar, code pane, console
+- [ ] `./tompouce` opens the Notcurses UI (status bar, code pane, console
       pane, prompt line) with no crash.
 - [ ] `./tompouce --mcp` stays headless (no UI) and answers
       `{"jsonrpc":"2.0","id":1,"method":"ping"}` with `{"result":{}}`.

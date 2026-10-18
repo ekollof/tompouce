@@ -28,6 +28,7 @@ class TerminalRenderTest(unittest.TestCase):
                 master, slave = pty.openpty()
                 output = bytearray()
                 child = None
+                negotiated = False
                 try:
                     fcntl.ioctl(slave, termios.TIOCSWINSZ,
                                 struct.pack('HHHH', rows, cols, 0, 0))
@@ -42,6 +43,9 @@ class TerminalRenderTest(unittest.TestCase):
                         if select.select([master], [], [], .1)[0]:
                             try:
                                 output.extend(os.read(master, 65536))
+                                if not negotiated and b'\x1b[c' in output:
+                                    os.write(master,b'\x1b[1;1R\x1b[?1;2c')
+                                    negotiated = True
                             except OSError:
                                 break  # PTY slave closed on exit.
                     diagnostic = output.decode(errors='replace')[-3000:]

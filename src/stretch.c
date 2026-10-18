@@ -12,11 +12,12 @@
 #define CACHE_BYTES (128u*1024u*1024u)
 typedef struct { double re,im; } Complex;
 typedef struct {
+    char source_key[768];
     int sample, phase, frames;
     double fraction,step,gate,factor,begin,end,attack,decay,sustain,release;
     DspParams params;
 } StretchKey;
-struct StretchBuffer { atomic_uint refs; int frames; size_t bytes; float pcm[]; };
+struct StretchBuffer { atomic_uint refs; int frames; size_t bytes; double age_offset; float pcm[]; };
 static struct { StretchKey key; StretchBuffer *buffer; unsigned long used; } cache[CACHE_SIZE];
 static size_t cache_bytes;
 static unsigned long serial;
@@ -120,6 +121,45 @@ void stretch_retain(const StretchBuffer *buffer) { if (buffer) atomic_fetch_add(
 void stretch_release(const StretchBuffer *buffer) { if (buffer) atomic_fetch_sub(&((StretchBuffer *)buffer)->refs,1); }
 int stretch_frames(const StretchBuffer *buffer) { return buffer?buffer->frames:0; }
 const float *stretch_pcm(const StretchBuffer *buffer) { return buffer?buffer->pcm:NULL; }
+double stretch_age_offset(const StretchBuffer *buffer) { return buffer?buffer->age_offset:0; }
+
+const StretchBuffer *stretch_pcm_lookup(const char *key) {
+    if (!key || !*key || strlen(key)>=sizeof(cache[0].key.source_key)) return NULL;
+    pthread_mutex_lock(&lock);
+    for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !strcmp(cache[i].key.source_key,key)) {
+        cache[i].used=++serial; stretch_retain(cache[i].buffer); pthread_mutex_unlock(&lock); return cache[i].buffer;
+    }
+    pthread_mutex_unlock(&lock); return NULL;
+}
+
+const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) {
+    if (!key || !*key || strlen(key)>=sizeof(cache[0].key.source_key) || !pcm || frames<=0 || frames>90*44100) {
+        free(pcm); return NULL;
+    }
+    size_t bytes=sizeof(StretchBuffer)+(size_t)frames*2*sizeof(float);
+    pthread_mutex_lock(&lock);
+    for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !strcmp(cache[i].key.source_key,key)) {
+        cache[i].used=++serial; stretch_retain(cache[i].buffer); pthread_mutex_unlock(&lock); free(pcm); return cache[i].buffer;
+    }
+    int slot=-1;
+    for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer) { slot=i; break; }
+    while (slot<0 || cache_bytes+bytes>CACHE_BYTES) {
+        int oldest=-1;
+        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
+            (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
+        if (oldest<0) { pthread_mutex_unlock(&lock); free(pcm); return NULL; }
+        cache_bytes-=cache[oldest].buffer->bytes;
+        free(cache[oldest].buffer); cache[oldest].buffer=NULL; if (slot<0) slot=oldest;
+    }
+    StretchBuffer *buffer=malloc(bytes);
+    if (!buffer) { pthread_mutex_unlock(&lock); free(pcm); return NULL; }
+    atomic_init(&buffer->refs,1); buffer->frames=frames; buffer->bytes=bytes; buffer->age_offset=0;
+    memcpy(buffer->pcm,pcm,(size_t)frames*2*sizeof(float)); free(pcm);
+    memset(&cache[slot].key,0,sizeof(cache[slot].key));
+    snprintf(cache[slot].key.source_key,sizeof(cache[slot].key.source_key),"%s",key);
+    cache[slot].buffer=buffer; cache[slot].used=++serial; cache_bytes+=bytes;
+    pthread_mutex_unlock(&lock); return buffer;
+}
 
 const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     if (!event || !isfinite(event->stretch) || event->stretch<=0 || event->stretch>17 || event->smp<0) return NULL;
@@ -175,6 +215,7 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     Work *work=calloc(1,sizeof(*work));
     if (!buffer || !work) { free(buffer); free(work); pthread_mutex_unlock(&lock); return NULL; }
     buffer->frames=key.frames; buffer->bytes=bytes; atomic_init(&buffer->refs,1);
+    buffer->age_offset=.04;
     /* Match the reference's 40ms source anticipation and global 128-frame
        OLA grid. PCM is indexed from the musical onset, including its tail. */
     double source_start=key.phase+key.fraction-.04*SR;

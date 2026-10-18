@@ -2,10 +2,17 @@ CC = gcc
 CFLAGS = -O2 -Wall -Wextra -Iinclude -Ithirdparty -pthread -Werror -pedantic
 CFLAGS += -isystem thirdparty/quickjs -MMD -MP
 LDFLAGS = -pthread
-LIBS = $(shell pkg-config --libs slang portaudio-2.0 libcurl libcjson alsa tree-sitter 2>/dev/null) -lm -lleveldb
+CFLAGS += $(shell pkg-config --cflags notcurses-core)
+LIBS = $(shell pkg-config --libs notcurses-core portaudio-2.0 libcurl libcjson alsa tree-sitter 2>/dev/null) -lm -lleveldb
 WITH_PIPEWIRE ?= $(shell pkg-config --atleast-version=0.3.7 libpipewire-0.3 && echo 1 || echo 0)
 WITH_PULSE ?= $(shell pkg-config --exists libpulse && echo 1 || echo 0)
 WITH_SAMPLERATE ?= $(shell pkg-config --exists samplerate && echo 1 || echo 0)
+WITH_FLUIDSYNTH ?= $(shell pkg-config --atleast-version=2.2 fluidsynth && echo 1 || echo 0)
+ifeq ($(WITH_FLUIDSYNTH),1)
+CFLAGS += -DHAVE_FLUIDSYNTH
+GM_CFLAGS = $(patsubst -I%,-isystem %,$(shell pkg-config --cflags fluidsynth))
+LIBS += $(shell pkg-config --libs fluidsynth)
+endif
 ifeq ($(WITH_PIPEWIRE),1)
 CFLAGS += -DHAVE_PIPEWIRE
 OUTPUT_CFLAGS += $(patsubst -I%,-isystem %,$(shell pkg-config --cflags libpipewire-0.3))
@@ -45,6 +52,7 @@ SRC += src/native_synth.c
 SRC += src/osc_output.c
 SRC += src/reverb_impulse.c
 SRC += src/stretch.c
+SRC += src/gm_synth.c
 QJS_OBJ = $(addprefix thirdparty/quickjs/,quickjs.o cutils.o libregexp.o libunicode.o dtoa.o)
 TSJS_OBJ = thirdparty/tree-sitter-javascript/src/parser.o thirdparty/tree-sitter-javascript/src/scanner.o
 OBJ = $(SRC:.c=.o) $(QJS_OBJ) $(TSJS_OBJ)
@@ -57,6 +65,8 @@ $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
 src/audio_output.o: src/audio_output.c include/audio_output.h
 	$(CC) $(CFLAGS) $(OUTPUT_CFLAGS) -c $< -o $@
+src/gm_synth.o: src/gm_synth.c include/gm_synth.h
+	$(CC) $(CFLAGS) $(GM_CFLAGS) -c $< -o $@
 thirdparty/quickjs/%.o: thirdparty/quickjs/%.c
 	$(CC) -O2 -w -fwrapv -D_GNU_SOURCE -DCONFIG_VERSION='"2026-06-04"' -c $< -o $@
 thirdparty/tree-sitter-javascript/src/%.o: thirdparty/tree-sitter-javascript/src/%.c
@@ -89,7 +99,6 @@ test: $(TARGET) tests/test_pattern tests/test_harmony tests/test_strudel tests/t
 	./tests/test_strudel
 	./tests/test_websamp
 	./tests/test_editor
-	TERM=xterm-256color ./tests/test_terminal_render
 	python3 tests/test_terminal_render_pty.py
 	./tests/test_terminal_graphics
 	./tests/test_javascript
@@ -112,8 +121,8 @@ test-audio-backends: tests/test_audio_output tests/probe_audio_output tests/prob
 	python3 tests/test_audio_backends.py
 tests/test_native_synth: tests/test_native_synth.c src/audio.c src/js_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/test_native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ)) $(LDFLAGS) $(LIBS)
-tests/test_native_synth_sanitize: tests/test_native_synth.c src/audio.c src/js_audio.c src/native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o,$(OBJ))
-	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer -o $@ tests/test_native_synth.c src/native_synth.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o,$(OBJ)) $(LDFLAGS) $(LIBS)
+tests/test_native_synth_sanitize: tests/test_native_synth.c src/audio.c src/js_audio.c src/native_synth.c src/gm_synth.c src/stretch.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o src/gm_synth.o src/stretch.o,$(OBJ))
+	$(CC) $(CFLAGS) $(GM_CFLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -o $@ tests/test_native_synth.c src/native_synth.c src/gm_synth.c src/stretch.c $(filter-out src/main.o src/audio.o src/js_audio.o src/native_synth.o src/gm_synth.o src/stretch.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/render_audio: tests/render_audio.c src/audio.c src/js_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/render_audio.c $(filter-out src/main.o src/audio.o src/js_audio.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/test_csound: tests/test_csound.c $(filter-out src/main.o,$(OBJ))
@@ -128,9 +137,11 @@ tests/test_dsp: tests/test_dsp.c $(filter-out src/main.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 tests/test_javascript: tests/test_javascript.c $(filter-out src/main.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-tests/test_editor: tests/test_editor.c src/tui.c src/tui_vi.h $(filter-out src/main.o src/tui.o,$(OBJ))
+src/tui.o: src/tui_terminal.h src/tui_theme.h src/tui_vi.h
+
+tests/test_editor: tests/test_editor.c src/tui.c src/tui_vi.h src/tui_terminal.h src/tui_theme.h $(filter-out src/main.o src/tui.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/test_editor.c $(filter-out src/main.o src/tui.o,$(OBJ)) $(LDFLAGS) $(LIBS)
-tests/test_terminal_render: tests/test_terminal_render.c src/tui.c src/tui_vi.h $(filter-out src/main.o src/tui.o,$(OBJ))
+tests/test_terminal_render: tests/test_terminal_render.c src/tui.c src/tui_vi.h src/tui_terminal.h src/tui_theme.h $(filter-out src/main.o src/tui.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/test_terminal_render.c $(filter-out src/main.o src/tui.o,$(OBJ)) $(LDFLAGS) $(LIBS)
 tests/test_install_runtime: tests/test_install_runtime.c $(filter-out src/main.o,$(OBJ))
 	$(CC) $(CFLAGS) -o $@ tests/test_install_runtime.c $(filter-out src/main.o,$(OBJ)) $(LDFLAGS) $(LIBS)

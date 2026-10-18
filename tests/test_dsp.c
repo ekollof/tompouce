@@ -3,7 +3,50 @@
 #include "audio.h"
 #include "track.h"
 #include "scheduler.h"
+#include "banks.h"
+#include "sampler.h"
 #include <assert.h>
+#include <dirent.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static void test_standalone_file_event(void) {
+    pid_t child=fork(); assert(child>=0);
+    if (!child) {
+        char root[]="/tmp/tompouce-file-event-XXXXXX"; assert(mkdtemp(root));
+        assert(!setenv("XDG_CACHE_HOME",root,1) && !setenv("XDG_CONFIG_HOME",root,1));
+        assert(!setenv("TOMPOUCE_BANKS",root,1));
+        char path[512]; snprintf(path,sizeof(path),"%s/My Drum.wav",root);
+        const unsigned char wav[]={ 'R','I','F','F',40,0,0,0,'W','A','V','E','f','m','t',' ',
+            16,0,0,0,1,0,1,0,68,172,0,0,136,88,1,0,2,0,16,0,'d','a','t','a',4,0,0,0,0,32,0,192 };
+        FILE *file=fopen(path,"wb"); assert(file);
+        assert(fwrite(wav,1,sizeof(wav),file)==sizeof(wav)); assert(!fclose(file));
+        banks_start_index(root);
+        for (int i=0;!banks_ready() && i<500;i++) usleep(10000);
+        assert(banks_ready());
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile("s(pure('My Drum.wav'))",120,&metadata,error,sizeof(error)); assert(program);
+        js_audio_schedule(program,0,0,event_queue_generation());
+        assert(event_queue_depth()==1);
+        char queued[2048]; assert(scheduler_debug_queue(queued,sizeof(queued),1)>0);
+        assert(strstr(queued,"smp=0 "));
+        float *pcm=NULL; int frames=0,channels=0;
+        smp_get_stereo(0,&pcm,&frames,&channels);
+        assert(pcm && frames==2 && channels==1 && fabs(pcm[0]-.25)<1e-6);
+        event_queue_clear(); javascript_free(program); cJSON_Delete(metadata);
+        assert(!unlink(path));
+        snprintf(path,sizeof(path),"%s/tompouce/banks.ldb",root);
+        DIR *dir=opendir(path); assert(dir); struct dirent *entry;
+        while ((entry=readdir(dir))) {
+            if (!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")) continue;
+            char item[1024]; snprintf(item,sizeof(item),"%s/%s",path,entry->d_name); assert(!unlink(item));
+        }
+        closedir(dir); assert(!rmdir(path));
+        snprintf(path,sizeof(path),"%s/tompouce",root); assert(!rmdir(path)); assert(!rmdir(root));
+        _exit(0);
+    }
+    int status; assert(waitpid(child,&status,0)==child); assert(WIFEXITED(status) && !WEXITSTATUS(status));
+}
 
 static double rms(const char *controls, double hz) {
     cJSON *json = cJSON_Parse(controls);
@@ -47,6 +90,7 @@ static void test_filter_envelopes(void) {
 }
 
 int main(void) {
+    test_standalone_file_event();
     double alias_naive = 0, alias_filtered = 0;
     for (int i = 0; i < 256; i++) {
         double phase = 2*M_PI*i*3/16;

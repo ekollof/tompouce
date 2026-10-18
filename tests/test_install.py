@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 import wave
@@ -24,6 +25,37 @@ def wav():
 
 
 class InstallerTest(unittest.TestCase):
+    def test_pinned_archive_members_and_receipts(self):
+        data=io.BytesIO()
+        with tarfile.open(fileobj=data, mode='w:gz') as archive:
+            for name in ('kit-rev/a.wav','kit-rev/unused.wav'):
+                payload=wav(); member=tarfile.TarInfo(name); member.size=len(payload)
+                archive.addfile(member,io.BytesIO(payload))
+        archive_bytes=data.getvalue()
+        source={'repo':'owner/kit','commit':'rev','archive_sha256':hashlib.sha256(archive_bytes).hexdigest()}
+        with patch.object(installer,'fetch',return_value=archive_bytes):
+            files=installer.BankInstaller.archive_contents(source,['a.wav'])
+            self.assertEqual(files,{'a.wav':wav()})
+            with self.assertRaises(ValueError):
+                installer.BankInstaller.archive_contents(source,['missing.wav'])
+            with self.assertRaises(ValueError):
+                installer.BankInstaller.archive_contents(dict(source,archive_sha256='0'*64),['a.wav'])
+        with tempfile.TemporaryDirectory() as root:
+            bank=installer.BankInstaller(Path(root),1)
+            with patch.object(installer,'fetch',side_effect=AssertionError('unexpected HTTP')):
+                bank.batch([('a.wav','https://example.com/a.wav')],files)
+                bank.batch([('a.wav','https://example.com/a.wav')],{'a.wav':b''})
+            self.assertEqual(json.loads(bank.receipt_path.read_text())['a.wav']['sha256'],hashlib.sha256(wav()).hexdigest())
+
+    def test_archive_links_refused(self):
+        data=io.BytesIO()
+        with tarfile.open(fileobj=data,mode='w:gz') as archive:
+            link=tarfile.TarInfo('kit-rev/a.wav'); link.type=tarfile.SYMTYPE; link.linkname='/etc/passwd'
+            archive.addfile(link)
+        archive_bytes=data.getvalue()
+        source={'repo':'owner/kit','commit':'rev','archive_sha256':hashlib.sha256(archive_bytes).hexdigest()}
+        with patch.object(installer,'fetch',return_value=archive_bytes),self.assertRaises(ValueError):
+            installer.BankInstaller.archive_contents(source,['a.wav'])
     def test_dry_run_has_no_side_effects(self):
         with tempfile.TemporaryDirectory() as root:
             prefix = Path(root) / 'uncreated'
@@ -35,6 +67,11 @@ class InstallerTest(unittest.TestCase):
             self.assertFalse(prefix.exists())
 
     def test_distro_commands(self):
+        for family, package in [('arch', 'notcurses'), ('debian', 'libnotcurses-dev'),
+                                ('fedora', 'notcurses-devel')]:
+            command = installer.dependency_command(family, {}, False)
+            self.assertIn(package, command)
+            self.assertFalse(any('slang' in item for item in command))
         for identity, family in [('omarchy', 'arch'), ('ubuntu', 'debian'), ('fedora', 'fedora')]:
             with patch.object(installer.platform, 'freedesktop_os_release', return_value={'ID': identity}):
                 self.assertEqual(installer.distro()[0], family)
@@ -48,6 +85,11 @@ class InstallerTest(unittest.TestCase):
             command = installer.dependency_command(family, {}, False)
             for package in native:
                 self.assertIn(package, command)
+        for family, packages in [('arch', ['fluidsynth', 'soundfont-fluid']),
+                                 ('debian', ['libfluidsynth-dev', 'fluid-soundfont-gm']),
+                                 ('fedora', ['fluidsynth-devel', 'fluid-soundfont-gm'])]:
+            for package in packages:
+                self.assertIn(package, installer.dependency_command(family, {}, False))
 
     def test_paths_and_links_refused(self):
         for path in ['/etc/passwd', '../escape.wav', '%2e%2e/escape.wav', 'a\\b.wav', 'a\0.wav']:

@@ -43,5 +43,8 @@ int websamp_default_url(const char *name, int index, char *out, int outlen);
 /* Catalog snapshots only: never downloads audio. Explicit user maps win. */
 int websamp_list_sounds(SoundInfo *out, int capacity);
 unsigned websamp_revision(void);
+/* Canonical local files referenced by all loaded default manifests, including
+ * entries shadowed by later catalogs. Lookup does not perform file I/O. */
+int websamp_manifest_contains(const char *absolute_path);
 
 #endif

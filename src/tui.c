@@ -15,7 +15,8 @@
 #include "songfile.h"
 #include "terminal_graphics.h"
 #include <cjson/cJSON.h>
-#include <slang.h>
+#include <poll.h>
+#include "tui_terminal.h"
 #include <string.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -89,7 +90,7 @@ static unsigned inline_bound_generation;
 static unsigned inline_bound_revision;
 static int viz_h = 0;
 static int viz_utf8 = 0;
-static int graphics_disabled, graphics_supported, graphics_probe_pending;
+static int graphics_disabled, graphics_supported;
 static int graphics_redraw, graphics_cell_width = 8, graphics_cell_height = 16;
 typedef struct {
     int line, kind, row, col, width, first, count, cell_width, cell_height;
@@ -98,18 +99,41 @@ typedef struct {
 static InlineGraphic graphics_pending[GRAPHICS_IMAGES], graphics_previous[GRAPHICS_IMAGES];
 static int graphics_pending_count, graphics_previous_count;
 static double graphics_last_frame;
-static double palette_next_query, palette_reply_until;
 #define GRAPHICS_FRAME_SECONDS (1.0/60.0)
 static void inline_graphics_clear(void);
 
-static void graphics_probe(void) {
-    /* Multiplexer passthrough is deliberately not assumed. Unknown terminals
-       safely ignore APC; braille stays active until the probe succeeds. */
-    if (!graphics_disabled && !getenv("TMUX") && !getenv("STY") &&
-        isatty(fileno(stdin)) && isatty(fileno(stdout))) {
-        graphics_probe_pending = terminal_graphics_probe(stdout);
-        fflush(stdout);
+static void graphics_read_palette(void) {
+    /* Notcurses owns OSC input. Import its startup snapshot rather than racing
+       its input thread for terminal replies. Optional theme-file watching can
+       replace this baseline; backgrounds retain terminal transparency. */
+    uint32_t rgb;
+    char reply[48];
+    if (!notcurses_default_foreground(terminal_nc,&rgb)) {
+        snprintf(reply,sizeof(reply),"10;#%06x",rgb&0xffffffu);
+        terminal_graphics_palette_reply(reply);
     }
+    if (!notcurses_default_background(terminal_nc,&rgb)) {
+        snprintf(reply,sizeof(reply),"11;#%06x",rgb&0xffffffu);
+        terminal_graphics_palette_reply(reply);
+    }
+    ncpalette *palette=ncpalette_new(terminal_nc);
+    if (palette) {
+        for (int i=0;i<16;i++) {
+            ncpalette_get(palette,i,&rgb);
+            if (!rgb && i) continue;
+            snprintf(reply,sizeof(reply),"4;%d;#%06x",i,rgb);
+            terminal_graphics_palette_reply(reply);
+        }
+        ncpalette_free(palette);
+    }
+}
+
+static void graphics_probe(void) {
+    /* Our transport sends Kitty images; Notcurses owns capability replies. */
+    ncpixelimpl_e pixels=notcurses_check_pixel_support(terminal_nc);
+    graphics_supported=!graphics_disabled && !getenv("TMUX") && !getenv("STY") &&
+        (pixels==NCPIXEL_KITTY_STATIC || pixels==NCPIXEL_KITTY_ANIMATED || pixels==NCPIXEL_KITTY_SELFREF);
+    graphics_redraw=1;
 }
 static double split_ratio = 0.6; /* code pane fraction; F10/F11 adjust */
 static int *line_err;
@@ -130,7 +154,7 @@ static int search_ndirs_total = 0; /* all matches */
 static char search_path[1024] = {0}; /* "" = global flat search */
 static int search_category = -1;
 static unsigned search_revision;
-static int search_categories[256], search_pitched[256];
+static SoundBrowserRow search_rows[256];
 static int file_mode = 0; /* 0 off, 1 save picker, 2 load picker */
 static char file_buf[256] = {0};
 static int file_len = 0;
@@ -802,6 +826,8 @@ static int editor_redo(void) {
 }
 
 /* Unknown or malformed settings leave the defaults intact. */
+#include "tui_theme.h"
+
 static void load_editor_config(void) {
     char base[1024], path[1200], text[4097];
     user_dir(base, sizeof(base), "XDG_CONFIG_HOME", "tompouce", ".config/tompouce");
@@ -832,6 +858,9 @@ static void load_editor_config(void) {
     if (cJSON_IsBool(v)) inline_visuals = cJSON_IsTrue(v);
     v = cJSON_GetObjectItemCaseSensitive(cfg, "kitty_graphics");
     if (cJSON_IsBool(v)) graphics_disabled = !cJSON_IsTrue(v);
+    v = cJSON_GetObjectItemCaseSensitive(cfg, "theme_source");
+    if (cJSON_IsString(v)) for (int i=0;i<4;i++)
+        if (!strcmp(v->valuestring,theme_modes[i])) theme_mode=i;
     cJSON_Delete(cfg);
 }
 
@@ -866,6 +895,8 @@ static void save_editor_config(void) {
     cJSON_AddBoolToObject(cfg, "inline_visuals", inline_visuals ? 1 : 0);
     cJSON_DeleteItemFromObject(cfg, "kitty_graphics");
     cJSON_AddBoolToObject(cfg, "kitty_graphics", !graphics_disabled);
+    cJSON_DeleteItemFromObject(cfg, "theme_source");
+    cJSON_AddStringToObject(cfg, "theme_source", theme_modes[theme_mode]);
     char *txt = cJSON_Print(cfg);
     cJSON_Delete(cfg);
     if (!txt) return;
@@ -891,13 +922,12 @@ void tui_init(void) {
     log_console_stderr(0); /* stderr shares the terminal: keep it quiet */
     SLtt_get_terminfo();
     if (SLsmg_init_smg() == -1) {
-        fprintf(stderr, "SLsmg_init_smg failed\n");
+        fprintf(stderr, "Notcurses terminal initialization failed\n");
         exit(1);
     }
     smg_active = 1;
-    SLang_TT_Read_FD = fileno(stdin);
-    if (SLang_init_tty(-1, 1, 0) == -1) {
-        fprintf(stderr, "SLang_init_tty failed\n");
+    if (notcurses_linesigs_disable(terminal_nc) < 0) {
+        fprintf(stderr, "cannot configure Notcurses input\n");
         exit(1);
     }
     tty_active = 1;
@@ -937,19 +967,18 @@ void tui_init(void) {
     SLkp_define_keysym("\033[<", 2100); /* SGR mouse report prefix */
     SLkp_define_keysym("\033[200~", 2101); /* bracketed paste */
     SLkp_define_keysym("\033[Z", 2102); /* Shift+Tab */
-    SLkp_define_keysym("\033_G", 2103); /* Kitty graphics response */
-    SLkp_define_keysym("\033]", 2104); /* OSC palette response */
     SLkp_define_keysym("\033[1;2A", 2110);
     SLkp_define_keysym("\033[1;2B", 2111);
     SLkp_define_keysym("\033[1;2D", 2112);
     SLkp_define_keysym("\033[1;2C", 2113);
     SLkp_define_keysym("\033[1;2H", 2114);
     SLkp_define_keysym("\033[1;2F", 2115);
-    fputs("\033[?2004h", stdout);
-    if (mouse_enabled) fputs("\033[?1002h\033[?1006h", stdout);
-    fflush(stdout);
+    fputs("\033[?2004h", terminal_output);
+    if (mouse_enabled) fputs("\033[?1002h\033[?1006h", terminal_output);
+    fflush(terminal_output);
     SLsmg_utf8_enable(1);
     viz_utf8 = SLsmg_is_utf8_mode();
+    graphics_read_palette();
     graphics_probe();
     /* editor colors (degrade to inverse video on mono terminals) */
     SLtt_set_color(2, NULL, "yellow", "black");        /* keyword */
@@ -962,6 +991,7 @@ void tui_init(void) {
     SLtt_set_color(9, NULL, "red", "black");          /* error marker */
     SLtt_set_color(10, NULL, "black", "yellow");      /* sounding now */
     SLtt_set_color(11, NULL, "black", "brightcyan"); /* selection */
+    theme_init();
     rows = SLtt_Screen_Rows;
     cols = SLtt_Screen_Cols;
     if (!lines_ready()) {
@@ -974,8 +1004,9 @@ void tui_shutdown(void) {
     companion_shutdown();
     if (!smg_active && !tty_active) return;
     inline_graphics_clear();
+    fflush(terminal_output);
     if (smg_active) { SLsmg_reset_smg(); smg_active = 0; }
-    if (tty_active) { SLang_reset_tty(); tty_active = 0; }
+    tty_active = 0;
     fputs("\033[?1002l\033[?1006l\033[?2004l\033[0m\033[?25h", stdout);
     fflush(stdout);
     if (saved_tty_valid) (void)tcsetattr(fileno(stdin), TCSANOW, &saved_tty);
@@ -1846,6 +1877,7 @@ static unsigned char **play_rows;
 static int play_ink[192];
 static uint32_t play_color[192];
 static unsigned play_flags[192];
+static unsigned play_theme_revision[192];
 static int *play_cap;
 static int play_n;
 static const char *hl_src;
@@ -1926,7 +1958,8 @@ static void fill_play_mask(double now) {
     free(flat);
     for (int s=0;s<n;s++) {
         if (!(flags[s]&(VISUAL_COLOR|VISUAL_BOLD|VISUAL_UNDERLINE|VISUAL_ITALIC))) { play_ink[s]=10; continue; }
-        if (play_ink[s]!=16+s || play_color[s]!=colors[s] || play_flags[s]!=flags[s]) {
+        if (play_ink[s]!=16+s || play_color[s]!=colors[s] || play_flags[s]!=flags[s] || play_theme_revision[s]!=theme_revision) {
+            play_theme_revision[s]=theme_revision;
             char background[16]; char *foreground="black";
             if (flags[s]&VISUAL_COLOR) {
                 snprintf(background,sizeof(background),"#%06x",(unsigned)(colors[s]>>8));
@@ -2514,7 +2547,7 @@ static int queue_inline_graphic(int line, int kind, int sub, int row, int col,
 
 static void inline_graphics_clear(void) {
     for (int i = 0; i < graphics_previous_count; i++)
-        terminal_graphics_delete(stdout,GRAPHICS_IMAGE_ID+(unsigned)i);
+        terminal_graphics_delete(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i);
     graphics_previous_count = 0;
     graphics_redraw = 1;
 }
@@ -2562,9 +2595,8 @@ static void inline_graphics_flush(void) {
     double now = now_seconds();
     if (!changed && now-graphics_last_frame < GRAPHICS_FRAME_SECONDS) return;
     graphics_redraw = 0; graphics_last_frame = now;
-    fputs("\0337",stdout); /* Restore S-Lang's physical cursor after placements. */
     for (int i = graphics_pending_count; i < graphics_previous_count; i++)
-        terminal_graphics_delete(stdout,GRAPHICS_IMAGE_ID+(unsigned)i);
+        terminal_graphics_delete(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i);
     static TerminalImage image;
     for (int i = 0; i < graphics_pending_count; i++) {
         const InlineGraphic *g = &graphics_pending[i];
@@ -2579,18 +2611,16 @@ static void inline_graphics_flush(void) {
         image.height = full_rows*cell_height;
         image.compact=0;
         render_inline_feedback(&image,g->kind,g->feed,g->generation);
-        if (!terminal_graphics_send(stdout,GRAPHICS_IMAGE_ID+(unsigned)i,&image,
+        if (!terminal_graphics_send(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i,&image,
                                    g->row,g->col,g->width,g->count,g->first*cell_height,g->count*cell_height)) {
             graphics_supported = 0;
             if (graphics_previous_count < i+1) graphics_previous_count = i+1;
             inline_graphics_clear();
-            fputs("\0338",stdout);
             return;
         }
     }
     memcpy(graphics_previous,graphics_pending,(size_t)graphics_pending_count*sizeof(InlineGraphic));
     graphics_previous_count = graphics_pending_count;
-    fputs("\0338",stdout);
 }
 
 static void draw_inline_row(int line, int sub, int row, int col, int width) {
@@ -3148,45 +3178,24 @@ static void complete_at_cursor(void) {
 static void search_use_bank(const char *dirfrag);
 static void search_refresh(void) {
     int cnt = banks_count();
-    unsigned revision = sounds_revision();
+    unsigned revision = sounds_revision()+(unsigned)banks_ready();
     if (!search_dirty && cnt == search_lastcount && revision == search_revision) return;
     search_dirty = 0;
     search_lastcount = cnt;
     search_revision = revision;
-    if (search_category != SOUND_CATEGORIES) {
-        search_path[0] = 0;
-        if (search_category < 0 && !search_buf[0]) {
-            search_ndirs = search_ndirs_total = SOUND_CATEGORIES+1;
-            for (int i = 0; i <= SOUND_CATEGORIES; i++) {
-                snprintf(search_dirs[i],sizeof(search_dirs[i]),"%s",i == SOUND_CATEGORIES ? "local-banks" : sounds_category(i));
-                search_dircounts[i] = i == SOUND_CATEGORIES ? cnt : sounds_search(i,"",NULL,0);
-            }
-        } else if (search_category == SOUND_IMPORT) {
-            search_ndirs = search_ndirs_total = 0;
-        } else {
-            SoundInfo rows[256];
-            search_ndirs_total = sounds_search(search_category,search_buf,rows,256);
-            if (search_ndirs_total < 0) search_ndirs_total = 0;
-            search_ndirs = search_ndirs_total < 256 ? search_ndirs_total : 256;
-            for (int i = 0; i < search_ndirs; i++) {
-                snprintf(search_dirs[i],sizeof(search_dirs[i]),"%.63s",rows[i].name);
-                search_dircounts[i] = rows[i].slots; search_categories[i] = rows[i].category; search_pitched[i] = rows[i].pitched;
-            }
-        }
-        if (search_sel >= search_ndirs) search_sel = search_ndirs > 0 ? search_ndirs-1 : 0;
-        return;
-    }
-    if (search_path[0]) {
-        search_ndirs_total = banks_list_dir(search_path, search_buf, search_dirs, 256);
+    if (search_category == SOUND_IMPORT) {
+        search_ndirs = search_ndirs_total = 0;
+    } else {
+        search_ndirs_total = sounds_browse(search_category,search_path,search_buf,search_rows,256);
         if (search_ndirs_total < 0) search_ndirs_total = 0;
         search_ndirs = search_ndirs_total < 256 ? search_ndirs_total : 256;
-    } else {
-        search_ndirs_total = banks_search_dirs(search_buf, search_dirs, search_dircounts, 256);
-        search_ndirs = search_ndirs_total < 256 ? search_ndirs_total : 256;
+        for (int i = 0; i < search_ndirs; i++) {
+            snprintf(search_dirs[i],sizeof(search_dirs[i]),"%s",search_rows[i].name);
+            search_dircounts[i] = search_rows[i].sound.slots;
+        }
     }
-    int mx = search_ndirs + (search_path[0] ? 1 : 0) - 1; /* +1 for '..' */
-    if (search_sel > mx) search_sel = mx;
-    if (search_sel < 0) search_sel = 0;
+    int count=search_ndirs+(search_path[0]?1:0);
+    if (search_sel >= count) search_sel = count > 0 ? count-1 : 0;
 }
 
 static void search_ascend(void) {
@@ -3207,46 +3216,32 @@ static int search_row_target(void) {
 }
 
 static void search_descend_or_use(void) {
-    if (search_category < 0 && !search_buf[0]) {
-        search_category = search_sel; search_sel = 0; search_dirty = 1; return;
-    }
     if (search_category == SOUND_IMPORT) {
         if (companion_import_folder(search_buf)) {
             search_category = SOUND_USER; search_buf[0] = 0; search_len = 0; search_sel = 0; search_dirty = 1;
         } else snprintf(status_msg,sizeof(status_msg),"type a folder path, or wait for current import");
         return;
     }
-    if (search_category != SOUND_CATEGORIES) {
-        if (search_sel >= 0 && search_sel < search_ndirs) {
-            SoundInfo sound = {0}; char snippet[512];
-            snprintf(sound.name,sizeof(sound.name),"%.63s",search_dirs[search_sel]);
-            sound.category = search_categories[search_sel]; sound.pitched = search_pitched[search_sel];
-            if (sounds_snippet(&sound,snippet,sizeof(snippet))) {
-                int a = editor_offset(cur_line,cur_col), b = a;
-                if (sel_active) selection_bounds(&a,&b);
-                if (!editor_replace(a,b,snippet)) return;
-                search_mode = 0;
-                snprintf(status_msg,sizeof(status_msg),"sound inserted (F5 evaluates)");
-            }
-        }
-        return;
-    }
     int t = search_row_target();
     if (t == -2) { search_ascend(); return; }
     if (t < 0 || t >= search_ndirs) return;
-    char probe[1][512];
-    int has_kids = banks_list_dir(search_dirs[t], "", probe, 1);
-    if (has_kids > 0) {
-        snprintf(search_path, sizeof(search_path), "%s", search_dirs[t]);
-        search_sel = 0;
-        search_buf[0] = 0;
-        search_len = 0;
-        search_dirty = 1;
-        snprintf(status_msg, sizeof(status_msg), "browsing %.200s", search_dirs[t]);
-    } else {
-        search_use_bank(search_dirs[t]);
-        search_mode = 0;
+    if (search_rows[t].kind!=SOUND_ROW_BANK) {
+        char snippet[1200];
+        if (sounds_browser_snippet(&search_rows[t],snippet,sizeof(snippet))) {
+            int a = editor_offset(cur_line,cur_col), b = a;
+            if (sel_active) selection_bounds(&a,&b);
+            if (!editor_replace(a,b,snippet)) return;
+            search_mode = 0;
+            snprintf(status_msg,sizeof(status_msg),"sound inserted (F5 evaluates)");
+        }
+        return;
     }
+    snprintf(search_path, sizeof(search_path), "%s", search_dirs[t]);
+    search_sel = 0;
+    search_buf[0] = 0;
+    search_len = 0;
+    search_dirty = 1;
+    snprintf(status_msg, sizeof(status_msg), "browsing %.200s", search_dirs[t]);
 }
 
 /* ---- song file picker (Ctrl+S save, Ctrl+O load) ---- */
@@ -3377,10 +3372,13 @@ static void file_confirm(void) {
 }
 
 static void draw_search_at(int r0, int c0, int h, int w) {
-    if (h < 4 || w < 12) return;
+    if (h < 7 || w < 12) return;
     SLsmg_draw_box(r0, c0, h, w);
     SLsmg_gotorc(r0, c0+2);
-    if (search_category != SOUND_CATEGORIES) {
+    if (search_path[0]) {
+        char title[120]; snprintf(title,sizeof(title)," bank: %.95s ",search_path);
+        draw_text(r0,c0+2,title,w-4,0);
+    } else if (search_category != SOUND_CATEGORIES) {
         char title[80]; snprintf(title,sizeof(title)," sounds: %s ",sounds_category(search_category));
         draw_text(r0,c0+2,title,w-4,0);
     } else if (search_path[0]) {
@@ -3394,7 +3392,29 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     snprintf(q, sizeof(q), search_category == SOUND_IMPORT ? "folder> %.200s" : "find> %.200s", search_buf);
     int qu = draw_text(r0+1, c0+1, q, w-2, 0);
     if (qu < w - 2) blank_inner(r0+1, c0+1+qu, w-2-qu);
-    int visible = h - 4;
+    /* Keep category controls visible while browsing and wrap in narrow panes. */
+    int category_row = r0+2, category_col = 0;
+    blank_inner(category_row,c0+1,w-2);
+    for (int i = -1; i <= SOUND_CATEGORIES; i++) {
+        const char *name = i < 0 ? "all" : i == SOUND_CATEGORIES ? "local-banks"
+            : i == SOUND_USER ? "user sounds" : sounds_category(i);
+        char label[64];
+        snprintf(label,sizeof(label),"%s%s%s",i == search_category ? "[" : " ",name,
+                 i == search_category ? "]" : " ");
+        int len = (int)strlen(label);
+        if (category_col && category_col+len > w-2) {
+            if (category_row+1 >= r0+h-3) break;
+            category_row++; category_col = 0;
+            blank_inner(category_row,c0+1,w-2);
+        }
+        if (i == search_category) SLsmg_reverse_video();
+        draw_text(category_row,c0+1+category_col,label,w-2-category_col,0);
+        if (i == search_category) SLsmg_normal_video();
+        category_col += len;
+    }
+    int info_row = category_row+1;
+    int list_row = info_row+1;
+    int visible = r0+h-1-list_row;
     char info[256];
     if (search_category == SOUND_IMPORT) snprintf(info,sizeof(info),"folder path; WAV/MP3/FLAC, 8 MiB/file");
     else if (search_category != SOUND_CATEGORIES) snprintf(info,sizeof(info),"%d sounds; Left/Right: category",search_ndirs_total);
@@ -3405,35 +3425,32 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     else if (search_ndirs_total <= 0) snprintf(info, sizeof(info), "%d files indexed, no match", banks_count());
     else snprintf(info, sizeof(info), "%d bank%s",
         search_ndirs_total, search_ndirs_total == 1 ? "" : "s");
-    int iu = draw_text(r0+2, c0+1, info, w-2, 0);
-    if (iu < w - 2) blank_inner(r0+2, c0+1+iu, w-2-iu);
+    int iu = draw_text(info_row, c0+1, info, w-2, 0);
+    if (iu < w - 2) blank_inner(info_row, c0+1+iu, w-2-iu);
     int top = search_sel - visible + 1;
     if (top < 0) top = 0;
     int nrows = search_ndirs + (search_path[0] ? 1 : 0);
     for (int r = 0; r < visible; r++) {
         int idx = top + r;
-        if (idx >= nrows) { blank_inner(r0+3+r, c0+1, w-2); continue; }
+        if (idx >= nrows) { blank_inner(list_row+r, c0+1, w-2); continue; }
         char b[256];
         if (search_path[0] && idx == 0) {
             snprintf(b, sizeof(b), "%s", "..");
         } else {
             int di = idx - (search_path[0] ? 1 : 0);
-            if (search_path[0]) {
-                const char *base = strrchr(search_dirs[di], '/');
-                snprintf(b, sizeof(b), "> %.200s/", base ? base + 1 : search_dirs[di]);
-            } else {
-                snprintf(b, sizeof(b), "> %.200s (%d)", search_dirs[di], search_dircounts[di]);
-            }
+            snprintf(b,sizeof(b),"> %.190s%s (%d)%s",search_dirs[di],
+                search_rows[di].kind==SOUND_ROW_BANK?"/":"",search_dircounts[di],
+                search_rows[di].kind==SOUND_ROW_FILE?" [file]":"");
         }
-        SLsmg_gotorc(r0+3+r, c0+1);
+        SLsmg_gotorc(list_row+r, c0+1);
         if (idx == search_sel) SLsmg_reverse_video();
-        int used = draw_text(r0+3+r, c0+1, b, w-2, 0);
+        int used = draw_text(list_row+r, c0+1, b, w-2, 0);
         if (idx == search_sel) SLsmg_normal_video();
-        if (used < w - 2) blank_inner(r0+3+r, c0+1+used, w-2-used);
+        if (used < w - 2) blank_inner(list_row+r, c0+1+used, w-2-used);
     }
-    const char *foot = search_category == SOUND_IMPORT ? "Enter:import folder  Bs(empty):categories" : search_category != SOUND_CATEGORIES ? "Enter:insert  Bs(empty):categories" : search_ndirs_total > search_ndirs
+    const char *foot = search_category == SOUND_IMPORT ? "Enter:import  Left/Right:category" : search_ndirs_total > search_ndirs
         ? "...more (refine query)"
-        : "Enter:open/use Tab:use bank Up/Down:sel Bs:up";
+        : "Enter:open/insert Tab:insert bank Bs:up";
     int fu = draw_text(r0+h-1, c0+1, foot, w-2, 0);
     if (fu < w - 2) blank_inner(r0+h-1, c0+1+fu, w-2-fu);
 }
@@ -3472,44 +3489,30 @@ static void draw_file_at(int r0, int c0, int h, int w) {
     if (fu2 < w - 2) blank_inner(r0+h-1, c0+1+fu2, w-2-fu2);
 }
 
-/* append "| bank <dir>" to a drum line, else insert a new drum line */
+/* Insert a manifest bank at the source selection without evaluating it. */
 static void search_use_bank(const char *dirfrag) {
-    char firstw[64] = {0};
-    char *line = code_lines[cur_line];
-    int i = 0;
-    while (line[i] == ' ' || line[i] == '\t') i++;
-    int k = 0;
-    while (line[i] && line[i] != ' ' && line[i] != '\t' && k < 63) firstw[k++] = line[i++];
-    firstw[k] = 0;
-    int drumtrk = (strncmp(firstw, "drum", 4) == 0 || strcmp(firstw, "sound") == 0);
-    if (drumtrk) {
-        size_t L = strlen(line);
-        int hasbar = strchr(line, '|') != NULL;
-        char add[512];
-        snprintf(add, sizeof(add), "%sbank %.400s", hasbar ? " " : " | ", dirfrag);
-        undo_begin(0);
-        if (!line_splice(cur_line, (int)L, 0, add, (int)strlen(add))) {
-            undo_abort();
-            snprintf(status_msg, sizeof(status_msg), "out of memory");
-            return;
-        }
-        undo_commit();
-        cur_col = (int)strlen(code_lines[cur_line]);
-        snprintf(status_msg, sizeof(status_msg), "bank set");
-    } else {
-        char add[512];
-        snprintf(add, sizeof(add), "drum bd sd hh cp | bank %.200s", dirfrag);
-        undo_begin(0);
-        if (!line_insert(cur_line + 1, add)) {
-            undo_abort();
-            snprintf(status_msg, sizeof(status_msg), "out of memory");
-            return;
-        }
-        undo_commit();
-        cur_line++;
-        cur_col = 0;
-        snprintf(status_msg, sizeof(status_msg), "drum line added");
+    SoundBrowserRow rows[256]; char pattern[512]={0}; size_t used=0;
+    int count=sounds_browse(SOUND_MACHINES,dirfrag,"",rows,256);
+    for (int i=0;i<count && i<256;i++) {
+        const char *part=strrchr(rows[i].sound.name,'_');
+        if (!part || !part[1]) continue;
+        size_t len=strlen(part+1);
+        if (used+len+2>=sizeof(pattern)) break;
+        if (used) pattern[used++]=' ';
+        memcpy(pattern+used,part+1,len+1); used+=len;
     }
+    if (!used) return;
+    cJSON *name=cJSON_CreateString(dirfrag);
+    char *quoted=name?cJSON_PrintUnformatted(name):NULL; cJSON_Delete(name);
+    if (!quoted) return;
+    cJSON *value=cJSON_CreateString(pattern);
+    char *quoted_pattern=value?cJSON_PrintUnformatted(value):NULL; cJSON_Delete(value);
+    if (!quoted_pattern) { free(quoted); return; }
+    char snippet[1200]; snprintf(snippet,sizeof(snippet),"s(%s).bank(%s)",quoted_pattern,quoted);
+    free(quoted_pattern); free(quoted);
+    int a=editor_offset(cur_line,cur_col), b=a;
+    if (sel_active) selection_bounds(&a,&b);
+    if (editor_replace(a,b,snippet)) snprintf(status_msg,sizeof(status_msg),"bank inserted (F5 evaluates)");
 }
 
 /* ---- right-pane geometry: main area rows 1..rows-3, right side at col mid ---- */
@@ -3628,6 +3631,7 @@ static const DocLine cheat[] = {
     {3, "/scope off hides bottom scope/roll; /scope on restores"},
     {3, "._scope() / ._pianoroll(): inline braille; /inline off hides"},
     {3, "Kitty graphics auto-detected; /graphics braille or /graphics auto"},
+    {3, "/theme off|omarchy|pywal|auto: optional live theme colors"},
     {3, "Up/Down and PgUp/PgDn follow wrapped rows"},
     {3, "source grows until memory runs out; offsets stop near 2 GiB"},
     {3, "128 voices, nesting 32 deep, bpm 20-400"},
@@ -3827,7 +3831,7 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         free(text);
         state_line(&row,maxrow,c0+1,w-2,"history undo=%d redo=%d cursor=L%d byte=%d",undo_n,redo_n,cur_line+1,cur_col);
         const char *graphics=graphics_disabled?"braille (forced)":graphics_supported?"Kitty":
-            graphics_probe_pending?"probing":"braille";
+            "braille";
         state_line(&row,maxrow,c0+1,w-2,"graphics=%s cell=%dx%d target=%s",graphics,graphics_cell_width,
             graphics_cell_height,graphics_supported && !graphics_disabled?"60fps":"20fps UI");
         state_line(&row,maxrow,c0+1,w-2,"inline=%s lines=%d images=%d/%d footer=%s F12=%s",
@@ -4262,6 +4266,13 @@ static void do_command_or_ai(const char *text) {
             graphics_redraw = 1;
             if (!graphics_disabled && !graphics_supported) graphics_probe();
             snprintf(status_msg,sizeof(status_msg),"inline graphics %s",graphics_disabled ? "braille" : "auto");
+        } else if (cmd && strcmp(cmd, "theme") == 0) {
+            char *a = strtok_r(NULL, " \t", &save);
+            int mode=-1;
+            if (a) for (int i=0;i<4;i++) if (!strcmp(a,theme_modes[i])) mode=i;
+            if (mode<0) { log_console("theme off|omarchy|pywal|auto"); return; }
+            theme_mode=mode; theme_poll(1); save_editor_config();
+            snprintf(status_msg,sizeof(status_msg),"theme %s",theme_modes[mode]);
         } else if (cmd && strcmp(cmd, "scope") == 0) {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) editor_scope = !editor_scope;
@@ -4293,11 +4304,7 @@ static void do_command_or_ai(const char *text) {
 }
 
 void tui_frame(void) {
-    double palette_now=now_seconds();
-    if (graphics_supported && !graphics_disabled && palette_now>=palette_next_query) {
-        terminal_graphics_palette_probe(stdout); fflush(stdout);
-        palette_reply_until=palette_now+.75; palette_next_query=palette_now+5;
-    }
+    theme_poll(0);
     companion_poll();
     /* live pattern check (only when the buffer changed) */
     {
@@ -4325,10 +4332,8 @@ void tui_frame(void) {
     if (resize_flag) {
         resize_flag = 0;
         graphics_redraw = 1;
-        SLsmg_reset_smg();
-        SLtt_get_terminfo();
+        notcurses_refresh(terminal_nc,NULL,NULL);
         SLtt_get_screen_size();
-        SLsmg_init_smg();
     }
     if (wsh) {
         SLtt_Screen_Rows = ws.ws_row;
@@ -4344,7 +4349,7 @@ void tui_frame(void) {
     memset(graphics_pending,0,sizeof(graphics_pending));
     viz_h = (show_viz && rows >= 28) ? VIZ_H : 0;
     /* full clear only on first frame or resize; otherwise every pane
-       rewrites all its rows, so SLsmg diffs stay minimal (no flicker) */
+       rewrites all its rows, so Notcurses diffs stay minimal (no flicker) */
     {
         static int first = 1, lr = 0, lc = 0;
         if (first || rows != lr || cols != lc) {
@@ -4359,6 +4364,14 @@ void tui_frame(void) {
     draw_console();
     if (viz_h > 0) draw_viz_at(rows - 3 - viz_h, cols);
     draw_input();
+    int graphic_layout_changed=graphics_pending_count!=graphics_previous_count ||
+        memcmp(graphics_pending,graphics_previous,(size_t)graphics_pending_count*sizeof(InlineGraphic));
+    if (graphic_layout_changed) {
+        /* External Kitty placements are outside the Notcurses damage model.
+           Retire them before repainting text exposed by a layout change. */
+        inline_graphics_clear();
+        fflush(terminal_output);
+    }
     int cursor_r = 0, cursor_c = 0;
     if (search_mode) {
         int mid = (cols * split_ratio < 24) ? 24 : (int)(cols * split_ratio);
@@ -4380,55 +4393,24 @@ void tui_frame(void) {
         SLsmg_gotorc(rows - 2, 4 + input_len);
         cursor_r = rows - 2; cursor_c = 4 + input_len;
     }
-    int graphics_sync = graphics_supported;
-    if (graphics_sync) { fputs("\033[?2026h",stdout); fflush(stdout); }
+    if (cursor_r || cursor_c) SLtt_goto_rc(cursor_r,cursor_c);
     SLsmg_refresh();
+    if (graphic_layout_changed) notcurses_refresh(terminal_nc,NULL,NULL);
     inline_graphics_flush();
-    fflush(stdout);
-    if (cursor_r || cursor_c) {
-        SLtt_goto_rc(cursor_r, cursor_c);
-        fflush(stdout);
-    }
-    if (graphics_sync) { fputs("\033[?2026l",stdout); fflush(stdout); }
+    /* DECSC/DECRC also restore rendition and collide with the library's
+       saved state. Return explicitly to its requested visible cursor. */
+    if (graphics_pending_count && (cursor_r || cursor_c))
+        fprintf(terminal_output,"\033[%d;%dH",cursor_r+1,cursor_c+1);
+    fflush(terminal_output);
 }
 
 static int report_byte(void) {
     if (quit_requested || !SLang_input_pending(1)) return -1;
     unsigned int c = SLang_getkey();
+    if (c == NCKEY_ENTER) return '\n';
+    if (c == NCKEY_BACKSPACE) return 127;
+    if (c > 255 && c != 0xffff) return -1;
     return c == 0xffff ? -1 : (int)c;
-}
-
-static void read_graphics_reply(void) {
-    char reply[128]; int n = 0, escaped = 0, complete = 0, bad = 0;
-    for (int i = 0; i < 256; i++) {
-        int c = report_byte();
-        if (c < 0) break;
-        if (escaped) { if (c == '\\') complete = 1; else bad = 1; break; }
-        if (c == 27) { escaped = 1; continue; }
-        if (c < 32 || c > 126 || n >= (int)sizeof(reply)-1) bad = 1;
-        else reply[n++] = (char)c;
-    }
-    reply[n] = 0;
-    if (complete && !bad && graphics_probe_pending && terminal_graphics_reply(reply)) {
-        graphics_supported = 1; graphics_probe_pending = 0; graphics_redraw = 1;
-        log_console("inline visuals: Kitty graphics supported");
-    }
-}
-
-static void read_palette_reply(void) {
-    char reply[128]; int n=0,escaped=0,complete=0,bad=0;
-    double deadline=now_seconds()+.1;
-    for (int i=0;i<256 && now_seconds()<deadline;i++) {
-        int c=report_byte(); if (c<0) break;
-        if (escaped) { if (c=='\\') complete=1; else bad=1; break; }
-        if (c==7) { complete=1; break; }
-        if (c==27) { escaped=1; continue; }
-        if (c<32 || c>126 || n>=(int)sizeof(reply)-1) bad=1;
-        else reply[n++]=(char)c;
-    }
-    reply[n]=0;
-    if (complete && !bad && now_seconds()<=palette_reply_until && terminal_graphics_palette_reply(reply))
-        graphics_redraw=1;
 }
 
 static void read_mouse(void) {
@@ -4607,6 +4589,8 @@ static void read_paste(void) {
 static int read_key(void) {
     unsigned int c = SLang_getkey();
     if (c == 0xFFFF) return SL_KEY_ERR;
+    if (c == NCKEY_ENTER) return '\r';
+    if (c > 255) return (int)c;
     if (c == 27) {
         if (SLang_input_pending(1) == 0) {
             return 27;
@@ -4614,7 +4598,7 @@ static int read_key(void) {
         /* Escape followed quickly by a normal-mode command is two keys,
            not an unknown terminal sequence that should swallow the command. */
         unsigned int next=SLang_getkey();
-        if (next!=0xffff) SLang_ungetkey((unsigned char)next);
+        if (next!=0xffff) SLang_ungetkey(next);
         if (next!='[' && next!='O' && next!='_' && next!=']') return 27;
         SLang_ungetkey(27);
         return SLkp_getkey();
@@ -4685,6 +4669,7 @@ void tui_run(void) {
 
         if (SLang_input_pending(0)) ch = read_key();
         else {
+            if (terminal_input_closed) { quit_requested=SIGHUP; continue; }
             int idle_ms = 50;
             if (graphics_supported && !graphics_disabled && graphics_previous_count > 0) {
                 /* Rendering/transfer time counts toward the frame interval.
@@ -4693,12 +4678,10 @@ void tui_run(void) {
                 idle_ms = remaining > 0 ? (int)ceil(remaining*1000) : 0;
                 if (idle_ms > 17) idle_ms = 17;
             }
-            mcp_wait_input(fileno(stdin),idle_ms);
+            mcp_wait_input(terminal_input_fd(),idle_ms);
             continue;
         }
         if (ch == SL_KEY_ERR) continue;
-        if (ch == 2103) { read_graphics_reply(); continue; }
-        if (ch == 2104) { read_palette_reply(); continue; }
         undo_tick++;
         if (ch == 2100) { vi_reset(); read_mouse(); continue; }
         if (ch == 2101) { vi_reset(); read_paste(); continue; }
@@ -4708,20 +4691,22 @@ void tui_run(void) {
             if (ch == 27 || ch == SL_KEY_F(6)) { search_mode = 0; continue; }
             else if (ch == SL_KEY_LEFT || ch == SL_KEY_RIGHT) {
                 int direction = ch == SL_KEY_RIGHT ? 1 : -1;
-                search_category = search_category < 0 ? (direction > 0 ? 0 : SOUND_CATEGORIES)
-                    : (search_category+direction+SOUND_CATEGORIES+1)%(SOUND_CATEGORIES+1);
-                search_path[0] = 0; search_buf[0] = 0; search_len = 0; search_sel = 0; search_dirty = 1; continue;
+                int previous = search_category;
+                search_category = (search_category+1+direction+SOUND_CATEGORIES+2)%(SOUND_CATEGORIES+2)-1;
+                if (previous == SOUND_IMPORT || search_category == SOUND_IMPORT) {
+                    search_buf[0] = 0; search_len = 0;
+                }
+                search_path[0] = 0; search_sel = 0; search_dirty = 1; continue;
             }
             else if (ch == SL_KEY_ENTER || ch == '\n' || ch == '\r') {
                 search_descend_or_use();
                 continue;
             } else if (ch == 9) {
-                if (search_category != SOUND_CATEGORIES) { search_descend_or_use(); continue; }
                 int t = search_row_target();
-                if (t >= 0 && t < search_ndirs) {
+                if (t >= 0 && t < search_ndirs && search_rows[t].kind==SOUND_ROW_BANK) {
                     search_use_bank(search_dirs[t]);
                     search_mode = 0;
-                }
+                } else search_descend_or_use();
                 continue;
             } else if (ch == SL_KEY_UP) { if (search_sel > 0) search_sel--; continue; }
             else if (ch == SL_KEY_DOWN) {
@@ -4832,12 +4817,12 @@ void tui_run(void) {
         }
         if (sel_active && (!vi_mode || !vi_normal) &&
             (ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8 || ch == SL_KEY_DELETE ||
-             ch == '\r' || ch == '\n' || (ch >= 32 && ch < 127))) {
+             ch == '\r' || ch == '\n' || (ch >= 32 && ch <= 255 && ch != 127))) {
             int a, b;
             selection_bounds(&a, &b);
             char text[2] = {0, 0};
             if (ch == '\r' || ch == '\n') text[0] = '\n';
-            else if (ch >= 32 && ch < 127) text[0] = (char)ch;
+            else if (ch >= 32 && ch <= 255 && ch != 127) text[0] = (char)ch;
             (void)editor_replace(a, b, text);
             continue;
         }
@@ -5125,7 +5110,7 @@ void tui_run(void) {
                 undo_abort();
                 snprintf(status_msg, 256, "out of memory");
             }
-        } else if (ch >= 32 && ch < 127) {
+        } else if (ch >= 32 && ch <= 255 && ch != 127) {
             char one[2] = { (char)ch, 0 };
             undo_begin(UNDO_TYPE);
             if (line_splice(cur_line, cur_col, 0, one, 1)) {

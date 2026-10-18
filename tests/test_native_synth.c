@@ -4,7 +4,10 @@
 #include <assert.h>
 
 static void clear_voices(void) {
-    for (int i=0;i<MAX_VOICES;i++) { native_synth_state_free(voices[i].native_state); native_synth_state_free(voices[i].native_right); }
+    for (int i=0;i<MAX_VOICES;i++) {
+        native_synth_state_free(voices[i].native_state); native_synth_state_free(voices[i].native_right);
+        stretch_release(voices[i].stretch_buffer);
+    }
     memset(voices,0,sizeof(voices));
 }
 static AudioEvent prepare(const char *code) {
@@ -29,7 +32,109 @@ static void render(AudioEvent *event) {
     }
     assert(energy>1e-5); clear_voices();
 }
+
+static AudioEvent prepare_gm(const char *code) {
+    char error[512]; cJSON *metadata=NULL;
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error)); assert(program);
+    cJSON *haps=javascript_query_cps(program,0,1,.5); assert(cJSON_GetArraySize(haps)==1);
+    const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value));
+    assert(event.stretch_buffer && !event.native_synth && !event.is_drum);
+    cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
+}
+
+static void test_gm(void) {
+    assert(gm_synth_count()==125 && gm_synth_program("gm_piano")==0 && gm_synth_program("gm_flute")==73);
+    assert(gm_synth_program("gm_gunshot")==127 && gm_synth_program("gm_missing")==-1);
+    if (!gm_synth_available()) { puts("GM soundfont unavailable: native rendering checks skipped"); return; }
+    SoundInfo rows[256]; assert(sounds_search(SOUND_SYNTHS,"gm_",rows,256)==125);
+    websamp_load_code("samples({gm_flute:['https://example.com/custom-flute.wav']})");
+    assert(sounds_search(SOUND_SYNTHS,"gm_flute",rows,256)==0);
+    assert(sounds_search(SOUND_USER,"gm_flute",rows,256)==1 && websamp_slot_count("gm_flute")==1);
+    websamp_load_code("");
+    AudioEvent flute=prepare_gm("note(60.5).s('gm_flute').release(.05)");
+    AudioEvent again=prepare_gm("note(60.5).s('gm_flute').release(.05).gain(.2).lpf(1200).pan(.8)");
+    assert(flute.stretch_buffer==again.stretch_buffer && stretch_age_offset(flute.stretch_buffer)==0);
+    const float *pcm=stretch_pcm(flute.stretch_buffer); double energy=0;
+    for (int i=0;i<stretch_frames(flute.stretch_buffer)*2;i++) { assert(isfinite(pcm[i])); energy+=pcm[i]*pcm[i]; }
+    assert(energy>1 && stretch_frames(flute.stretch_buffer)==(int)ceil(2.05*SR));
+    render(&again);
+    AudioEvent piano=prepare_gm("note(60.5).s('gm_piano').release(.05)");
+    assert(piano.stretch_buffer!=flute.stretch_buffer);
+    const float *other=stretch_pcm(piano.stretch_buffer); double difference=0;
+    for (int i=0;i<44100;i++) difference+=fabs(pcm[i]-other[i]);
+    assert(difference>1);
+    stretch_release(piano.stretch_buffer); stretch_release(again.stretch_buffer); stretch_release(flute.stretch_buffer);
+    /* Exercise every registered program and cache eviction without a device. */
+    for (int i=0;i<gm_synth_count();i++) {
+        AudioEvent event={0}; snprintf(event.token,sizeof(event.token),"%s",gm_synth_name(i));
+        event.freq=440; event.duration=.02; event.att=.001; event.dec=.001; event.sus=1; event.rel=.01; event.smp_speed=1;
+        dsp_params_init(&event.dsp); assert(gm_synth_prepare(&event));
+        assert(stretch_frames(event.stretch_buffer)==1323);
+        stretch_release(event.stretch_buffer);
+    }
+    /* Keep a voice alive after preparation ownership is dropped and evicted. */
+    AudioEvent held=prepare_gm("note(64).s('gm_violin').release(.01)");
+    clear_voices(); playing=1; audio_time=0; audio_trigger_event(&held); stretch_release(held.stretch_buffer);
+    for (int i=0;i<150;i++) {
+        AudioEvent event=held; event.stretch_buffer=NULL; event.freq=100+i; event.duration=.01;
+        assert(gm_synth_prepare(&event)); stretch_release(event.stretch_buffer);
+    }
+    float out[1024]; pa_callback(NULL,out,512,NULL,0,NULL); clear_voices();
+    puts("GM programs, fractional notes, immutable PCM reuse, eviction and native callback ok");
+}
+
+static AudioEvent prepare_wavetable(const char *code) {
+    char error[512]; cJSON *metadata=NULL;
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error)); assert(program);
+    cJSON *haps=javascript_query_cps(program,0,1,.5); assert(cJSON_GetArraySize(haps)==1);
+    const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value));
+    assert(event.smp>=0 && event.smp_gate && !event.is_drum && event.dsp.p[DSP_LOOP]==1);
+    cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
+}
+
+static void test_wavetable_banks(void) {
+    cJSON *hap=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"wt_test\"}}");
+    AudioEvent event; assert(js_audio_event(hap,0,2,&event));
+    assert(!event.is_drum && event.freq>0 && event.dsp.p[DSP_LOOP]==1);
+    cJSON_AddNumberToObject(cJSON_GetObjectItemCaseSensitive(hap,"value"),"loop",0);
+    assert(js_audio_event(hap,0,2,&event) && event.dsp.p[DSP_LOOP]==0); cJSON_Delete(hap);
+    char url[512];
+    if (!websamp_default_url("wt_flute",0,url,sizeof(url))) { puts("AKWF assets unavailable: real-bank callback checks skipped"); return; }
+    SoundInfo rows[256]; int count=sounds_search(SOUND_WAVETABLES,"wt_",rows,256); assert(count==65);
+    for (int i=0;i<count;i++) {
+        assert(rows[i].pitched && rows[i].slots>0);
+        int id=websamp_acquire(rows[i].name,69); assert(id>=0);
+        float *pcm; int frames,channels; smp_get_stereo(id,&pcm,&frames,&channels);
+        assert(pcm && frames>2 && (channels==1 || channels==2));
+    }
+    AudioEvent flute=prepare_wavetable("note(69).s('wt_flute').gain(.2).sustain(1).release(.01)");
+    AudioEvent variation=prepare_wavetable("note(69).s('wt_flute').n(1)"); assert(variation.smp!=flute.smp);
+    AudioEvent last=prepare_wavetable("note(69).s('wt_flute').n(-1)");
+    AudioEvent wrapped=prepare_wavetable("note(69).s('wt_flute').n(16)"); assert(last.smp==wrapped.smp);
+    float *pcm; int frames,channels; smp_get_stereo(flute.smp,&pcm,&frames,&channels);
+    clear_voices(); playing=1; audio_time=0; audio_trigger_event(&flute);
+    assert(fabs(voices[0].smpstep-frames*440/SR)<1e-9);
+    float out[1024]; double late_energy=0;
+    for (int block=0;block<100;block++) {
+        pa_callback(NULL,out,512,NULL,0,NULL);
+        if (block==99) for (int i=0;i<1024;i++) { assert(isfinite(out[i])); late_energy+=out[i]*out[i]; }
+    }
+    assert(voices[0].active && late_energy>1e-5); /* Sustained far beyond the source's one cycle. */
+    for (int block=0;block<90;block++) pa_callback(NULL,out,512,NULL,0,NULL);
+    assert(!voices[0].active); clear_voices();
+    AudioEvent stereo=prepare_wavetable("note(60).s('wt_stereo')");
+    smp_get_stereo(stereo.smp,&pcm,&frames,&channels); assert(channels==2);
+    render(&stereo);
+    puts("65 AKWF banks decode offline; variant order/wrapping, exact cycle pitch, stereo and sustain/release ok");
+}
 int main(void) {
+#ifdef __linux__
+    snd_lib_error_set_handler(alsa_silent);
+#endif
+    test_gm();
+    test_wavetable_banks();
     const char *waves[]={"zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise"};
     for (int i=0;i<7;i++) {
         char code[256]; snprintf(code,sizeof(code),"note(60).s('%s').gain(.2).zrand(0).zdelay(.01)",waves[i]);

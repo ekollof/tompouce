@@ -1,4 +1,5 @@
 #include "js_audio.h"
+#include "gm_synth.h"
 #include "audio.h"
 #include "scheduler.h"
 #include "sampler.h"
@@ -122,6 +123,8 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
     if (cJSON_HasObjectItem(v,"delaysync")) ev->delay_time = control(v,"delaysync",.1875,0,64)*seconds;
     const char *sound = text_control(v,"s");
+    int wavetable=!strncmp(sound,"wt_",3);
+    if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;
     ev->waveform_gain=(!strcmp(sound,"saw") || !strcmp(sound,"sawtooth"))?dsp_periodic_gain(0):
         !strcmp(sound,"square")?dsp_periodic_gain(1):1;
     const cJSON *note = cJSON_GetObjectItemCaseSensitive(v,"note");
@@ -129,6 +132,7 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
     int inst = oscillator(sound);
     ev->inst = inst >= 0 ? inst : INST_TRI;
     ev->is_drum = !note && inst < 0;
+    if (wavetable) ev->is_drum=0;
     if (!*sound) ev->is_drum = 0;
     if (ev->dsp.n_partials) { ev->inst = INST_ADDITIVE; ev->is_drum = 0; ev->waveform_gain=1; }
     if (ev->is_drum) ev->inst = INST_HH;
@@ -192,7 +196,7 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
     if (!*sound || oscillator(sound) >= 0 || ev->dsp.n_partials || (ev->native_synth && !native_synth_effect(ev->native_synth))) return 1;
     double midi = ev->is_drum ? -1 : fmax(0,fmin(127,69+12*log2(ev->freq/440)));
     double n = floor(control(value,"n",0,-1000000,1000000)+.5);
-    char token[256];
+    char token[1024];
     int len = *bank ? snprintf(token,sizeof(token),"%s_%s:%d",bank,sound,(int)n)
                     : snprintf(token,sizeof(token),"%s:%d",sound,(int)n);
     if (len < 0 || (size_t)len >= sizeof(token)) return 0;
@@ -204,6 +208,7 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
     ev->smp = websamp_acquire(token,midi);
     /* Explicit sample maps must not silently change instrument on failure. */
     if (mapped && ev->smp < 0) return 0;
+    if (!mapped && ev->smp<0 && !*bank && gm_synth_program(sound)>=0) return gm_synth_prepare(ev);
     if (ev->smp < 0 && *bank) {
         char dir[1024];
         if (bank_find_dir(bank,dir,sizeof(dir))) {
@@ -214,6 +219,9 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
         }
     }
     if (ev->smp < 0 && !*bank) {
+        if (strchr(sound,'/') || strchr(sound,'.')) ev->smp=smp_acquire_path(sound);
+    }
+    if (ev->smp < 0 && !*bank) {
         char dir[1024];
         char bare[256];
         sample_bank_name(sound, bare, sizeof(bare));
@@ -222,7 +230,8 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
     }
     if (ev->smp >= 0) {
         if (ev->smp_speed == 0) return 0;
-        ev->smp_gate = cJSON_HasObjectItem(value,"clip") || cJSON_HasObjectItem(value,"loop") ||
+        int wavetable=!strncmp(sound,"wt_",3);
+        ev->smp_gate = wavetable || cJSON_HasObjectItem(value,"clip") || cJSON_HasObjectItem(value,"loop") ||
             cJSON_HasObjectItem(value,"release");
         if (midi < 0) ev->freq = 0;
         const char *names[4] = {"attack","decay","sustain","release"};
@@ -231,8 +240,16 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
         dsp_read_adsr(value,names,defaults,envelope);
         ev->att = envelope[0]; ev->dec = envelope[1];
         ev->sus = envelope[2]; ev->rel = envelope[3];
+        if (wavetable) {
+            float *buffer; int length;
+            smp_get(ev->smp,&buffer,&length);
+            if (!buffer || length<1) return 0;
+            /* Each selected AKWF file is one cycle. Its length, not the
+               manifest's nominal recording note, sets exact oscillator pitch. */
+            ev->smp_speed*=length/SR*midi_to_freq(smp_base_midi(ev->smp));
+        }
         const char *unit = text_control(value,"unit");
-        if (!strcmp(unit,"c")) {
+        if (!wavetable && !strcmp(unit,"c")) {
             float *buffer; int length;
             smp_get(ev->smp,&buffer,&length);
             if (buffer && length > 0) ev->smp_speed *= length/SR;

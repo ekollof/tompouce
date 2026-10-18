@@ -13,13 +13,50 @@ import time
 import urllib.request
 import re
 import base64
+from pathlib import Path
+from terminal_screen import screen_text
 
-BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', './tompouce')
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', str(PROJECT_ROOT / 'tompouce'))
 CASE_FILTER = os.environ.get('TOMPOUCE_TEST_FILTER', '')
 
+# Direct invocation must test the current source, including private UI headers.
+# Explicit binary overrides intentionally test an already installed executable.
+if 'TOMPOUCE_TEST_BINARY' not in os.environ:
+    subprocess.run(['make', 'tompouce'], cwd=PROJECT_ROOT, check=True)
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False):
+GM_SUPPORTED = None
+
+
+def gm_supported():
+    global GM_SUPPORTED
+    if GM_SUPPORTED is None:
+        with tempfile.TemporaryDirectory(prefix='tompouce-gm-catalog-') as root:
+            env = dict(os.environ, XDG_CONFIG_HOME=root, XDG_CACHE_HOME=root,
+                       XDG_STATE_HOME=root, TOMPOUCE_BANKS=root)
+            request = {'jsonrpc':'2.0','id':1,'method':'tools/call','params':{
+                'name':'music_sounds','arguments':{'category':'synths','query':'gm_','limit':256}}}
+            binary = str(Path(BINARY).resolve()) if '/' in BINARY else BINARY
+            result = subprocess.run([binary,'--mcp'],input=json.dumps(request)+'\n',
+                                    capture_output=True,text=True,env=env,cwd=root,timeout=15,check=True)
+            replies = [json.loads(line) for line in result.stdout.splitlines()]
+            reply = next(reply for reply in replies if reply.get('id') == 1)
+            catalog = json.loads(reply['result']['content'][0]['text'])
+            GM_SUPPORTED = catalog['total'] > 0
+            if GM_SUPPORTED:
+                assert catalog['total'] == 125
+                assert any(item['name']=='gm_flute' and item['code']=='note("c4").s("gm_flute")'
+                           for item in catalog['items'])
+            elif os.environ.get('TOMPOUCE_TEST_REQUIRE_GM'):
+                raise AssertionError('GM support required but unavailable in the tested executable')
+    return GM_SUPPORTED
+
+
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False):
     if CASE_FILTER and CASE_FILTER not in name:
+        return
+    if name.startswith('GM synth') and not gm_supported():
+        print(name+' skipped (optional GM backend/font unavailable)')
         return
     with tempfile.TemporaryDirectory(prefix="tompouce-pty-") as root:
         os.mkdir(root + "/" + application)
@@ -29,9 +66,24 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
         original = termios.tcgetattr(slave)
         env = dict(os.environ, TERM="xterm-256color", XDG_CONFIG_HOME=root,
-                   XDG_CACHE_HOME=root, TOMPOUCE_BANKS=root)
+                   XDG_CACHE_HOME=root, XDG_STATE_HOME=root, TOMPOUCE_BANKS=root)
         env.pop('TMUX', None)
         env.pop('STY', None)
+        if theme:
+            env['COLORTERM']='truecolor'
+        if manifest:
+            from test_sound_import import audio
+            os.mkdir(root+'/kit')
+            for filename in ('z.wav','a.wav','snare.wav'):
+                with open(root+'/kit/'+filename,'wb') as file:
+                    file.write(audio())
+            with open(root+'/stray.wav','wb') as file:
+                file.write(audio())
+            with open(root+'/My Drum.wav','wb') as file:
+                file.write(audio())
+            with open(root+'/kit/strudel.json','w') as file:
+                json.dump({'Fixture909_bd':['z.wav','a.wav'],'Fixture909_sd':['snare.wav'],
+                           'fixturebell':['z.wav','a.wav'],'wt_test':{'D2':['z.wav','a.wav']}},file)
         if load_song:
             path=root+'/loaded-song.json'
             with open(path,'w') as song:
@@ -58,12 +110,21 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                                 stdout=slave, stderr=slave, env=env)
         application = "tompouce"  # Legacy roots migrate during startup.
         output = bytearray()
+        negotiated = False
 
         def drain(duration):
+            nonlocal negotiated
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
                 if select.select([master], [], [], .02)[0]:
                     output.extend(os.read(master, 65536))
+                    if not negotiated and b'\x1b[c' in output:
+                        palette = (b'\x1b]10;rgb:1111/2222/3333\x1b\\\x1b]11;rgb:ee/ee/ee\x1b\\'
+                                   b'\x1b]4;14;rgb:ab/cd/ef\x1b\\') if name == 'Kitty terminal palette' else b''
+                        pixels = (b'\x1bP>|kitty(0.40.0)\x1b\\\x1b_Gi=1;OK\x1b\\'
+                                  b'\x1b[4;512;960t\x1b[8;32;120t') if graphics and graphics != 'unsupported' else b''
+                        os.write(master,palette+pixels+b'\x1b[1;1R\x1b[?1;2c')
+                        negotiated = True
 
         try:
             deadline = time.monotonic() + 8
@@ -71,21 +132,43 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 drain(.05)
             assert b"\x1b[?2004h" in output, (name, "UI did not initialize")
             drain(.15)
+            if theme:
+                os.mkdir(root+'/wal')
+                def write_palette(fg):
+                    with open(root+'/wal/new.json','w') as palette:
+                        json.dump({'special':{'foreground':fg,'background':'#010203'},
+                                   'colors':{f'color{i}':f'#{0x200000+i:06x}' for i in range(16)}},palette)
+                    os.replace(root+'/wal/new.json',root+'/wal/colors.json')
+                write_palette('#123456')
+                os.write(master,b'\x1bOQ/theme pywal\r')
+                drain(.3)
+                assert b'38;2;18;52;86' in output, ('theme command did not recolor text',bytes(output[-3000:]))
+                start=len(output)
+                write_palette('#abcdef')
+                drain(1.3)
+                assert b'38;2;171;205;239' in output[start:], 'file replacement did not recolor live text'
+                if graphics:
+                    chunks=re.findall(rb'\x1b_G([^;]*);([A-Za-z0-9+/=]*)\x1b\\',bytes(output[start:]))
+                    pixels=b''.join(base64.b64decode(payload) for header,payload in chunks
+                                    if header.startswith((b'a=T,',b'q=2,m=')))
+                    assert b'\xab\xcd\xef\xff' in pixels, 'file change did not recolor graphics labels'
+                with open(root+'/tompouce/config.json') as config:
+                    assert json.load(config)['theme_source']=='pywal'
             if graphics:
-                assert b'i=1414483200,s=1,v=1,a=q,t=d,f=24;AAAA' in output, (name, 'missing capability query')
+                assert b'\x1b_Gi=1,a=q;' in output, (name, 'missing Notcurses capability query')
                 response = b'OK' if graphics != 'unsupported' else b'ENOTSUP'
                 os.write(master, b'\x1b_Gi=1414483200;' + response + b'\x1b\\')
                 drain(.2)
                 if name == 'Kitty terminal palette':
                     assert b'\x1b]10;?' in output and b'\x1b]4;14;?' in output
-                    start=len(output)
+                    start=0
                     os.write(master,b'\x1b]10;rgb:1111/2222/3333\x1b\\\x1b]11;rgb:ee/ee/ee\x07'
                              b'\x1b]4;14;rgb:ab/cd/ef\x1b\\\x1b]4;99;rgb:ff/ff/ff\x07')
                     drain(.15)
                     chunks=re.findall(rb'\x1b_G([^;]*);([A-Za-z0-9+/=]*)\x1b\\',bytes(output[start:]))
                     pixels=b''.join(base64.b64decode(payload) for header,payload in chunks
                                     if header.startswith((b'a=T,',b'q=2,m=')))
-                    assert b'\xab\xcd\xef\xff' in pixels, 'scope did not use terminal cyan'
+                    assert b'\xab\xcd\xef\xff' in pixels, 'scope did not use Notcurses terminal cyan'
                     assert b'\x11\x22\x33\xff' in pixels, 'axis text did not use foreground'
                 if graphics != 'unsupported':
                     if graphics != 'live':
@@ -113,7 +196,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                         drain(.3)
                         assert b'\x1b_Ga=d,d=I,' in output[start:], (name, 'scroll left images behind')
             if vi:
-                assert b"VI:NORMAL" in output, (name, "vi startup config ignored")
+                assert b"VI:NORMAL" in re.sub(rb'\x1b\[[0-9;]*m', b'', output), (name, "vi startup config ignored")
             if keys:
                 os.write(master, keys)
             drain(.3)
@@ -174,9 +257,9 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                         raise AssertionError("/companion stop left its helper running")
             if observed is not None:
                 deadline = time.monotonic() + 3
-                while observed not in output and proc.poll() is None and time.monotonic() < deadline:
+                while observed not in re.sub(rb'\x1b\[[0-9;]*m', b'', output) and observed not in screen_text(output) and proc.poll() is None and time.monotonic() < deadline:
                     drain(.05)
-                assert observed in output, (name, "expected display value missing", bytes(output[-2000:]))
+                assert observed in re.sub(rb'\x1b\[[0-9;]*m', b'', output) or observed in screen_text(output), (name, "expected display value missing", screen_text(output))
             if stop_signal:
                 proc.send_signal(stop_signal)
             else:
@@ -199,7 +282,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             if graphics == 'unsupported':
                 assert b'\x1b_Ga=T' not in output, (name, 'unsupported terminal received images')
             elif graphics:
-                assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'owned images were not removed')
+                assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'owned images were not removed', re.findall(rb'\x1b_Ga=d[^\x1b]*', output), bytes(output[-1500:]))
                 if graphics == 'braille':
                     with open(root + '/tompouce/config.json') as file:
                         assert json.load(file)['kitty_graphics'] is False
@@ -221,6 +304,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 with open(root + '/' + application + '/config.json') as file:
                     assert json.load(file)['vi_mode'] is persisted_vi
                 output.clear()
+                negotiated = False
                 proc = subprocess.Popen([BINARY, '--code', code], stdin=slave,
                     stdout=slave, stderr=slave, env=env)
                 deadline = time.monotonic() + 8
@@ -228,7 +312,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     drain(.05)
                 drain(.15)
                 assert b'\x1b[?2004h' in output, (name, 'restart failed')
-                assert (b'VI:NORMAL' in output) is persisted_vi, (name, 'startup mode not restored')
+                assert (b'VI:NORMAL' in re.sub(rb'\x1b\[[0-9;]*m', b'', output)) is persisted_vi, (name, 'startup mode not restored')
                 os.write(master,b'\x11')
                 deadline = time.monotonic() + 8
                 while proc.poll() is None and time.monotonic() < deadline:
@@ -265,7 +349,7 @@ check("vi mode clears regular selection", 'note("c4").gain(0)', b'\x01\x1bOR',
 check("mouse cursor", "one\ntwo", b"\x1b[<0;8;4M\x1b[<0;8;4mX", "one\ntXwo")
 check("mouse selection", "one\ntwo\nthree",
       b"\x1b[<0;7;3M\x1b[<32;10;4M\x1b[<0;10;4m\x18", "\nthree")
-check("pane focus", "one", b"\x1b[<0;90;4MX\x1b[<0;7;3MY", "Yone")
+check("pane focus", "one", b"\x1b[<0;90;4M\x1b[<0;90;4mX\x1b[<0;7;3MY", "Yone")
 check("mouse slider", 's("hh").gain(slider(.5))',
       b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5))', observed=b"slider 1 = 1")
 check("invalid mouse report", "one", b"\x1b[<999999999999999999999999;7;3M", "one")
@@ -280,11 +364,47 @@ check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')
 check("Tab undo", "", b'\t\x1a', expected='')
 check("Ctrl Space completion", "", b'bp\x00', expected='bpm')
+check("Notcurses CSI-u completion", "", b'bp\x1b[32;5u', expected='bpm')
+check("Notcurses shifted associated text", "", b'\x1b[97;2;65u\x1b[49;2;33u\x1b[57;2;40u', expected='A!(')
+check("Notcurses shifted plain text", "", b'A!(){}_+"', expected='A!(){}_+"')
+check("Notcurses associated Unicode text", "", b'\x1b[101;1;101;769u\x1b[50;2;233u', expected='e\u0301é')
+check("Notcurses shifted repeat and release", "", b'\x1b[49;2:1;33u\x1b[49;2:2;33u\x1b[49;2:3;33u', expected='!!')
+check("Notcurses key release ignored", "", b'\x1b[88;1:3u\x1b[120;1:1u', expected='x')
+large_paste = '// ' + 'café ' * 2048
+check("Notcurses bounded input pipe preserves large paste", "",
+      b'\x1b[200~' + large_paste.encode() + b'\x1b[201~', expected=large_paste)
 check("Selected block unindent", "one\ntwo", b'\x01\t\x1b[Z', expected='one\ntwo')
+check("Live theme file watching", "note('c4').gain(0)", expected="note('c4').gain(0)", theme=True)
 check("categorized sound search and insertion", "", b'\x1b[17~supersaw\r',
       expected='note("c4").s("supersaw")')
 check("sound category navigation", "", b'\x1b[17~\x1b[C\x1b[C\x1b[Csine\r',
       expected='note("c4").s("sine")')
+check("GM synth search and insertion", "", b'\x1b[17~gm_flute\r', expected='note("c4").s("gm_flute")')
+check("GM synth category", "", b'\x1b[17~\x1b[C\x1b[C\x1b[Cgm_acoustic_bass\r',
+      expected='note("c4").s("gm_acoustic_bass")')
+check("sound search survives category changes", "", b'\x1b[17~supersaw\x1b[C\x1b[C\x1b[C\r',
+      expected='note("c4").s("supersaw")')
+check("sound search persistent categories", "", b'\x1b[17~',
+      observed=b'user sounds', stop_signal=signal.SIGTERM)
+check("manifest machine bank list", "", b'\x1b[17~fixture909',
+      observed=b'fixture909/ (2)', manifest=True, stop_signal=signal.SIGTERM)
+check("manifest bank component insertion", "", b'\x1b[17~fixture909\r\x1b[B\r',
+      expected='s("fixture909_bd")', manifest=True)
+check("manifest whole bank insertion", "", b'\x1b[17~fixture909\t',
+      expected='s("bd sd").bank("fixture909")', manifest=True)
+check("manifest local banks category", "", b'\x1b[17~\x1b[Dfixture909\t',
+      expected='s("bd sd").bank("fixture909")', manifest=True)
+check("manifest sample array stays one entry", "", b'\x1b[17~\x1b[Cfixturebell\r',
+      expected='s("fixturebell")', manifest=True)
+check("Strudel wavetable category and insertion", "", b'\x1b[17~\x1b[C\x1b[C\x1b[C\x1b[Cwt_test\r',
+      expected='note("c4").s("wt_test")', manifest=True)
+check("Strudel wavetable variants stay one bank", "", b'\x1b[17~wt_test', observed=b'wt_test (2)',
+      manifest=True, stop_signal=signal.SIGTERM)
+check("manifest covered files hidden", "", b'\x1b[17~z.wav', observed=b'0 sounds', manifest=True, stop_signal=signal.SIGTERM)
+check("manifest uncovered file insertion", "", b'\x1b[17~stray.wav\r', expected='s(pure("stray.wav"))', manifest=True)
+check("manifest uncovered file with spaces", "", b'\x1b[17~my drum.wav\r', expected='s(pure("My Drum.wav"))', manifest=True)
+check("manifest bank back navigation", "", b'\x1b[17~fixture909\r\x7f',
+      observed=b'fixture909/ (2)', manifest=True, stop_signal=signal.SIGTERM)
 check("sound folder import and insertion", "", import_sounds=True, expected='s("my_drums")')
 check("inline braille scope", "const melody=note('c4').gain(0); melody._scope()",
       expected="const melody=note('c4').gain(0); melody._scope()", observed=b"scope | pattern output")
@@ -322,6 +442,7 @@ check("companion stop", "note('c4').gain(0)", b"\x1bOQ/companion\r", companion="
 check("legacy vi configuration", "one", b"iX", expected="Xone", vi=True, application="strudelterm")
 check("legacy sound library import", "", import_sounds=True, expected='s("my_drums")', application="strudelterm")
 graphics_code = 'note("c4").gain(0)._scope()\nnote("g4").gain(0)._pianoroll()'
+check('Kitty Live theme file watching', graphics_code, expected=graphics_code, theme=True, graphics='supported')
 check('Kitty terminal palette', graphics_code, expected=graphics_code, graphics='supported')
 check('Kitty graphics capability, resize and editor input', graphics_code, b'X', expected='X'+graphics_code, graphics='supported')
 check('Kitty unsupported braille fallback', graphics_code, expected=graphics_code, graphics='unsupported')

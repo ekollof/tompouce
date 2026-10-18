@@ -5,7 +5,8 @@
 #define WT_MAX 16
 
 /* Procedural single-cycle wavetables, bandlimited via additive synthesis.
-   AKWF-style public-domain waves can be loaded here later (see docs). */
+   Manifest-backed Strudel wt_ banks use the sampler, independently of this
+   fixed procedural table registry. */
 void wt_init(void);
 int wt_count(void);
 const char *wt_name(int idx);

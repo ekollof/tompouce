@@ -2,6 +2,8 @@
 #include "sampler.h"
 #include "common.h"
 #include "sound_store.h"
+#include "banks.h"
+#include <dirent.h>
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 #include <arpa/inet.h>
@@ -19,6 +21,9 @@
 #include <unistd.h>
 
 #define WEB_NAMES 256
+#define WAVEFORM_CATALOG "Dough-Waveforms/strudel.json"
+#define WAVEFORM_SPEC "github:Bubobubobubobubo/Dough-Waveforms/125801fa9a799117fd0a0350a195ab7c2f4cdf13"
+static int waveform_installed(void);
 #define WEB_URL 480
 #define WEB_JSON_MAX (2u * 1024u * 1024u)
 #define WEB_AUDIO_MAX (8u * 1024u * 1024u)
@@ -918,6 +923,7 @@ static int parse_call(const char *args, int len) {
     if (*p.s == '"' || *p.s == '\'' || *p.s == '`') {
         char spec[WEB_URL];
         if (!px_str(&p, spec, (int)sizeof(spec))) return 0;
+        if (!strcmp(spec,"bubo:waveforms")) return waveform_installed()?1:fetch_github_json(WAVEFORM_SPEC);
         if (strncmp(spec, "github:", 7) == 0) return fetch_github_json(spec);
         if (strncmp(spec, "https://", 8) == 0 || strncmp(spec, "http://", 7) == 0) {
             if (!websamp_url_allowed(spec)) return 0;
@@ -1085,6 +1091,15 @@ typedef WebName DefName;
 static DefName def_names[DEF_NAMES];
 static int def_n;
 static int def_slots;
+#define MANIFEST_FILES_MAX 150000
+#define MANIFEST_FILE_BUCKETS 262144
+static char *manifest_files[MANIFEST_FILES_MAX];
+static char *manifest_file_hash[MANIFEST_FILE_BUCKETS];
+static int manifest_file_count;
+
+static int manifest_file_compare(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a,*(const char *const *)b);
+}
 
 static const char UZU_JSON[] =
     "{\"_base\":\"https://raw.githubusercontent.com/tidalcycles/uzu-drumkit/main/\","
@@ -1238,6 +1253,27 @@ static void def_add_path(const char *name, const char *path, const char *base,
     def_push(name, url, local, pitched, midi);
 }
 
+static void manifest_claim_value(const cJSON *value, const char *directory, int depth) {
+    if (!directory || !*directory || depth>3) return;
+    if (cJSON_IsString(value)) {
+        char local[PATH_MAX];
+        if (!local_audio(directory,value->valuestring,local,sizeof(local))) return;
+        uint32_t hash=2166136261u;
+        for (const unsigned char *p=(const unsigned char *)local;*p;p++) hash=(hash^*p)*16777619u;
+        unsigned slot=hash&(MANIFEST_FILE_BUCKETS-1);
+        while (manifest_file_hash[slot]) {
+            if (!strcmp(manifest_file_hash[slot],local)) return;
+            slot=(slot+1)&(MANIFEST_FILE_BUCKETS-1);
+        }
+        if (manifest_file_count>=MANIFEST_FILES_MAX) return;
+        char *copy=strdup(local);
+        if (copy) { manifest_file_hash[slot]=copy; manifest_files[manifest_file_count++]=copy; }
+    } else if (cJSON_IsArray(value) || cJSON_IsObject(value)) {
+        const cJSON *child;
+        cJSON_ArrayForEach(child,value) manifest_claim_value(child,directory,depth+1);
+    }
+}
+
 static void def_add_value(const char *name, const cJSON *value, const char *base,
                           const char *dir, int pitched, int midi) {
     if (cJSON_IsString(value) && value->valuestring) {
@@ -1248,6 +1284,14 @@ static void def_add_value(const char *name, const cJSON *value, const char *base
             if (cJSON_IsString(el) && el->valuestring)
                 def_add_path(name, el->valuestring, base, dir, pitched, midi);
     }
+}
+
+static int manifest_machine_key(const char *key) {
+    const char *suffix=strrchr(key,'_');
+    const char *parts[]={"_bd","_sd","_hh","_oh","_cp","_cb","_cr","_ht","_mt","_lt","_rd","_sh","_tb","_rim","_rs","_perc"};
+    if (!suffix) return 0;
+    for (size_t i=0;i<sizeof(parts)/sizeof(*parts);i++) if (!strcasecmp(suffix,parts[i])) return 1;
+    return 0;
 }
 
 static void def_ingest(cJSON *root, const char *local_dir, int machine) {
@@ -1261,8 +1305,9 @@ static void def_ingest(cJSON *root, const char *local_dir, int machine) {
         snprintf(base, sizeof(base), "%s", b->valuestring);
     for (ch = root->child; ch; ch = ch->next) {
         if (!ch->string || ch->string[0] == '_') continue;
+        manifest_claim_value(ch,local_dir,0);
         if (!def_reset(ch->string)) continue;
-        def_find(ch->string,0)->machine = machine;
+        def_find(ch->string,0)->machine = machine<0?manifest_machine_key(ch->string):machine;
         if (cJSON_IsObject(ch)) {
             const cJSON *region;
             cJSON_ArrayForEach(region, ch) {
@@ -1357,12 +1402,84 @@ static void load_default_catalog(const char *manifest, const char *samples) {
     }
 }
 
+static int waveform_installed(void) {
+    char path[1200], directory[1024];
+    return find_catalog(WAVEFORM_CATALOG,"Dough-Waveforms",path,sizeof(path),directory,sizeof(directory));
+}
+
+static int catalog_audio_value(const cJSON *value, int depth) {
+    if (depth>3) return 0;
+    if (cJSON_IsString(value)) {
+        const char *dot=strrchr(value->valuestring,'.');
+        return dot && (!strcasecmp(dot,".wav") || !strcasecmp(dot,".mp3") ||
+                       !strcasecmp(dot,".flac") || !strcasecmp(dot,".fla"));
+    }
+    if (cJSON_IsArray(value) || cJSON_IsObject(value)) {
+        const cJSON *child;
+        cJSON_ArrayForEach(child,value) if (catalog_audio_value(child,depth+1)) return 1;
+    }
+    return 0;
+}
+
+/* Discover additional local Strudel maps once, outside the audio callback.
+ * Known catalogs below are then applied in their established precedence order.
+ * Bounds and symlink rejection match the bank scanner. */
+static void discover_catalogs(const char *directory, int depth, int *visited, int *loaded) {
+    if (depth>=32 || *visited>=200000 || *loaded>=512) return;
+    (*visited)++;
+    struct dirent **names=NULL;
+    int count=scandir(directory,&names,NULL,alphasort);
+    if (count<0) return;
+    for (int i=0;i<count;i++) {
+        const char *name=names[i]->d_name;
+        char path[PATH_MAX]; struct stat st;
+        int n=snprintf(path,sizeof(path),"%s/%s",directory,name);
+        if (name[0]!='.' && n>0 && (size_t)n<sizeof(path) && !lstat(path,&st)) {
+            if (S_ISDIR(st.st_mode)) discover_catalogs(path,depth+1,visited,loaded);
+            else if (S_ISREG(st.st_mode) && *loaded<512 && strlen(name)>5 && !strcasecmp(name+strlen(name)-5,".json")) {
+                char *text=read_capped(path,WEB_JSON_MAX);
+                cJSON *root=text?cJSON_ParseWithOpts(text,NULL,1):NULL; free(text);
+                int valid=0, machine=strstr(name,"tidal-drum-machines")?1:-1;
+                if (cJSON_IsObject(root)) {
+                    const cJSON *child;
+                    cJSON_ArrayForEach(child,root) {
+                        if (!child->string || child->string[0]=='_' || !catalog_audio_value(child,0)) continue;
+                        valid=1;
+                    }
+                }
+                if (valid) { def_ingest(root,directory,machine); (*loaded)++; }
+                cJSON_Delete(root);
+            }
+        }
+        free(names[i]);
+    }
+    free(names);
+}
+
 static void load_defaults(void) {
+    int visited=0, loaded=0;
+    char root[PATH_MAX]; root[0]=0;
+    const char *configured=getenv("TOMPOUCE_BANKS");
+    if (!configured || !*configured) configured=getenv("STRUDELTERM_BANKS");
+    struct stat st;
+    if (configured && !stat(configured,&st) && S_ISDIR(st.st_mode)) snprintf(root,sizeof(root),"%s",configured);
+    else if (banks_root_dir()[0]) snprintf(root,sizeof(root),"%s",banks_root_dir());
+    else if (!stat("./assets/banks",&st) && S_ISDIR(st.st_mode)) snprintf(root,sizeof(root),"./assets/banks");
+    else {
+        char exe[PATH_MAX]; ssize_t n=readlink("/proc/self/exe",exe,sizeof(exe)-1);
+        if (n>0 && (size_t)n<sizeof(exe)) {
+            exe[n]=0; char *slash=strrchr(exe,'/');
+            if (slash) { *slash=0; int len=snprintf(root,sizeof(root),"%s/assets/banks",exe);
+                if (len<0 || (size_t)len>=sizeof(root)) root[0]=0; }
+        }
+    }
+    if (root[0]) discover_catalogs(root,0,&visited,&loaded);
     load_default_catalog("Dirt-Samples/strudel.json", "Dirt-Samples");
     load_default_catalog("dough-samples/vcsl.json", "VCSL");
     load_default_catalog("dough-samples/mridangam.json", "mrid");
     load_default_catalog("dough-samples/tidal-drum-machines.json", "tidal-drum-machines/machines");
     load_default_catalog("dough-samples/piano.json", "dough-samples/piano");
+    load_default_catalog(WAVEFORM_CATALOG,"Dough-Waveforms");
     cJSON *uzu = cJSON_Parse(UZU_JSON);
     if (uzu) {
         char manifest[1200], directory[1024];
@@ -1372,12 +1489,19 @@ static void load_defaults(void) {
         cJSON_Delete(uzu);
     }
     def_compact();
+    qsort(manifest_files,(size_t)manifest_file_count,sizeof(*manifest_files),manifest_file_compare);
     if (def_n > 0) log_console("samples: default map %d names", def_n);
 }
 
 static void ensure_defaults(void) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, load_defaults);
+}
+
+int websamp_manifest_contains(const char *absolute_path) {
+    ensure_defaults();
+    return absolute_path && bsearch(&absolute_path,manifest_files,(size_t)manifest_file_count,
+                                    sizeof(*manifest_files),manifest_file_compare)!=NULL;
 }
 
 static void def_mark_failed(const char *name, const char *url) {
@@ -1600,6 +1724,7 @@ int websamp_list_sounds(SoundInfo *out, int capacity) {
                 out[total].slots = table[i].nslots;
                 out[total].category = source ? SOUND_USER : table[i].machine ? SOUND_MACHINES : SOUND_SAMPLES;
                 out[total].pitched = table[i].slots[0].pitched;
+                if (!strncmp(table[i].name,"wt_",3)) { out[total].category=SOUND_WAVETABLES; out[total].pitched=1; }
             }
             total++;
         }

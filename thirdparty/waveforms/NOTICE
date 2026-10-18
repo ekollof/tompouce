@@ -1,0 +1,13 @@
+AKWF single-cycle waveform banks
+
+Original waveforms: Adventure Kid / Kristoffer Ekstrand.
+https://www.adventurekid.se/akrt/waveforms/
+The author states that the waveforms are public domain in the reply dated
+2020-11-21 on that page. This notice preserves attribution; it does not
+relicense the data under Tompouce's application license.
+
+Strudel bank manifest and reworked WAV files:
+https://github.com/Bubobubobubobubo/Dough-Waveforms
+Pinned revision: 125801fa9a799117fd0a0350a195ab7c2f4cdf13
+The installer retains that repository's README alongside bank attribution.
+Array ordering and pitch-region keys in its manifest are preserved.

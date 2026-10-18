@@ -29,7 +29,7 @@ source-location highlighting, limits, coverage, and dependency licenses.
 ```mermaid
 flowchart TB
     subgraph Input
-        UI["tui.c<br/>S-Lang editor / console / AI prompt"]
+        UI["tui.c<br/>Notcurses editor / console / AI prompt"]
         MCP["mcp.c<br/>JSON-RPC 2.0 over stdio"]
         AI["ai.c<br/>OpenAI-compatible client / offline templates"]
     end
@@ -78,7 +78,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 | `src/track.c` | source → `Track tracks[32]` + `current_code` | `track_load_from_code` |
 | `src/scheduler.c` | generator + consumer threads, sorted event queue | `scheduler_init/shutdown/start`, `event_queue_push/clear` |
 | `src/ai.c` | LLM request worker, offline fallback | `ai_request_async`, `ai_poll_result` |
-| `src/tui.c` | S-Lang UI, editor state, vi mode, cursor, resize | `tui_init/run/shutdown`, `tui_frame` |
+| `src/tui.c`, `src/tui_terminal.h` | Notcurses UI, editor state, vi mode, cursor, resize | `tui_init/run/shutdown`, `tui_frame` |
 | `src/mcp.c` | MCP server, frame reader, UI orchestration | `mcp_run`, `handle_request`, `mcp_read_frame` |
 | `src/main.c` | mode dispatch (`--mcp`, `--mcp --ui`) | `main` |
 
@@ -107,9 +107,12 @@ console ring buffer feeds both UI console pane and music_get_console.
 - Scheduler generator/consumer: `tracks_lock` for track list, `qlock` for the
   queue (short critical sections).
 - AI worker: detached thread, results exchanged via `ai_lock`-guarded pointer.
-- UI: all `SLang`/`SLsmg` calls on the foreground thread; `SIGWINCH` sets a
-  `sig_atomic_t` flag consumed in `tui_frame()`; window size re-read via
-  `TIOCGWINSZ` each frame.
+- UI: Notcurses planes and rendering stay on the foreground thread; `SIGWINCH`
+  sets a `sig_atomic_t` flag consumed in `tui_frame()`, with geometry read via
+  `TIOCGWINSZ`. A blocking Notcurses input reader sends fixed-size events through
+  a bounded, pollable pipe, preserving literal Ctrl+Space without timeout
+  ambiguity. It never accesses editor or audio state. Output has a separate
+  blocking terminal descriptor so nonblocking input cannot truncate graphics.
 - MCP: headless mode loops on `select()` + `mcp_read_frame()` (1 MiB cap,
   non-blocking fd); `--mcp --ui` reattaches stdio to `/dev/tty`. A piped
   stdin stays the MCP socket. A terminal stdin opens `127.0.0.1:18789`
@@ -135,7 +138,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 
 ## Modes
 
-- `./tompouce` — interactive S-Lang UI only.
+- `./tompouce` — interactive Notcurses UI only.
 - `./tompouce --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
 - `./tompouce --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
   stdin is a pipe. From a terminal, MCP listens on `127.0.0.1:18789`.

@@ -52,7 +52,7 @@ and installs the binary, companion assets, licenses and examples under
 needed for installation: both JavaScript bundles are included in the project.
 
 Default sound banks: Dirt-Samples, Salamander piano, tidal drum machines and
-uzu-drumkit (roughly 450 MiB). They are installed beside the binary and work
+uzu-drumkit and AKWF wavetable banks (roughly 456 MiB). They are installed beside the binary and work
 offline. `./install.sh --all-banks` also installs the VCSL and mridangam catalog
 samples (roughly 3 GiB total). Repository revisions are pinned in
 `scripts/banks.lock.json`; downloaded files get SHA-256 receipts for safe resume,
@@ -91,7 +91,7 @@ execution still needs testing on those distributions.
 - `src/scheduler.c` — cycle-based scheduler with event queue
 - `src/track.c` — code-to-tracks compiler
 - `src/ai.c` — LLM-assisted code generation (OpenAI-compatible)
-- `src/tui.c` — S-Lang terminal interface (editor, console, AI prompt)
+- `src/tui.c` — Notcurses terminal interface (editor, console, AI prompt)
 - `src/wavetable.c` — procedural bandlimited single-cycle tables (`inst wt:<name>`)
 - `src/mcp.c` — MCP JSON-RPC server + UI orchestration
 - `src/csound_host.c` — isolated native Csound orchestra renderer
@@ -111,13 +111,15 @@ execution still needs testing on those distributions.
 make
 ```
 
-Requirements: `slang` (S-Lang), `portaudio-2.0`, `libcurl`, `libcjson`, `leveldb`,
+Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`, `libcjson`, `leveldb`,
 ALSA and `tree-sitter` development libraries.
 Native sound-server support is detected with pkg-config: `libpipewire-0.3`
 (0.3.7+), `libpulse`, and `samplerate` enable PipeWire, PulseAudio and output
 resampling respectively. The installer includes their development packages.
+Optional `fluidsynth` 2.2+ and an installed GM soundfont enable the `gm_`
+instruments. The installer includes FluidSynth and FluidR3 GM packages.
 For a minimal PortAudio build, use `make clean` then
-`make WITH_PIPEWIRE=0 WITH_PULSE=0 WITH_SAMPLERATE=0`.
+`make WITH_PIPEWIRE=0 WITH_PULSE=0 WITH_SAMPLERATE=0 WITH_FLUIDSYNTH=0`.
 `xxd` embeds the committed JavaScript bundle during the build. QuickJS is
 vendored; Node.js is only needed when rebuilding the JavaScript bundle.
 
@@ -180,6 +182,34 @@ future starts. Each folder becomes a sound name, with alphabetical file slots
 `samples()` maps take precedence. Limits: 8 MiB per file, 256 MiB / 2048 stored
 files, 256 sound names. Local bank browsing remains available in F6.
 
+The **wavetables** category includes 65 Strudel `wt_` banks with 4,358 waveform
+variants, alongside the procedural `wt:` oscillators. For example:
+`note("c4 e4 g4").s("wt_flute").n(3)`. Each manifest bank appears once;
+`.n()` selects its variants in manifest order. Installed banks work offline,
+including code using `samples('bubo:waveforms')`. Native playback loops each
+single-cycle waveform at the requested pitch for the note's sustain and release;
+the browser's advanced wavetable morph/warp processing is not implemented.
+AKWF attribution and its author's public-domain statement are preserved in
+`thirdparty/waveforms/NOTICE`.
+
+The **synths** category also includes 125 Strudel-compatible `gm_` soundfont
+names, such as `gm_piano`, `gm_flute` and `gm_acoustic_bass`, when native GM
+support is available. For example: `note("c4 e4 g4").s("gm_flute")`.
+These play locally through FluidSynth using the installed FluidR3 GM font;
+they do not require an external MIDI connection. Set `TOMPOUCE_SOUNDFONT`
+before starting to choose another SF2/SF3 file (512 MiB maximum).
+Native playback provides one voice per name; the web client's multiple
+soundfont variants selected by `n` are not replicated. Explicit sample maps
+and imported sounds with the same name retain priority. Standard envelopes,
+pitch modulation, gain, pan and native effects apply; speed and stretch scale
+native GM pitch, while sample slicing/loop-region controls are not applied.
+GM notes are prepared into immutable stereo PCM on the generator thread,
+with a 60-second note-plus-release limit. They share the 128-buffer/128 MiB
+prepared-audio cache; referenced queued/sounding notes survive eviction.
+The audio callback never loads fonts or calls FluidSynth. A first GM note
+loads the font; later matching notes reuse prepared PCM. This is native
+soundfont playback, not a waveform replica of the web client's renderer.
+
 The editor’s bottom mini scope and piano roll can be hidden with F2 →
 `/scope off` (restored with `/scope on`). This preference persists across
 restarts. F12 controls the separate large visualization pane.
@@ -208,8 +238,19 @@ range. Labels reserve their own gutter so they do not cover the plots.
 Other terminals retain braille. F2 → `/graphics braille` selects braille;
 `/graphics auto` restores automatic detection. This preference persists.
 Graphics defaults follow the terminal palette, including guides and labels.
-Tompouce checks for theme changes every five seconds; explicit pattern and
-visual-option colors take precedence. Terminals that do not answer color
+By default, text, highlights and RGBA graphics use Notcurses' startup palette.
+F2 → `/theme omarchy`, `/theme pywal`, or `/theme auto` enables live recoloring;
+`/theme off` restores the startup colors. This preference persists as
+`theme_source` in config.json. Omarchy reads
+`$XDG_STATE_HOME/omarchy/current/theme/colors.toml` (default
+`~/.local/state/omarchy/current/theme/colors.toml`), with the older
+`$XDG_CONFIG_HOME/omarchy/current/theme/colors.toml` as a fallback;
+pywal reads `$XDG_CACHE_HOME/wal/colors.json` (default `~/.cache/wal/colors.json`).
+Auto prefers a valid Omarchy palette, falling back to pywal. Files are checked
+once per second on the UI thread, including atomic replacement and theme symlink
+changes. Missing or incomplete palettes retain the last valid colors.
+Backgrounds retain terminal transparency. Explicit
+pattern and visual-option colors take precedence. Terminals that do not answer color
 queries keep the built-in fallback palette, with a transparent background.
 Direct tmux/screen sessions retain braille. The separate F12 pane also retains
 its text display.
@@ -226,7 +267,7 @@ Keys:
   sample-bank index, song/hold state, voices, queue and per-track timing.
 - `F3` — toggle vi editor mode; motions, operators and search are listed below
 - `Ctrl+Space` — context-aware completion (keywords, notes, drums, transforms, `wt:` tables)
-- `F6` — browse samples, drum-machines, synths, wavetables and user sounds. Type to search; Left/Right changes category; Enter inserts a snippet at the source cursor. Backspace with an empty query returns to categories. The local-banks category preserves folder browsing (`Enter` descends, `Tab` uses a bank).
+- `F6` — browse samples, drum-machines, synths, wavetables, user sounds and import-sounds. The search bar sits above persistent category tabs; Left/Right changes category while retaining the query. Manifest arrays and pitch regions remain one sound entry; drum-machine components are grouped under their bank name. Enter opens a bank or inserts a sound; Tab inserts the selected bank using its listed instruments. All and local-banks include standalone audio files only when no loaded manifest references them. Custom Strudel JSON maps under the banks root are discovered at startup; known catalogs retain their existing precedence. Import-sounds accepts a folder path in its own field. Backspace with an empty query goes up a bank, then returns to All. Insertion replaces the source selection without evaluating; F5 applies it.
 - `F7` — song mode: play track buffers in sequence from track 0 (`/song [on|off|hold]`)
 - `F8` — hold current track (loop it inside song mode)
 - `F9` — track list pane (shows buffers, active highlighted)
@@ -297,6 +338,8 @@ block visual mode and dot-repeat are not implemented.
 Editor regression checks: `make test` covers buffer edits and selection bounds;
 `python3 tests/test_tui_pty.py` checks real terminal input, mouse reports,
 startup configuration, paste, and terminal restoration on quit and signals.
+The PTY script builds the checkout executable before running. Set
+`TOMPOUCE_TEST_BINARY=/path/to/tompouce` to test an existing binary without rebuilding.
 
 Flags: `--bpm N`, `--block N` (audio frames 64–4096), `--code '...'`,
 `--mcp-port N` (TCP instead of stdio), `--mcp [--ui]`, `--help`.
@@ -349,7 +392,9 @@ Tools: `music_set_code`, `music_evaluate`, `music_play`, `music_stop`, `music_se
 
 ## Terminal UI
 
-The interactive UI now uses S-Lang (`slang`) instead of ncurses. Works in any terminal, including kitty.
+The interactive UI uses Notcurses (`notcurses-core`) for Unicode cells, screen
+diffs and terminal input, including Kitty. The editor's existing inline Kitty
+graphics transport and braille fallback share the same native renderers.
 
 ## Sample banks (`assets/banks`)
 

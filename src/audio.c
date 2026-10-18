@@ -12,7 +12,7 @@
 #include "stretch.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
-/* ALSA probing spams stderr, which shares the terminal with the S-Lang
+/* ALSA probing spams stderr, which shares the terminal with the Notcurses
    UI and corrupts arbitrary screen rows. Silence it; we log our own. */
 static void alsa_silent(const char *file, int line, const char *func,
                          int err, const char *fmt, ...) {
@@ -218,7 +218,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     for (int i = 0; i < N_PATTERN_SCOPES; i++) if (ev->scope_mask&(1u<<i)) pattern_scope_generation[i] = ev->generation;
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
-    if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE)) dsp_init(&v->dsp_right,&ev->dsp);
+    if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE || ev->stretch_buffer)) dsp_init(&v->dsp_right,&ev->dsp);
     v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
     v->native_program=ev->native_synth;
@@ -307,7 +307,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->stretch_factor = ev->stretch > 0 ? ev->stretch : 1;
     v->stretch_buffer=ev->stretch_buffer;
     stretch_retain(v->stretch_buffer);
-    if (v->stretch_buffer) v->age=.04;
+    if (v->stretch_buffer) v->age=stretch_age_offset(v->stretch_buffer);
     if (ev->smp >= 0) {
         smp_get_stereo(ev->smp, &v->smpbuf, &v->smplen,&v->smp_channels);
         if (ev->dsp.enabled && v->smp_channels == 2)
@@ -792,14 +792,19 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             double dt = 1.0/SR;
             for (int v = 0; v < MAX_VOICES; v++) {
                 Voice *V = &voices[v];
-                if (!V->active) continue;
+                if (!V->active) {
+                    if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
+                    continue;
+                }
                 int orbit = V->orbit;
                 if (orbit < 0 || orbit >= N_ORBITS) orbit = 0;
                 VoiceMix *vm = &mixes[orbit];
                 double age = V->age;
                 if (V->stretch_buffer) {
                     const float *pcm=stretch_pcm(V->stretch_buffer);
-                    if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) { V->active=0; continue; }
+                    if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) {
+                        V->active=0; stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; continue;
+                    }
                     double gate=V->gate_end-V->start_time;
                     double left=pcm[(size_t)V->stretch_frame*2]*V->amp;
                     double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp;

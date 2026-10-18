@@ -238,7 +238,29 @@ static void local_defaults_child(int legacy) {
         assert(fprintf(manifest, "%s\"TestMachine/%s.wav\"", i ? "," : "", i == 107 ? "a" : "z") > 0);
     assert(fputs("]}", manifest) >= 0);
     assert(fclose(manifest) == 0);
+    assert(!mkdir("Custom",0700));
+    assert(!mkdir("Dough-Waveforms",0700));
+    write_fixture_wav("Custom/one.wav",32);
+    write_fixture_wav("Custom/two.wav",64);
+    write_fixture_wav("Custom/orphan.wav",96);
+    manifest=fopen("Custom/my-bank.json","w"); assert(manifest);
+    assert(fputs("{\"customkit\":[\"two.wav\",\"one.wav\"]}",manifest)>=0); assert(!fclose(manifest));
+    write_fixture_wav("Dough-Waveforms/a.wav",32); write_fixture_wav("Dough-Waveforms/b.wav",64);
+    manifest=fopen("Dough-Waveforms/strudel.json","w"); assert(manifest);
+    assert(fputs("{\"wt_test\":{\"D2\":[\"b.wav\",\"a.wav\"]}}",manifest)>=0); assert(!fclose(manifest));
     assert(websamp_default_url("kit", 0, url, sizeof(url)) && url[0] == '/');
+    expect_fixture_sample("customkit:0",-1,36,.5f);
+    expect_fixture_sample("customkit:1",-1,36,.25f);
+    expect_fixture_sample("wt_test:0",69,38,.5f);
+    expect_fixture_sample("wt_test:1",69,38,.25f);
+    websamp_load_code("samples('bubo:waveforms')");
+    assert(websamp_name_count()==0); /* Installed alias needs no fetch/user-map overlay. */
+    expect_fixture_sample("wt_test:1",69,38,.25f);
+    char canonical[PATH_MAX];
+    assert(realpath("Custom/one.wav",canonical)); assert(websamp_manifest_contains(canonical));
+    assert(realpath("Dirt-Samples/a.wav",canonical)); assert(websamp_manifest_contains(canonical)); /* shadowed hh */
+    assert(realpath("VCSL/ball whistle.wav",canonical)); assert(websamp_manifest_contains(canonical));
+    assert(realpath("Custom/orphan.wav",canonical)); assert(!websamp_manifest_contains(canonical));
     for (int i = 0; i < 2; i++) {
         int id = websamp_acquire(i ? "kit:1" : "kit:0", -1);
         float *buffer = NULL; int frames = 0;
@@ -280,6 +302,10 @@ static void local_defaults_child(int legacy) {
     websamp_load_code("");
     expect_fixture_sample("piano", 60, 60, .5f);
     for (size_t i = 0; i < sizeof(files)/sizeof(files[0]); i++) assert(unlink(files[i]) == 0);
+    assert(!unlink("Custom/one.wav") && !unlink("Custom/two.wav") && !unlink("Custom/orphan.wav"));
+    assert(!unlink("Custom/my-bank.json") && !rmdir("Custom"));
+    assert(!unlink("Dough-Waveforms/a.wav") && !unlink("Dough-Waveforms/b.wav"));
+    assert(!unlink("Dough-Waveforms/strudel.json") && !rmdir("Dough-Waveforms"));
     assert(unlink("Dirt-Samples/link.wav") == 0);
     assert(unlink("Dirt-Samples/sub") == 0);
     assert(unlink("Dirt-Samples/strudel.json") == 0);

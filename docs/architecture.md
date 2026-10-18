@@ -113,6 +113,8 @@ console ring buffer feeds both UI console pane and music_get_console.
   a bounded, pollable pipe, preserving literal Ctrl+Space without timeout
   ambiguity. It never accesses editor or audio state. Output has a separate
   blocking terminal descriptor so nonblocking input cannot truncate graphics.
+  Notcurses owns mouse enable/disable and the cell/pixel reporting protocol;
+  the editor consumes decoded cell coordinates and preserves modifier bits.
 - MCP: headless mode loops on `select()` + `mcp_read_frame()` (1 MiB cap,
   non-blocking fd); `--mcp --ui` reattaches stdio to `/dev/tty`. A piped
   stdin stays the MCP socket. A terminal stdin opens `127.0.0.1:18789`
@@ -138,7 +140,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 
 ## Modes
 
-- `./tompouce` — interactive Notcurses UI only.
-- `./tompouce --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
-- `./tompouce --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
+- `./build/tompouce` — interactive Notcurses UI only.
+- `./build/tompouce --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
+- `./build/tompouce --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
   stdin is a pipe. From a terminal, MCP listens on `127.0.0.1:18789`.

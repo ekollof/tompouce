@@ -17,16 +17,16 @@ sampler and Csound tests check sample roots/levels, filters, and rendered audio.
 Native Csound tests fetch the current orchestra used by Lounge sponge;
 sample-loader tests also need network access. The event corpus itself is offline.
 
-Updating the fixtures is an explicit maintenance step, never part of `make test`:
+Updating the fixtures is an explicit maintenance step, never part of `ctest --preset default`:
 
 ```sh
 node js/example-corpus.mjs > tests/fixtures/strudel-examples.json
 node js/example-reference.mjs > tests/fixtures/strudel-example-events.json
-make test
+ctest --preset default
 ```
 
 Review source, version, and event changes before accepting a new baseline.
-Run `make js-bundle` first if the adapter or pinned dependencies changed.
+Run `cmake --build build --target js-bundle` first if the adapter or pinned dependencies changed.
 
 `mp3-gapless.h` contains synthetic half-second recordings (no third-party
 music), encoded with ffmpeg/libmp3lame and converted to C arrays with `xxd -i`:

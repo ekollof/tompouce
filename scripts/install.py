@@ -25,9 +25,9 @@ SOURCE = Path(__file__).resolve().parents[1]
 TREE_URL = 'https://codeload.github.com/tree-sitter/tree-sitter/tar.gz/refs/tags/v0.25.10'
 TREE_SHA = 'ad5040537537012b16ef6e1210a572b927c7cdc2b99d1ee88d44a7dcdc3ff44c'
 PACKAGES = {
-    'arch': ['gcc', 'make', 'pkgconf', 'xxd', 'notcurses', 'portaudio', 'libpipewire', 'libpulse', 'libsamplerate', 'fluidsynth', 'soundfont-fluid', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
-    'debian': ['build-essential', 'pkg-config', 'xxd', 'libnotcurses-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libfluidsynth-dev', 'fluid-soundfont-gm', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
-    'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'arch': ['gcc', 'make', 'cmake', 'ninja', 'pkgconf', 'xxd', 'notcurses', 'portaudio', 'libpipewire', 'libpulse', 'libsamplerate', 'fluidsynth', 'soundfont-fluid', 'curl', 'cjson', 'leveldb', 'alsa-lib', 'tree-sitter', 'python', 'unzip', 'tar', 'ca-certificates'],
+    'debian': ['build-essential', 'cmake', 'ninja-build', 'pkg-config', 'xxd', 'libnotcurses-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libfluidsynth-dev', 'fluid-soundfont-gm', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
+    'fedora': ['gcc', 'gcc-c++', 'make', 'cmake', 'ninja-build', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
     'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py',
@@ -356,12 +356,12 @@ def install_tree_sitter(prefix, jobs):
         shutil.copy2(root / 'LICENSE', prefix / 'LICENSE')
 
 
-def copy_runtime(build, application):
+def copy_runtime(build, application, binary=None):
     # Explicit allowlist: do not copy accounts, credentials, caches or personal state.
     for relative in RUNTIME_FILES:
-        source = build / relative
+        source = binary if relative == 'tompouce' and binary is not None else build / relative
         atomic_bytes(application / relative, source.read_bytes(), 0o755 if relative == 'tompouce' else 0o644)
-    for name in ('arpoon.json', 'belldub.json', 'bassfugue.json', 'flatrave.json', 'juxundtollerei.json'):
+    for name in ('arpoon.json', 'belldub.json', 'bassfugue.json', 'flatrave.json', 'juxundtollerei.json', 'strudeltutor.json'):
         if (SOURCE / name).is_file():
             atomic_bytes(application / 'examples' / name, (SOURCE / name).read_bytes())
 
@@ -385,7 +385,7 @@ def main(argv=None):
         parser.error('--jobs must be 1..16')
     prefix = args.prefix.expanduser().absolute()
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', str(prefix)) or '..' in prefix.parts:
-        parser.error('use an absolute prefix without spaces, shell metacharacters or .. (make path limitation)')
+        parser.error('use an absolute prefix without spaces, shell metacharacters or .. (private dependency build path limitation)')
     application = prefix / 'lib/tompouce'
     family, release = distro() if not args.skip_deps else (None, {})
     csound = (args.csound_prefix.expanduser().absolute() if args.csound_prefix else application / 'deps/csound7')
@@ -397,7 +397,7 @@ def main(argv=None):
     if family:
         print('System packages: ' + ' '.join(dependency_command(family, release, not args.no_browser)))
     if args.dry_run:
-        print('Plan: dependencies → private Csound 7 → compatible tree-sitter → isolated build → pinned banks + licenses → install → MCP smoke check')
+        print('Plan: dependencies → private Csound 7 → compatible tree-sitter → isolated CMake/Ninja build → pinned banks + licenses → install → MCP smoke check')
         for item in lock['catalogs']:
             if not args.skip_banks and (item['profile'] == 'core' or args.all_banks):
                 print('  bank: ' + item['name'])
@@ -405,7 +405,7 @@ def main(argv=None):
     launcher = prefix / 'bin/tompouce'
     if launcher.exists() and not launcher.is_symlink():
         raise ValueError(f'{launcher} already exists as a regular file; move it before installing')
-    required = ['Makefile', 'src/main.c', 'thirdparty/quickjs/quickjs.c', 'js/dist/runtime.js', 'tests/test_install_runtime.c']
+    required = ['CMakeLists.txt', 'cmake/Embed.cmake', 'strudeltutor.json', 'src/main.c', 'thirdparty/quickjs/quickjs.c', 'js/dist/runtime.js', 'js/dist/completions.h', 'tests/test_install_runtime.c']
     required += [relative for relative in RUNTIME_FILES if relative != 'tompouce']
     for relative in required:
         if not (SOURCE / relative).is_file():
@@ -442,17 +442,21 @@ def main(argv=None):
             environment['PKG_CONFIG_PATH'] = str(tree / 'lib/pkgconfig') + os.pathsep + environment.get('PKG_CONFIG_PATH', '')
         with tempfile.TemporaryDirectory(prefix='tompouce-build-') as temporary:
             build = Path(temporary)
-            for name in ('Makefile', 'README.md', 'LICENSE', 'NOTICE'):
+            for name in ('CMakeLists.txt', 'README.md', 'LICENSE', 'NOTICE', 'strudeltutor.json'):
                 shutil.copy2(SOURCE / name, build / name)
             ignore = shutil.ignore_patterns('*.o', '*.d', '*.inc', 'node_modules', '__pycache__', '.git')
-            for relative in ('src', 'include', 'thirdparty', 'js/dist', 'web'):
+            for relative in ('cmake', 'src', 'include', 'thirdparty', 'js/dist', 'web'):
                 shutil.copytree(SOURCE / relative, build / relative, ignore=ignore)
             directory(build / 'tests')
             shutil.copy2(SOURCE / 'tests/test_install_runtime.c',build / 'tests/test_install_runtime.c')
-            command = ['make', f'-j{args.jobs}', f'CSOUND_PREFIX={csound}']
+            binary_dir = build / 'build'
+            command = ['cmake', '-S', str(build), '-B', str(binary_dir), '-G', 'Ninja',
+                       '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', f'-DCSOUND_PREFIX={csound}']
             if needs_tree:
-                command.append(f'TREE_SITTER_PREFIX={tree}')
+                command.append(f'-DTREE_SITTER_PREFIX={tree}')
             run(command, cwd=build, env=environment)
+            run(['cmake', '--build', binary_dir, '--parallel', str(args.jobs),
+                 '--target', 'tompouce', 'test_install_runtime'], cwd=build, env=environment)
             if not args.skip_banks:
                 available = shutil.disk_usage(application).free
                 minimum = (128 * 1024 ** 2 if (application / 'assets/banks/.install-receipt.json').exists()
@@ -460,16 +464,15 @@ def main(argv=None):
                 if available < minimum:
                     raise ValueError('not enough free disk space for the selected sound banks')
                 BankInstaller(application / 'assets/banks',args.jobs).install(lock,args.all_banks)
-            run(command + ['tests/test_install_runtime'],cwd=build,env=environment)
             check_home = directory(build / 'check-home')
             check_env = dict(environment, HOME=str(check_home), XDG_CONFIG_HOME=str(check_home), XDG_CACHE_HOME=str(check_home),
                              TOMPOUCE_BANKS=str(application / 'assets/banks'), https_proxy='http://127.0.0.1:9',
                              HTTP_PROXY='http://127.0.0.1:9', ALL_PROXY='http://127.0.0.1:9', NO_PROXY='', no_proxy='')
-            run([build / 'tests/test_install_runtime'] + (['--no-banks'] if args.skip_banks else []),cwd=build,env=check_env)
+            run([binary_dir / 'tests/test_install_runtime'] + (['--no-banks'] if args.skip_banks else []),cwd=build,env=check_env)
             directory(build / 'scripts')
             for name in ('companion.py', 'sound_import.py'):
                 shutil.copy2(SOURCE / 'scripts' / name, build / 'scripts' / name)
-            copy_runtime(build,application)
+            copy_runtime(build,application,binary_dir / 'tompouce')
         bin_dir = directory(prefix / 'bin')
         launcher = bin_dir / 'tompouce'
         if launcher.exists() and not launcher.is_symlink():

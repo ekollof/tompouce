@@ -17,13 +17,14 @@ from pathlib import Path
 from terminal_screen import screen_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', str(PROJECT_ROOT / 'tompouce'))
+BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', str(PROJECT_ROOT / 'build/tompouce'))
 CASE_FILTER = os.environ.get('TOMPOUCE_TEST_FILTER', '')
 
 # Direct invocation must test the current source, including private UI headers.
 # Explicit binary overrides intentionally test an already installed executable.
 if 'TOMPOUCE_TEST_BINARY' not in os.environ:
-    subprocess.run(['make', 'tompouce'], cwd=PROJECT_ROOT, check=True)
+    subprocess.run(['cmake', '--preset', 'default'], cwd=PROJECT_ROOT, check=True)
+    subprocess.run(['cmake', '--build', '--preset', 'default', '--target', 'tompouce'], cwd=PROJECT_ROOT, check=True)
 
 GM_SUPPORTED = None
 
@@ -52,7 +53,7 @@ def gm_supported():
     return GM_SUPPORTED
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     if name.startswith('GM synth') and not gm_supported():
@@ -61,9 +62,15 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
     with tempfile.TemporaryDirectory(prefix="tompouce-pty-") as root:
         os.mkdir(root + "/" + application)
         with open(root + "/" + application + "/config.json", "w") as config:
-            json.dump({"vi_mode": vi}, config)
+            json.dump({"vi_mode": vi, "mouse": mouse}, config)
+        if tutor_existing is not None:
+            tutorial = json.loads((PROJECT_ROOT/'strudeltutor.json').read_text())
+            tutorial['code'] = tutorial['tracks'][0] = tutor_existing
+            with open(root+'/'+application+'/strudeltutor.json','w') as file:
+                json.dump(tutorial,file)
         master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120,
+                                                       960 if mouse_pixels else 0, 512 if mouse_pixels else 0))
         original = termios.tcgetattr(slave)
         env = dict(os.environ, TERM="xterm-256color", XDG_CONFIG_HOME=root,
                    XDG_CACHE_HOME=root, XDG_STATE_HOME=root, TOMPOUCE_BANKS=root)
@@ -82,8 +89,11 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             with open(root+'/My Drum.wav','wb') as file:
                 file.write(audio())
             with open(root+'/kit/strudel.json','w') as file:
-                json.dump({'Fixture909_bd':['z.wav','a.wav'],'Fixture909_sd':['snare.wav'],
-                           'fixturebell':['z.wav','a.wav'],'wt_test':{'D2':['z.wav','a.wav']}},file)
+                catalog = {'Fixture909_bd':['z.wav','a.wav'],'Fixture909_sd':['snare.wav'],
+                           'fixturebell':['z.wav','a.wav'],'wt_test':{'D2':['z.wav','a.wav']}}
+                if 'scrolled row' in name:
+                    catalog.update({f'scrollfixture{i:02}':['z.wav'] for i in range(40)})
+                json.dump(catalog,file)
         if load_song:
             path=root+'/loaded-song.json'
             with open(path,'w') as song:
@@ -96,6 +106,12 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             with open(folder + '/kick.wav', 'wb') as file:
                 file.write(audio())
             keys = b'\x1b[17~\x1b[D\x1b[D\x1b[200~' + folder.encode() + b'\x1b[201~\r'
+        if command_files:
+            os.mkdir(root+'/songs')
+            for path in ('Existing.json','songs/My song.json'):
+                with open(root+'/'+path,'w') as file:
+                    json.dump({'version':2,'bpm':120,'code':'note(72).gain(0)'},file)
+        launch_binary = str(Path(BINARY).resolve()) if '/' in BINARY else BINARY
         browser_record = root + "/browser.jsonl"
         companion_url = None
         if companion:
@@ -106,11 +122,29 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             os.chmod(root + "/chromium", 0o700)
             env["PATH"] = root + os.pathsep + env["PATH"]
             env["TEST_BROWSER_RECORD"] = browser_record
-        proc = subprocess.Popen([BINARY, "--code", code], stdin=slave,
-                                stdout=slave, stderr=slave, env=env)
+        proc = subprocess.Popen([launch_binary, "--code", code], stdin=slave,
+                                stdout=slave, stderr=slave, env=env, cwd=root if command_files else None)
         application = "tompouce"  # Legacy roots migrate during startup.
         output = bytearray()
         negotiated = False
+
+        def mouse_modes():
+            modes = {}
+            for match in re.finditer(rb'\x1b\[\?([0-9;]+)([hl])', output):
+                for mode in match[1].split(b';'):
+                    modes[int(mode)] = match[2] == b'h'
+            return modes
+
+        def terminal_keys(data):
+            # A real terminal follows the protocol the app enabled. Advertising
+            # pixel support alone must not silently change cell reports to pixels.
+            if mouse_pixels and mouse_modes().get(1016):
+                def pixels(match):
+                    x = (int(match[2])-1)*8+4
+                    y = (int(match[3])-1)*16+8
+                    return b'\x1b[<'+match[1]+b';'+str(x).encode()+b';'+str(y).encode()+match[4]
+                data = re.sub(rb'\x1b\[<([0-9]+);([0-9]+);([0-9]+)([Mm])', pixels, data)
+            os.write(master, data)
 
         def drain(duration):
             nonlocal negotiated
@@ -123,6 +157,8 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                                    b'\x1b]4;14;rgb:ab/cd/ef\x1b\\') if name == 'Kitty terminal palette' else b''
                         pixels = (b'\x1bP>|kitty(0.40.0)\x1b\\\x1b_Gi=1;OK\x1b\\'
                                   b'\x1b[4;512;960t\x1b[8;32;120t') if graphics and graphics != 'unsupported' else b''
+                        if mouse_pixels:
+                            pixels += b'\x1b[?1016;2$y\x1b[4;512;960t\x1b[8;32;120t'
                         os.write(master,palette+pixels+b'\x1b[1;1R\x1b[?1;2c')
                         negotiated = True
 
@@ -198,7 +234,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             if vi:
                 assert b"VI:NORMAL" in re.sub(rb'\x1b\[[0-9;]*m', b'', output), (name, "vi startup config ignored")
             if keys:
-                os.write(master, keys)
+                terminal_keys(keys)
             drain(.3)
             if graphics == 'live':
                 assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels')
@@ -287,14 +323,30 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     with open(root + '/tompouce/config.json') as file:
                         assert json.load(file)['kitty_graphics'] is False
             assert termios.tcgetattr(slave) == original, (name, "termios changed")
-            assert b"\x1b[?1002l\x1b[?1006l\x1b[?2004l" in output, name
+            assert b"\x1b[?2004l" in output, name
+            assert not any(mouse_modes().get(mode) for mode in (1000,1002,1003,1006,1016)), (name, 'mouse tracking survived exit')
             if expected is not None:
                 with open(root + "/" + application + "/state.json") as state_file:
                     state = json.load(state_file)
                 assert state["code"].rstrip("\n") == expected, (name, state["code"])
+            if saved_file:
+                with open(root+'/'+saved_file) as file:
+                    assert json.load(file)['code'].rstrip('\n') == expected
+            if tutor_saved:
+                with open(root+'/'+application+'/strudeltutor.json') as file:
+                    working = json.load(file)
+                assert working['code'].rstrip('\n') == expected, (name, 'config working copy differs')
+                assert len(working['tracks']) == 22, (name, 'lesson buffers missing')
+                assert not Path(root+'/strudeltutor.json').exists(), (name, 'saved into CWD instead of config')
+            if command_files and saved_file!='Existing.json':
+                with open(root+'/Existing.json') as file:
+                    assert json.load(file)['code']=='note(72).gain(0)'
             if name == 'disable editor scope':
                 with open(root + '/' + application + '/config.json') as file:
                     assert json.load(file)['editor_scope'] is False
+            if mouse_pixels and mouse:
+                assert re.search(rb'\x1b\[\?1002;1016h', output), (name, 'pixel mouse mode not enabled')
+                assert not mouse_modes().get(1016), (name, 'pixel mouse mode survived exit')
             if name.startswith('inline braille'):
                 assert re.search(rb'\xe2[\xa0-\xa3][\x80-\xbf]', output), (name, 'braille pixels missing')
             if name == 'disable inline visuals':
@@ -347,11 +399,26 @@ check("persist insert mode on restart", "", b'\x1bOR', expected='', vi=True, per
 check("vi mode clears regular selection", 'note("c4").gain(0)', b'\x01\x1bOR',
       expected='note("c4").gain(0)', observed=b'VI:NORMAL')
 check("mouse cursor", "one\ntwo", b"\x1b[<0;8;4M\x1b[<0;8;4mX", "one\ntXwo")
+check("pixel mouse cursor", "one\ntwo", b"\x1b[<0;8;4M\x1b[<0;8;4mX", "one\ntXwo", mouse_pixels=True)
+check("pixel mouse selection", "one\ntwo\nthree",
+      b"\x1b[<0;7;3M\x1b[<32;10;4M\x1b[<0;10;4m\x18", "\nthree", mouse_pixels=True)
+check("pixel mouse wheel", "zero\none\ntwo\nthree\nfour", b"\x1b[<65;10;5MX",
+      "zero\none\ntwo\nXthree\nfour", mouse_pixels=True)
+check("pixel mouse slider", 's("hh").gain(slider(.5)).gain(0)',
+      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5)).gain(0)',
+      observed=b"slider 1 = 1", mouse_pixels=True)
+check("pixel mouse pane focus", "one", b"\x1b[<0;90;4M\x1b[<0;90;4mX\x1b[<0;7;3MY", "Yone", mouse_pixels=True)
+check("mouse shift selection", "abcdef",
+      b"\x1b[<0;8;3M\x1b[<0;8;3m\x1b[<4;11;3M\x1b[<4;11;3m\x18", "aef")
+check("pixel mouse shift selection", "abcdef",
+      b"\x1b[<0;8;3M\x1b[<0;8;3m\x1b[<4;11;3M\x1b[<4;11;3m\x18", "aef", mouse_pixels=True)
+check("mouse disabled ignores reports", "one\ntwo", b"\x1b[<0;8;4M\x1b[<0;8;4mX", "Xone\ntwo", mouse=False)
+check("pixel mouse disabled ignores reports", "one\ntwo", b"\x1b[<0;8;4M\x1b[<0;8;4mX", "Xone\ntwo", mouse=False, mouse_pixels=True)
 check("mouse selection", "one\ntwo\nthree",
       b"\x1b[<0;7;3M\x1b[<32;10;4M\x1b[<0;10;4m\x18", "\nthree")
 check("pane focus", "one", b"\x1b[<0;90;4M\x1b[<0;90;4mX\x1b[<0;7;3MY", "Yone")
-check("mouse slider", 's("hh").gain(slider(.5))',
-      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5))', observed=b"slider 1 = 1")
+check("mouse slider", 's("hh").gain(slider(.5)).gain(0)',
+      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5)).gain(0)', observed=b"slider 1 = 1")
 check("invalid mouse report", "one", b"\x1b[<999999999999999999999999;7;3M", "one")
 check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)
@@ -364,6 +431,74 @@ check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')
 check("Tab undo", "", b'\t\x1a', expected='')
 check("Ctrl Space completion", "", b'bp\x00', expected='bpm')
+check("Strudel method Tab completion", 'note(60).ga', b'\x1b[F\t(0)', expected='note(60).gain(0)')
+check("Strudel method Ctrl Space completion", 'note(60).ga', b'\x1b[F\x00(0)', expected='note(60).gain(0)')
+check("Strudel sound completion", 'note(60).s("squ', b'\x1b[F\t").gain(0)', expected='note(60).s("square").gain(0)')
+check("Strudel completion in vi insert", 'note(60).ga', b'A\t(0)\x1b', expected='note(60).gain(0)', vi=True)
+check("Strudel completion undo", 'note(60).ga', b'\x1b[F\t\x1a', expected='note(60).ga')
+check("vi command entry", 'one', b':set nowrap\r', expected='one', vi=True, observed=b'nowrap')
+check("vi command from console focus", 'one', b'\x1b[<0;90;4M\x1b[<0;90;4m:set nowrap\r',
+      expected='one', vi=True, observed=b'nowrap')
+check("vi command Tab completion", 'one', b':set now\t\r', expected='one', vi=True, observed=b'nowrap')
+check("vi command reverse completion", 'one', b':set no\t\t\x1b[Z\r', expected='one', vi=True, observed=b'nowrap')
+check("vi command line jump", 'one\ntwo\nthree', b':2\rIX\x1b', expected='one\nXtwo\nthree', vi=True)
+check("vi command undo redo", 'one', b'iX\x1b:undo\r:redo\r', expected='Xone', vi=True)
+check("vi command quit guard", 'one', b'iX\x1b:q\r', expected='Xone', vi=True, observed=b'E37')
+check("vi command F5 retains quit guard", 'note(60).gain(0)', b'I//\x1b\x1b[15~:q\r',
+      expected='//note(60).gain(0)', vi=True, observed=b'E37')
+check("vi command cancel", 'one', b':set nowrap\x1bIX\x1b', expected='Xone', vi=True)
+check("vi command unknown stays local", 'one', b':missingcommand\r', expected='one', vi=True, observed=b'E492')
+check("vi command shell stays local", 'one', b':!touch should-not-run\r', expected='one', vi=True, observed=b'E492')
+check("vi command write quit", 'note(60).gain(0)', b':wq Saved.json\r', expected='note(60).gain(0)',
+      vi=True, command_files=True, saved_file='Saved.json')
+check("vi command write failure stays open", 'one', b':wq missing/song.json\r', expected='one',
+      vi=True, command_files=True, observed=b'save failed')
+check("vi command overwrite guard", 'one', b':w Existing.json\r', expected='one',
+      vi=True, command_files=True, observed=b'E13')
+check("vi command forced overwrite", 'one', b':w! Existing.json\r', expected='one',
+      vi=True, command_files=True, saved_file='Existing.json')
+check("vi command filename completion", 'one', b':e songs/My\t\r', expected='note(72).gain(0)',
+      vi=True, command_files=True)
+check("vi command quoted filename completion", 'one', b':e "songs/My\t\r', expected='note(72).gain(0)',
+      vi=True, command_files=True)
+check("vi command edit guard", 'one', b'iX\x1b:e Existing.json\r', expected='Xone',
+      vi=True, command_files=True, observed=b'E37')
+check("vi command forced edit", 'one', b'iX\x1b:e! Existing.json\r', expected='note(72).gain(0)',
+      vi=True, command_files=True)
+check("vi command forced quit", 'one', b'iX\x1b:q!\r', expected='Xone', vi=True)
+check("prompt command completion", 'one', b'\x1bOQ/wra\t of\t\r', expected='one', observed=b'wrap off')
+
+# Tutorial startup is deliberately silent; run from an unrelated directory.
+if not CASE_FILTER or 'tutor' in CASE_FILTER or CASE_FILTER in 'tutor shortcut':
+    tutorial = Path(BINARY).resolve().parent/'examples/strudeltutor.json'
+    tutorial_before = tutorial.read_bytes()
+    tutor_intro = json.loads(tutorial_before)['code'].rstrip('\n')
+    check('tutor slash shortcut', 'one', b'\x1bOQ/tutor\r', expected=tutor_intro, command_files=True, tutor_saved=True)
+    check('tutor vi shortcut', 'one', b':tutor\r', expected=tutor_intro, vi=True, command_files=True, tutor_saved=True)
+    check('tutor slash completion', 'one', b'\x1bOQ/tu\t\r', expected=tutor_intro, command_files=True)
+    check('tutor vi completion', 'one', b':tu\t\r', expected=tutor_intro, vi=True, command_files=True)
+    check('tutor slash unsaved guard', 'one', b'X\x1bOQ/tutor\r', expected='Xone', observed=b'E37')
+    check('tutor vi unsaved guard', 'one', b'iX\x1b:tutor\r', expected='Xone', vi=True, observed=b'E37')
+    check('tutor slash force', 'one', b'X\x1bOQ/tutor!\r', expected=tutor_intro, command_files=True)
+    check('tutor vi force', 'one', b'iX\x1b:tutor!\r', expected=tutor_intro, vi=True, command_files=True)
+    check('tutor config save with w', 'one', b':tutor\r:w\r', expected=tutor_intro,
+          vi=True, command_files=True, tutor_saved=True, observed=b'saved')
+    check('tutor config slash save', 'one', b'\x1bOQ/tutor\r\x1bOQ/save\r', expected=tutor_intro,
+          command_files=True, tutor_saved=True, observed=b'saved')
+    progress='// my tutorial progress\n'+tutor_intro
+    check('tutor Ctrl S saves config edits', 'one', b':tutor\rggI// my tutorial progress\r\x1b\x13\r',
+          expected=progress, vi=True, command_files=True, tutor_saved=True)
+    check('tutor reopen preserves saved edits', 'one', b':tutor\rggI// my tutorial progress\r\x1b:w\r:tutor\r',
+          expected=progress, vi=True, command_files=True, tutor_saved=True)
+    check('tutor existing copy resumed', 'one', b'\x1bOQ/tutor\r', expected=progress,
+          command_files=True, tutor_existing=progress, tutor_saved=True)
+    check('tutor force preserves existing progress', 'one', b'iX\x1b:tutor!\r', expected=progress,
+          vi=True, command_files=True, tutor_existing=progress, tutor_saved=True)
+    check('tutor save working copy', 'one', b':tutor\r:wq Work.json\r', expected=tutor_intro,
+          vi=True, command_files=True, saved_file='Work.json')
+    check('tutor disables song advancement', 'one', b'\x1bOQ/load Existing.json\r\x1bOQ/song on\r\x1bOQ/tutor!\r\x1bOS',
+          expected=tutor_intro, command_files=True, observed=b'song=off')
+    assert tutorial.read_bytes() == tutorial_before, 'tutor shortcut changed the bundled save'
 check("Notcurses CSI-u completion", "", b'bp\x1b[32;5u', expected='bpm')
 check("Notcurses shifted associated text", "", b'\x1b[97;2;65u\x1b[49;2;33u\x1b[57;2;40u', expected='A!(')
 check("Notcurses shifted plain text", "", b'A!(){}_+"', expected='A!(){}_+"')
@@ -390,6 +525,14 @@ check("manifest machine bank list", "", b'\x1b[17~fixture909',
       observed=b'fixture909/ (2)', manifest=True, stop_signal=signal.SIGTERM)
 check("manifest bank component insertion", "", b'\x1b[17~fixture909\r\x1b[B\r',
       expected='s("fixture909_bd")', manifest=True)
+check("mouse sound browser bank row", "", b'\x1b[17~fixture909\r\x1b[<0;80;10M\x1b[<0;80;10m\r',
+      expected='s("fixture909_sd")', manifest=True)
+check("pixel mouse sound browser bank row", "", b'\x1b[17~fixture909\r\x1b[<0;80;10M\x1b[<0;80;10m\r',
+      expected='s("fixture909_sd")', manifest=True, mouse_pixels=True)
+check("mouse sound browser scrolled row", "", b'\x1b[17~scrollfixture\x1b[6~\x1b[6~\x1b[6~\x1b[<0;80;8M\x1b[<0;80;8m\r',
+      expected='s("scrollfixture09")', manifest=True)
+check("pixel mouse sound browser scrolled row", "", b'\x1b[17~scrollfixture\x1b[6~\x1b[6~\x1b[6~\x1b[<0;80;8M\x1b[<0;80;8m\r',
+      expected='s("scrollfixture09")', manifest=True, mouse_pixels=True)
 check("manifest whole bank insertion", "", b'\x1b[17~fixture909\t',
       expected='s("bd sd").bank("fixture909")', manifest=True)
 check("manifest local banks category", "", b'\x1b[17~\x1b[Dfixture909\t',

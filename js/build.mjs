@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { completionHeader } from './completions.mjs';
 
 await mkdir('dist', { recursive: true });
 const result = await build({
@@ -8,6 +9,7 @@ const result = await build({
   define: { 'process.env.NODE_ENV': '"production"' },
 });
 await writeFile('dist/runtime.js', result.outputFiles[0].contents);
+await writeFile('dist/completions.h', await completionHeader(result.outputFiles[0].text));
 
 const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
 const notices = [];

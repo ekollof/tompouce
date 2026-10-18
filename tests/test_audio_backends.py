@@ -8,9 +8,9 @@ import subprocess
 import tempfile
 import unittest
 
-PROBE = './tests/probe_audio_output'
+PROBE = os.environ.get('TOMPOUCE_AUDIO_PROBE', './build/tests/probe_audio_output')
 RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', '/nonexistent'))
-BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', './tompouce')
+BINARY = os.environ.get('TOMPOUCE_TEST_BINARY', './build/tompouce')
 
 
 class AudioBackendsTest(unittest.TestCase):
@@ -96,7 +96,7 @@ class AudioBackendsTest(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('TOMPOUCE_TEST_JACK') == '1', 'set TOMPOUCE_TEST_JACK=1 with a running JACK-compatible server')
     def test_jack_without_native_backends(self):
-        self.probe('JACK', binary='./tests/probe_audio_portaudio')
+        self.probe('JACK', binary=os.environ.get('TOMPOUCE_PORTAUDIO_PROBE', './build/tests/probe_audio_portaudio'))
 
 
 if __name__ == '__main__':

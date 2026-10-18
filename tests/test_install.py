@@ -25,6 +25,24 @@ def wav():
 
 
 class InstallerTest(unittest.TestCase):
+    def test_out_of_tree_runtime_copy(self):
+        with tempfile.TemporaryDirectory() as root:
+            source, application = Path(root) / 'source', Path(root) / 'installed'
+            for relative in installer.RUNTIME_FILES:
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'old binary' if relative == 'tompouce' else relative.encode())
+            binary = source / 'build/tompouce'
+            binary.parent.mkdir()
+            binary.write_bytes(b'new binary')
+            (source / 'private-config.json').write_text('private data')
+            installer.copy_runtime(source, application, binary)
+            self.assertEqual((application / 'tompouce').read_bytes(), b'new binary')
+            self.assertTrue((application / 'tompouce').stat().st_mode & 0o111)
+            self.assertEqual((application / 'NOTICE').read_text(), 'NOTICE')
+            self.assertFalse((application / 'build').exists())
+            self.assertFalse((application / 'private-config.json').exists())
+
     def test_pinned_archive_members_and_receipts(self):
         data=io.BytesIO()
         with tarfile.open(fileobj=data, mode='w:gz') as archive:
@@ -71,6 +89,8 @@ class InstallerTest(unittest.TestCase):
                                 ('fedora', 'notcurses-devel')]:
             command = installer.dependency_command(family, {}, False)
             self.assertIn(package, command)
+            self.assertIn('cmake', command)
+            self.assertIn('ninja' if family == 'arch' else 'ninja-build', command)
             self.assertFalse(any('slang' in item for item in command))
         for identity, family in [('omarchy', 'arch'), ('ubuntu', 'debian'), ('fedora', 'fedora')]:
             with patch.object(installer.platform, 'freedesktop_os_release', return_value={'ID': identity}):

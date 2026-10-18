@@ -25,7 +25,7 @@ static int theme_parse(char *text, int wal, uint32_t colors[18]) {
         cJSON *palette=cJSON_GetObjectItemCaseSensitive(root,"colors");
         int ok=1;
         for (int i=0;i<18;i++) {
-            char key[16]; snprintf(key,sizeof(key),"color%d",i);
+            char key[32]; snprintf(key,sizeof(key),"color%d",i);
             cJSON *v=cJSON_GetObjectItemCaseSensitive(i<16?palette:special,
                 i<16?key:i==16?"foreground":"background");
             if (!cJSON_IsString(v) || !theme_hex(v->valuestring,&colors[i])) ok=0;
@@ -42,7 +42,7 @@ static int theme_parse(char *text, int wal, uint32_t colors[18]) {
         if (sscanf(line," %63[a-zA-Z0-9_] = \"%63[^\"]\" %n",key,value,&end)<2 || !end) continue;
         if (line[end] && line[end]!='#' && line[end]!='\r') return 0;
         for (int i=0;i<18;i++) {
-            char indexed[16]; snprintf(indexed,sizeof(indexed),"color%d",i);
+            char indexed[32]; snprintf(indexed,sizeof(indexed),"color%d",i);
             if (!strcmp(key,names[i]) || (i<16 && !strcmp(key,indexed))) {
                 if (!theme_hex(value,&colors[i])) return 0;
                 seen|=1u<<i;

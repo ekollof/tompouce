@@ -15,7 +15,7 @@ def run(*args, **kwargs):
 
 def main():
     checkout = Path(__file__).resolve().parents[1]
-    binary = Path(os.environ.get('TOMPOUCE_TEST_BINARY', str(checkout / 'tompouce')))
+    binary = Path(os.environ.get('TOMPOUCE_TEST_BINARY', str(checkout / 'build/tompouce')))
     output = Path('/tmp/tompouce-notcurses-qa')
     output.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='tompouce-kitty-qa-') as root:

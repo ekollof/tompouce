@@ -1,4 +1,6 @@
 *.o
+/build*/
+/CMakeUserPresets.json
 tompouce
 strudelterm
 tests/test_pattern

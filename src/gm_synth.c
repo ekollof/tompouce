@@ -55,8 +55,7 @@ static fluid_settings_t *settings;
 static int font_id=-1, attempted;
 static void gm_log(int level, const char *message, void *data) {
     (void)level; (void)data;
-    /* This renderer creates no audio driver and does not need SDL. */
-    if (message && !strstr(message,"SDL3 not initialized")) log_console("GM: %.200s",message);
+    if (message) log_console("GM: %.200s",message);
 }
 static void find_font(void) {
     const char *explicit=getenv("TOMPOUCE_SOUNDFONT");
@@ -80,6 +79,15 @@ static void gm_cleanup(void) {
 static int gm_start(void) {
     if (attempted) return synth!=NULL;
     attempted=1;
+    /* We render PCM directly and use Tompouce's output backends. Disable
+       FluidSynth device probes before its first settings/synth instance:
+       its SDL3 probe leaks a mutex when SDL audio has not been initialized.
+       Registration is process-global; gm_lock serializes all our FluidSynth
+       calls, and attempted keeps it ahead of instance creation. */
+    const char *drivers[]={NULL};
+    if (fluid_audio_driver_register(drivers)!=FLUID_OK) {
+        log_console("GM: cannot disable unused FluidSynth audio drivers"); return 0;
+    }
     fluid_set_log_function(FLUID_PANIC,gm_log,NULL);
     fluid_set_log_function(FLUID_ERR,gm_log,NULL);
     fluid_set_log_function(FLUID_WARN,gm_log,NULL);

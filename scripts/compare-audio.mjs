@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { build } from '../js/node_modules/esbuild/lib/main.js';
 import { StringDecoder } from 'node:string_decoder';
 
+const renderer = process.env.TOMPOUCE_RENDER_AUDIO ?? './build/tests/render_audio';
 const out = path.resolve(process.argv[2] ?? '/tmp/tompouce-comparison');
 await fs.mkdir(out, { recursive: true });
 // Exact shared PCM isolates the vocoder from independently decoded MP3s.
@@ -124,7 +125,7 @@ try {
   ];
   const report = { browser: version, url: 'https://strudel.cc/', capturedAt: new Date().toISOString(),
     nativeBundleSha256: hash(await fs.readFile('js/dist/runtime.js')),
-    nativeRendererSha256: hash(await fs.readFile('tests/render_audio')),
+    nativeRendererSha256: hash(await fs.readFile(renderer)),
     nativePackages: JSON.parse(await fs.readFile('js/package.json', 'utf8')).dependencies,
     scheduling: 'browser eager offline path; native sample-frame triggers', cases: [] };
   report.browserScripts = await evaluate(`Promise.all(Array.from(document.scripts).filter(s=>s.src).map(async s=>{
@@ -144,7 +145,7 @@ try {
     await evaluate(transpiler.outputFiles[0].text);
     const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native.f32`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
-    const rendered = spawnSync('./tests/render_audio', [request, native], { encoding: 'utf8', timeout: 120000,
+    const rendered = spawnSync(renderer, [request, native], { encoding: 'utf8', timeout: 120000,
       env:spec.fixture?{...nativeEnvironment,TOMPOUCE_BANKS:fixtureRoot}:nativeEnvironment });
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{

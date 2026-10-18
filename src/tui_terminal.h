@@ -267,6 +267,9 @@ static int terminal_event(void) {
         else if (key==NCKEY_MOTION && terminal_mouse_down) b=32;
         else return -1;
         if (ni.evtype==NCTYPE_REPEAT && b==0) b=32;
+        if (ncinput_shift_p(&ni) || ni.shift) b|=4;
+        if (ncinput_alt_p(&ni) || ni.alt) b|=8;
+        if (ncinput_ctrl_p(&ni) || ni.ctrl) b|=16;
         char report[64];
         snprintf(report,sizeof(report),"\033[<%u;%d;%d%c",b,ni.x+1,ni.y+1,
                  ni.evtype==NCTYPE_RELEASE ? 'm' : 'M');

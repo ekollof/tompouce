@@ -305,7 +305,7 @@ atomic compare-and-swap against simultaneous terminal edits.
 
 The committed `web/dist/editor.js` and `web/dist/licenses.txt` let the
 companion run without npm or CDN access. Rebuild them with
-`make companion-bundle` after editing `web/editor.mjs`; `web/package-lock.json`
+`cmake --build build --target companion-bundle` after editing `web/editor.mjs`; `web/package-lock.json`
 pins the editor/build dependencies independently of the Strudel runtime.
 Editor DOM regression checks run with `node tests/test_companion_editor.mjs`
 after installing those development dependencies. Companion asset/CSP changes
@@ -446,12 +446,12 @@ upstream bridge.
 
 Current `livecode.orc` uses Csound 7 syntax. Install the pinned native engine
 on Linux x86_64 with `bash scripts/install-csound7.sh`, then rebuild. It lives
-under `~/.local/opt/tompouce-csound7`; override `CSOUND_PREFIX` when building
+under `~/.local/opt/tompouce-csound7`; pass `-DCSOUND_PREFIX=/path` when configuring
 to use another installation. Csound 6 headers/libraries are also supported
 for older orchestras. Without either dependency, ordinary Strudel playback
 still builds and Csound evaluation reports the missing dependency.
 
-`make test` includes all 31 published examples, comparing 1,207 events across
+`ctest --preset default` includes all 31 published examples, comparing 1,207 events across
 three cycles with committed Node/V8 reference results. It also renders the
 two Csound examples using the native backend. See
 [fixture provenance and update instructions](../tests/fixtures/README.md).
@@ -470,16 +470,18 @@ the pattern event's duration for that gate.
 Normal builds use the committed bundle and vendored QuickJS sources:
 
 ```sh
-make
-make test
+cmake --preset default
+cmake --build --preset default
+ctest --preset default
 python3 tests/test_tui_pty.py
 ```
 
 Updating the JavaScript bundle requires Node.js/npm and package downloads:
 
 ```sh
-make js-bundle
-make
+cmake --build build --target js-bundle
+cmake --preset default
+cmake --build --preset default
 ```
 
 `js/package-lock.json` pins dependencies. `js/runtime.mjs` contains the native

@@ -5,6 +5,10 @@ Access requires a GitHub account with permission to this repository.
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 
+New to Strudel? [Strudeltutor](#learn-with-strudeltutor) teaches live coding
+through 22 interactive lessons inspired by vimtutor. Press **F2**, enter
+**`/tutor`**, or use **`:tutor`** in vi normal mode to start.
+
 ![Tompouce running Bell dub with inline waveform and spectrum visualizations and console](docs/images/tompouce.png)
 
 ## Why?
@@ -78,6 +82,30 @@ the fresh-install and repeat-install flows are also exercised on Arch/Omarchy.
 Debian/Ubuntu and Fedora package plans have unit coverage; their package-manager
 execution still needs testing on those distributions.
 
+## Learn with Strudeltutor
+
+[`strudeltutor.json`](strudeltutor.json) is a hands-on Strudel tutorial inspired
+by vimtutor. Its 22 lesson buffers contain playable starters, editing exercises,
+listening checkpoints and commented hints. Work through notes, rhythm, scales,
+layering, envelopes, filters, signals and variation, then write your own piece.
+The starters use built-in synths and work offline; sample-bank exercises are optional.
+
+In Tompouce, press F2 and enter `/tutor`, or use `:tutor` in vi normal mode.
+The shortcut copies the bundled lessons to
+`$XDG_CONFIG_HOME/tompouce/strudeltutor.json` (normally
+`~/.config/tompouce/strudeltutor.json`) and opens that working copy. Existing
+copies are reused, preserving progress. Automatic song advancement is turned off.
+Save any unsaved editor changes first; `/tutor!` or `:tutor!` discards them.
+Use Ctrl+S, `:w` or F2 `/save` to save to the config copy. To save elsewhere,
+use F2 `/save ~/strudeltutor-work.json`. The first lesson starts silently and
+shows how to make your first note audible. The bundled master stays unchanged.
+
+Keep song mode off with F2 `/song off`. Use Ctrl+N / Ctrl+B for the next /
+previous lesson and F9 for the lesson list. F5 evaluates and commits edits to
+the current lesson; press it before switching lessons to retain your work.
+Ctrl+S saves the whole tutorial. Allow about 30–45 minutes, or take one lesson
+at a time. F1 remains the Tompouce keybinding reference.
+
 ## Components
 
 - `src/audio.c` — native real-time synth + drum voices
@@ -98,6 +126,7 @@ execution still needs testing on those distributions.
 
 ## Docs
 
+- [Strudeltutor](#learn-with-strudeltutor) — interactive lessons, exercises and hints inside Tompouce
 - [`docs/examples.md`](docs/examples.md) — copy-pasteable example gallery
 - [`docs/architecture.md`](docs/architecture.md) — module map, data flow, threading, limits
 - [`docs/acceptance.md`](docs/acceptance.md) — manual acceptance test checklist
@@ -107,35 +136,64 @@ execution still needs testing on those distributions.
 
 ## Build
 
+CMake 3.20+ and Ninja are required for the default build:
+
 ```sh
-make
+cmake --preset default
+cmake --build --preset default --parallel 4
+ctest --preset default
 ```
 
-Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`, `libcjson`, `leveldb`,
-ALSA and `tree-sitter` development libraries.
-Native sound-server support is detected with pkg-config: `libpipewire-0.3`
-(0.3.7+), `libpulse`, and `samplerate` enable PipeWire, PulseAudio and output
-resampling respectively. The installer includes their development packages.
-Optional `fluidsynth` 2.2+ and an installed GM soundfont enable the `gm_`
-instruments. The installer includes FluidSynth and FluidR3 GM packages.
-For a minimal PortAudio build, use `make clean` then
-`make WITH_PIPEWIRE=0 WITH_PULSE=0 WITH_SAMPLERATE=0 WITH_FLUIDSYNTH=0`.
-`xxd` embeds the committed JavaScript bundle during the build. QuickJS is
-vendored; Node.js is only needed when rebuilding the JavaScript bundle.
+The executable is `build/tompouce`; generated headers, objects and test binaries
+stay in `build/`. `compile_commands.json` is generated for editor tooling.
+Equivalent commands without presets are `cmake -S . -B build -G Ninja`,
+`cmake --build build`, and `ctest --test-dir build --output-on-failure`.
+Other CMake generators are supported in separate build directories.
+
+Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`,
+`libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus
+pkg-config and `xxd`. Optional packages detected at configuration time are
+`libpipewire-0.3` (0.3.7+), `libpulse`, `samplerate` and `fluidsynth` (2.2+).
+FluidSynth also needs an installed GM soundfont for the `gm_` instruments.
+The installer includes these packages and FluidR3 GM.
+
+For a minimal PortAudio build:
+
+```sh
+cmake -S . -B build-minimal -G Ninja -DWITH_PIPEWIRE=OFF -DWITH_PULSE=OFF \
+  -DWITH_SAMPLERATE=OFF -DWITH_FLUIDSYNTH=OFF -DWITH_CSOUND=OFF
+cmake --build build-minimal --parallel 4
+```
+
+Optional libraries default to enabled when found. Explicit `-DWITH_...=ON`
+requires the corresponding package; `OFF` disables it. Csound is enabled when
+found unless `-DWITH_CSOUND=OFF` is set. Use `-DCSOUND_PREFIX=/path` or
+`-DTREE_SITTER_PREFIX=/path` for private installations; their library paths
+remain available to the executable after the installer copies it.
 
 For `.csound()`, `loadCsound()` and `loadOrc()`, install Csound headers/library.
 The current upstream livecode orchestra requires Csound 7. On Linux x86_64,
 `bash scripts/install-csound7.sh` installs a pinned engine under `~/.local/opt`
-without replacing system libraries; then run `make clean && make`.
+without replacing system libraries; then reconfigure and rebuild.
 
-`make test` includes all 31 official Strudel examples with stored event
-expectations, plus native Csound rendering checks. See
-[`tests/fixtures/README.md`](tests/fixtures/README.md) for provenance and limits.
+CTest includes the native suite, all 31 official Strudel examples / 1,207 stored
+reference events, Csound rendering, installer/import/companion checks and terminal
+PTY tests. Assertions remain enabled in test executables for Release builds.
+Use `ctest --test-dir build -R examples --output-on-failure` for a focused check;
+`cmake --build build --target test-sanitize` runs the callback/vocoder/synth/editor
+ASan/UBSan checks. `cmake --build build --target test-terminal-sanitize` checks
+terminal rendering in four owned PTY geometries under ASan/UBSan.
+See [fixture provenance](tests/fixtures/README.md).
+
+Normal builds use the committed JavaScript bundles and vendored QuickJS.
+Node.js/npm are needed only for explicit `js-bundle`, `companion-bundle` or
+`compare-audio` targets, e.g. `cmake --build build --target js-bundle`.
+After rebuilding a bundle, run the normal build again to embed it.
 
 ## Run
 
 ```sh
-./tompouce
+./build/tompouce
 ```
 
 Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, skipping unavailable
@@ -147,9 +205,9 @@ accept 44.1 kHz is skipped. F4 and MCP `music_health` show the selected backend;
 the console records startup failures. With no usable output, editing and MCP
 remain available with `stream=down backend=none`. Selection occurs at startup.
 
-`make test-audio-backends` checks fallback and cleanup with temporary null ALSA
+`cmake --build build --target test-audio-backends` checks fallback and cleanup with temporary null ALSA
 devices and disposable silent server streams. Native daemon checks skip when
-their sockets are absent; `TOMPOUCE_TEST_JACK=1 make test-audio-backends` also
+their sockets are absent; `TOMPOUCE_TEST_JACK=1 cmake --build build --target test-audio-backends` also
 checks a running JACK-compatible server. These checks do not change desktop
 audio configuration or the user's running Tompouce session.
 
@@ -206,9 +264,11 @@ native GM pitch, while sample slicing/loop-region controls are not applied.
 GM notes are prepared into immutable stereo PCM on the generator thread,
 with a 60-second note-plus-release limit. They share the 128-buffer/128 MiB
 prepared-audio cache; referenced queued/sounding notes survive eviction.
-The audio callback never loads fonts or calls FluidSynth. A first GM note
-loads the font; later matching notes reuse prepared PCM. This is native
-soundfont playback, not a waveform replica of the web client's renderer.
+FluidSynth's own audio-device probes are disabled; Tompouce's selected output
+backend plays the prepared PCM. The audio callback never loads fonts or calls
+FluidSynth. A first GM note loads the font; later matching notes reuse prepared
+PCM. This is native soundfont playback, not a waveform replica of the web
+client's renderer.
 
 The editor’s bottom mini scope and piano roll can be hidden with F2 →
 `/scope off` (restored with `/scope on`). This preference persists across
@@ -256,17 +316,17 @@ Direct tmux/screen sessions retain braille. The separate F12 pane also retains
 its text display.
 
 Keys:
-- `Tab` — indent two spaces (selected lines as a block); `Shift+Tab` — unindent; `Ctrl+Space` — complete a legacy keyword.
+- `Tab` — complete a word in insert mode; indent two spaces in leading whitespace or a selection. `Shift+Tab` cycles completion backward, otherwise unindents.
 - Type code in the editor (left pane).
 - `F5` — evaluate code (`Ctrl+R` also evaluates outside vi normal mode)
 - `Ctrl+P` — play / stop
-- `F1` — toggle language cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
+- `F1` — toggle Tompouce keybinding cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
 - `F2` — AI prompt (supports `/bpm N`, `/play`, `/stop`, `/clear`, `/save`, `/load`, `/song`, `/rescan`)
 - `F4` — toggle internals/state pane: editor mode, pending evaluation/unsaved
   changes, undo history, engine generations, graphics/inline status, audio/MIDI,
   sample-bank index, song/hold state, voices, queue and per-track timing.
-- `F3` — toggle vi editor mode; motions, operators and search are listed below
-- `Ctrl+Space` — context-aware completion (keywords, notes, drums, transforms, `wt:` tables)
+- `F3` — toggle vi editor mode; `:` opens commands in vi normal mode (Tab completes). Motions, operators and search are listed below.
+- `Ctrl+Space` — explicit completion for Strudel functions/methods, note/sound/scale strings and legacy keywords; repeated Tab/Shift+Tab cycles candidates.
 - `F6` — browse samples, drum-machines, synths, wavetables, user sounds and import-sounds. The search bar sits above persistent category tabs; Left/Right changes category while retaining the query. Manifest arrays and pitch regions remain one sound entry; drum-machine components are grouped under their bank name. Enter opens a bank or inserts a sound; Tab inserts the selected bank using its listed instruments. All and local-banks include standalone audio files only when no loaded manifest references them. Custom Strudel JSON maps under the banks root are discovered at startup; known catalogs retain their existing precedence. Import-sounds accepts a folder path in its own field. Backspace with an empty query goes up a bank, then returns to All. Insertion replaces the source selection without evaluating; F5 applies it.
 - `F7` — song mode: play track buffers in sequence from track 0 (`/song [on|off|hold]`)
 - `F8` — hold current track (loop it inside song mode)
@@ -330,12 +390,43 @@ Vi normal mode supports:
 - `i/a/I/A/o/O` and `v/V`; Escape returns to normal mode. Horizontal character
   motions and deletion respect UTF-8 code-point boundaries.
 
+In vi normal mode, `:` opens a local command line; Escape cancels it. Tab
+completes command names, settings and song filenames; repeat Tab or Shift+Tab
+to cycle choices. F2 remains the AI prompt, with completion for `/commands`.
+
+| Command | Action |
+| --- | --- |
+| `:w[rite][!] [song.json]` | Save the whole song; `!` allows overwriting another existing file. |
+| `:e[dit][!] [song.json]` | Open a song; `!` discards unsaved editor changes. |
+| `:q[uit][!]` | Quit; `!` bypasses the unsaved editor guard. |
+| `:wq[!] [song.json]`, `:x[it][!] [song.json]` | Save and quit; `x` writes only when changed or given a filename. Failed writes keep the editor open. |
+| `:undo`, `:redo` | Undo or redo. |
+| `:42`, `:$` | Jump to a logical source line or the last line. |
+| `:set wrap`, `:set nowrap`, `:set mouse`, `:set nomouse` | Change and persist editor settings; `:set` or `:set wrap?` shows their values. |
+| `:help`, `:evaluate` | Open the cheatsheet or evaluate as with F5. |
+| `:tutor[!]` | Open Strudeltutor; `!` discards unsaved editor changes. |
+
+Existing application commands also work after `:`, for example `:stop`,
+`:bpm 120`, `:theme auto` and `:graphics braille`. Unknown commands stay local.
+Save/open commands use Tompouce's whole-song JSON format, as Ctrl+S/Ctrl+O do.
+Filename completion lists JSON files and directories, including quoted names
+with spaces. F5 evaluates music and leaves the unsaved-file guard intact.
+Quitting still saves Tompouce's recovery session, including after `:q!`;
+`q!` leaves the named project file unchanged.
+
+Editor completion uses vocabulary generated from the pinned Strudel runtime
+without evaluating edited code. For example, `.ga` completes to `.gain`, and
+`.s("squ` completes to `.s("square`. Sound names reflect the loaded catalog.
+Completion replaces the whole token at the cursor, preserves following arguments
+and forms one undo step even when cycling candidates. Comments are left alone;
+Tab still indents at the start of a line and indents selected lines as a block.
+
 Application shortcuts (including playback, sliders, track switching, clipboard,
 save/load and Ctrl+D duplication) retain their existing meanings. This is a
-native vi subset: regex search, Ex commands, macros, named registers, marks,
-block visual mode and dot-repeat are not implemented.
+native vi subset: regex search, Ex ranges/substitution/shell commands, macros,
+named registers, marks, block visual mode and dot-repeat are not implemented.
 
-Editor regression checks: `make test` covers buffer edits and selection bounds;
+Editor regression checks: `ctest --preset default` covers buffer edits and selection bounds;
 `python3 tests/test_tui_pty.py` checks real terminal input, mouse reports,
 startup configuration, paste, and terminal restoration on quit and signals.
 The PTY script builds the checkout executable before running. Set
@@ -374,7 +465,7 @@ When `OPENAI_API_KEY` is set and the network library initializes, the AI prompt 
 Run as an MCP server over stdio:
 
 ```sh
-./tompouce --mcp
+./build/tompouce --mcp
 ```
 
 Tools: `music_set_code`, `music_evaluate`, `music_play`, `music_stop`, `music_set_bpm`, `music_get_status`, `music_get_code`, `music_get_console`, `music_ai`, `music_song`, `music_track`, `music_session`, `music_health`, `music_debug`. Example Claude Code config:

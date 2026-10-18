@@ -74,6 +74,126 @@ static void test_vi_motions(void) {
     vi_mode=vi_normal=0;
 }
 
+static void completion_setup(const char *code, int at) {
+    vi_setup(code); vi_mode=vi_normal=0; completion_reset();
+    cur_col=at<0?(int)strlen(code_lines[0]):at;
+}
+static void test_completion(void) {
+    completion_setup("note(60).ga(0)",11);
+    assert(editor_complete(0,1)); vi_expect("note(60).gain(0)");
+    assert(cur_col==13); assert(editor_undo()); vi_expect("note(60).ga(0)");
+    completion_setup("note(60).gain(0)",11);
+    assert(editor_complete(0,1)); vi_expect("note(60).gain(0)"); assert(cur_col==13);
+    completion_setup("note(\"é\").ga",-1);
+    assert(editor_complete(0,0)); vi_expect("note(\"é\").gain");
+    completion_setup("note(60).f",-1);
+    assert(editor_complete(0,1));
+    char *first=editor_flatten(); assert(first);
+    assert(editor_complete(0,1));
+    char *second=editor_flatten(); assert(second && strcmp(first,second));
+    assert(editor_complete(1,1));
+    char *back=editor_flatten(); assert(back && !strcmp(first,back));
+    free(first); free(second); free(back);
+    assert(editor_undo()); vi_expect("note(60).f");
+    completion_setup("// .ga",-1); assert(!editor_complete(0,1)); vi_expect("// .ga");
+    completion_setup("/* comment\n.ga",-1); cur_line=1; cur_col=3;
+    assert(!editor_complete(0,1)); vi_expect("/* comment\n.ga");
+    completion_setup("note(60).s(\"squ",-1);
+    assert(editor_complete(0,1)); vi_expect("note(60).s(\"square");
+    completion_setup("bp",-1); assert(editor_complete(0,1)); vi_expect("bpm");
+    completion_setup("note(60).",-1); assert(editor_complete(0,0)); vi_expect("note(60).");
+    assert(completion.count>1 && strstr(status_msg,"Tab cycles"));
+    completion_setup("note c4 | sl",-1); assert(editor_complete(0,1)); vi_expect("note c4 | slow");
+}
+static void test_commands(void) {
+    char root[]="/tmp/tompouce-ex-XXXXXX", file[1024], missing[1024], saved[1024];
+    assert(mkdtemp(root));
+    const char *old=getenv("XDG_CONFIG_HOME"); char *keep=old?strdup_safe(old):NULL;
+    assert(setenv("XDG_CONFIG_HOME",root,1)==0);
+    const char *old_home=getenv("HOME"); char *home=old_home?strdup_safe(old_home):NULL;
+    assert(setenv("HOME",root,1)==0);
+    assert(command_path("~/My song.json",file,sizeof(file)));
+    snprintf(saved,sizeof(saved),"%s/My song.json",root); assert(!strcmp(file,saved));
+    assert(home?setenv("HOME",home,1)==0:unsetenv("HOME")==0); free(home);
+    vi_setup("one\ntwo\nthree");
+    free(editor_written); editor_written=editor_flatten(); assert(editor_written);
+    command_execute("2"); assert(cur_line==1 && cur_col==0);
+    command_execute("$"); assert(cur_line==2);
+    command_execute("99999"); assert(cur_line==2 && strstr(status_msg,"E16"));
+    command_prompt_open(); assert(input_mode==2 && !input_buf[0]);
+    snprintf(input_buf,sizeof(input_buf),"set no"); input_len=(int)strlen(input_buf);
+    assert(command_complete(0) && !strcmp(input_buf,"set nowrap"));
+    assert(command_complete(0) && !strcmp(input_buf,"set nomouse"));
+    assert(command_complete(1) && !strcmp(input_buf,"set nowrap"));
+    command_execute(input_buf); assert(!editor_wrap);
+    completion_setup("before",-1);
+    free(editor_written); editor_written=editor_flatten(); assert(editor_written);
+    assert(editor_replace(0,6,"after"));
+    command_execute("q"); assert(!quit_requested && strstr(status_msg,"E37"));
+    mark_editor_clean(); /* F5's evaluated baseline must not clear file dirtiness. */
+    command_execute("q"); assert(!quit_requested && strstr(status_msg,"E37"));
+    command_execute("tutor"); assert(strstr(status_msg,"E37")); vi_expect("after");
+    do_command_or_ai("/tutor"); assert(strstr(status_msg,"E37")); vi_expect("after");
+    command_execute("tutor! extra"); assert(strstr(status_msg,"E488")); vi_expect("after");
+    do_command_or_ai("/tutor! extra"); assert(strstr(status_msg,"usage:")); vi_expect("after");
+    snprintf(saved,sizeof(saved),"%s",project_path); project_path[0]=0;
+    assert(!project_save(NULL) && strstr(status_msg,"No filename"));
+    snprintf(project_path,sizeof(project_path),"%s",saved);
+    snprintf(file,sizeof(file),"%s/My song.json",root);
+    snprintf(saved,sizeof(saved),"%s",project_path);
+    snprintf(missing,sizeof(missing),"%s/missing/song.json",root);
+    assert(!project_save(missing) && !strcmp(project_path,saved));
+    char command[1200]; snprintf(command,sizeof(command),"wq %s",missing);
+    command_execute(command); assert(!quit_requested && strstr(status_msg,"save failed"));
+    snprintf(command,sizeof(command),"wr \"%s\"",file);
+    command_execute(command); assert(!command_modified() && !strcmp(project_path,file));
+    assert(editor_replace(0,5,"changed"));
+    command_execute("undo"); vi_expect("after");
+    command_execute("redo"); vi_expect("changed");
+    snprintf(command,sizeof(command),"e %s",file);
+    command_execute(command); assert(strstr(status_msg,"E37")); vi_expect("changed");
+    snprintf(command,sizeof(command),"e! %s",missing);
+    command_execute(command); assert(!strcmp(project_path,file)); vi_expect("changed");
+    command_execute("!touch /tmp/should-not-run"); assert(strstr(status_msg,"E492"));
+    input_mode=0; completion_reset(); quit_requested=0;
+    assert(unlink(file)==0);
+    char config[1200]; snprintf(config,sizeof(config),"%s/tompouce/config.json",root); assert(unlink(config)==0);
+    snprintf(config,sizeof(config),"%s/tompouce",root); assert(rmdir(config)==0);
+    assert(rmdir(root)==0);
+    assert(keep?setenv("XDG_CONFIG_HOME",keep,1)==0:unsetenv("XDG_CONFIG_HOME")==0); free(keep);
+    snprintf(project_path,sizeof(project_path),"tompouce-song.json");
+}
+
+static void test_tutor_copy(void) {
+    char root[]="/tmp/tompouce-tutor-copy-XXXXXX",master[512],working[512],other[512],path[1024];
+    assert(mkdtemp(root));
+    snprintf(master,sizeof(master),"%s/master.json",root);
+    snprintf(working,sizeof(working),"%s/working.json",root);
+    snprintf(other,sizeof(other),"%s/other.json",root);
+    FILE *file=fopen(master,"w"); assert(file && fputs("master",file)>=0 && !fclose(file));
+    assert(tutor_copy(master,working));
+    struct stat st; assert(!stat(working,&st) && !(st.st_mode&077));
+    char content[32]={0}; file=fopen(working,"r");
+    assert(file && fread(content,1,sizeof(content)-1,file)==6 && !fclose(file) && !strcmp(content,"master"));
+    file=fopen(working,"w"); assert(file && fputs("progress",file)>=0 && !fclose(file));
+    assert(tutor_copy(other,working)); /* Existing progress survives even without the master. */
+    memset(content,0,sizeof(content)); file=fopen(working,"r");
+    assert(file && fread(content,1,sizeof(content)-1,file)==8 && !fclose(file) && !strcmp(content,"progress"));
+    assert(!tutor_copy(other,other) && access(other,F_OK));
+    assert(!symlink(master,other)); assert(!tutor_copy(master,other)); assert(!unlink(other));
+    assert(!link(master,other)); assert(!tutor_copy(master,other)); assert(!unlink(other));
+    char keep[sizeof(project_path)]; snprintf(keep,sizeof(keep),"%s",project_path);
+    snprintf(project_path,sizeof(project_path),"%s",working);
+    file_mode=1; snprintf(file_buf,sizeof(file_buf),"working.json");
+    assert(file_pick_path(path,sizeof(path)) && !strcmp(path,working));
+    snprintf(file_buf,sizeof(file_buf),"copy.json");
+    assert(file_pick_path(path,sizeof(path)) && !strcmp(path,"copy.json"));
+    file_mode=2; snprintf(file_buf,sizeof(file_buf),"working.json");
+    assert(file_pick_path(path,sizeof(path)) && !strcmp(path,"working.json"));
+    file_mode=0; snprintf(project_path,sizeof(project_path),"%s",keep);
+    assert(!unlink(master) && !unlink(working) && !rmdir(root));
+}
+
 int main(void) {
     graphics_supported = 1;
     assert(queue_inline_graphic(0,1,2,5,6,40,1,123));
@@ -335,6 +455,9 @@ int main(void) {
     inline_dot(dots,2,4,1,4);
     assert(dots[1][1] == 0);
     test_vi_motions();
+    test_completion();
+    test_commands();
+    test_tutor_copy();
     puts("editor, vi motions and inline braille layout ok");
     return 0;
 }

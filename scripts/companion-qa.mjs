@@ -37,7 +37,7 @@ function tool(port,name,args={}) {
 try {
   const server=net.createServer(); await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const port=server.address().port; await new Promise(r=>server.close(r));
-  engine=spawn(process.env.TOMPOUCE_TEST_BINARY??'./tompouce',['--mcp-port',String(port),'--code','note(60).gain(0)'],{
+  engine=spawn(process.env.TOMPOUCE_TEST_BINARY??'./build/tompouce',['--mcp-port',String(port),'--code','note(60).gain(0)'],{
     env:{...process.env,XDG_CONFIG_HOME:root,XDG_CACHE_HOME:root,TOMPOUCE_BANKS:root,
       PIPEWIRE_REMOTE:'tompouce-qa-missing-native',PULSE_SINK:sinkName},stdio:['ignore','ignore','pipe'],
   });

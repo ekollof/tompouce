@@ -82,6 +82,7 @@ static void check_state_modes(void) {
     replace_code_with("note('c4').gain(0)");
     char *code=editor_flatten(); assert(code && current_code_set(code)); free(code);
     mark_editor_clean();
+    free(editor_written); editor_written=editor_flatten(); assert(editor_written);
     vi_mode=vi_normal=1; input_mode=0; graphics_disabled=1;
     SLsmg_cls(); draw_state_at(1,0,18,78);
     char text[1600]; state_text(text,sizeof(text));
@@ -91,6 +92,15 @@ static void check_state_modes(void) {
     input_mode=1;
     draw_state_at(1,0,18,78); state_text(text,sizeof(text));
     assert(strstr(text,"mode=PROMPT") && strstr(text,"source=pending F5") && strstr(text,"file=unsaved"));
+    input_mode=2; draw_state_at(1,0,18,78); state_text(text,sizeof(text));
+    assert(strstr(text,"mode=COMMAND"));
+    input_buf[0]=0; input_len=0; draw_input();
+    SLsmg_Char_Type prompt; SLsmg_gotorc(rows-2,0); assert(SLsmg_char_at(&prompt)==0 && prompt.wchars[0]==':');
+    snprintf(input_buf,sizeof(input_buf),"%s","e My café.json"); input_len=(int)strlen(input_buf); draw_input();
+    SLsmg_gotorc(rows-2,0); assert(SLsmg_char_at(&prompt)==0 && prompt.wchars[0]==':');
+    memset(input_buf,'x',sizeof(input_buf)-1); input_buf[sizeof(input_buf)-1]=0;
+    input_len=(int)strlen(input_buf); assert(prompt_view_start()>0); draw_input();
+    input_len=0; input_buf[0]=0;
     SLsmg_cls(); draw_state_at(1,0,8,30); /* Compact terminal clipping. */
     input_mode=vi_mode=vi_normal=graphics_disabled=0;
 }
@@ -196,6 +206,35 @@ static void check_live_mode_highlights(void) {
     audio_toggle_play(0);
     tracks[0].javascript = NULL; track_count = 0;
     javascript_free(program); free(code);
+}
+
+static void check_stopped_highlight_growth(void) {
+    replace_code_with("note(\"c4\").gain(0)");
+    assert(current_code_set(code_lines[0]));
+    free(play_rows[0]); play_rows[0]=NULL; play_cap[0]=0;
+    audio_toggle_play(1); fill_play_mask(0);
+    int old_capacity=play_cap[0]; assert(old_capacity>0);
+    audio_toggle_play(0); sel_active=vi_mode=vi_normal=0; pane_focus=1;
+    const char *comment="// contain a plain instrument name. Keep both quote pairs. This line grew while stopped.";
+    replace_code_with(comment);
+    assert((int)strlen(comment)>old_capacity);
+    cur_line=cur_col=view_top=view_col=0;
+    draw_code();
+    assert(hl_play_len<=play_cap[hl_line]);
+    int mid,h,w,sh,th; right_geom(&mid,&h,&w,&sh,&th);
+    int width=line_textw(mid,0), nrows=line_text_rows(0,width);
+    for (int sub=0;sub<nrows;sub++) {
+        int a,b; editor_row_span(comment,width,sub,&a,&b);
+        for (int i=a;i<b;i++) {
+            SLsmg_Char_Type cell; SLsmg_gotorc(sub+2,6+i-a);
+            assert(!SLsmg_char_at(&cell) && cell.color==6);
+        }
+    }
+    /* A shorter replacement followed by another growth must stay cleared. */
+    replace_code_with("// short"); draw_code();
+    replace_code_with(comment); draw_code();
+    assert(hl_play_len<=play_cap[hl_line]);
+    pane_focus=0;
 }
 
 static void check_visual_edit_highlights(void) {
@@ -313,6 +352,7 @@ int main(void) {
     check_live_visual_addition();
     check_live_mode_highlights();
     check_visual_edit_highlights();
+    check_stopped_highlight_growth();
     check_state_modes();
     check_theme_watch();
     SLsmg_reset_smg();

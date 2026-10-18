@@ -41,6 +41,7 @@ static char **code_lines;
 static int code_line_cap;
 static char *last_synced_code;
 static char *editor_clean;
+static char *editor_written; /* File/initial-buffer baseline, independent of F5. */
 static int editor_wrap = 1; /* 1 = wrap long lines, 0 = scroll with the cursor */
 static int view_col;
 /* Hardware cursor, in screen cells, set by draw_code. 0 when the editor is not showing it. */
@@ -59,6 +60,9 @@ static double undo_group_time;
 static int vi_mode = 0; /* 0 = insert, 1 = vi-ish normal */
 static int vi_normal = 0;
 static int vi_pending = 0;  /* for dd/yy */
+static void command_prompt_open(void);
+static int command_path(const char *arg, char *path, size_t capacity);
+static int command_modified(void);
 static void vi_reset(void);
 static int vi_prev(const char *s, int at);
 static int vi_next(const char *s, int at, int n);
@@ -155,6 +159,8 @@ static char search_path[1024] = {0}; /* "" = global flat search */
 static int search_category = -1;
 static unsigned search_revision;
 static SoundBrowserRow search_rows[256];
+/* Mouse hits use the rendered layout, including wrapped tabs and scroll. */
+static int search_list_row, search_list_top, search_list_visible, search_list_count;
 static int file_mode = 0; /* 0 off, 1 save picker, 2 load picker */
 static char file_buf[256] = {0};
 static int file_len = 0;
@@ -974,7 +980,10 @@ void tui_init(void) {
     SLkp_define_keysym("\033[1;2H", 2114);
     SLkp_define_keysym("\033[1;2F", 2115);
     fputs("\033[?2004h", terminal_output);
-    if (mouse_enabled) fputs("\033[?1002h\033[?1006h", terminal_output);
+    /* Notcurses must select the wire protocol to match its coordinate decoder
+       (cell SGR or pixel SGR on terminals advertising DEC mode 1016). */
+    if (mouse_enabled && notcurses_mice_enable(terminal_nc,NCMICE_BUTTON_EVENT|NCMICE_DRAG_EVENT)<0)
+        log_console("cannot enable terminal mouse tracking");
     fflush(terminal_output);
     SLsmg_utf8_enable(1);
     viz_utf8 = SLsmg_is_utf8_mode();
@@ -1004,10 +1013,12 @@ void tui_shutdown(void) {
     companion_shutdown();
     if (!smg_active && !tty_active) return;
     inline_graphics_clear();
+    if (smg_active && notcurses_mice_disable(terminal_nc)<0)
+        log_console("cannot disable terminal mouse tracking");
     fflush(terminal_output);
     if (smg_active) { SLsmg_reset_smg(); smg_active = 0; }
     tty_active = 0;
-    fputs("\033[?1002l\033[?1006l\033[?2004l\033[0m\033[?25h", stdout);
+    fputs("\033[?2004l\033[0m\033[?25h", stdout);
     fflush(stdout);
     if (saved_tty_valid) (void)tcsetattr(fileno(stdin), TCSANOW, &saved_tty);
     log_console_stderr(1);
@@ -1803,7 +1814,7 @@ static void draw_status(void) {
     rows = SLtt_Screen_Rows; cols = SLtt_Screen_Cols;
     SLsmg_gotorc(0, 0);
     SLsmg_reverse_video();
-    const char *mode_str = (input_mode == 1) ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:NORMAL" : "VI:INSERT") : "INSERT");
+    const char *mode_str = input_mode==2 ? "COMMAND" : input_mode==1 ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:NORMAL" : "VI:INSERT") : "INSERT");
     if (!input_mode && vi_mode && vi_normal && sel_active)
         mode_str = sel_linewise ? "VI:VISUAL LINE" : "VI:VISUAL";
     char songstr[64] = {0};
@@ -2888,7 +2899,9 @@ static void draw_code(void) {
                 tmp[n] = 0;
                 hl_line = ln;
                 hl_play = (ln < play_n) ? play_rows[ln] : NULL;
-                hl_play_len = (int)strlen(code_lines[ln]);
+                /* Stopped playback clears existing masks without resizing
+                   them. Edits/lesson switches can make the new line longer. */
+                hl_play_len = (ln < play_n) ? play_cap[ln] : 0;
                 hl_bias = b0;
                 hl_eol_comment = 0;
                 if (b0 > 0) highlight_scan(code_lines[ln], b0);
@@ -3018,7 +3031,7 @@ static const char *xform_cands[] = {
     "pw","lpf","cutoff","shuffle","degrade",NULL};
 static const char *inst_cands[] = {"sine","saw","sawtooth","sqr","square","tri","triangle","noise","white","wt",NULL};
 static const char *drum_cands[] = {"bd","sd","sn","hh","hat","cp","clap","tom","~",NULL};
-static char note_pool[40][8];
+static char note_pool[40][16];
 static int note_pool_init = 0;
 
 static void insert_text(const char *txt) {
@@ -3038,7 +3051,7 @@ static void insert_text(const char *txt) {
     undo_commit();
 }
 
-static void complete_at_cursor(void) {
+static void complete_legacy_cursor(void) {
     char *line = code_lines[cur_line];
     int L = (int)strlen(line);
     if (cur_col > L) cur_col = L;
@@ -3175,6 +3188,8 @@ static void complete_at_cursor(void) {
 
 /* ---- bank search ---- */
 
+#include "tui_completion.h"
+
 static void search_use_bank(const char *dirfrag);
 static void search_refresh(void) {
     int cnt = banks_count();
@@ -3246,8 +3261,8 @@ static void search_descend_or_use(void) {
 
 /* ---- song file picker (Ctrl+S save, Ctrl+O load) ---- */
 
-static void project_save(const char *path);
-static void project_load(const char *path, int quiet);
+static int project_save(const char *path);
+static int project_load(const char *path, int quiet);
 
 static int file_has_suffix(const char *name, const char *suf) {
     size_t nl = strlen(name), sl = strlen(suf);
@@ -3324,7 +3339,7 @@ static void file_open(int mode) {
         mode == 1 ? "save song: edit name, Enter to write" : "load song: pick file, Enter to load");
 }
 
-/* typed/selected name -> confined CWD path. Returns 1 with out set. */
+/* New names stay in CWD; the current filename retains its project directory. */
 static int file_pick_path(char *out, size_t outlen) {
     const char *nm = file_buf[0] ? file_buf :
         (file_sel >= 0 && file_sel < file_n ? file_names[file_sel] : "");
@@ -3345,8 +3360,10 @@ static int file_pick_path(char *out, size_t outlen) {
             !(c >= '0' && c <= '9') && !strchr("_.-", c))
             return 0;
     }
-    snprintf(out, outlen, "%s", tmp);
-    return 1;
+    const char *base=strrchr(project_path,'/');
+    const char *target=file_mode==1 && !strcmp(tmp,base?base+1:project_path)?project_path:tmp;
+    int n=snprintf(out,outlen,"%s",target);
+    return n>=0 && (size_t)n<outlen;
 }
 
 static void file_confirm(void) {
@@ -3355,23 +3372,13 @@ static void file_confirm(void) {
         snprintf(status_msg, sizeof(status_msg), "bad name (a-z 0-9 _ . -)");
         return;
     }
-    if (file_mode == 1) {
-        char before[1024];
-        snprintf(before, sizeof(before), "%s", project_path);
-        project_save(path);
-        /* project_save sets project_path itself; keep picker open on failure */
-        FILE *probe = fopen(project_path, "r");
-        if (probe) { fclose(probe); file_mode = 0; }
-        else snprintf(project_path, sizeof(project_path), "%s", before);
-    } else {
-        project_load(path, 0);
-        /* project_load logs failure; close picker only if file read */
-        FILE *probe = fopen(path, "r");
-        if (probe) { fclose(probe); file_mode = 0; }
-    }
+    if (file_mode==1) {
+        if (project_save(path)) file_mode=0;
+    } else if (project_load(path,0)) file_mode=0;
 }
 
 static void draw_search_at(int r0, int c0, int h, int w) {
+    search_list_visible = 0;
     if (h < 7 || w < 12) return;
     SLsmg_draw_box(r0, c0, h, w);
     SLsmg_gotorc(r0, c0+2);
@@ -3430,6 +3437,8 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     int top = search_sel - visible + 1;
     if (top < 0) top = 0;
     int nrows = search_ndirs + (search_path[0] ? 1 : 0);
+    search_list_row = list_row; search_list_top = top;
+    search_list_visible = visible; search_list_count = nrows;
     for (int r = 0; r < visible; r++) {
         int idx = top + r;
         if (idx >= nrows) { blank_inner(list_row+r, c0+1, w-2); continue; }
@@ -3561,93 +3570,130 @@ static void draw_console_at(int r0, int c0, int h, int w) {
    style: 0 normal, 1 header, 2 code, 3 bullet */
 typedef struct { int style; const char *text; } DocLine;
 static const DocLine cheat[] = {
-    {1, "Tompouce language cheatsheet"},
-    {0, "One voice per line. F5 evaluates. Cycle = 4 beats."},
-    {0, "A song track holds a whole buffer; F7 steps tracks."},
-    {0, "Shift+arrows select; Ctrl+A all; Ctrl+C/X/V copy/cut/paste."},
-    {0, "Vi: v/V visual text/lines; y/d copy/cut; p/P paste."},
-    {3, "Vi counts: 5w, 3dd, 2d3w, 12G; u undo, Ctrl+R redo."},
-    {3, "Vi motions: w/b/e W/B/E 0 ^ $ gg G { } %; j/k wrap rows."},
-    {3, "Vi operators: d/c/y + motion; diw daw ci\" da( di[ ci{"},
-    {3, "Vi find: f/F/t/T + character; ; repeat, , reverse."},
-    {3, "Vi search: /text ?text Enter, n/N repeat, */# whole word."},
-    {0, "Mouse: click cursor/panes, drag selection or slider bars."},
+    {1, "Tompouce keybindings"},
+    {0, "F1 closes this reference. PgUp/PgDn scroll it."},
     {0, ""},
-    {1, "Track lines"},
-    {2, "bpm 128"},
-    {2, "drum bd sd [bd bd] sd"},
-    {2, "drum hh hh hh hh | fast 2"},
-    {2, "bass c2 e2 g2 c3 | rev"},
-    {2, "lead c4 e4 g4 c5 | slow 2"},
-    {2, "drum bd bd bd bd | inst wt:acid"},
-    {0, "keywords: drum sound note notes n chord bass lead melody noise s"},
+    {1, "Playback and panels"},
+    {3, "F5                Evaluate the editor buffer"},
+    {3, "Ctrl+P            Play / stop"},
+    {3, "F1                Toggle this keybinding reference"},
+    {3, "F2                Open AI / application command prompt"},
+    {3, "F3                Toggle vi editing mode"},
+    {3, "F4                Toggle engine / editor diagnostics"},
+    {3, "F6                Open / close the sound browser"},
+    {3, "F9                Toggle the song track list"},
+    {3, "F10 / F11         Narrow / widen the editor pane"},
+    {3, "F12               Toggle piano roll + scope pane"},
+    {3, "Ctrl+Left/Right   Adjust slider at cursor, evaluate"},
     {0, ""},
-    {1, "Pattern mini-notation"},
-    {3, "space separates steps in one cycle"},
-    {3, "[ a b ] groups steps into one slot"},
-    {3, "< a b > picks one per cycle (rotates)"},
-    {3, "tok*N repeats inside slot, incl. [..]*N and <..>*N (1-64)"},
-    {3, "tok!N replicates steps; tok@N elongates; tok/N slows across cycles"},
-    {3, "tok? or tok?0.2 drops events (stable per cycle); a|b chooses"},
-    {3, "bd(3,8) euclid; {a b c, d e} polymeter"},
-    {3, "euclid(k,n,tok[,rot])  Bjorklund rhythm"},
-    {3, "every(n, X)  play X every nth cycle"},
-    {3, "~  _  -  rest are rests"},
-    {3, "a,b  stacks over the same time (chords)"},
-    {3, "typos show as pattern errors in the console"},
+    {1, "Songs and files"},
+    {3, "F7                Toggle sequential song playback"},
+    {3, "F8                Hold / release the current track"},
+    {3, "Ctrl+T            Copy buffer to a new song track"},
+    {3, "Ctrl+N / Ctrl+B   Load next / previous track"},
+    {3, "Ctrl+S / Ctrl+O   Save / open whole-song JSON"},
+    {3, "Ctrl+Q            Quit and save recovery session"},
     {0, ""},
-    {1, "Transforms (after |)"},
-    {3, "rev  mirror timing in cycle"},
-    {3, "fast N  compress + repeat (1-64)"},
-    {3, "slow N  play every Nth cycle"},
-    {3, "gain X  volume 0-2"},
-    {3, "attack/decay/sustain/release  or adsr A:D:S:R"},
-    {3, "inst/sound/s  sine saw square tri noise (pink=white)"},
-    {3, "inst wt[:name]  wavetable: sine tri saw square"},
-    {3, "  organ acid voice pluck pad glass (bare wt = saw)"},
-    {3, "bank NAME  drum samples (e.g. bank 909)"},
-    {3, "bank NAME on notes too: nearest pitch, shifted"},
-    {3, "scale C:minor  degrees 0 2 4 (root octave 3)"},
-    {3, "transpose N  semitones (alias add)"},
-    {3, "arp 0 1 2 1  indexes a stacked chord"},
-    {3, "lfo gain|freq|lpf|pw [shape] rate [depth]"},
-    {3, "vib 4  or vib 4:.1  sine pitch LFO"},
-    {3, "pw 0.5  pulse width; lpf/cutoff Hz per voice"},
+    {1, "Editor and selection"},
+    {3, "Arrows            Move cursor (Up/Down follow wraps)"},
+    {3, "Home / End        Start / end of logical line"},
+    {3, "PgUp / PgDn       Page editor; scroll help if open"},
+    {3, "Enter             Split line / replace selection"},
+    {3, "Backspace / Del   Delete before / at cursor"},
+    {3, "Shift+arrows      Extend selection"},
+    {3, "Shift+Home/End    Select to line start / end"},
+    {3, "Ctrl+A            Select all"},
+    {3, "Ctrl+C / Ctrl+X   Copy / cut selection"},
+    {3, "Ctrl+V            Paste internal clipboard"},
+    {3, "Ctrl+D            Duplicate current line"},
+    {3, "Ctrl+Z / Ctrl+Y   Undo / redo"},
+    {3, "Ctrl+R            Evaluate (vi normal: redo)"},
+    {3, "Esc               Clear selection / return to editor"},
     {0, ""},
-    {1, "Sounds"},
-    {3, "drums: bd kick, sd/sn snare, hh/hat hat,"},
-    {3, "cp/clap clap, tom tom (unknown -> hat)"},
-    {3, "notes: c d e f g a b + #/b + octave"},
-    {3, "e.g. c4 eb4 f#3, or MIDI number 60"},
-    {3, "chords: Cm7 C^7 C-7  (keyword chord: C = major)"},
-    {3, "on note tracks c7 is the note, cm7 is a chord"},
-    {3, "defaults: bass>saw lead>square notes/n/chord>tri"},
+    {1, "Completion and indentation"},
+    {3, "Tab               Complete word in insert mode"},
+    {3, "Ctrl+Space        Request Strudel / sound completion"},
+    {3, "Tab / Shift+Tab   Cycle completion forward / backward"},
+    {3, "Tab               Indent leading space or selection"},
+    {3, "Shift+Tab         Unindent when not cycling matches"},
     {0, ""},
-    {1, "Limits"},
-    {3, "note(\"c e g\").s(\"saw\").lpf(800)  also s() sound() n() setcpm()"},
-    {3, "slider(v) slider(v,min,max,step)  Ctrl+Left/Right nudges"},
-    {3, "song tracks grow (safety ceiling 8192); code pane shows roll+scope"},
-    {3, "lines wrap on syntax tokens (/wrap off scrolls)"},
-    {3, "/scope off hides bottom scope/roll; /scope on restores"},
-    {3, "._scope() / ._pianoroll(): inline braille; /inline off hides"},
-    {3, "Kitty graphics auto-detected; /graphics braille or /graphics auto"},
-    {3, "/theme off|omarchy|pywal|auto: optional live theme colors"},
-    {3, "Up/Down and PgUp/PgDn follow wrapped rows"},
-    {3, "source grows until memory runs out; offsets stop near 2 GiB"},
-    {3, "128 voices, nesting 32 deep, bpm 20-400"},
+    {1, "Vi normal mode (F3 enables)"},
+    {3, "i / a             Insert before / after cursor"},
+    {3, "I / A             Insert at first nonblank / line end"},
+    {3, "o / O             Open line below / above"},
+    {3, "Esc               Leave insert / visual mode"},
+    {3, "h j k l           Left / down / up / right"},
+    {3, "j/k, gj/gk        Move through wrapped editor rows"},
+    {3, "w b e / W B E     Word / WORD motions"},
+    {3, "0 ^ $             Line start / first nonblank / end"},
+    {3, "gg / G            First / last line; 12G goes to 12"},
+    {3, "{ / }             Previous / next paragraph"},
+    {3, "%                 Match literal bracket"},
+    {3, "f/F/t/T + char    Find / move just before character"},
+    {3, "; / ,             Repeat / reverse character find"},
+    {3, "/text / ?text     Search forward / backward; Enter"},
+    {3, "n / N             Repeat / reverse literal search"},
+    {3, "* / #             Search cursor word forward / back"},
+    {3, "v / V             Select text / whole lines"},
+    {3, "d / c / y         Delete / change / copy with motion"},
+    {3, "dd / cc / yy      Delete / change / copy lines"},
+    {3, "D / C             Delete / change to line end"},
+    {3, "Y                 Copy whole line"},
+    {3, "x / X             Delete at / before cursor"},
+    {3, "s / r + char      Substitute / replace character"},
+    {3, "p / P             Paste after / before cursor"},
+    {3, "u / Ctrl+R        Undo / redo"},
+    {3, "Counts            5w, 3dd, 2d3w; also counted paste"},
+    {3, "Text objects      diw daw ci\" da( di[ ci{"},
     {0, ""},
-    {1, "Keys"},
-    {3, "F1 help  F2 AI  F3 vi  F4 state  F5 eval  F6 sounds"},
-    {3, "F7 song  F8 hold  F9 tracks  Tab indents; Ctrl+Space completes"},
-    {3, "Ctrl+T copy buffer to track  Ctrl+N/B next/prev"},
-    {3, "Ctrl+D dup line  Ctrl+S save song  Ctrl+O load song"},
-    {3, "Ctrl+Z undo  Ctrl+Y redo  (vi normal: u)"},
-    {3, "a typing run is one step until a pause or another key"},
-    {3, "Ctrl+P play  Ctrl+Q quit  Esc vi-normal"},
-    {3, "Ctrl+Left/Right nudge the slider under the cursor"},
-    {3, "F12 full piano roll + scope  PgUp/PgDn scroll this help"},
-    {3, "/wrap on|off  long lines wrap, or scroll to the cursor"},
-    {3, "F2 /companion  launch Chromium controls; /companion stop"},
+    {1, "Vi command line (: in normal mode)"},
+    {3, "Tab / Shift+Tab   Complete / cycle commands and paths"},
+    {3, "Enter / Esc       Run / cancel command"},
+    {3, "Ctrl+U            Clear prompt"},
+    {3, ":w [file.json]    Save whole song"},
+    {3, ":e [file.json]    Open song"},
+    {3, ":q / :wq / :x     Quit / save+quit / save if changed"},
+    {3, "! suffix          Override unsaved / overwrite guard"},
+    {3, ":undo / :redo     Undo / redo"},
+    {3, ":42 / :$          Go to logical line / last line"},
+    {3, ":set [no]wrap     Enable / disable wrapping"},
+    {3, ":set [no]mouse    Enable / disable mouse input"},
+    {3, ":help             Open this keybinding reference"},
+    {3, ":tutor            Open Strudeltutor lessons"},
+    {3, ":evaluate         Evaluate editor buffer"},
+    {0, ""},
+    {1, "Sound browser (F6)"},
+    {3, "Type / Backspace  Filter / erase query"},
+    {3, "Left / Right      Switch sound categories"},
+    {3, "Up / Down         Select sound or bank"},
+    {3, "PgUp / PgDn       Move selection by ten rows"},
+    {3, "Enter             Open bank / insert selected sound"},
+    {3, "Tab               Insert bank pattern / use selection"},
+    {3, "Empty Backspace   Leave bank / return to All category"},
+    {3, "Esc / F6          Close browser without inserting"},
+    {0, ""},
+    {1, "File picker (Ctrl+S / Ctrl+O)"},
+    {3, "Type / Backspace  Enter / erase filename"},
+    {3, "Up / Down         Select existing song"},
+    {3, "PgUp / PgDn       Move selection by ten rows"},
+    {3, "Enter / Esc       Save or open / cancel picker"},
+    {0, ""},
+    {1, "AI / application prompt (F2)"},
+    {3, "Enter / Esc       Submit / cancel prompt"},
+    {3, "Ctrl+U            Clear prompt"},
+    {3, "Tab / Shift+Tab   Complete / cycle /commands"},
+    {3, "/tutor            Open Strudeltutor lessons"},
+    {3, "/companion        Open browser companion"},
+    {3, "/companion stop   Close companion"},
+    {0, ""},
+    {1, "Mouse and pane focus"},
+    {3, "Left-click        Place cursor / focus pane"},
+    {3, "Left-drag         Select text / adjust slider bar"},
+    {3, "Track row click   Load that song track"},
+    {3, "Wheel             Scroll editor / console / help"},
+    {3, "PgUp / PgDn       Scroll focused console or open help"},
+    {3, "Esc               Return focus to editor"},
+    {3, "Shift+mouse       Terminal's native text selection"},
 };
 static const int cheat_n = (int)(sizeof(cheat) / sizeof(cheat[0]));
 
@@ -3691,7 +3737,7 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
     if (h < 3 || w < 8) return;
     SLsmg_draw_box(r0, c0, h, w);
     SLsmg_gotorc(r0, c0+2);
-    SLsmg_write_string(" cheatsheet (F1:back PgUp/PgDn:scroll) ");
+    SLsmg_write_string(" keybindings (F1:back PgUp/PgDn:scroll) ");
     int visible = h - 2;
     int vw = w - 2;
     if (vw > 250) vw = 250;
@@ -3772,7 +3818,7 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     int qd = event_queue_depth();
     int av = 0; int by[10] = {0};
     audio_voice_stats(&av, by);
-    const char *mode = (input_mode == 1) ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:N" : "VI:I") : "INS");
+    const char *mode = input_mode==2 ? "COMMAND" : input_mode==1 ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:N" : "VI:I") : "INS");
     state_line(&row,maxrow,c0+1,w-2,"mode=%s wrap=%s mouse=%s selection=%s",mode,
         editor_wrap?"on":"off",mouse_enabled?"on":"off",sel_active?(sel_linewise?"lines":"text"):"none");
     snprintf(b, sizeof(b), "bpm %.0f %s t=%.1fs beat=%.3fs cyc=%.3fs",
@@ -3826,7 +3872,7 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         char *text=editor_flatten();
         state_line(&row,maxrow,c0+1,w-2,"source=%s file=%s bytes=%zu lines=%d",
             !text?"unknown":(!strcmp(text,cstr(current_code))?"evaluated":"pending F5"),
-            !text?"unknown":(editor_clean && !strcmp(text,editor_clean)?"saved":"unsaved"),
+            !text?"unknown":(editor_written && !strcmp(text,editor_written)?"saved":"unsaved"),
             text?strlen(text):0,code_line_count);
         free(text);
         state_line(&row,maxrow,c0+1,w-2,"history undo=%d redo=%d cursor=L%d byte=%d",undo_n,redo_n,cur_line+1,cur_col);
@@ -4065,17 +4111,24 @@ static void draw_console(void) {
     draw_right_pane();
 }
 
+static int prompt_view_start(void) {
+    int start=0, width=cols-(input_mode==2?1:4)-1;
+    if (width<0) width=0;
+    while (start<input_len && editor_visual_col(input_buf+start,input_len-start)>width)
+        start=vi_next(input_buf,start,input_len);
+    return start;
+}
+
 static void draw_input(void) {
-    rows = SLtt_Screen_Rows; cols = SLtt_Screen_Cols;
-    char buf[256];
+    char buf[sizeof(input_buf)+8];
     int used;
-    if (input_mode == 1) snprintf(buf, sizeof(buf), "AI> %.240s", input_buf);
-    else snprintf(buf, sizeof(buf), "Type code. F2=prompt (/companion) F1=help F4=state F6=sounds.");
-    used = draw_text(rows-2, 0, buf, cols, 0);
-    if (used < cols) blank_inner(rows-2, used, cols - used);
-    snprintf(buf, sizeof(buf), "Enter submits prompt. Esc cancels.");
-    used = draw_text(rows-1, 0, buf, cols, 0);
-    if (used < cols) blank_inner(rows-1, used, cols - used);
+    if (input_mode) snprintf(buf,sizeof(buf),"%s%s",input_mode==2?":":"AI> ",input_buf+prompt_view_start());
+    else snprintf(buf,sizeof(buf),vi_mode?"Type code. :commands F2=AI prompt F1=help F6=sounds.":"Type code. F2=prompt (/companion) F1=help F4=state F6=sounds.");
+    used=draw_text(rows-2,0,buf,cols,0);
+    if (used<cols) blank_inner(rows-2,used,cols-used);
+    snprintf(buf,sizeof(buf),input_mode==2?"Enter runs command. Tab/Shift+Tab complete. Esc cancels.":"Enter submits prompt. Esc cancels.");
+    used=draw_text(rows-1,0,buf,cols,0);
+    if (used<cols) blank_inner(rows-1,used,cols-used);
 }
 
 static void do_evaluate(void) {
@@ -4111,22 +4164,29 @@ static void duplicate_line(void) {
     snprintf(status_msg, sizeof(status_msg), "line duplicated");
 }
 
-static void project_save(const char *path) {
-    if (path && *path) snprintf(project_path, sizeof(project_path), "%s", path);
+static int project_save(const char *path) {
+    const char *target=path && *path?path:project_path;
+    if (!*target) {
+        snprintf(status_msg,sizeof(status_msg),"No filename: use /save <path> or :w <path>"); return 0;
+    }
+    if (strlen(target)>=sizeof(project_path)) { snprintf(status_msg,sizeof(status_msg),"save failed: path too long"); return 0; }
     char *code = editor_flatten();
     if (!code) {
         snprintf(status_msg, sizeof(status_msg), "out of memory");
-        return;
+        return 0;
     }
-    int n = songfile_save(project_path, code, audio_get_bpm(), 0);
-    free(code);
+    int n = songfile_save(target, code, audio_get_bpm(), 0);
     if (n > 0) {
+        if (target!=project_path) snprintf(project_path,sizeof(project_path),"%s",target);
+        free(editor_written); editor_written=code; code=NULL;
         log_console("saved %s (%d track%s)", project_path, n, n == 1 ? "" : "s");
         snprintf(status_msg, sizeof(status_msg), "saved %.200s (%d track%s)",
             project_path, n, n == 1 ? "" : "s");
     } else {
         snprintf(status_msg, sizeof(status_msg), "save failed");
     }
+    free(code);
+    return n>0;
 }
 
 static int code_has_bpm(const char *code) {
@@ -4135,15 +4195,18 @@ static int code_has_bpm(const char *code) {
     return strstr(code, "\nbpm ") != NULL || strstr(code, "\nbpm\t") != NULL;
 }
 
-static void project_load(const char *path, int quiet) {
-    if (path && *path) snprintf(project_path, sizeof(project_path), "%s", path);
+static int project_load(const char *path, int quiet) {
+    const char *target=path && *path?path:project_path;
+    if (strlen(target)>=sizeof(project_path)) { snprintf(status_msg,sizeof(status_msg),"load failed: path too long"); return 0; }
     char *code = NULL;
     double b = 0;
-    int n = songfile_load(project_path, &code, &b, quiet);
-    if (n < 0) return;
+    int n = songfile_load(target, &code, &b, quiet);
+    if (n < 0) { snprintf(status_msg,sizeof(status_msg),"load failed"); return 0; }
     int apply_bpm = (b > 0 && !code_has_bpm(code));
-    replace_code_with(code ? code : "");
+    if (!replace_code_with(code ? code : "")) { free(code); return 0; }
     free(code);
+    if (target!=project_path) snprintf(project_path,sizeof(project_path),"%s",target);
+    free(editor_written); editor_written=editor_flatten();
     do_evaluate();
     if (apply_bpm) audio_set_bpm(b);
     note_synced(1);
@@ -4152,6 +4215,76 @@ static void project_load(const char *path, int quiet) {
             project_path, n, n == 1 ? "" : "s");
     }
     log_console("loaded %s (%d track%s)", project_path, n, n == 1 ? "" : "s");
+    return 1;
+}
+
+/* Publish a complete private copy without replacing existing lesson progress. */
+static int tutor_copy(const char *master, const char *working) {
+    struct stat st;
+    if (!lstat(working,&st)) {
+        if (S_ISREG(st.st_mode) && st.st_nlink==1) return 1;
+        errno=EINVAL; return 0;
+    }
+    if (errno!=ENOENT) return 0;
+    char temporary[sizeof(project_path)+16];
+    int n=snprintf(temporary,sizeof(temporary),"%s.XXXXXX",working);
+    if (n<0 || (size_t)n>=sizeof(temporary)) { errno=ENAMETOOLONG; return 0; }
+    FILE *input=fopen(master,"rb");
+    if (!input) return 0;
+    int fd=mkstemp(temporary);
+    if (fd<0) { int error=errno; fclose(input); errno=error; return 0; }
+    FILE *output=fdopen(fd,"wb");
+    if (!output) {
+        int error=errno; close(fd); unlink(temporary); fclose(input); errno=error; return 0;
+    }
+    char block[4096]; size_t count; int error=0;
+    while ((count=fread(block,1,sizeof(block),input))) {
+        if (fwrite(block,1,count,output)!=count) { error=errno?errno:EIO; break; }
+    }
+    if (ferror(input) && !error) error=errno?errno:EIO;
+    if (fclose(input) && !error) error=errno?errno:EIO;
+    if (fclose(output) && !error) error=errno?errno:EIO;
+    if (!error && link(temporary,working)) error=errno;
+    unlink(temporary);
+    if (error && error!=EEXIST) { errno=error; return 0; }
+    /* Another invocation may have created the working copy first. */
+    if (lstat(working,&st)) return 0;
+    if (!S_ISREG(st.st_mode) || st.st_nlink!=1) { errno=EINVAL; return 0; }
+    return 1;
+}
+
+static void tutor_open(int force) {
+    if (!force && command_modified()) {
+        snprintf(status_msg,sizeof(status_msg),"E37: Unsaved changes; save first or use /tutor! or :tutor!"); return;
+    }
+    char path[sizeof(project_path)];
+    ssize_t length=readlink("/proc/self/exe",path,sizeof(path)-1);
+    if (length<0 || (size_t)length>=sizeof(path)-1) {
+        snprintf(status_msg,sizeof(status_msg),"Cannot locate Strudeltutor beside the executable"); return;
+    }
+    path[length]=0;
+    char *slash=strrchr(path,'/');
+    if (!slash) return;
+    size_t base=(size_t)(slash-path);
+    int n=snprintf(path+base,sizeof(path)-base,"/examples/strudeltutor.json");
+    if (n<0 || (size_t)n>=sizeof(path)-base) {
+        snprintf(status_msg,sizeof(status_msg),"Strudeltutor missing; reinstall Tompouce to restore examples"); return;
+    }
+    char directory[sizeof(project_path)], working[sizeof(project_path)];
+    user_dir(directory,sizeof(directory),"XDG_CONFIG_HOME","tompouce",".config/tompouce");
+    if (!*directory) { snprintf(status_msg,sizeof(status_msg),"Cannot locate Tompouce config directory"); return; }
+    mkdir_p(directory);
+    n=snprintf(working,sizeof(working),"%s/strudeltutor.json",directory);
+    if (n<0 || (size_t)n>=sizeof(working)) {
+        snprintf(status_msg,sizeof(status_msg),"Strudeltutor config path is too long"); return;
+    }
+    if (!tutor_copy(path,working)) {
+        snprintf(status_msg,sizeof(status_msg),"Cannot prepare Strudeltutor working copy: %.160s",strerror(errno)); return;
+    }
+    if (!project_load(working,0)) return;
+    scheduler_song_set(0);
+    cur_line=cur_col=view_top=view_col=sel_active=pane_focus=0;
+    snprintf(status_msg,sizeof(status_msg),"Strudeltutor working copy: F5 applies; Ctrl+N/B lessons; Ctrl+S saves");
 }
 
 void tui_load_initial(const char *code) {
@@ -4204,6 +4337,9 @@ static void do_command_or_ai(const char *text) {
         if (cmd && strcmp(cmd,"bpm")==0) {
             char *a = strtok_r(NULL, " \t", &save);
             if (a) { audio_set_bpm(atof(a)); snprintf(status_msg,256,"BPM %.0f",audio_get_bpm()); }
+        } else if (cmd && (!strcmp(cmd,"tutor") || !strcmp(cmd,"tutor!"))) {
+            if (strtok_r(NULL," \t",&save)) snprintf(status_msg,sizeof(status_msg),"usage: /tutor[!]");
+            else tutor_open(cmd[5]=='!');
         } else if (cmd && strcmp(cmd,"play")==0) {
             audio_toggle_play(1); scheduler_start(); snprintf(status_msg,256,"playing");
         } else if (cmd && strcmp(cmd,"stop")==0) {
@@ -4227,11 +4363,13 @@ static void do_command_or_ai(const char *text) {
             if (banks_rescan()) snprintf(status_msg, 256, "rescanning banks...");
             else snprintf(status_msg, 256, "indexing already running");
         } else if (cmd && strcmp(cmd,"save")==0) {
-            char *a = strtok_r(NULL, " \t", &save);
-            project_save(a);
+            char path[sizeof(project_path)];
+            while (save && isspace((unsigned char)*save)) save++;
+            if (command_path(save?save:"",path,sizeof(path))) project_save(*path?path:NULL);
         } else if (cmd && strcmp(cmd,"load")==0) {
-            char *a = strtok_r(NULL, " \t", &save);
-            project_load(a, 0);
+            char path[sizeof(project_path)];
+            while (save && isspace((unsigned char)*save)) save++;
+            if (command_path(save?save:"",path,sizeof(path))) project_load(*path?path:NULL,0);
         } else if (cmd && strcmp(cmd,"song")==0) {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) {
@@ -4302,6 +4440,8 @@ static void do_command_or_ai(const char *text) {
     ai_request_async(text, ctx);
     free(ctx);
 }
+
+#include "tui_commands.h"
 
 void tui_frame(void) {
     theme_poll(0);
@@ -4390,8 +4530,10 @@ void tui_frame(void) {
         cursor_r = editor_cur_r;
         cursor_c = editor_cur_c;
     } else if (input_mode) {
-        SLsmg_gotorc(rows - 2, 4 + input_len);
-        cursor_r = rows - 2; cursor_c = 4 + input_len;
+        int start=prompt_view_start();
+        cursor_r=rows-2; cursor_c=(input_mode==2?1:4)+editor_visual_col(input_buf+start,input_len-start);
+        if (cursor_c>=cols) cursor_c=cols-1;
+        SLsmg_gotorc(cursor_r,cursor_c);
     }
     if (cursor_r || cursor_c) SLtt_goto_rc(cursor_r,cursor_c);
     SLsmg_refresh();
@@ -4437,6 +4579,7 @@ static void read_mouse(void) {
     char end = *p;
     if ((end != 'm' && end != 'M') || p[1] || b > 127 || x < 1 || y < 1 ||
         x > (unsigned)cols || y > (unsigned)rows) return;
+    if (!mouse_enabled) return;
     mouse_x = (int)x - 1; mouse_y = (int)y - 1;
     int mid, h, w, sh, th;
     right_geom(&mid, &h, &w, &sh, &th);
@@ -4470,9 +4613,10 @@ static void read_mouse(void) {
                 if (idx < scheduler_song_count()) {
                     scheduler_track_goto(idx); sync_editor_from_track(idx);
                 }
-            } else if (search_mode && mouse_y >= 4) {
-                search_sel = mouse_y - 4;
-                if (search_sel >= search_ndirs) search_sel = search_ndirs - 1;
+            } else if (search_mode && mouse_y >= search_list_row &&
+                       mouse_y < search_list_row + search_list_visible) {
+                int idx = search_list_top + mouse_y - search_list_row;
+                if (idx < search_list_count) search_sel = idx;
             } else if (file_mode && mouse_y >= 4) {
                 file_sel = mouse_y - 4;
                 if (file_sel >= file_n) file_sel = file_n - 1;
@@ -4609,6 +4753,7 @@ static int read_key(void) {
 
 void tui_run(void) {
     int ch;
+    if (!editor_written) editor_written=editor_flatten();
     while (!quit_requested) {
         char *res = ai_poll_result();
         if (res) {
@@ -4682,6 +4827,7 @@ void tui_run(void) {
             continue;
         }
         if (ch == SL_KEY_ERR) continue;
+        if (ch!=9 && ch!=2102 && ch!=0) completion_reset();
         undo_tick++;
         if (ch == 2100) { vi_reset(); read_mouse(); continue; }
         if (ch == 2101) { vi_reset(); read_paste(); continue; }
@@ -4752,10 +4898,14 @@ void tui_run(void) {
             }
             continue;
         }
-        if (input_mode == 1) {
+        if (input_mode) {
             if (ch == SL_KEY_ENTER || ch == '\n' || ch == '\r') {
                 input_buf[input_len] = 0;
-                if (input_len > 0) do_command_or_ai(input_buf);
+                if (input_len > 0) {
+                    if (input_mode==2) command_execute(input_buf);
+                    else if (input_buf[0]==':') command_execute(input_buf+1);
+                    else do_command_or_ai(input_buf);
+                }
                 input_len = 0;
                 input_buf[0] = 0;
                 input_mode = 0;
@@ -4764,9 +4914,14 @@ void tui_run(void) {
                 input_len = 0;
                 input_buf[0] = 0;
             } else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && input_len > 0) {
-                input_len--;
+                input_len=vi_prev(input_buf,input_len);
                 input_buf[input_len] = 0;
-            } else if (ch >= 32 && ch < 127 && input_len < AI_PROMPT_MAX) {
+            } else if (ch==9 || ch==2102 || ch==0) {
+                (void)command_complete(ch==2102);
+            } else if (ch==21) {
+                input_len=0; input_buf[0]=0;
+            } else if (ch >= 32 && ch <= 255 && ch!=127 &&
+                       input_len < (input_mode==2?(int)sizeof(input_buf)-1:AI_PROMPT_MAX)) {
                 input_buf[input_len++] = (char)ch;
                 input_buf[input_len] = 0;
             }
@@ -4775,6 +4930,7 @@ void tui_run(void) {
         if (ch == 26) { editor_undo(); continue; }
         if (ch == 25) { editor_redo(); continue; }
         if (ch == 27 && pane_focus) { pane_focus = 0; continue; }
+        if (pane_focus && vi_mode && vi_normal && ch==':' && vi_handle_normal(ch)) continue;
         if (pane_focus && ch != 17 && ch != 16 && ch != SL_KEY_NPAGE && ch != SL_KEY_PPAGE &&
             !(ch >= SL_KEY_F(1) && ch <= SL_KEY_F(12))) continue;
         if (ch >= 2110 && ch <= 2115) {
@@ -4954,13 +5110,13 @@ void tui_run(void) {
             file_open(2); /* Ctrl+O: load picker */
             continue;
         } else if (ch == 9) {
-            editor_indent(0);
+            if (sel_active || (vi_mode && vi_normal) || !editor_complete(0,0)) editor_indent(0);
             continue;
         } else if (ch == 2102) {
-            editor_indent(1);
+            if (!completion_current(1)) editor_indent(1); else (void)editor_complete(1,0);
             continue;
         } else if (ch == 0) {
-            complete_at_cursor();
+            (void)editor_complete(0,1);
             continue;
         } else if (ch == SL_KEY_F(3)) {
             editor_toggle_mode();

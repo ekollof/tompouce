@@ -231,6 +231,7 @@ static int vi_handle_normal(int ch) {
         return 1;
     }
     if (ch==18 && !vi.prefix && !vi.op) { editor_redo(); vi_reset(); return 1; }
+    if (ch==':' && !vi.prefix && !vi.op) { vi_reset(); sel_active=0; command_prompt_open(); return 1; }
     if (ch<32 || ch>126) { vi_reset(); return 0; }
     if (!vi.prefix && ch>='0' && ch<='9' && (ch!='0' || vi.count)) {
         vi.count=vi.count>999?9999:vi.count*10+ch-'0';

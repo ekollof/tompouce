@@ -1,17 +1,17 @@
 # Tompouce manual acceptance checklist
 
-Build: `make clean && make` must finish with zero warnings under
+Build: `cmake --build build --clean-first` must finish with zero warnings under
 `-Wall -Wextra`. Mark each box after verifying on a real terminal
 (kitty or xterm-256color).
 
 ## Build and launch
 
-- [ ] `make clean && make` succeeds, no warnings/errors.
-- [ ] `./tompouce` opens the Notcurses UI (status bar, code pane, console
+- [ ] `cmake --build build --clean-first` succeeds, no warnings/errors.
+- [ ] `./build/tompouce` opens the Notcurses UI (status bar, code pane, console
       pane, prompt line) with no crash.
-- [ ] `./tompouce --mcp` stays headless (no UI) and answers
+- [ ] `./build/tompouce --mcp` stays headless (no UI) and answers
       `{"jsonrpc":"2.0","id":1,"method":"ping"}` with `{"result":{}}`.
-- [ ] `./tompouce --mcp --ui` from a terminal shows the UI and accepts keys.
+- [ ] `./build/tompouce --mcp --ui` from a terminal shows the UI and accepts keys.
 
 ## Editor and vi mode
 - [ ] Typing inserts text at a visible cursor (block highlight + hardware cursor).
@@ -80,7 +80,7 @@ Build: `make clean && make` must finish with zero warnings under
       log `pattern: ... at col N` in the console.
 - [ ] Live checking: typing `drum [bd sd` shows `! L1: expected ]` in the
       status bar with a red gutter marker; closing the bracket clears it.
-- [ ] `make test` passes (pattern gate cases).
+- [ ] `ctest --preset default` passes (pattern gate cases).
 
 ## Mix, fx, MIDI, sessions
 

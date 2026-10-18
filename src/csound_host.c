@@ -18,7 +18,7 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <stddef.h>
-#include "../thirdparty/strudel-csound/presets.inc"
+#include "presets.inc"
 #endif
 
 #define CS_BLOCK 64

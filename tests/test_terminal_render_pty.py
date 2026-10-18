@@ -12,7 +12,8 @@ import termios
 import time
 import unittest
 
-BINARY = Path(__file__).resolve().with_name('test_terminal_render')
+BINARY = Path(os.environ.get('TOMPOUCE_RENDER_TEST_BINARY',
+                            Path(__file__).resolve().parents[1] / 'build/tests/test_terminal_render'))
 
 
 def no_core():

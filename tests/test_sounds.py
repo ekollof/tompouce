@@ -15,7 +15,7 @@ class CatalogTest(unittest.TestCase):
             with SoundStore() as store:
                 store.import_file('mydrums', 'B.wav', audio())
                 store.import_file('mydrums', 'a.wav', audio(1))
-            process = subprocess.Popen(['./tompouce', '--mcp'], stdin=subprocess.PIPE,
+            process = subprocess.Popen([os.environ.get('TOMPOUCE_TEST_BINARY', './build/tompouce'), '--mcp'], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             try:
                 def call(name, arguments=None):

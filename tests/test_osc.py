@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-BINARY=os.environ.get('TOMPOUCE_TEST_BINARY','./tompouce')
+BINARY=os.environ.get('TOMPOUCE_TEST_BINARY','./build/tompouce')
 
 def decode(packet):
     assert packet[:8]==b'#bundle\0'

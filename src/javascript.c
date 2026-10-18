@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include "../js/dist/runtime.inc"
+#include "runtime.inc"
 
 #define JS_MEMORY_LIMIT (128 * 1024 * 1024)
 #define JS_TEXT_LIMIT (4 * 1024 * 1024)

@@ -33,4 +33,4 @@ cat > "$csound_prefix/include/csound/float-version.h" <<'HEADER'
 #endif
 HEADER
 cp "$csound_work/source/COPYING" "$csound_prefix/"
-echo "Installed Csound $csound_tag in $csound_prefix; run make clean && make"
+echo "Installed Csound $csound_tag in $csound_prefix; reconfigure with cmake --preset default and rebuild with cmake --build --preset default"

@@ -3,7 +3,8 @@
 Run from the repository root after `npm ci --ignore-scripts` in `js/`:
 
 ```sh
-make compare-audio
+cmake --preset default
+cmake --build build --target compare-audio
 # Or choose an artifact directory:
 node scripts/compare-audio.mjs /tmp/my-comparison
 ```
@@ -11,13 +12,13 @@ node scripts/compare-audio.mjs /tmp/my-comparison
 Requires Chromium, Node with its standard APIs, installed piano catalogs and
 recordings, and HTTPS access to strudel.cc and its sample hosts. Set `CHROMIUM`
 to an alternative Chromium executable. This is an explicit diagnostic, not a
-network-dependent part of `make test`. It creates a disposable browser profile
+network-dependent part of `ctest --preset default`. It creates a disposable browser profile
 and uses Chromium's debugging pipe; it does not connect to an existing browser
 or the running Tompouce MCP/UI session.
 The harness checks `assets/banks` and the standard user-local installation for
 catalogs. Set `TOMPOUCE_BANKS` for another installation root.
 
-`tests/render_audio` builds the real native callback and event/sample resolver
+`build/tests/render_audio` builds the real native callback and event/sample resolver
 into a separate executable. It queries the pinned QuickJS runtime one cycle at
 a time, resolves samples before rendering, and triggers each event at its due
 frame. It opens no PortAudio device. Its output is interleaved stereo float32

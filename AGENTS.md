@@ -2,6 +2,239 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Stopped-editor highlight bounds (2026-10-18)
+
+The tutorial's random yellow blocks in comments were an out-of-bounds read,
+not replayed note locations. fill_play_mask clears existing buffers and returns
+early while stopped, so a later edit/lesson switch may leave a mask shorter than
+the current line. draw_code used the new text length as that buffer's read limit.
+It now supplies the actual allocated mask capacity to hl_put. Stopped masks stay
+cleared, and running note/source-mapping behavior is unchanged.
+
+A backing-cell regression grows a line after stopping, checks wrapped comments
+and repeats a shrink/grow cycle. It failed in all four PTY geometries before the
+fix. ASan independently confirmed a one-byte read just beyond a 19-byte mask in
+hl_put; the fixed test passes under ASan/UBSan with leak detection enabled.
+The test hides the software cursor while asserting comment colors. CMake's new
+test-terminal-sanitize target runs the backing-cell harness in four owned PTYs;
+README documents it. Installed with --skip-deps --skip-banks --no-browser,
+preserving banks/private Csound. An installed, silent /tutor → stop → next-lesson
+PTY flow also passes. All 20 CTest checks pass after rerunning the corrected
+cursor-free backing-cell fixture, including the full PTY suite, Csound and all
+31 examples / 1,207 reference events. No live user engine, source or config was changed; restart
+normally to load the renderer fix.
+
+### Tutor config working copy (2026-10-18)
+
+/tutor and :tutor now create/open $XDG_CONFIG_HOME/tompouce/strudeltutor.json
+(default ~/.config/tompouce/strudeltutor.json), superseding the unnamed-template
+behavior below. Existing progress is reused even when the master is unavailable;
+! discards unsaved editor changes without resetting the saved working copy.
+New copies are private 0600 files, published from a sibling temporary file
+without replacing an existing destination. Failures remove the temporary file;
+symlink/shared-hardlink destinations are refused. The loaded project filename
+is the working path, so :w and /save update that copy.
+
+Ctrl+S's picker now retains the current project's directory when its filename
+is unchanged. A different name still saves in CWD; load-picker lookup stays in
+CWD. This prevents ordinary Ctrl+S from writing to the bundled master when
+launched from the examples directory. README and lesson 01 explain config saves.
+
+Validation: warning-as-error build; editor filesystem/filename tests, installer
+checks and all four terminal-render geometries; 16 silent owned PTY tutor cases
+cover initial copying, Ctrl+S, :w, /save, edited-copy saves, reopening/forced resume,
+all 22 buffers and unchanged master. Filesystem tests cover private permissions,
+preserving progress without a master, copy failures/cleanup and link refusal.
+Editor ASan/UBSan passes with leak detection and halt_on_error enabled.
+Updated the installed executable with --skip-deps --skip-banks --no-browser,
+retaining banks/private Csound. Tests use temporary config roots; the user's
+live engine/source/settings remain untouched. Restart normally for this change.
+
+### Tutor command shortcut (2026-10-18)
+
+F2 /tutor and vi :tutor open the bundled Strudeltutor and disable automatic
+song advancement. Both forms support Tab completion and refuse unsaved editor
+changes unless explicitly forced with /tutor! or :tutor!. Extra arguments are
+rejected. The asset is resolved under examples beside /proc/self/exe, independent
+of CWD; CMake stages it in each build configuration and the isolated installer
+copies its source. Missing assets report a reinstall hint.
+
+The tutorial opens as an unnamed template, requiring an explicit filename for
+/save or :w; normal saving cannot overwrite the bundled tutorial. Ctrl+S still
+offers its file picker. README and F1 document the shortcuts. Validation passes:
+warning-as-error build; editor/installer checks; four terminal-render geometries;
+12 owned silent PTY shortcut cases, including both completion forms, force/dirty
+guards, explicit-copy save, unchanged template and song-mode reset; existing vi
+command PTY regressions. Installed through --skip-deps --skip-banks --no-browser,
+preserving private Csound and banks. The user's live engine/source/settings
+remain untouched; restart normally to load the new commands.
+
+### Strudeltutor save (2026-10-18)
+
+strudeltutor.json is an original vimtutor-inspired Strudel tutorial in the
+ordinary version-2 whole-song format, with 22 independently runnable lesson
+buffers. Each has instructions, an editable starter, listening checkpoints
+and a commented answer. Topics progress from edit/F5/play and mini-notation
+through scales, layers, envelopes, filters, signals, JavaScript reuse,
+percussion, effects/sliders/visuals, error recovery and a final composition.
+All starters/answers use native synths; sample-bank practice is optional.
+Lesson 01 starts silent and explains working-copy saves, song mode off,
+Ctrl+N/B navigation and F5 commits before switching lessons. F5 commits the
+active buffer but does not save the project file. Preserve these instructions.
+The probability lesson follows pinned mini semantics: ?0.3 drops 30% of events.
+
+The installer copies this save into its examples directory; README explains
+loading it through F2 /load and keeping a working copy. All 22 starters and
+22 answers compile/query/render four cycles offline through the production
+callback without opening an audio device. PCM is finite; the introductory
+starter is silent and all other starters/answers produce audio. Owned PTYs
+load a muted copy and verify next/previous wrapping and all 22 transitions.
+Installer-copy verification and all nine installer tests pass. Tutorial and
+README were copied to the installed runtime using the installer's atomic
+writer. No binary rebuild/restart is needed for this data-only addition.
+The user's running engine, musical source and settings were left untouched.
+
+### F1 keybinding reference (2026-10-18)
+
+F1 now shows Tompouce keybindings instead of the historical language tutorial.
+The grouped reference covers playback/panels, songs/files, editing/selection,
+completion/indentation, vi motions/operators/commands, sound/file browsers,
+the F2 prompt and mouse/pane focus. Descriptions follow the actual handlers,
+including Ctrl+R evaluate versus vi redo, Y whole-line copy and slider evaluation.
+PgUp/PgDn and the wheel retain existing help scrolling; :help opens the same
+reference. README's F1 description matches. No input behavior changed.
+
+Validation: warning-as-error build, editor checks and all four backing-screen
+PTY geometries pass. Owned PTYs verify the F1 title and scrolling to the final
+mouse section without changing source. The installed executable was updated
+with --skip-deps --skip-banks --no-browser, retaining banks/private Csound.
+The user's live engine/source/settings remain untouched; restart normally.
+
+### Vi commands and Strudel completion (2026-10-18)
+
+Vi normal mode now opens a local command prompt with `:` (also from console
+focus). Escape cancels. The native Ex subset supports write/edit/quit/xit,
+write-quit, undo/redo, logical line numbers/$, help, evaluate, set wrap/mouse
+and their negations/queries, plus existing application commands. Standard
+abbreviations and applicable ! overrides work. Unknown commands stay local;
+there is no shell execution or AI fallback. Saves/loads use whole-song JSON,
+accept quoted/spaced paths and ~/ expansion, and retain the current filename
+on failure. Failed writes never quit. A separate editor_written snapshot
+guards unsaved changes independently of F5 evaluation. Quitting still saves
+the existing recovery session; q! does not write the named project file.
+
+Tab/Shift+Tab completes/cycles command names, settings and JSON paths. Editor
+Tab and Ctrl+Space complete Strudel globals/methods and known note/sound/scale
+strings; sound suggestions use the loaded catalog. Leading whitespace and
+selections keep indentation. Token replacement preserves following arguments,
+cycling shares one undo step, and bounded lexical scanning skips comments.
+Vocabulary is generated from the pinned runtime by js/completions.mjs and
+js/build.mjs, committed in js/dist/completions.h and compiled into the binary.
+Normal builds/installations need no Node; edited music is never executed for
+completion. Preserve src/tui_commands.h, src/tui_completion.h and the generated
+metadata header in source transfers. Runtime versions/events remain unchanged.
+
+Validation: warning-as-error build and all 20 CTest entries pass, including
+the full PTY suite, four backing-screen geometries, Csound and all 31 examples /
+1,207 reference events. The old installed binary failed the method-Tab case
+before the fix. Native editor ASan/UBSan now joins callback/vocoder/synth checks;
+all pass with leak detection and halt_on_error enabled. Small legacy formatting
+buffers were enlarged to satisfy the sanitizer build's range diagnostics.
+Generated vocabulary matches the committed runtime. Installed command/completion
+PTY checks pass. Updated ~/.local/bin/tompouce with --skip-deps --skip-banks
+--no-browser, retaining banks/private Csound. The user's engine, source and
+settings remain untouched; restart normally to load this executable.
+
+### Mouse protocol and sound-browser hits (2026-10-18)
+
+The Notcurses port manually enabled cell-based SGR (1006), while Notcurses
+interpreted reports as pixels when the terminal advertised DEC mode 1016.
+This sent ordinary clicks to the top-left or dropped them entirely. tui_init
+now uses notcurses_mice_enable for button/drag events; tui_shutdown uses its
+disable API. Do not reintroduce raw mouse-mode escapes: the library must own
+protocol selection and coordinate conversion. The adapter retains Shift/Alt/Ctrl
+bits, and the mouse handler consumes but ignores reports when mouse=false.
+Notcurses keeps the terminal's native Shift+mouse selection behavior.
+
+F6 also retained an obsolete fixed row offset. draw_search_at now publishes its
+actual list origin, scroll offset, visible height and row count for hit testing,
+including wrapped category labels and the parent row inside banks. Header/empty
+row clicks do not select another sound. Keep this geometry shared with rendering.
+
+The PTY emulator now advertises optional pixel-mouse support and pixel geometry,
+and sends cell or pixel reports according to the mode the app actually enables.
+The new cursor regression failed before the protocol fix ('Xone\ntwo' instead
+of 'one\ntXwo'); the bank-row regression selected bd instead of sd before the
+layout fix. Tests cover cell/pixel clicks, drags, wheel, slider/pane controls,
+modifiers, disabled input, scrolled/bank sound rows and protocol cleanup on exit.
+
+Validation: warning-as-error full and optional-library-disabled builds pass;
+all 20 CTest entries pass, including full PTY coverage and 31 examples / 1,207
+reference events. The actual ~/.local/bin/tompouce installation was updated with
+--skip-deps --skip-banks --no-browser, preserving private Csound and banks.
+All 19 mouse-filtered PTY cases also pass against that installed executable.
+Both slider mouse fixtures use a final gain(0) so interaction checks stay silent.
+The user's running engine, source and settings were left alone; restart normally
+to load the fix.
+
+### FluidSynth device-probe leak fix (2026-10-18)
+
+FluidSynth 2.6.1's SDL3 settings probe creates a mutex before testing whether
+SDL audio is initialized, leaking it on the early return. Tompouce uses only
+FluidSynth's direct PCM renderer. src/gm_synth.c now calls the public
+fluid_audio_driver_register API with an empty NULL-terminated list before its
+first settings/synth instance, disabling unused device probes. This also avoids
+unnecessary device enumeration. The API exists in the supported FluidSynth 2.2
+baseline. Registration is process-global and requires no live FluidSynth
+instances or concurrent API calls: keep it inside first gm_start, serialized by
+gm_lock, before instance creation. All Tompouce FluidSynth calls share that lock.
+The old SDL-warning filter was removed. No SDL dependency, upstream library
+patch, sanitizer suppression or disabled leak detection was introduced.
+
+The old standalone settings/destructor probe leaked 40 bytes; the same probe
+with device registration disabled exits cleanly under LeakSanitizer. Full
+callback/vocoder/native-synth ASan/UBSan passes with detect_leaks=1 and
+halt_on_error=1, including all 125 GM programs, fractional notes, cache eviction
+and active voice ownership. All 20 CTest entries pass, including the complete
+PTY suite and 31 examples / 1,207 event references. The optional-library-disabled
+build also passes. Updated ~/.local/bin/tompouce through the CMake installer
+with --skip-deps --skip-banks --no-browser, retaining private Csound and banks;
+installed syntax/MCP startup verification passes. The user's running process,
+composition and settings were left alone; restart normally to load the fix.
+
+### CMake/Ninja build migration (2026-10-18)
+
+The hand-maintained Makefile is replaced by CMake 3.20+ with a Ninja default
+preset. Configure/build/test with `cmake --preset default`,
+`cmake --build --preset default --parallel 4`, and `ctest --preset default`.
+The executable is `build/tompouce`; generated resources, objects and tests stay
+in the build tree. CMake regenerates embedded JS/orchestra headers from their
+inputs and tracks private UI headers through compiler dependencies. Runtime
+helpers/web/assets are linked beside build executables, including multi-config
+layouts. Preserve CMakeLists.txt, CMakePresets.json and cmake/*.cmake in transfers.
+
+Optional backends keep WITH_PIPEWIRE/PULSE/SAMPLERATE/FLUIDSYNTH controls; Csound
+adds WITH_CSOUND. Missing optional packages default off, explicit ON requires
+their package (Csound remains opportunistic unless a prefix is given). Private
+CSOUND_PREFIX/TREE_SITTER_PREFIX are CMake cache paths with runtime library paths;
+changing a prefix invalidates the previous find results. The installer now uses
+an isolated CMake/Ninja build with BUILD_TESTING=OFF, explicitly builds its
+offline runtime verifier, and copies the binary from the build directory.
+The upstream tree-sitter fallback still uses its own Makefile.
+
+Validation: full warning-as-error Release build; all 20 CTest entries including
+31 examples / 1,207 events and full PTY coverage; minimal optional-library build;
+audio-backend integration (optional JACK skipped); and a temporary-prefix
+--skip-deps --skip-banks --no-browser installation with private Csound and MCP
+startup. Nine installer tests pass, including copying the new out-of-tree
+binary rather than a stale source-root executable. Callback/vocoder/synth
+ASan/UBSan passes with optional FluidSynth disabled. The full optional sanitizer
+run initially reported 40 bytes allocated in system SDL3 via new_fluid_settings; a standalone
+new_fluid_settings/delete_fluid_settings probe reproduces the same leak without
+Tompouce. The follow-up above fixes this by disabling unused driver probes.
+No suppression or disabled leak checking was added. The user's
+installed command, engine, composition and settings were untouched.
+
 ### Project license (2026-10-18)
 
 The user selected AGPL-3.0-or-later for Tompouce. Root LICENSE contains the
@@ -674,14 +907,21 @@ leave them untouched. Do not assume that service, its sample IDs, temporary
 browser profile, or diagnostic files exist on the destination.
 
 ## Build / run
-- Build: `make`
-- Clean/rebuild: `make clean && make`
-- Run interactive UI: `./tompouce`
-- Run MCP server over stdio: `./tompouce --mcp`
-- Run MCP server with terminal UI: `./tompouce --mcp --ui`
-- Run MCP over TCP (local only): `./tompouce --mcp-port 18789`
+- Configure: `cmake --preset default` (CMake 3.20+, Ninja, Release).
+- Build: `cmake --build --preset default --parallel 4`.
+- Clean/rebuild: `cmake --build build --clean-first`.
+- Test: `ctest --preset default`; focused PTY checks: `cmake --build build --target test-tui`.
+- Run UI: `./build/tompouce`; headless MCP: `./build/tompouce --mcp`.
+- MCP with UI: `./build/tompouce --mcp --ui`; TCP: `./build/tompouce --mcp-port 18789`.
 
-Requirements (system packages): `slang`, `portaudio-2.0`, `libcurl`, `libcjson`, `leveldb`, `alsa`, `tree-sitter`; GCC, make, pkg-config, and xxd. See the portable build notes above for Csound and tests.
+Requirements: Notcurses 3.0.9+, PortAudio, curl, cJSON, LevelDB, ALSA,
+tree-sitter 0.25+, CMake 3.20+, Ninja, pkg-config and xxd. Optional
+PipeWire/PulseAudio/libsamplerate/FluidSynth are detected at configuration.
+Use `-DWITH_PIPEWIRE=OFF`, `-DWITH_PULSE=OFF`, `-DWITH_SAMPLERATE=OFF`,
+`-DWITH_FLUIDSYNTH=OFF`, `-DWITH_CSOUND=OFF` for minimal builds.
+`-DCSOUND_PREFIX=/path` and `-DTREE_SITTER_PREFIX=/path` support private deps.
+Generated resource headers and all binaries stay in the build tree. Historical
+Make/S-Lang commands below describe earlier checkpoints, not current build steps.
 
 ## Architecture
 - `src/common.c`: common helpers, console ring buffer, timing.

@@ -7,6 +7,27 @@ A terminal live-coding environment for music, inspired by Strudel, built in C.
 
 ![Tompouce running Bass fugue with an inline vertical piano roll and console](docs/images/tompouce.png)
 
+## Why?
+
+Writing Strudel shouldn't require running a full browser or Electron app.
+Tompouce embeds Strudel's JavaScript runtime in QuickJS and generates audio in C,
+bringing the editor, sound engine and live visualizations into your terminal.
+
+- **A small memory footprint.** More RAM stays available for samples, effects and
+  other music tools. One measured live session used about 96 MiB of resident RAM;
+  usage varies with the composition and loaded samples.
+- **A keyboard-driven workflow.** Write, evaluate, browse sounds and watch patterns
+  in one place, with vi editing and your terminal's colors.
+- **Local, offline music making.** Installed sound banks work without a network
+  connection. Downloaded or imported samples stay available locally.
+- **Native Linux audio.** Connect through PipeWire, PulseAudio, JACK or ALSA,
+  alongside the rest of your audio setup.
+
+The Chromium companion is optional: open it when you want browser controls,
+while the audio engine keeps running natively. For terminal-only installation,
+use `./install.sh --no-browser`. See [JavaScript and native audio](docs/javascript.md)
+for supported Strudel features and differences from the browser version.
+
 ## Install
 
 Clone the complete project and install on Linux x86_64:

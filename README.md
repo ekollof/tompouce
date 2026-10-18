@@ -126,6 +126,9 @@ at a time. F1 remains the Tompouce keybinding reference.
 
 ## Docs
 
+- [`docs/wiki/Home.md`](docs/wiki/Home.md) — project handbook: installation, live coding, sounds, visuals, integrations, development and troubleshooting
+- [`docs/wiki/Learn-Strudel.md`](docs/wiki/Learn-Strudel.md) — official Strudel workshops, reference pages and learning resources
+- [GitHub Discussions](https://github.com/ekollof/tompouce/discussions) — questions, ideas and musical showcases
 - [Strudeltutor](#learn-with-strudeltutor) — interactive lessons, exercises and hints inside Tompouce
 - [`docs/examples.md`](docs/examples.md) — copy-pasteable example gallery
 - [`docs/architecture.md`](docs/architecture.md) — module map, data flow, threading, limits

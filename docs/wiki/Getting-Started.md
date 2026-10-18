@@ -1,0 +1,55 @@
+# Getting started
+
+## Install
+
+The installer targets Linux x86_64 and supports package plans for Arch/Omarchy, Debian/Ubuntu and Fedora. Use a UTF-8 terminal and run the installer as your normal user:
+
+```sh
+git clone git@github.com:ekollof/tompouce.git
+cd tompouce
+./install.sh
+~/.local/bin/tompouce
+```
+
+An authenticated `gh repo clone ekollof/tompouce` also works. Access to a private repository requires an authorized GitHub account.
+
+The default installation puts the runtime in `~/.local/lib/tompouce` and its launcher in `~/.local/bin`. The installer uses sudo for distro dependencies, builds in an isolated directory, and installs pinned banks separately. Node/npm is unnecessary for normal installation because JavaScript bundles are committed.
+
+Default banks include Dirt, piano, drum machines, uzu and AKWF wavetables, about 456 MiB. `--all-banks` adds VCSL and mridangam, bringing the total to roughly 3 GiB. Installed banks work offline. Debian/Fedora package plans have automated coverage; actual package-manager execution still needs validation on those distributions.
+
+Useful installer options:
+
+| Option | Purpose |
+| --- | --- |
+| `--dry-run` | Inspect the dependency and installation plan |
+| `--prefix /absolute/path` | Choose another installation root |
+| `--skip-deps` | Use dependencies already installed |
+| `--skip-banks` | Preserve existing banks or use built-in synths only |
+| `--no-browser` | Omit browser installation |
+| `--jobs 4` | Bound build parallelism |
+
+## Make your first sound
+
+Type this into the left editor pane:
+
+```js
+setcpm(108 / 4)
+note("c4 e4 g4 c5").s('triangle').gain(0.4)
+```
+
+Press F5. If transport is stopped, press Ctrl+P. Change a note, press F5 again, and listen. F1 opens the keybinding reference; Escape returns focus from the right pane to the editor.
+
+For guided practice, press F2, enter `/tutor`, then Enter. See [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md).
+
+## Update
+
+Save your work, update the checkout and rerun the installer:
+
+```sh
+git pull --ff-only
+./install.sh --skip-deps --skip-banks --no-browser --jobs 4
+```
+
+This preserves existing banks and skips dependency/browser installation. Omit those skip options when you need updated dependencies or newly added banks. Restart Tompouce normally to load a new executable. Installation does not restart a running session or replace saved tutorial progress.
+
+For source builds, see [Development](Development.md). For sound output problems, see [Troubleshooting](Troubleshooting.md).

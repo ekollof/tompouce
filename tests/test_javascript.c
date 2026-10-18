@@ -1,6 +1,7 @@
 #include "javascript.h"
 #include "js_audio.h"
 #include "slider.h"
+#include "common.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -170,7 +171,112 @@ static cJSON *query(const char *code, JsProgram **program) {
     return haps;
 }
 
+static void test_tutorial(void) {
+    FILE *file=fopen("strudeltutor.json","rb"); assert(file);
+    assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
+    rewind(file); char *text=malloc((size_t)length+1); assert(text);
+    assert(fread(text,1,(size_t)length,file)==(size_t)length); fclose(file); text[length]=0;
+    cJSON *song=cJSON_Parse(text); free(text); assert(song);
+    cJSON *tracks=cJSON_GetObjectItemCaseSensitive(song,"tracks");
+    assert(cJSON_GetArraySize(tracks)==22);
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(song,"code")),
+                   cJSON_GetStringValue(cJSON_GetArrayItem(tracks,0))));
+    for (int lesson=0;lesson<22;lesson++) {
+        const char *source=cJSON_GetStringValue(cJSON_GetArrayItem(tracks,lesson)); assert(source);
+        char answer[8192]={0}; size_t used=0;
+        for (const char *line=source;line && *line;) {
+            const char *end=strchr(line,'\n'); size_t n=end?(size_t)(end-line):strlen(line);
+            if (n>=5 && !strncmp(line,"// | ",5)) {
+                assert(used+n-5+2<sizeof(answer));
+                memcpy(answer+used,line+5,n-5); used+=n-5; answer[used++]='\n'; answer[used]=0;
+            }
+            line=end?end+1:NULL;
+        }
+        assert(used);
+        for (int variant=0;variant<2;variant++) {
+            JsProgram *program; cJSON *initial=query(variant?answer:source,&program);
+            cJSON_Delete(initial);
+            for (int cycle=0;cycle<5;cycle++) {
+                cJSON *haps=javascript_query_cps(program,cycle,cycle+1,.45);
+                assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)>0);
+                int transposed=0, first=0;
+                for (int i=0;i<cJSON_GetArraySize(haps);i++) {
+                    cJSON *hap=cJSON_GetArrayItem(haps,i);
+                    double begin=cJSON_GetObjectItemCaseSensitive(hap,"begin")->valuedouble;
+                    assert(begin>=cycle && begin<cycle+1);
+                    if (lesson==0 && !variant) {
+                        cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+                        assert(cJSON_GetObjectItemCaseSensitive(value,"gain")->valuedouble==0);
+                        continue; /* Silent introductory events are deliberately not scheduled. */
+                    }
+                    AudioEvent event; assert(js_audio_event(hap,0,1/.45,&event));
+                    assert(isfinite(event.freq) && isfinite(event.gain));
+                    if (lesson==10 && variant) {
+                        const int roots[]={48,53,55,48}, intervals[]={0,4,7};
+                        assert(i<3);
+                        int midi=roots[cycle%4]+intervals[i];
+                        assert(fabs(event.freq-440*pow(2,(midi-69)/12.0))<.01);
+                    }
+                    if (lesson==11) {
+                        int step=(int)lround((begin-cycle)*4);
+                        cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+                        assert(step>=0 && step<4);
+                        assert(fabs(cJSON_GetObjectItemCaseSensitive(value,"gain")->valuedouble-
+                                    (step%2?.15:.6))<1e-9);
+                        if (variant) assert(cJSON_GetObjectItemCaseSensitive(value,"pan")->valuedouble==step%2);
+                    }
+                    if (begin==cycle) {
+                        first=1;
+                        if ((lesson==10 || lesson==17) && variant) {
+                            /* Raw degree arithmetic follows a four-cycle progression. */
+                            const int roots[]={48,53,55,48};
+                            int midi=lesson==10?roots[cycle%4]:67;
+                            if (fabs(event.freq-440*pow(2,(midi-69)/12.0))<.01) transposed=1;
+                        }
+                        if (lesson==16 && !variant) {
+                            int midi=cycle%4==0?67:60;
+                            assert(fabs(event.freq-440*pow(2,(midi-69)/12.0))<.01);
+                        }
+                    }
+                }
+                if (variant && (lesson==10 || (lesson==17 && cycle%2==0))) assert(transposed);
+                if (lesson==10 && variant) assert(cJSON_GetArraySize(haps)==3);
+                if (lesson==11) assert(cJSON_GetArraySize(haps)==4);
+                if (lesson==16) {
+                    assert(first);
+                    assert(cJSON_GetArraySize(haps)==(variant && cycle%2==0?8:4));
+                }
+                cJSON_Delete(haps);
+            }
+            for (int i=0;i<console_count_get();i++) {
+                const char *message=console_line(i);
+                assert(!strstr(message,"[warn]") && !strstr(message,"[error]"));
+            }
+            javascript_free(program);
+        }
+        if (lesson==10) {
+            const char *bonus="note(\"c3 e3 g3\".add(\"<0 5 7 0>\")).s('triangle').gain(0.5)";
+            assert(strstr(source,bonus));
+            JsProgram *program; cJSON *initial=query(bonus,&program); cJSON_Delete(initial);
+            for (int cycle=0;cycle<4;cycle++) {
+                cJSON *haps=javascript_query_cps(program,cycle,cycle+1,.45);
+                assert(cJSON_GetArraySize(haps)==3);
+                const int offsets[]={0,5,7,0}, notes[]={48,52,55};
+                for (int i=0;i<3;i++) {
+                    cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,i),"value");
+                    assert(cJSON_GetObjectItemCaseSensitive(value,"note")->valueint==notes[i]+offsets[cycle]);
+                }
+                cJSON_Delete(haps);
+            }
+            javascript_free(program);
+        }
+    }
+    cJSON_Delete(song);
+    puts("All 22 tutorial starters/answers query five cycles without warnings; control timing, periodic transforms and transposition verified");
+}
+
 int main(void) {
+    test_tutorial();
     test_live_visuals();
     test_visual_highlight_mapping();
     test_local_modules();

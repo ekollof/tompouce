@@ -2,6 +2,51 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Tutorial arithmetic examples (2026-10-18)
+
+Lesson 11 now teaches valid .add() use on raw mini-patterns inside n(...) and
+note(...), alongside .transpose() on resolved notes. Its answer uses
+n("0 2 4".add("<0 3 4 0>")).scale('C:major') for the C/F/G/C progression;
+the bonus note-name example adds semitone offsets before note(...) wraps it.
+Bare n(...).add(7) remains invalid control-pattern arithmetic. Native regressions
+check all progression pitches and numeric MIDI conversion for the bonus.
+The installed tutorial master is updated; saved working copies/live source
+remain unchanged. This supersedes the earlier removal of all .add() examples.
+
+### Full tutorial audit (2026-10-18)
+
+Audited all 22 lessons against the pinned runtime and actual editor handlers.
+Lesson 12's two-value gain/pan patterns spanned half a cycle per value instead
+of alternating on four notes; starter, instructions and answer now use four
+aligned values and explain control-pattern timing. Lesson 17 now states that
+every(4) transforms cycles 0, 4, 8, ... and asks for five cycles of listening.
+Lesson 02 clarifies that either quote style accepts mini-notation; lesson 20
+demonstrates completion inside .ga(0.4), preserving arguments; lesson 22 says
+Ctrl+T duplicates the current lesson rather than implying a blank track.
+
+The native JavaScript test now reads all 44 actual starters/answers, queries
+five cycles without warnings, and checks silent introduction, gain/pan timing,
+periodic transformation phase/density and lesson 11/18 transposition. A separate
+audit exercised 39 instructed edits/expected failures. All 44 native offline
+four-cycle renders had finite unclipped PCM, the intended introductory silence
+and audible remaining cases; maximum peak was 0.3809. Editor/installer checks
+and all 16 tutor PTY flows pass. Updated the installed tutorial master through
+the installer's atomic writer; no binary update is needed. Existing config
+copies, lesson progress and the user's live source/engine remain unchanged.
+
+### Tutorial control-pattern transposition (2026-10-18)
+
+Lessons 11 and 18 incorrectly applied bare .add(number) to control patterns.
+Pinned Strudel rejects that operation with an arithmetic-on-control warning;
+it does not transpose the notes. Both lessons now use .transpose(number),
+and lesson 11 distinguishes changing degree numbers from transposing pitches.
+Native JavaScript regressions read the actual lesson answers and verify their
+transposed first notes (G3 for the default C:minor scale, G4 for the C4 motif).
+All 44 starters/answers query four cycles without warnings. The installed
+tutorial master was updated with the installer's atomic writer. Existing saved
+working copies and the user's live source/session were left untouched; those
+copies retain their previous text and need the same local correction.
+
 ### Audible tutorial defaults (2026-10-18)
 
 Raised the common Strudeltutor gain from 0.08 to 0.5 (about +16 dB), with

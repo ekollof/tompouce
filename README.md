@@ -383,3 +383,19 @@ dirs for drums (`mydrums/bd/*.wav`), note-named files (`_C4_`) for pitched
 use, keep playable files within 8 levels. Then `/rescan` (no restart
 needed). Only libre-licensed material — keep the table above current.
 The index caches in LevelDB (`~/.cache/tompouce/banks.ldb`).
+
+## License
+
+Tompouce is licensed under the **GNU Affero General Public License, version 3
+or later** (`AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full terms and
+[NOTICE](NOTICE) for the project copyright and third-party attribution pointers.
+
+Third-party libraries, vendored code and sample banks retain their own licenses
+and notices. The project license applies to Tompouce's original source unless
+otherwise indicated; it does not relicense those dependencies or sound recordings.
+
+When distributing binaries, provide the corresponding source under the AGPL,
+including the files needed to build them. For modified versions offered over a
+network, follow the source-offer requirements in section 13. A private repository
+link alone is insufficient for recipients who cannot access it: give them access
+or provide the corresponding source separately.

@@ -2,6 +2,19 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Project license (2026-10-18)
+
+The user selected AGPL-3.0-or-later for Tompouce. Root LICENSE contains the
+unmodified AGPLv3 text; NOTICE grants version 3 or later for original project code
+and preserves third-party copyrights/licenses. README documents scope, source
+distribution and private-repository access requirements. Both private npm packages
+and their lockfile roots declare AGPL-3.0-or-later; dependencies are unchanged.
+The installer copies LICENSE/NOTICE into its isolated build and installed runtime.
+Six installer tests, package/lock metadata consistency and temporary runtime-copy
+verification pass. Installed license/notice/README files were updated without
+rebuilding or restarting the user's engine. Third-party and sample-bank licenses
+were not replaced, and repository visibility was not changed.
+
 ### Terminal-render test geometry (2026-10-18)
 
 The user's `make test` abort was tests/test_terminal_render.c:230, confirmed from

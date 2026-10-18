@@ -1,0 +1,22 @@
+Tompouce — a terminal live-coding environment for music
+Copyright (C) 2026 Emiel Kollof and Tompouce contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+Tompouce's original source code is licensed under the GNU Affero General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version, unless a file states otherwise.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See LICENSE for the full license text.
+
+Third-party code and assets retain their own copyrights and licenses. This
+project license does not replace their notices. See:
+
+- thirdparty/ for vendored source licenses and native DSP attribution;
+- js/dist/licenses.txt for JavaScript dependency notices;
+- web/dist/licenses.txt for companion editor dependency notices;
+- README.md, "Sample banks", and the installed banks' licenses/ directory
+  for sample attribution and license terms.
+
+Project source: https://github.com/ekollof/tompouce

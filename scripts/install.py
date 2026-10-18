@@ -29,7 +29,7 @@ PACKAGES = {
     'fedora': ['gcc', 'gcc-c++', 'make', 'pkgconf-pkg-config', 'xxd', 'slang-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
-    'tompouce', 'README.md', 'scripts/companion.py', 'scripts/sound_import.py',
+    'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py',
     'web/index.html', 'web/companion.js', 'web/sounds.js', 'web/companion.css',
     'web/dist/editor.js', 'web/dist/licenses.txt', 'js/dist/licenses.txt',
     'thirdparty/STRUDEL-LICENSE', 'thirdparty/quickjs/LICENSE',
@@ -382,8 +382,8 @@ def main(argv=None):
             environment['PKG_CONFIG_PATH'] = str(tree / 'lib/pkgconfig') + os.pathsep + environment.get('PKG_CONFIG_PATH', '')
         with tempfile.TemporaryDirectory(prefix='tompouce-build-') as temporary:
             build = Path(temporary)
-            shutil.copy2(SOURCE / 'Makefile', build / 'Makefile')
-            shutil.copy2(SOURCE / 'README.md', build / 'README.md')
+            for name in ('Makefile', 'README.md', 'LICENSE', 'NOTICE'):
+                shutil.copy2(SOURCE / name, build / name)
             ignore = shutil.ignore_patterns('*.o', '*.d', '*.inc', 'node_modules', '__pycache__', '.git')
             for relative in ('src', 'include', 'thirdparty', 'js/dist', 'web'):
                 shutil.copytree(SOURCE / relative, build / relative, ignore=ignore)

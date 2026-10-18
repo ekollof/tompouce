@@ -3,15 +3,6 @@
 Source: [ekollof/tompouce](https://github.com/ekollof/tompouce) (private repository).
 Access requires a GitHub account with permission to this repository.
 
-Previously named StrudelTerm. Build and run `./tompouce`; the installer places
-the command at `~/.local/bin/tompouce`. New user data uses `tompouce` directories.
-When that directory is absent, existing `strudelterm` settings, sessions,
-modules, imported sounds and sample caches are moved into `tompouce` on startup.
-If both roots exist, the `tompouce` root wins without merging or overwriting the
-old directory. `TOMPOUCE_BANKS` replaces `STRUDELTERM_BANKS`,
-which remains accepted as a fallback. The MCP `strudel://code` URI and song
-format remain compatible.
-
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 
 ![Tompouce running Bass fugue with an inline vertical piano roll and console](docs/images/tompouce.png)

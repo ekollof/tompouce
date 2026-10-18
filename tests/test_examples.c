@@ -135,8 +135,51 @@ static int preview_bass_roll(void) {
     return 0;
 }
 
+/* Exercise the published Markdown itself, rather than a duplicate fixture. */
+static void check_gallery(void) {
+    FILE *file=fopen("docs/examples.md","rb"); assert(file);
+    assert(!fseek(file,0,SEEK_END)); long size=ftell(file); assert(size>0 && size<1024*1024);
+    rewind(file); char *text=malloc((size_t)size+1); assert(text);
+    assert(fread(text,1,(size_t)size,file)==(size_t)size); assert(!fclose(file)); text[size]=0;
+    const char *cursor=text, *fence; int snippets=0;
+    while ((fence=strstr(cursor,"```"))) {
+        assert(!strncmp(fence,"```js\n",6));
+        const char *start=fence+6, *end=strstr(start,"\n```"); assert(end);
+        size_t length=(size_t)(end-start); char *code=malloc(length+1); assert(code);
+        memcpy(code,start,length); code[length]=0;
+        char error[1024]; cJSON *metadata=NULL;
+        slider_begin(); JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"Gallery example %d: %s\n%s\n",snippets+1,error,code);
+        assert(program); free(code);
+        const cJSON *tempo=get(metadata,"bpm");
+        assert(cJSON_IsNumber(tempo) && tempo->valuedouble>0);
+        double seconds=240/tempo->valuedouble; int events=0;
+        for (int cycle=0;cycle<4;cycle++) {
+            cJSON *haps=javascript_query_cps(program,cycle,cycle+1,1/seconds);
+            assert(cJSON_IsArray(haps));
+            const cJSON *hap;
+            cJSON_ArrayForEach(hap,haps) {
+                AudioEvent event; assert(js_audio_event(hap,0,seconds,&event));
+                assert(isfinite(event.time) && isfinite(event.duration) && event.duration>0);
+                assert(isfinite(event.freq) && isfinite(event.gain)); events++;
+            }
+            cJSON_Delete(haps);
+        }
+        assert(events>0);
+        for (int i=0;i<console_count_get();i++) {
+            const char *message=console_line(i);
+            assert(!strstr(message,"[warn]") && !strstr(message,"[error]"));
+        }
+        cJSON_Delete(metadata); javascript_free(program);
+        snippets++; cursor=end+4;
+    }
+    assert(snippets==18); free(text);
+    puts("Gallery: all 18 Markdown examples query four cycles without warnings");
+}
+
 int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--roll-preview")) return preview_bass_roll();
+    check_gallery();
     cJSON *corpus = read_json("tests/fixtures/strudel-examples.json");
     cJSON *reference = read_json("tests/fixtures/strudel-example-events.json");
     const cJSON *examples = get(corpus,"examples"), *references = get(reference,"examples");

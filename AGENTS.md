@@ -2,6 +2,27 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### JavaScript example gallery (2026-10-18)
+
+docs/examples.md now contains 18 complete JavaScript Strudel buffers instead
+of the historical line dialect. Examples use named branches, explicit synths,
+manifest drum-machine/piano/wt_ sounds and valid arithmetic. Obsolete slow,
+sample-gating, fallback, voice-limit and master-fx claims were removed; the
+noise example now emits actual noise events. Bank requirements are explicit.
+The wavetable bass uses the actual wt_bw_saw catalog name. Handbook links
+now describe the modern gallery; MCP documentation correctly states that
+music_set_code replaces and evaluates source, with transport started separately.
+
+tests/test_examples.c reads the actual Markdown fences, compiles all 18 snippets
+and queries four cycles, checking native event validity and absent warnings.
+The existing 31 published examples / 1,207 reference events still pass.
+All 18 gallery patterns also rendered four cycles through the native callback
+offline with the installed banks, finite audible PCM and maximum peak 0.8377.
+The checkout lacks uzu's catalog, so offline bank verification used the actual
+installed bank root with isolated config/cache/state and networking disabled.
+The user's live engine/source, desktop settings and installed executable were
+unchanged; this update only changes documentation and its regression test.
+
 ### Tutorial arithmetic examples (2026-10-18)
 
 Lesson 11 now teaches valid .add() use on raw mini-patterns inside n(...) and

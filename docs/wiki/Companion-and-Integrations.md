@@ -14,7 +14,7 @@ tompouce --mcp
 
 Configure your MCP client with the actual executable path and `--mcp` arguments. Main tools cover source retrieval/editing, evaluation, play/stop, tempo, song/track/session management and diagnostics. `music_sounds` searches the shared catalog; `music_reload_sounds` reloads fixed config storage.
 
-Source editing and evaluation are separate operations. Read-only diagnostics include `music_health`, `music_debug`, `music_get_status` and `music_get_console`. For a shared terminal session, `--mcp --ui` enables UI orchestration. A loopback TCP transport is also available through `--mcp-port`.
+`music_set_code` replaces and evaluates source; `music_evaluate` reevaluates the current source. `music_play` starts transport separately. Read-only diagnostics include `music_health`, `music_debug`, `music_get_status` and `music_get_console`. For a shared terminal session, `--mcp --ui` enables UI orchestration. A loopback TCP transport is also available through `--mcp-port`.
 
 See the [MCP setup](https://github.com/ekollof/tompouce/blob/master/README.md#mcp-external-agents) and [architecture](https://github.com/ekollof/tompouce/blob/master/docs/architecture.md). Optional AI requests use an OpenAI-compatible endpoint; consult the README's AI data-egress description before enabling that workflow.
 

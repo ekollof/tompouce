@@ -1,273 +1,261 @@
 # Tompouce example gallery
 
-All snippets are copy-pasteable into the editor (`F5` evaluates) or via
-MCP `music_set_code`. Verified against the parser in `src/track.c` /
-`src/pattern.c`.
+These are complete JavaScript Strudel buffers for the pinned 1.2.6 runtime.
+Paste one example into the editor and press F5; Ctrl+P toggles playback.
+With MCP, `music_set_code` replaces and evaluates source; `music_play` starts
+transport. `music_evaluate` reevaluates the current source.
+F5 evaluates music; Ctrl+S saves the whole song.
 
-Syntax recap (what actually works today):
-- One track per line: `drum|drums|sound|note|notes|n|chord|bass|lead|melody|noise|s <pattern> [| transforms]`
-- `bpm N` line sets tempo (clamped 20–400, non-finite rejected).
-- Pattern tokens are space-separated steps in one cycle (1 cycle = 4 beats).
-- `[ a b ]` groups steps into a single step slot.
-- `< a b >` picks one alternative per cycle (`cycle_index % n`).
-- `tok*N` repeats a token inside its slot (clamped 1–64). A fractional
-  `*` (`bd*1.5`) speeds the step without the integer repeat path.
-- `tok!N` splices N copies into the parent (`c!3 e` is four steps).
-  `tok@N` is temporal weight (`c@3 e` is 3/4 then 1/4). In `< >`, `@N`
-  holds for N cycles.
-- `tok/N` is Strudel slow: the pattern stretches across N cycles.
-  `[c a f e]/2` plays `c a` on cycle 0 and `f e` on cycle 1.
-  `| slow N` is different: the whole track sounds only every Nth cycle.
-- `tok?` / `tok?0.2` drops events (degradeBy, default 0.5), seeded by
-  the cycle so the lookahead matches playback.
-- `a | b` inside the pattern chooses one side per cycle. `|` before a
-  transform name is still the track bar, not a choice.
-- `bd(3,8)` and `bd(3,8,rot)` are postfix Euclidean rhythms.
-  `{bd sd hh, cp lt}` is a polymeter: later lists cycle at the first
-  list's step size.
-- `~`, `_`, `-`, `rest` are rests. `a,b` stacks both over the same span (a chord).
-- Transforms after `|`: `rev`, `fast N` (1–64), `slow N` (1–64),
-  `gain X` (0–2), `inst sine|saw|sqr|square|tri|triangle|noise`.
-- One pattern per line may also be a call: `note("c e g").s("saw").lpf(800)`,
-  `s("bd sd").gain(slider(0.5))`, `setcpm(45)` or `setcpm(120/4)`
-  (numeric arguments do `+ - * / %` and parentheses; BPM = cycles/min × 4,
-  so `120/4` is 30 cycles/min and 120 BPM). A `/` inside quotes is slow.
-  `slider(v)` / `slider(v,min,max,step)` keeps the literal in the
-  source; Ctrl+Left / Ctrl+Right nudge the live value.
-- Drum tokens: `bd` kick, `sd`/`sn` snare, `hh`/`hat` hat (also the
-  fallback for unknown tokens), `cp`/`clap` clap, `tom` tom.
-- Note tokens: `c d e f g a b` with `#`/`b` accidentals plus octave
-  (e.g. `c4`, `eb4`, `f#3`), or a raw MIDI number (e.g. `60`).
-- Default instruments: `bass`→saw, `lead`→square, `notes`/`melody`→tri,
-  `noise`→noise, everything else→sine.
-- Limits: 32 voices in one buffer, song tracks grow until a safety
-  ceiling of 8192. The editor source grows until memory runs out
-  (offsets stop near 2 GiB). Long lines wrap on JavaScript tokens;
-  arrows follow the wrapped rows. `/wrap off` scrolls
-  with the cursor. The code pane
-  draws a one-row roll of the cursor line and a one-row scope when
-  the pane is tall enough. F12 is the full roll.
+Examples using `bd`, `sd`, `hh`, `cp`, `piano`, `RolandTR909` or `wt_` sounds
+need the corresponding default banks from `./install.sh`. Built-in synth
+examples work offline without banks. F6 shows the available sound catalog.
+
+## Syntax to keep nearby
+
+- `setcpm(120 / 4)` gives 30 cycles per minute, equivalent to 120 BPM with
+  four beats per cycle. More steps divide the same cycle rather than extend it.
+- `note("c4 e4 g4")` sequences pitches; `.s('triangle')` chooses the sound.
+  MIDI note numbers also work. `s("bd sd")` sequences sample sounds.
+- `$:` and named labels such as `bass:` play concurrent branches. Rename a
+  label to `bass_:` to mute it. A song buffer can contain several branches.
+- Spaces sequence steps, `~` rests, `[]` subdivides, `<>` alternates across
+  cycles, and commas stack events. `*` repeats inside a slot; `!` adds copies
+  at the same level; `@` changes relative duration.
+- `.fast(2)` doubles a branch's speed; `.slow(2)` stretches its pattern over
+  two cycles. It does not silence every other cycle.
+- Controls have their own pattern timing: two gain values span half a cycle
+  each. Use four values to alternate gain on a four-note sequence.
+- `.every(4, x => x.rev())` transforms cycles 0, 4, 8, ... in this runtime.
+- Use `.add()` on raw mini-pattern values inside `n(...)` or `note(...)`;
+  use `.transpose()` to shift resolved notes. Bare `n(...).add(7)` is invalid
+  control-pattern arithmetic.
+
+The native example test compiles these Markdown snippets and queries their
+events directly. See the [JavaScript/audio reference](javascript.md) for
+supported controls and bounds, or the [handbook](wiki/Home.md) for setup.
 
 ## 1. Hello beat
 
-```text
-bpm 120
-drum bd sd
+```js
+setcpm(120 / 4)
+s("bd sd").gain(0.5)
 ```
 
-Two steps per cycle: kick, then snare.
+Two equally spaced steps per cycle: kick, then snare. Requires default drums.
 
 ## 2. Four on the floor
 
-```text
-bpm 124
-drum bd bd bd bd
-drum ~ sd ~ sd
-drum hh hh hh hh | fast 2
-bass c2 c2 eb2 g2
+```js
+setcpm(124 / 4)
+kick: s("bd*4").gain(0.5)
+snare: s("~ sd ~ sd").gain(0.4)
+hats: s("hh*8").gain(0.2)
+bass: note("c2 c2 eb2 g2").s('sawtooth').lpf(600).gain(0.3)
 ```
 
-Classic house skeleton. `fast 2` doubles the hats inside the same cycle.
+Four kicks and eight hats share each cycle. Labels collect the four parts;
+they do not create separate song buffers.
 
 ## 3. Break with fill
 
-```text
-bpm 132
-drum bd ~ bd [bd bd]
-drum ~ sd ~ [sd cp]
-drum hh hh hh hh | fast 2
-bass c2 ~ eb2 g2 | rev
-lead eb4 g4 bb4 c5 | slow 2
+```js
+setcpm(132 / 4)
+kick: s("bd ~ bd [bd bd]").gain(0.5)
+snare: s("~ sd ~ [sd cp]").gain(0.4)
+hats: s("hh*8").gain(0.2)
+bass: note("c2 ~ eb2 g2").rev().s('sawtooth').lpf(700).gain(0.3)
+lead: note("eb4 g4 bb4 c5").slow(2).s('triangle').gain(0.3)
 ```
 
-`[bd bd]` squeezes two kicks into one slot; the lead only plays every
-2nd cycle (`slow 2`); `rev` mirrors the bass pattern in time.
+The final kick slot holds two kicks. The lead takes two cycles to finish its
+four notes; the bass is reversed in time.
 
-## 4. Alternation (`< >`)
+## 4. Alternation across cycles
 
-```text
-bpm 110
-drum <bd sd>
-bass <c2 eb2 g2 a2>
+```js
+setcpm(110 / 4)
+drums: s("<bd sd>").gain(0.5)
+bass: note("<c2 eb2 g2 a2>").s('sawtooth').lpf(600).gain(0.3)
 ```
 
-Cycle 0 plays the first alternative, cycle 1 the second, and so on.
+The drums alternate kick/snare each cycle; the bass follows a four-cycle loop.
 
 ## 5. Rests and space
 
-```text
-bpm 100
-drum bd ~ ~ bd ~ ~ bd ~
-bass c2 ~ ~ ~ g1 ~ ~ ~
+```js
+setcpm(100 / 4)
+drums: s("bd ~ ~ bd ~ ~ bd ~").gain(0.5)
+bass: note("c2 ~ ~ ~ g1 ~ ~ ~").s('sine').gain(0.4)
 ```
 
-`~` keeps the slot timing but emits nothing. Good for sparse grooves.
+A rest occupies time without emitting a note. Removing a slot instead changes
+how the remaining steps divide the cycle.
 
-## 6. Sub bass + triad lead
+## 6. Sub bass and lead
 
-```text
-bpm 118
-bass c2 e2 g2 c3 | inst sine | gain 0.9
-lead c4 e4 g4 c5 | inst square | gain 0.5
+```js
+setcpm(118 / 4)
+bass: note("c2 e2 g2 c3").s('sine').gain(0.4)
+lead: note("c4 e4 g4 c5").s('square').lpf(2000).gain(0.2)
 ```
 
-Explicit `inst` overrides the keyword default; gains are clamped to 0–2.
+This example needs no banks. Set the instrument explicitly with `.s()` rather
+than relying on historical line-dialect keywords.
 
-## 7. MIDI numbers
+## 7. MIDI note numbers
 
-```text
-bpm 120
-notes 60 62 64 67 | inst tri
-bass 36 36 41 43 | inst saw
+```js
+setcpm(120 / 4)
+melody: note("60 62 64 67").s('triangle').gain(0.4)
+bass: note("36 36 41 43").s('sawtooth').lpf(600).gain(0.3)
 ```
 
-`60` = middle C. Same timing model as note names.
+MIDI 60 is C4. These numbers select local synth pitches; they do not route
+events to an external MIDI device.
 
-## 8. Ambient pad-ish
+## 8. Ambient pads
 
-```text
-bpm 72
-notes c4 e4 g4 b4 | slow 2
-notes e4 g4 b4 d5 | slow 4
-bass c2 ~ ~ ~ | slow 2
+```js
+setcpm(72 / 4)
+pad: note("[c4,e4,g4,b4] [e4,g4,b4,d5]").slow(4).s('triangle')
+  .attack(0.5).release(0.8).room(0.2).gain(0.15)
+bass: note("c2 ~ g1 ~").slow(2).s('sine').gain(0.3)
 ```
 
-Long cycle (4 beats at 72 BPM ≈ 3.3 s); `slow` staggers the layers.
+Commas make simultaneous notes. The pad's two chords span four cycles;
+attack, release and reverb soften their edges.
 
 ## 9. Techno driver
 
-```text
-bpm 138
-drum bd bd bd bd
-drum ~ ~ sd ~
-drum hh*4 hh*4 hh*4 hh*4
-bass c2 c2 c2 g1 | inst saw
+```js
+setcpm(138 / 4)
+kick: s("bd*4").gain(0.5)
+snare: s("~ ~ sd ~").gain(0.4)
+hats: s("hh*4 hh*4 hh*4 hh*4").gain(0.15)
+bass: note("c2 c2 c2 g1").s('sawtooth')
+  .lpf("400 800 400 1200").decay(0.15).sustain(0).gain(0.35)
 ```
 
-`hh*4` repeats the hat 4× inside its slot.
+Each `hh*4` repeats inside one of four outer slots, giving sixteen hats per cycle.
 
 ## 10. Noise texture
 
-```text
-bpm 90
-noise ~ ~ ~ ~ | gain 0.3
-drum hh hh hh hh | fast 2 | gain 0.4
-bass c2 ~ g1 ~ | slow 2
+```js
+setcpm(90 / 4)
+texture: note("c4*4").s('pink').hpf(1000).lpf(5000)
+  .attack(0.05).release(0.2).gain(0.15)
+bass: note("c2 ~ g1 ~").slow(2).s('sine').gain(0.35)
 ```
 
-`noise` tracks default to the noise oscillator.
+The noise branch has actual events, so it is audible. Replace pink with white
+or brown to compare the native noise sources. No banks are required.
 
-## 11. Full mix template
+## 11. Full mix with live controls
 
-```text
-bpm 124
-drum bd ~ bd [bd bd]
-drum ~ sd ~ [sd cp]
-drum hh hh hh hh | fast 2
-bass c2 ~ eb2 g2 | rev
-lead eb4 g4 bb4 c5 | slow 2
+```js
+setcpm(124 / 4)
+kick: s("bd ~ bd [bd bd]").gain(0.5)
+snare: s("~ sd ~ [sd cp]").gain(0.4)
+hats: s("hh*8").gain(0.15)
+bass: note("c2 ~ eb2 g2").s('sawtooth')
+  .lpf(slider(700,200,3000,100)).gain(0.3)
+lead: note("eb4 g4 bb4 c5").slow(2).s('triangle')
+  .decay(0.2).sustain(0).delay(0.15).gain(0.3)._pianoroll()
 ```
 
-The smoke-test pattern used in CI-style MCP checks; expect
-`Loaded 5 tracks.`
+F5 registers the slider; Ctrl+Left/Right adjusts its live value and reevaluates.
+The inline roll follows the lead's final two-cycle timing.
 
-## 12. Wavetable voices
+## 12. Strudel wavetable banks
 
-```text
-bpm 118
-drum bd bd ~ bd
-drum ~ sd ~ sd
-lead c4 e4 g4 b4 | inst wt:pad
-bass c2 ~ g1 ~ | inst wt:acid
+```js
+setcpm(118 / 4)
+lead: note("c4 e4 g4 b4").s('wt_flute').n("0 1 2 3").gain(0.3)
+bass: note("c2 ~ g1 ~").s('wt_bw_saw').n(0).lpf(600).gain(0.3)
 ```
 
-`inst wt:<name>` selects a bandlimited single-cycle table instead of a
-naive oscillator. Tables: `sine tri saw square organ acid voice pluck
-pad glass`; bare `inst wt` means `wt:saw`. Unknown names fall back to
-`saw`.
+Requires the installed AKWF `wt_` banks. F6's wavetables category lists each
+manifest bank once; `.n()` selects a waveform variant in manifest order. Native
+playback loops each single-cycle waveform at the note pitch. Browser morph/warp
+processing is not implemented.
 
-## 13. Sampled drums
+## 13. Drum-machine manifests
 
-```text
-bpm 130
-drum bd sd hh cp | bank rolandtr909
+```js
+setcpm(130 / 4)
+s("bd sd hh cp").bank('RolandTR909').gain(0.5)
 ```
 
-`bank NAME` matches a directory under `assets/banks` (see F6 search)
-and plays one-shot WAVs instead of synthesized drums. Banks with
-cryptic file names (e.g. `Dirt-Samples/bd`) map tokens to fixed slots.
-Unknown/missing banks fall back to synthesis with a console note.
+Use the catalog's exact bank name. The installed drum-machine manifest controls
+instrument selection and variant order; directory-name guesses are unnecessary.
 
-## 14. Sampled instruments
+## 14. Sampled piano and note gates
 
-```text
-bpm 100
-drum bd sd | bank 909
-lead c4 eb4 g4 bb4 | bank Horn/mute
+```js
+setcpm(100 / 4)
+short: note("c4 e4 g4 bb4").s('piano').release(0.05).gain(0.35)
+long: note("c3 ~ g3 ~").s('piano').release(0.6).gain(0.3)
 ```
 
-`bank` also works on note tracks: the closest recorded pitch is picked
-by filename (`_A#1_`, `_D4_`, ...) and shifted to your note. Best with
-note-named banks (VSCO2-CE, VCSL); cryptic banks map arbitrarily.
+Requires the installed piano catalog. The sampler selects the nearest recorded
+pitch region and repitches it to the requested note. Explicit `.release()` uses
+the musical event duration as the gate, followed by the specified release tail;
+an unlooped source can still end naturally before the envelope does.
 
-Sampled notes obey note length: each note stops at the next one plus
-`rel` release (default 0.08s). Staccato vs legato from notation:
+## 15. Euclidean rhythms
 
-```text
-bpm 100
-lead c4 e4 g4 bb4 | bank Horn/mute | rel 0.05
-lead c4 e4 g4 bb4 | bank Horn/mute | rel 0.6
+```js
+setcpm(128 / 4)
+kick: s("bd(3,8)").gain(0.5)
+snare: s("~ sd ~ sd").gain(0.4)
+hats: s("hh(5,8,2)").gain(0.2)
 ```
 
-Drum and `s` banks always ring fully.
+`(pulses,steps,rotation)` distributes events over a grid. Rotation changes
+their placement; it does not add pulses.
 
-## 15. Euclidean hats and backbeats
+## 16. Mixing branches and effects
 
-```text
-bpm 128
-drum euclid(3,8,bd)
-drum every(2,sd)
-drum euclid(5,8,hh,2)
+```js
+setcpm(120 / 4)
+drums: s("bd sd").gain(0.4)
+hats_: s("hh*8").gain(0.15)
+bass: note("c2 e2").s('sawtooth').lpf(700)
+  .attack(0.01).release(0.4).shape(0.1).gain(0.3)
+lead: note("c4 e4").s('triangle').delay(0.15).room(0.1).gain(0.3)
 ```
 
-## 16. Mix tools and master fx
+The trailing underscore mutes hats. Rename `hats_:` to `hats:` and press F5
+to enable them. Gains and effects are expressed on the pattern branches;
+shared orbit delay/reverb can affect other branches using the same orbit.
 
-```text
-bpm 120
-drum bd sd
-drum hh hh hh hh | mute
-bass c2 e2 | solo | att 0.01 rel 0.4
-lead c4 e4 | midi 0
-fx drive 0.3
-fx delay 0.4
+## 17. One-shots and reverse playback
+
+```js
+setcpm(100 / 4)
+s("bd:0 ~ sd:0 ~").speed("<1 -1>").gain(0.5)
 ```
 
-## 17. One-shot samples
+`:0` selects a manifest variant. Positive speed plays forward; negative speed
+plays backward. The speed alternates across cycles. These one-shots use the
+installed sample catalog, not hard-coded paths to filenames that may be absent.
 
-```text
-bpm 100
-s Dirt-Samples/bd/BT0A0A7.wav Dirt-Samples/sd/rytm-00-hard.wav
+For your own files, import a folder through F6's import-sounds category and
+insert its generated sound name. Imports persist across sessions.
+
+## 18. Scale arithmetic and semitone transposition
+
+```js
+setcpm(96 / 4)
+degrees: n("0 2 4".add("<0 3 4 0>"))
+  .scale('C:major').s('triangle').gain(0.3)
+melody: note("c5 e5 g5").transpose("<0 5 7 0>").s('sine')
+  .vib(5).vibmod(0.2).gain(0.3)
 ```
 
-`s` tokens are bank-relative sample paths (F6 shows them); missing
-files are silent.
+The first branch adds scale degrees before resolving pitches: C-E-G, F-A-C,
+G-B-D, then C-E-G. The second transposes note pitches by semitones. Both
+branches form a four-cycle progression; vibrato adds small pitch movement.
 
-## 18. Strudel tonal line
-
-```text
-bpm 96
-chord <Cm7 F7 Bb^7 Eb^7> | sound sine | adsr .01:.2:.5:.3
-n 0 2 4 7 | scale C:minor | arp 0 1 2 1 | sound sawtooth
-lead c4 e4 g4 | vib 5:.2 | lpf 1800
-```
-
-Comma chords (`g3,b3,e4`) and `[g3,b3,e4]` are the same stack.
-`| scale C:minor` reads plain integers as degrees (root defaults to
-octave 3, so `0` is C3). On a scaled track, write raw MIDI as a note
-name (`c4`). `chord` uses ireal symbols: `C` is major, `C7` is
-dominant, `C^7` is major-7, `C-7` is minor-7. On `notes`/`n`/`lead`,
-`c7` stays the note and `cm7` is a chord. Voicings are close position.
-`| arp` indexes that stack (`0 [0,2] 1`). `| lfo gain sine 2 .4` and
-`| vib 4:.1` (sine pitch) are one LFO per track. Pink and brown select
-the same noise as white. `| lpf` is a per-voice cutoff in Hz; `fx cutoff`
-is still the master filter.
+Continue with [Strudeltutor](wiki/Live-Coding-and-Strudeltutor.md) and the
+[official Strudel learning resources](wiki/Learn-Strudel.md).

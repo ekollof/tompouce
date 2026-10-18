@@ -36,4 +36,4 @@ Tompouce pins Strudel 1.2.6 and uses a native audio backend. Current upstream do
 
 Begin with a built-in synth, then change one thing at a time. Try replacing spaces with brackets, moving a melody through a scale, layering a bass, patterning a filter and adding one view. Compare predictions with what you hear. Keep each experiment in a separate song buffer and save a working version before extending it.
 
-Useful local resources are the [tutorial source](https://github.com/ekollof/tompouce/blob/master/strudeltutor.json), bundled project examples, and [example gallery](https://github.com/ekollof/tompouce/blob/master/docs/examples.md). The gallery includes historical line-dialect examples; use the JavaScript reference and Strudeltutor for the supported direction.
+Useful local resources are the [tutorial source](https://github.com/ekollof/tompouce/blob/master/strudeltutor.json), bundled project examples, and [example gallery](https://github.com/ekollof/tompouce/blob/master/docs/examples.md). The gallery uses JavaScript Strudel and is checked directly by the native example test.

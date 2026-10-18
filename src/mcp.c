@@ -329,8 +329,8 @@ void handle_request(cJSON *req) {
         cJSON_AddItemToArray(tools, t); \
     } while(0)
         ADDTOOL("music_set_code", "Replace and evaluate Tompouce code.",
-            "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\"}},\"required\":[\"code\"]}");
-        ADDTOOL("music_evaluate", "Evaluate current code buffer.", "{\"type\":\"object\",\"properties\":{}}");
+            "{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\"},\"autostart\":{\"type\":\"boolean\",\"default\":false}},\"required\":[\"code\"]}");
+        ADDTOOL("music_evaluate", "Evaluate current code buffer; optional autostart starts playback only on success.", "{\"type\":\"object\",\"properties\":{\"autostart\":{\"type\":\"boolean\",\"default\":false}}}");
         ADDTOOL("music_play", "Start playback.", "{\"type\":\"object\",\"properties\":{}}");
         ADDTOOL("music_stop", "Stop playback.", "{\"type\":\"object\",\"properties\":{}}");
         ADDTOOL("music_set_bpm", "Set tempo BPM.", "{\"type\":\"object\",\"properties\":{\"bpm\":{\"type\":\"number\"}},\"required\":[\"bpm\"]}");
@@ -397,23 +397,33 @@ void handle_request(cJSON *req) {
             iserr = names < 0;
         } else if (strcmp(tname, "music_set_code") == 0) {
             cJSON *code = args ? cJSON_GetObjectItem(args, "code") : NULL;
-            if (code && cJSON_IsString(code)) {
-                if (track_load_from_code(code->valuestring))
+            const cJSON *autostart=args?cJSON_GetObjectItemCaseSensitive(args,"autostart"):NULL;
+            if (autostart && !cJSON_IsBool(autostart)) { snprintf(out,outcap,"autostart must be boolean."); iserr=1; }
+            else if (code && cJSON_IsString(code)) {
+                if (track_load_from_code(code->valuestring)) {
+                    if (cJSON_IsTrue(autostart)) { scheduler_transport_set(1); scheduler_start(); }
                     snprintf(out, outcap, "Loaded %d tracks.", track_count);
+                }
                 else { snprintf(out,outcap,"Evaluation failed; last playable pattern retained. See music_get_console."); iserr = 1; }
             } else { snprintf(out, outcap, "Missing code"); iserr = 1; }
         } else if (strcmp(tname, "music_evaluate") == 0) {
-            if (track_load_from_code(current_code)) snprintf(out, outcap, "Evaluated %d tracks.", track_count);
+            const cJSON *autostart=args?cJSON_GetObjectItemCaseSensitive(args,"autostart"):NULL;
+            if (autostart && !cJSON_IsBool(autostart)) { snprintf(out,outcap,"autostart must be boolean."); iserr=1; }
+            else if (track_load_from_code(current_code)) {
+                if (cJSON_IsTrue(autostart)) { scheduler_transport_set(1); scheduler_start(); }
+                snprintf(out, outcap, "Evaluated %d tracks.", track_count);
+            }
             else { snprintf(out,outcap,"Evaluation failed; last playable pattern retained. See music_get_console."); iserr = 1; }
         } else if (strcmp(tname, "music_play") == 0) {
-            audio_toggle_play(1); scheduler_start();
+            scheduler_transport_set(1); scheduler_start();
             snprintf(out, outcap, "Playing.");
         } else if (strcmp(tname, "music_stop") == 0) {
-            audio_toggle_play(0);
+            scheduler_transport_set(0);
             snprintf(out, outcap, "Stopped.");
         } else if (strcmp(tname, "music_set_bpm") == 0) {
             cJSON *b = args ? cJSON_GetObjectItem(args, "bpm") : NULL;
-            if (b && (cJSON_IsNumber(b)) && isfinite(b->valuedouble)) {
+            if (b && cJSON_IsNumber(b) && isfinite(b->valuedouble) && b->valuedouble>=0 &&
+                (b->valuedouble==0 || isfinite(240/b->valuedouble))) {
                 audio_set_bpm(b->valuedouble);
                 snprintf(out, outcap, "BPM set to %.0f.", audio_get_bpm());
             } else { snprintf(out, outcap, "Missing or invalid bpm"); iserr=1; }

@@ -123,7 +123,7 @@ static void command_execute(const char *text) {
     if (command_abbrev(cmd,"help",1)) {
         show_docs=1; docs_scroll=0; snprintf(status_msg,sizeof(status_msg),"cheatsheet on"); return;
     }
-    if (!strcmp(cmd,"evaluate") || !strcmp(cmd,"eval")) { do_evaluate(); return; }
+    if (!strcmp(cmd,"evaluate") || !strcmp(cmd,"eval")) { do_perform(); return; }
     for (int i=0;native_command_words[i];i++) if (!strcmp(cmd,native_command_words[i])) {
         char native[sizeof(input_buf)];
         int n=snprintf(native,sizeof(native),"/%s%s%s",cmd,*args?" ":"",args);

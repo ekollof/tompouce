@@ -232,6 +232,8 @@ static void apply_strudel(const StrudelLine *sl, int line_off) {
     if (pat && sl->degrade >= 0) pat->degrade = sl->degrade;
     Track *t = &tracks[track_count++];
     memset(t, 0, sizeof(Track));
+    t->gain_slider=sl->gain_slider; t->lpf_slider=sl->lpf_slider;
+    t->slider_revision=slider_revision();
     snprintf(t->keyword, sizeof(t->keyword), "%s", sl->keyword[0] ? sl->keyword : "notes");
     t->pattern = pat;
     stamp_pat_origin(t, sl, line_off);
@@ -440,6 +442,8 @@ static void parse_one_line(char *line, int line_off, double now) {
 
     Track *t = &tracks[track_count++];
     memset(t,0,sizeof(Track));
+    t->gain_slider=t->lpf_slider=-1;
+    t->slider_revision=slider_revision();
     snprintf(t->keyword, sizeof(t->keyword), "%s", kw);
     t->pattern = pat;
     t->pat_off = pat_at;
@@ -500,6 +504,7 @@ static void parse_one_line(char *line, int line_off, double now) {
                 p = strtok_r(NULL, " \t", &sp);
                 if (p) {
                     double g = 0.8;
+                    t->gain_slider=!strncmp(p,"slider(",7)?slider_next_index():-1;
                     if (!slider_or_number(p, &g) || !isfinite(g)) g = 0.8;
                     if (g < 0) g = 0;
                     if (g > 2) g = 2;
@@ -699,6 +704,7 @@ static void parse_one_line(char *line, int line_off, double now) {
                 p = strtok_r(NULL, " \t", &sp);
                 if (p) {
                     double v = 0;
+                    t->lpf_slider=!strncmp(p,"slider(",7)?slider_next_index():-1;
                     if (slider_or_number(p, &v) && isfinite(v) && v >= 20.0 && v <= 18000.0)
                         t->lpf_hz = v;
                 }
@@ -730,12 +736,16 @@ int track_load_from_code(const char *code_buf) {
     cJSON *metadata = NULL;
     if (javascript_is_code(code_buf)) {
         char error[512];
-        slider_begin();
         program = javascript_compile(code_buf,audio_get_bpm(),&metadata,error,sizeof(error));
-        if (program && !javascript_prepare_csound(program,metadata,error,sizeof(error))) {
+        pthread_mutex_lock(&tracks_lock);
+        JsProgram *previous=track_count==1?tracks[0].javascript:NULL;
+        javascript_retain(previous);
+        pthread_mutex_unlock(&tracks_lock);
+        if (program && !javascript_prepare_csound_from(program,metadata,previous,error,sizeof(error))) {
             javascript_free(program); program = NULL;
             cJSON_Delete(metadata); metadata = NULL;
         }
+        javascript_free(previous);
         if (!program) {
             pthread_mutex_lock(&tracks_lock);
             int stored = current_code_set(code_buf);
@@ -772,30 +782,54 @@ int track_load_from_code(const char *code_buf) {
         log_console("out of memory");
         return 0;
     }
+    double now=audio_time_now(), music_cursor=0, tick=now;
+    double boundary=round((now+.01)*10000)/10000+.1;
+    int replace_javascript=program && track_count==1 && tracks[0].javascript;
+    int continuous=replace_javascript && audio_is_playing() && tracks[0].js_seconds>0;
+    if (continuous) {
+        music_cursor=tracks[0].js_cursor;
+        boundary=tracks[0].js_phase+.1;
+        tick=tracks[0].js_tick;
+        if (boundary<now+.05) {
+            music_cursor+=(now+.1-boundary)/tracks[0].js_seconds;
+            boundary=now+.1; tick=now;
+        }
+    }
     free_tracks();
-    event_queue_clear();
+    /* Web output has already accepted these notes. Replacing a pattern, even
+       after Stop, invalidates producers without withdrawing committed audio. */
+    if (replace_javascript) event_queue_new_program(HUGE_VAL);
+    else event_queue_clear();
     audio_set_csound(javascript_csound(program));
     audio_set_reference_mode(program != NULL);
     if (program) {
+        javascript_activate_sliders(program);
         Track *t = &tracks[0];
         memset(t,0,sizeof(*t));
+        t->gain_slider=t->lpf_slider=-1;
+        t->slider_revision=slider_revision();
         t->javascript = program;
         const cJSON *visuals = cJSON_GetObjectItemCaseSensitive(metadata,"visuals");
         t->visual_requests = cJSON_IsNumber(visuals) ? visuals->valueint & 3 : 0;
         t->compile_generation = event_queue_generation();
         t->active = t->fast_repeat = t->slow_stride = 1;
-        t->next_cycle = fmax(.1,audio_time_now());
         snprintf(t->keyword,sizeof(t->keyword),"javascript");
         track_count = 1;
         const cJSON *tempo = cJSON_GetObjectItemCaseSensitive(metadata,"bpm");
         if (cJSON_IsNumber(tempo) && isfinite(tempo->valuedouble)) audio_set_bpm(tempo->valuedouble);
+        t->js_seconds=audio_sec_per_cycle();
+        t->js_cursor=music_cursor; t->js_origin=isfinite(t->js_seconds)?boundary-music_cursor*t->js_seconds:boundary; t->js_tick=tick;
+        t->js_anchor_cycle=music_cursor;
+        t->js_anchor_time=boundary; t->js_phase=boundary-.1;
+        t->cycle_index=music_cursor>=INT_MAX?INT_MAX:music_cursor<=0?0:(int)floor(music_cursor);
+        t->next_cycle=isfinite(t->js_seconds)?t->js_origin+t->cycle_index*t->js_seconds:boundary;
         cJSON_Delete(metadata);
         pthread_mutex_unlock(&tracks_lock);
-        scheduler_song_sync();
+        if (!continuous) scheduler_song_sync();
         log_console("Loaded JavaScript/Strudel pattern, bpm %.0f",audio_get_bpm());
         return 1;
     }
-    double now = audio_time_now();
+    now = audio_time_now();
     // ensure now maybe 0; align
     if (now < 0.1) now = 0.1;
 

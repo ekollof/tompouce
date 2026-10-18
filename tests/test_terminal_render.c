@@ -2,6 +2,16 @@
 #include "../src/tui.c"
 #include <assert.h>
 
+static void check_input_readiness(void) {
+    while (SLang_input_pending(0)) (void)SLang_getkey();
+    ncinput events[3]={{.id=NCKEY_RESIZE},{.id='z',.evtype=NCTYPE_RELEASE},
+                      {.id='x',.evtype=NCTYPE_PRESS}};
+    assert(write(terminal_event_pipe[1],events,sizeof(events))==(ssize_t)sizeof(events));
+    /* Non-text events preceding queued text must not cancel a paste. */
+    assert(SLang_input_pending(0));
+    assert(SLang_getkey()=='x');
+}
+
 static void theme_fixture(const char *path, int wal, unsigned seed) {
     FILE *f=fopen(path,"w"); assert(f);
     if (wal) {
@@ -355,6 +365,7 @@ int main(void) {
     check_stopped_highlight_growth();
     check_state_modes();
     check_theme_watch();
+    check_input_readiness();
     SLsmg_reset_smg();
     puts("terminal highlight cells and indentation ok");
     return 0;

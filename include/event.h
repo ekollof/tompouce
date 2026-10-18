@@ -6,6 +6,12 @@
 #include "native_synth.h"
 #include "osc_output.h"
 
+typedef struct {
+    double onset, attack, depth;
+    int string_onset;
+    char onset_text[128];
+} DuckControl;
+
 #define INST_SINE 0
 #define INST_SAW 1
 #define INST_SQUARE 2
@@ -34,6 +40,14 @@ typedef struct {
     unsigned scope_mask; /* visualization call sites attached to this pattern */
     int csound_only;     /* scheduled by native renderer; retain UI note history */
     int osc_only;
+    int control_only;   /* shared controls with no source/MIDI/history event */
+    int audio_prepared; /* consumer reserved a timestamped voice before onset */
+    int delay_prepared; /* generator accepted shared AudioParam automation */
+    int room_prepared;  /* shared convolver selected during source preparation */
+    int room_params_valid, room_sample; /* -1 identifies a generated IR */
+    int room_rebuild;
+    unsigned room_defined; /* explicit IR speed/offset, distinct from defaults */
+    double room_speed, room_begin;
     OscOutputMessage osc;
     double time;        // absolute seconds
     double duration;    // seconds
@@ -71,9 +85,12 @@ typedef struct {
     double delay_time;  /* <0 leave the orbit time; else seconds */
     double delay_fb;    /* <0 leave the orbit feedback; else 0..0.98 */
     int orbit;          /* 0..N_ORBITS-1 */
-    unsigned duck_mask; /* bit i ducks orbit i on this note's onset */
+    unsigned duck_mask; /* bit i selects a target orbit; JS ramps begin 10 ms early */
     double duck_attack; /* seconds to return to full level */
     double duck_depth;  /* 0..1 */
+    double duck_onset;  /* seconds from source onset to minimum gain */
+    int duck_values;
+    DuckControl ducks[N_ORBITS];
     int lfo_tgt;        /* 0 off, 1 freq, 2 gain, 3 lpf, 4 pw */
     int lfo_wave;       /* 0 triangle, 1 sine, 2 saw, 3 square */
     double lfo_hz;

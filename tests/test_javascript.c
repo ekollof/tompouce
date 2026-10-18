@@ -12,6 +12,24 @@
 
 static cJSON *query(const char *code, JsProgram **program);
 
+static void test_slider_highlights(void) {
+    const char *source="const level=slider(.5); note(\"c4 e4\").gain(level)._scope()";
+    JsProgram *program; cJSON *haps=query(source,&program);
+    javascript_activate_sliders(program);
+    assert(slider_set(0,.6));
+    const char *editor="const level=slider(0.6); note(\"c4 e4\").gain(level)._scope()";
+    javascript_cache_spans(program,haps,0,2);
+    javascript_request_visuals(program,editor); javascript_update_visuals(program,.1,0,2);
+    assert(javascript_live_scope_mask(program,editor,(int)(strstr(editor,"_scope")-editor),VISUAL_SCOPE));
+    int offsets[8], lengths[8];
+    assert(javascript_editor_play_styles(program,editor,.1,offsets,lengths,NULL,NULL,8)>0);
+    assert(offsets[0]==(int)(strstr(editor,"c4 e4")-editor));
+    const char *unapplied="const level=slider(0.9); note(\"c4 e4\").gain(level)._scope()";
+    javascript_request_visuals(program,unapplied); javascript_update_visuals(program,.1,0,2);
+    assert(!javascript_editor_play_styles(program,unapplied,.1,offsets,lengths,NULL,NULL,8));
+    cJSON_Delete(haps); javascript_free(program);
+}
+
 static void test_live_visuals(void) {
     const char *code="globalThis.liveRuns=(globalThis.liveRuns??0)+1; $: note(60+liveRuns).slow(4); $: note(67)";
     JsProgram *program; cJSON *before=query(code,&program);
@@ -171,6 +189,57 @@ static cJSON *query(const char *code, JsProgram **program) {
     return haps;
 }
 
+static void test_control_aliases(void) {
+    JsProgram *program;
+    cJSON *noisy=query("note(69).csound('ClockQA').gain(.5).slow(4).late(1)",&program);
+    cJSON_Delete(noisy);
+    const double clock[][2]={{.60000000000000009,.62500000000000011},
+        {.75000000000000022,.77500000000000024},{.9750000000000002,1.0000000000000002}};
+    for (int i=0;i<3;i++) {
+        noisy=javascript_query_audio(program,clock[i][0],clock[i][1],.5);
+        assert(cJSON_IsArray(noisy) && cJSON_GetArraySize(noisy)==0);
+        cJSON_Delete(noisy);
+    }
+    noisy=javascript_query_audio(program,1.0000000000000002,1.0250000000000001,.5);
+    assert(cJSON_IsArray(noisy) && cJSON_GetArraySize(noisy)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(noisy,0),"begin")->valuedouble==1);
+    cJSON_Delete(noisy); javascript_free(program);
+    cJSON *haps=query("const control=slider; note(60).gain(control(.7))",&program);
+    javascript_activate_sliders(program);
+    assert(slider_count()==0 && cJSON_GetArraySize(haps)==1);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    assert(cJSON_GetObjectItemCaseSensitive(value,"gain")->valuedouble==.7);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("note(60).gain(globalThis['slider'](.4))",&program);
+    javascript_activate_sliders(program); assert(slider_count()==0);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("note(60).cpm(slider(60,30,120))",&program);
+    javascript_activate_sliders(program); assert(slider_count()==1 && cJSON_GetArraySize(haps)==2);
+    cJSON_Delete(haps);
+    haps=javascript_query_cps(program,0,1,1);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"end")->valuedouble==1);
+    cJSON_Delete(haps); assert(slider_set(0,30));
+    haps=javascript_query_cps(program,0,1,1);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"end")->valuedouble==2);
+    cJSON_Delete(haps);
+    haps=javascript_query_cps(program,0,1,.25);
+    assert(cJSON_GetArraySize(haps)==2);
+    cJSON_Delete(haps); javascript_free(program);
+    /* A numeric cpm transform is computed at evaluation, as in web repl.mjs. */
+    haps=query("note(60).cpm(60)",&program); assert(cJSON_GetArraySize(haps)==2); cJSON_Delete(haps);
+    haps=javascript_query_cps(program,0,1,1); assert(cJSON_GetArraySize(haps)==2);
+    cJSON_Delete(haps); javascript_free(program);
+    cJSON *metadata=NULL; char error[1024];
+    program=javascript_compile("setCpm(slider(30,20,60)); note(60)",120,&metadata,error,sizeof(error));
+    if (!program) fprintf(stderr,"setcpm Pattern: %s\n",error);
+    assert(program && cJSON_GetObjectItemCaseSensitive(metadata,"bpm")->valuedouble==120);
+    javascript_activate_sliders(program); assert(slider_count()==1 && slider_set(0,60));
+    haps=javascript_query(program,0,1); assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program);
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -276,8 +345,10 @@ static void test_tutorial(void) {
 }
 
 int main(void) {
+    test_control_aliases();
     test_tutorial();
     test_live_visuals();
+    test_slider_highlights();
     test_visual_highlight_mapping();
     test_local_modules();
     JsProgram *program;

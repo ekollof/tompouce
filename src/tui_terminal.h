@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 
 static struct notcurses *terminal_nc;
 static struct ncplane *terminal_plane;
@@ -308,16 +309,27 @@ static int terminal_event(void) {
 }
 static int SLang_input_pending(int tenth) {
     if (terminal_input_count) return 1;
-    int key=terminal_event();
-    if (key>=0) { SLang_ungetkey((unsigned)key); return 1; }
-    if (tenth) {
-        struct pollfd pfd={.fd=terminal_input_fd(),.events=POLLIN};
-        if (poll(&pfd,1,tenth*100)>0) {
-            key=terminal_event();
-            if (key>=0) { SLang_ungetkey((unsigned)key); return 1; }
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC,&now);
+    long long deadline=(long long)now.tv_sec*1000000000+now.tv_nsec+(long long)tenth*100000000;
+    for (;;) {
+        int key=terminal_event();
+        if (key>=0) { SLang_ungetkey((unsigned)key); return 1; }
+        if (terminal_input_closed) return 0;
+        /* Resize, signal and key-release events carry no editor key. Drain
+           them without reporting a gap in text already queued behind them. */
+        int timeout=0;
+        if (tenth>0) {
+            clock_gettime(CLOCK_MONOTONIC,&now);
+            long long left=deadline-((long long)now.tv_sec*1000000000+now.tv_nsec);
+            if (left<=0) return 0;
+            timeout=(int)((left+999999)/1000000);
         }
+        struct pollfd pfd={.fd=terminal_input_fd(),.events=POLLIN};
+        int ready=poll(&pfd,1,timeout);
+        if (ready<0 && errno==EINTR) continue;
+        if (ready<=0) return 0;
     }
-    return 0;
 }
 static unsigned int SLang_getkey(void) {
     if (!terminal_input_count && !SLang_input_pending(1)) return 0xffff;

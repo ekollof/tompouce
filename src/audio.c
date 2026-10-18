@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include "js_number.h"
 #include "wavetable.h"
 #include "sampler.h"
 #include "midi.h"
@@ -20,8 +21,9 @@ static void alsa_silent(const char *file, int line, const char *func,
 }
 #endif
 
-static double bpm = 120.0;
-static int playing = 0;
+static _Atomic double bpm = 120.0;
+static _Atomic double effect_bpm = 120.0;
+static atomic_int playing;
 static atomic_int reference_mode;
 void audio_set_reference_mode(int on) { atomic_store(&reference_mode,on != 0); }
 static unsigned long audio_block_frames = 256;
@@ -45,9 +47,60 @@ static double orbit_fb[N_ORBITS];
 static double duck_depth[N_ORBITS];
 static double duck_atk[N_ORBITS];
 static double duck_t[N_ORBITS];
+static double audio_time = 0.0;
+static struct {
+    int enabled, hold;
+    double initial, target, begin, minimum, end;
+} web_duck[N_ORBITS];
+/* Accepted timer callbacks outlive source voices and program replacements.
+   Match the event queue's capacity; all access is under voice_lock. */
+typedef struct {
+    double time, source_time;
+    unsigned long long serial;
+    unsigned mask;
+    DuckControl controls[N_ORBITS];
+} PendingDuck;
+#define MAX_PENDING_DUCKS 8192
+static PendingDuck pending_ducks[MAX_PENDING_DUCKS];
+static int pending_duck_count;
+static unsigned long long pending_duck_serial;
+typedef struct {
+    double time, delay, feedback;
+    unsigned long long serial;
+    int orbit;
+    unsigned fields;
+} PendingDelay;
+#define MAX_PENDING_DELAYS 8192
+static PendingDelay pending_delays[MAX_PENDING_DELAYS];
+static int pending_delay_count;
+static unsigned long long pending_delay_serial;
+static int web_delay_created[N_ORBITS];
 static int orbits_ready;
 static ConvState convolvers[N_ORBITS];
 static _Atomic(const ConvKernel *) requested_ir[N_ORBITS];
+static _Atomic unsigned long long ir_revision[N_ORBITS];
+static unsigned long long rendered_ir_revision[N_ORBITS];
+static const int room_fields[]={DSP_SIZE,DSP_ROOMFADE,DSP_ROOMLP,DSP_ROOMDIM};
+static double room_parameters[N_ORBITS][6];
+static int room_samples[N_ORBITS];
+static unsigned room_defined[N_ORBITS];
+static int room_created[N_ORBITS];
+static _Atomic unsigned created_orbits;
+
+unsigned audio_register_orbit(int orbit) {
+    if (orbit<0 || orbit>=N_ORBITS) return atomic_load(&created_orbits);
+    unsigned bit=1u<<orbit;
+    return atomic_fetch_or(&created_orbits,bit)|bit;
+}
+
+/* Writers hold voice_lock. The callback takes one bounded atomic snapshot;
+   an interrupted publication keeps the previous convolver for this frame. */
+static void publish_room(int orbit, const ConvKernel *kernel, int rebuild) {
+    if (!rebuild && atomic_load(&requested_ir[orbit])==kernel) return;
+    atomic_fetch_add(&ir_revision[orbit],1);
+    atomic_store(&requested_ir[orbit],kernel);
+    atomic_fetch_add(&ir_revision[orbit],1);
+}
 
 static void orbits_ensure(void) {
     if (orbits_ready) return;
@@ -60,6 +113,17 @@ static void orbits_ensure(void) {
 
 static double orbit_duck_gain(int orbit) {
     if (orbit < 0 || orbit >= N_ORBITS) return 1;
+    if (web_duck[orbit].enabled) {
+        double begin=web_duck[orbit].begin,minimum=web_duck[orbit].minimum,end=web_duck[orbit].end;
+        double initial=web_duck[orbit].initial,target=web_duck[orbit].target;
+        if (audio_time<begin) return initial;
+        if (audio_time<minimum && minimum>begin)
+            return initial*pow(target/initial,(audio_time-begin)/(minimum-begin));
+        if (web_duck[orbit].hold) return target;
+        if (audio_time<end && end>minimum)
+            return target*pow(1/target,(audio_time-minimum)/(end-minimum));
+        return 1;
+    }
     if (duck_depth[orbit] <= 0 || duck_atk[orbit] <= 0 || duck_t[orbit] >= duck_atk[orbit])
         return 1;
     return 1 - duck_depth[orbit] * (1 - duck_t[orbit] / duck_atk[orbit]);
@@ -74,17 +138,23 @@ void audio_fx_set(const char *name, double v) {
     else if (strcmp(name, "delay") == 0) fx_delay = v;
     else if (strcmp(name, "verb") == 0) fx_verb = v;
 }
-static double audio_time = 0.0;
 static double silent_clock_origin;
 static int silent_clock;
 static Voice voices[MAX_VOICES];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
 static CsoundProgram *csound_program;
+static double next_voice_onset=HUGE_VAL;
+static unsigned long long voice_onset_serial;
 
 void audio_set_csound(CsoundProgram *program) {
     csound_program_retain(program);
     pthread_mutex_lock(&voice_lock);
     CsoundProgram *old = csound_program;
+    if (old==program) {
+        pthread_mutex_unlock(&voice_lock);
+        csound_program_free(program);
+        return;
+    }
     csound_program = program;
     csound_program_activate(program,audio_time);
     pthread_mutex_unlock(&voice_lock);
@@ -148,10 +218,14 @@ int audio_scope_copy(float *out, int n) {
 
 
 double audio_time_now(void){ return silent_clock?now_seconds()-silent_clock_origin:audio_time; }
-void audio_set_bpm(double b){ if (!isfinite(b)) return; if (b<20) b=20; if (b>400) b=400; bpm=b; }
+void audio_set_bpm(double b){
+    if (!isfinite(b) || b<0 || (b>0 && (!isfinite(240/b) || 240/b<=0))) return;
+    bpm=b;
+    if (b>0) effect_bpm=b;
+}
 double audio_get_bpm(void){ return bpm; }
-double audio_sec_per_beat(void){ return 60.0/bpm; }
-double audio_sec_per_cycle(void){ return 4.0*60.0/bpm; } // 4 beats per cycle
+double audio_sec_per_beat(void){ double b=bpm; return b>0?60.0/b:HUGE_VAL; }
+double audio_sec_per_cycle(void){ double b=bpm; return b>0?240.0/b:HUGE_VAL; } // 4 beats per cycle
 double audio_cycle_beats(void){ return 4.0; }
 
 int note_name_to_midi(const char *name) {
@@ -212,12 +286,255 @@ static void dbg_token(char *dst, size_t n, const char *src) {
     dst[w] = 0;
 }
 
+/* Called under voice_lock at the duck timer or source onset respectively.
+   No allocation, decoding, JavaScript or resource destruction occurs here. */
+static double duck_endpoint_number(const char *text) {
+    JSATODTempMem temporary; const char *end;
+    double number=js_atod(text,&end,10,0,&temporary);
+    if (end==text) return NAN;
+    while (isspace((unsigned char)*end)) end++;
+    return *end?NAN:number;
+}
+
+static void apply_duck(const PendingDuck *pending) {
+    for (int o=0;o<N_ORBITS;o++) if (pending->mask&(1u<<o)) {
+        DuckControl control=pending->controls[o];
+        double initial=fmax(.01,(float)orbit_duck_gain(o));
+        double minimum=fmax(pending->source_time,audio_time)+control.onset;
+        double return_time=minimum+fmax(.002,control.attack);
+        if (control.string_onset) {
+            char text[224],attack[32]; JSDTOATempMem temporary;
+            int length=js_dtoa(text,fmax(pending->source_time,audio_time),10,0,JS_DTOA_FORMAT_FREE,&temporary);
+            size_t suffix=strlen(control.onset_text);
+            memcpy(text+length,control.onset_text,suffix+1);
+            minimum=duck_endpoint_number(text);
+            int attack_length=js_dtoa(attack,fmax(.002,control.attack),10,0,JS_DTOA_FORMAT_FREE,&temporary);
+            memcpy(text+length+suffix,attack,(size_t)attack_length+1);
+            return_time=duck_endpoint_number(text);
+        }
+        web_duck[o].enabled=1;
+        web_duck[o].hold=0;
+        web_duck[o].initial=fmax(.01,initial);
+        web_duck[o].target=fmin(initial,fmax(.01,1-sqrt(control.depth)));
+        web_duck[o].begin=audio_time;
+        web_duck[o].minimum=fmax(audio_time,minimum);
+        web_duck[o].end=fmax(audio_time,return_time);
+        /* WebAudio validates each ramp only after cancel/anchor. A failed
+           first ramp holds the anchor; a failed return retains the first
+           ramp and holds its target. Never propagate NaN into audio PCM. */
+        if (isnan(control.depth) || control.depth<0 || !isfinite(minimum) || minimum<0) {
+            web_duck[o].target=initial;
+            web_duck[o].minimum=audio_time;
+            web_duck[o].end=audio_time;
+            web_duck[o].hold=1;
+        } else if (!isfinite(control.attack) || !isfinite(return_time) || return_time<0) {
+            web_duck[o].end=web_duck[o].minimum;
+            web_duck[o].hold=1;
+        }
+        duck_depth[o]=control.depth; duck_atk[o]=control.attack; duck_t[o]=0;
+    }
+}
+
+static int duck_before(const PendingDuck *a, const PendingDuck *b) {
+    return a->time<b->time || (a->time==b->time && a->serial<b->serial);
+}
+
+static void dispatch_ducks_locked(void) {
+    while (pending_duck_count && pending_ducks[0].time<=audio_time+1e-10) {
+        PendingDuck due=pending_ducks[0],last=pending_ducks[--pending_duck_count];
+        int at=0;
+        while (at*2+1<pending_duck_count) {
+            int child=at*2+1;
+            if (child+1<pending_duck_count && duck_before(&pending_ducks[child+1],&pending_ducks[child])) child++;
+            if (!duck_before(&pending_ducks[child],&last)) break;
+            pending_ducks[at]=pending_ducks[child]; at=child;
+        }
+        if (pending_duck_count) pending_ducks[at]=last;
+        apply_duck(&due);
+    }
+}
+
+static int schedule_duck_locked(const AudioEvent *event) {
+    if (!event->dsp.enabled || !event->duck_mask) return 1;
+    dispatch_ducks_locked();
+    if (pending_duck_count==MAX_PENDING_DUCKS) return 0;
+    PendingDuck pending={.time=fmax(audio_time,event->time-.01),.source_time=event->time,
+        .serial=++pending_duck_serial,.mask=event->duck_mask};
+    for (int o=0;o<N_ORBITS;o++) if (event->duck_mask&(1u<<o))
+        pending.controls[o]=event->duck_values?event->ducks[o]:
+            (DuckControl){.onset=event->duck_onset,.attack=event->duck_attack,.depth=event->duck_depth};
+    int at=pending_duck_count++;
+    while (at>0) {
+        int parent=(at-1)/2;
+        if (!duck_before(&pending,&pending_ducks[parent])) break;
+        pending_ducks[at]=pending_ducks[parent]; at=parent;
+    }
+    pending_ducks[at]=pending;
+    dispatch_ducks_locked();
+    return 1;
+}
+
+static int delay_before(const PendingDelay *a, const PendingDelay *b) {
+    return a->time<b->time || (a->time==b->time && a->serial<b->serial);
+}
+
+static void dispatch_delays_locked(void) {
+    while (pending_delay_count && pending_delays[0].time<=audio_time+1e-10) {
+        PendingDelay due=pending_delays[0],last=pending_delays[--pending_delay_count];
+        int at=0;
+        while (at*2+1<pending_delay_count) {
+            int child=at*2+1;
+            if (child+1<pending_delay_count && delay_before(&pending_delays[child+1],&pending_delays[child])) child++;
+            if (!delay_before(&pending_delays[child],&last)) break;
+            pending_delays[at]=pending_delays[child]; at=child;
+        }
+        if (pending_delay_count) pending_delays[at]=last;
+        if (due.fields&1) orbit_dt[due.orbit]=due.delay;
+        if (due.fields&2) orbit_fb[due.orbit]=due.feedback;
+    }
+}
+
+int audio_prepare_delay(AudioEvent *event) {
+    if (!event) return 0;
+    if (event->delay_prepared) return 1;
+    if (!event->dsp.enabled || event->delay_send<=0 || event->delay_time<=0 || event->delay_fb<=0) {
+        event->delay_prepared=1; return 1;
+    }
+    if (!isfinite(event->time) || !isfinite(event->delay_time) || !isfinite(event->delay_fb)) return 0;
+    int orbit=event->orbit;
+    if (orbit<0 || orbit>=N_ORBITS) return 0;
+    double delay=(float)fmin(1,event->delay_time),feedback=(float)fmin(.98,event->delay_fb);
+    pthread_mutex_lock(&voice_lock);
+    if (silent_clock) audio_time=audio_time_now();
+    orbits_ensure(); dispatch_delays_locked();
+    double current_delay=web_delay_created[orbit]?orbit_dt[orbit]:delay;
+    double current_feedback=web_delay_created[orbit]?orbit_fb[orbit]:feedback;
+    unsigned fields=(current_delay!=event->delay_time?1u:0u)|(current_feedback!=event->delay_fb?2u:0u);
+    if (fields && pending_delay_count==MAX_PENDING_DELAYS) {
+        pthread_mutex_unlock(&voice_lock); return 0;
+    }
+    if (!web_delay_created[orbit]) {
+        orbit_dt[orbit]=delay; orbit_fb[orbit]=feedback; web_delay_created[orbit]=1;
+    }
+    if (fields) {
+        PendingDelay pending={.time=fmax(audio_time,event->time),.delay=delay,.feedback=feedback,
+            .serial=++pending_delay_serial,.orbit=orbit,.fields=fields};
+        int at=pending_delay_count++;
+        while (at>0) {
+            int parent=(at-1)/2;
+            if (!delay_before(&pending,&pending_delays[parent])) break;
+            pending_delays[at]=pending_delays[parent]; at=parent;
+        }
+        pending_delays[at]=pending;
+    }
+    dispatch_delays_locked();
+    event->delay_prepared=1;
+    pthread_mutex_unlock(&voice_lock);
+    return 1;
+}
+
+void audio_inherit_room(AudioEvent *event, unsigned explicit_fields) {
+    if (!event || !event->dsp.enabled || event->dsp.p[DSP_ROOM]<=0 ||
+        event->orbit<0 || event->orbit>=N_ORBITS) return;
+    pthread_mutex_lock(&voice_lock);
+    event->room_defined=explicit_fields&48u;
+    int regenerate=room_created[event->orbit] && room_samples[event->orbit]!=event->room_sample;
+    if (room_created[event->orbit]) for (int i=0;i<4;i++)
+        if ((explicit_fields&(1u<<i)) &&
+            event->dsp.p[room_fields[i]]!=room_parameters[event->orbit][i]) regenerate=1;
+    if (room_created[event->orbit] &&
+        (((explicit_fields&16) && (!(room_defined[event->orbit]&16) || event->room_speed!=room_parameters[event->orbit][4])) ||
+         ((explicit_fields&32) && (!(room_defined[event->orbit]&32) || event->room_begin!=room_parameters[event->orbit][5])))) regenerate=1;
+    /* The web's equality guards ignore undefined arguments. Once any
+       explicit argument changes, generate() receives the original arguments
+       and its defaults apply to all omitted controls. */
+    if (room_created[event->orbit] && !regenerate) for (int i=0;i<4;i++)
+        if (!(explicit_fields&(1u<<i)))
+            event->dsp.p[room_fields[i]]=room_parameters[event->orbit][i];
+    if (room_created[event->orbit] && !regenerate) {
+        event->room_defined=room_defined[event->orbit];
+        if (!(explicit_fields&16)) event->room_speed=room_parameters[event->orbit][4];
+        if (!(explicit_fields&32)) event->room_begin=room_parameters[event->orbit][5];
+    }
+    event->room_rebuild=!room_created[event->orbit] || regenerate;
+    pthread_mutex_unlock(&voice_lock);
+}
+
+void audio_prepare_room(AudioEvent *event) {
+    if (!event || event->room_prepared) return;
+    if (event->dsp.enabled && event->dsp.p[DSP_ROOM]>0 &&
+        event->orbit>=0 && event->orbit<N_ORBITS) {
+        pthread_mutex_lock(&voice_lock);
+        if (event->room_params_valid) {
+            for (int i=0;i<4;i++) room_parameters[event->orbit][i]=event->dsp.p[room_fields[i]];
+            room_parameters[event->orbit][4]=event->room_speed;
+            room_parameters[event->orbit][5]=event->room_begin;
+            room_samples[event->orbit]=event->room_sample;
+            room_defined[event->orbit]=event->room_defined;
+            room_created[event->orbit]=1;
+        }
+        publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
+        pthread_mutex_unlock(&voice_lock);
+    }
+    event->room_prepared=1;
+}
+
+static void voice_onset(Voice *v) {
+    v->onset_pending=0;
+    for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
+        pattern_scope_generation[i]=v->scope_generation;
+    if (v->onset_room) publish_room(v->orbit,v->onset_ir,0);
+    if (!v->dsp.control.enabled && v->delay_send>0) {
+        if (v->onset_delay_time>=0) orbit_dt[v->orbit]=v->onset_delay_time;
+        if (v->onset_delay_feedback>=0) orbit_fb[v->orbit]=v->onset_delay_feedback;
+    }
+    if (!v->dsp.control.enabled && v->onset_duck_mask && v->onset_duck_depth>0) {
+        for (int o=0;o<N_ORBITS;o++) if (v->onset_duck_mask&(1u<<o)) {
+            duck_depth[o]=fmin(1,v->onset_duck_depth);
+            web_duck[o].enabled=0;
+            duck_atk[o]=fmax(0,v->onset_duck_attack); duck_t[o]=0;
+        }
+    }
+    double cut=v->dsp.control.enabled && v->sampled_source?v->dsp.control.p[DSP_CUT]:0;
+    if (cut>0) for (int i=0;i<MAX_VOICES;i++) {
+        Voice *old=&voices[i];
+        if (old!=v && old->active && old->sampled_source && old->dsp.control.enabled && old->dsp.control.p[DSP_CUT]==cut &&
+            (old->start_time<v->start_time ||
+             (old->start_time==v->start_time && old->onset_serial<v->onset_serial)) && !old->cut_pending) {
+            old->cut_pending=1;
+            old->cut_time=v->start_time;
+        }
+    }
+}
+
+static void dispatch_voice_onsets(void) {
+    dispatch_delays_locked();
+    dispatch_ducks_locked();
+    if (next_voice_onset>audio_time+1e-10) return;
+    int due[MAX_VOICES], count=0;
+    next_voice_onset=HUGE_VAL;
+    for (int i=0;i<MAX_VOICES;i++) {
+        Voice *v=&voices[i];
+        if (!v->active || !v->onset_pending) continue;
+        if (v->start_time>audio_time+1e-10) { next_voice_onset=fmin(next_voice_onset,v->start_time); continue; }
+        int at=count++;
+        while (at>0) {
+            Voice *previous=&voices[due[at-1]];
+            if (previous->start_time<v->start_time ||
+                (previous->start_time==v->start_time && previous->onset_serial<v->onset_serial)) break;
+            due[at]=due[at-1]; at--;
+        }
+        due[at]=i;
+    }
+    for (int i=0;i<count;i++) if (voices[due[i]].active) voice_onset(&voices[due[i]]);
+}
+
 static void trigger_voice(Voice *v, AudioEvent *ev) {
     memset(v, 0, sizeof(Voice));
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
-    for (int i = 0; i < N_PATTERN_SCOPES; i++) if (ev->scope_mask&(1u<<i)) pattern_scope_generation[i] = ev->generation;
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
+    else v->dsp.control.enabled=v->dsp_right.control.enabled=0;
     if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE || ev->stretch_buffer)) dsp_init(&v->dsp_right,&ev->dsp);
     v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
@@ -242,12 +559,12 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         else v->inst = INST_HH;
     }
     v->freq = ev->freq > 0 ? ev->freq : 440.0;
-    v->amp = ev->gain > 0 ? ev->gain : 0.8;
+    v->amp = ev->dsp.enabled ? ev->gain : (ev->gain > 0 ? ev->gain : 0.8);
     v->pan = ev->pan;
     v->has_pan=ev->has_pan;
     v->waveform_gain=ev->waveform_gain>0?ev->waveform_gain:1;
-    v->start_time = audio_time; // trigger now
-    v->note_off_time = audio_time + (ev->duration > 0 ? ev->duration : 0.25);
+    v->start_time = fmax(audio_time,ev->time);
+    v->note_off_time = v->start_time + (ev->duration > 0 ? ev->duration : 0.25);
     v->gate_end = v->note_off_time;
     v->phase = 0;
     v->age = 0;
@@ -273,22 +590,15 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->orbit = ev->orbit;
     if (v->orbit < 0 || v->orbit >= N_ORBITS) v->orbit = 0;
     orbits_ensure();
-    if (ev->dsp.enabled && ev->dsp.p[DSP_ROOM] > 0)
-        atomic_store_explicit(&requested_ir[v->orbit],ev->ir_kernel,memory_order_release);
-    /* Only a voice that is actually sending may retune the orbit delay.
-       A zeroed event must not collapse the time to 0. */
-    if (ev->delay_send > 0.0) {
-        if (ev->delay_time >= 0) orbit_dt[v->orbit] = ev->delay_time;
-        if (ev->delay_fb >= 0) orbit_fb[v->orbit] = ev->delay_fb;
-    }
-    if (ev->duck_mask && ev->duck_depth > 0) {
-        for (int o = 0; o < N_ORBITS; o++) {
-            if ((ev->duck_mask & (1u << o)) == 0) continue;
-            duck_depth[o] = ev->duck_depth > 1 ? 1 : ev->duck_depth;
-            duck_atk[o] = ev->duck_attack > 0 ? ev->duck_attack : 0;
-            duck_t[o] = 0;
-        }
-    }
+    v->onset_serial=++voice_onset_serial;
+    v->sampled_source=ev->smp>=0 || ev->stretch_buffer!=NULL;
+    v->onset_pending=1;
+    v->onset_room=!ev->room_prepared && ev->dsp.enabled && ev->dsp.p[DSP_ROOM]>0;
+    v->onset_ir=ev->ir_kernel;
+    v->onset_delay_time=ev->delay_time; v->onset_delay_feedback=ev->delay_fb;
+    v->onset_duck_mask=ev->duck_mask; v->onset_duck_depth=ev->duck_depth; v->onset_duck_attack=ev->duck_attack;
+    if (v->start_time<=audio_time+1e-10) voice_onset(v);
+    else next_voice_onset=fmin(next_voice_onset,v->start_time);
     v->lfo_tgt = ev->lfo_tgt;
     v->lfo_wave = ev->lfo_wave;
     v->lfo_hz = ev->lfo_hz;
@@ -583,7 +893,20 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit) {
 
 void audio_trigger_event(AudioEvent *ev) {
     if (ev->csound_only || ev->osc_only) return;
-    if (!playing) return; // still trigger? allow
+    if (!playing && !atomic_load(&reference_mode)) return;
+    if (!ev->control_only) audio_register_orbit(ev->orbit);
+    AudioEvent prepared_event;
+    if (!ev->delay_prepared || !ev->room_prepared) {
+        prepared_event=*ev; ev=&prepared_event;
+        if (!audio_prepare_delay(ev)) log_console("delay: invalid event or pending control capacity exceeded");
+        audio_prepare_room(ev);
+    }
+    pthread_mutex_lock(&voice_lock);
+    if (silent_clock) audio_time=audio_time_now();
+    int controls_ready=schedule_duck_locked(ev);
+    pthread_mutex_unlock(&voice_lock);
+    if (!controls_ready) log_console("duck: pending control capacity exceeded");
+    if (ev->control_only) return;
     NativeSynthState *prepared=ev->native_synth?native_synth_state_new(ev->native_synth):NULL;
     NativeSynthState *prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
     if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
@@ -602,11 +925,6 @@ void audio_trigger_event(AudioEvent *ev) {
     }
     if (ev->native_synth && !prepared) { log_console("native synth: state memory budget exceeded"); return; }
     pthread_mutex_lock(&voice_lock);    // find free voice
-    if (ev->dsp.enabled && ev->dsp.p[DSP_CUT] > 0) {
-        for (int i = 0; i < MAX_VOICES; i++)
-            if (voices[i].dsp.control.enabled &&
-                voices[i].dsp.control.p[DSP_CUT] == ev->dsp.p[DSP_CUT]) voices[i].active = 0;
-    }
     int chosen = -1;
     for (int i = 0; i < MAX_VOICES; i++) {
         if (!voices[i].active) { chosen = i; break; }
@@ -698,7 +1016,13 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     static double size[N_ORBITS];
     const int lengths[] = {1116,1188,1277,1356};
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
-    const ConvKernel *kernel = atomic_load_explicit(&requested_ir[orbit],memory_order_acquire);
+    unsigned long long revision=atomic_load(&ir_revision[orbit]);
+    const ConvKernel *kernel=atomic_load(&requested_ir[orbit]);
+    if ((revision&1) || revision!=atomic_load(&ir_revision[orbit])) kernel=convolvers[orbit].kernel;
+    else if (revision!=rendered_ir_revision[orbit]) {
+        convolution_set(&convolvers[orbit],NULL);
+        rendered_ir_revision[orbit]=revision;
+    }
     convolution_set(&convolvers[orbit],kernel);
     if (kernel) {
         double left, right;
@@ -733,22 +1057,42 @@ static void native_reverb(int orbit, VoiceMix *mix) {
 static void orbit_delay(int orbit, VoiceMix *mix) {
     static float dbuf[N_ORBITS][2][ORBIT_DELAY];
     static int dpos[N_ORBITS];
+    static float feedback_quantum[N_ORBITS][2][128];
+    static unsigned feedback_pos[N_ORBITS];
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
-    double b = bpm < 20 ? 120 : bpm;
+    double b = effect_bpm;
     double dt = orbit_dt[orbit] >= 0 ? orbit_dt[orbit] : (0.75 * 60.0 / b);
     double fb = orbit_fb[orbit] >= 0 ? orbit_fb[orbit] : 0.5;
-    if (fb > 0.98) fb = 0.98;
+    double maximum_fb=web_delay_created[orbit]?(float).98:.98;
+    if (fb > maximum_fb) fb = maximum_fb;
     if (fb < 0) fb = 0;
     if (dt > 1.99) dt = 1.99;
-    if (dt < 1.0 / SR) dt = 1.0 / SR;
-    int dl = (int)(dt * SR);
-    if (dl < 1) dl = 1;
+    if (!web_delay_created[orbit] && dt < 1.0 / SR) dt = 1.0 / SR;
+    double frames=web_delay_created[orbit]?(float)((float)dt*(float)SR):dt*SR;
+    int dl = (int)frames;
+    if (dl < (web_delay_created[orbit]?0:1)) dl = web_delay_created[orbit]?0:1;
     if (dl >= ORBIT_DELAY) dl = ORBIT_DELAY - 1;
+    unsigned fp=feedback_pos[orbit];
+    if (web_delay_created[orbit]) {
+        dbuf[orbit][0][dpos[orbit]]=(float)(mix->delay_l+feedback_quantum[orbit][0][fp]);
+        dbuf[orbit][1][dpos[orbit]]=(float)(mix->delay_r+feedback_quantum[orbit][1][fp]);
+    }
     int rp = dpos[orbit] - dl;
     if (rp < 0) rp += ORBIT_DELAY;
     float de_l = dbuf[orbit][0][rp], de_r = dbuf[orbit][1][rp];
-    dbuf[orbit][0][dpos[orbit]] = (float)(mix->delay_l + de_l * fb);
-    dbuf[orbit][1][dpos[orbit]] = (float)(mix->delay_r + de_r * fb);
+    if (web_delay_created[orbit]) {
+        float fraction=(float)(frames-dl);
+        int previous=rp?rp-1:ORBIT_DELAY-1;
+        de_l=de_l*(1-fraction)+dbuf[orbit][0][previous]*fraction;
+        de_r=de_r*(1-fraction)+dbuf[orbit][1][previous]*fraction;
+    }
+    feedback_quantum[orbit][0][fp]=web_delay_created[orbit]?(float)(de_l*fb):0;
+    feedback_quantum[orbit][1][fp]=web_delay_created[orbit]?(float)(de_r*fb):0;
+    feedback_pos[orbit]=(fp+1)&127;
+    if (!web_delay_created[orbit]) {
+        dbuf[orbit][0][dpos[orbit]] = (float)(mix->delay_l + de_l*fb);
+        dbuf[orbit][1][dpos[orbit]] = (float)(mix->delay_r + de_r*fb);
+    }
     if (++dpos[orbit] >= ORBIT_DELAY) dpos[orbit] = 0;
     mix->left += de_l;
     mix->right += de_r;
@@ -787,27 +1131,32 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         double cs_l = 0, cs_r = 0;
         double duck_g[N_ORBITS];
         orbits_ensure();
-        if (playing) {
+        if (playing || atomic_load(&reference_mode)) {
             pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
+            dispatch_voice_onsets();
             for (int v = 0; v < MAX_VOICES; v++) {
                 Voice *V = &voices[v];
                 if (!V->active) {
                     if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
                     continue;
                 }
+                if (V->start_time>audio_time+1e-10) continue;
                 int orbit = V->orbit;
                 if (orbit < 0 || orbit >= N_ORBITS) orbit = 0;
                 VoiceMix *vm = &mixes[orbit];
                 double age = V->age;
+                /* Sample cut fades the source before its downstream effects;
+                   retain the graph until its original envelope/lifetime ends. */
+                double cut_gain=V->cut_pending ? fmax(0,1-(audio_time-V->cut_time)/.01) : 1;
                 if (V->stretch_buffer) {
                     const float *pcm=stretch_pcm(V->stretch_buffer);
                     if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) {
                         V->active=0; stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; continue;
                     }
                     double gate=V->gate_end-V->start_time;
-                    double left=pcm[(size_t)V->stretch_frame*2]*V->amp;
-                    double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp;
+                    double left=pcm[(size_t)V->stretch_frame*2]*V->amp*cut_gain;
+                    double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp*cut_gain;
                     V->env=dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
                     route_voice(V,dsp_process(&V->dsp,left,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
                     V->stretch_frame++; V->smppos+=V->smpstep; V->age+=dt; continue;
@@ -864,6 +1213,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     double left = source_value(V,V->smppos,0), right = source_value(V,V->smppos,1);
                     double transport = V->smpstep*dsp_pitch_multiplier(&V->dsp.control,age,V->gate_end-V->start_time);
+                    g*=cut_gain;
                     double s = left*V->amp*g;
                     if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
                         right *= V->amp*g;
@@ -1151,7 +1501,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         {
             static float dbuf[2][ORBIT_DELAY];
             static int dpos = 0;
-            double b = bpm < 20 ? 120 : bpm;
+            double b = effect_bpm;
             double dt = 0.75 * 60.0 / b;
             if (dt > 1.99) dt = 1.99;
             int dl = (int)(dt * SR);
@@ -1205,6 +1555,12 @@ void audio_init(void) {
 #endif
     midi_init();
     memset(voices, 0, sizeof(voices));
+    pending_duck_count=0; pending_duck_serial=0;
+    pending_delay_count=0; pending_delay_serial=0;
+    memset(web_delay_created,0,sizeof(web_delay_created));
+    memset(room_created,0,sizeof(room_created));
+    atomic_store(&created_orbits,0);
+    memset(web_duck,0,sizeof(web_duck));
     playing = 1;
     silent_clock=!audio_output_start(render_output,audio_block_frames);
     if (silent_clock) silent_clock_origin=now_seconds()-audio_time;

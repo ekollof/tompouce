@@ -7,6 +7,12 @@
 void scheduler_init(void);
 void scheduler_shutdown(void);
 void event_queue_clear(void);
+void event_queue_new_program(double boundary);
+/* Generator-only transaction: pushes are staged until finish. Existing notes
+   keep playing during preparation; finish atomically replaces future events. */
+void event_queue_refresh(double cutoff);
+int event_queue_refresh_finish(int success);
+double event_queue_not_before(void);
 void event_queue_push(AudioEvent *ev);
 int event_queue_depth(void);
 /* Read-only text of the next queued events. limit is clamped 1..48.
@@ -16,6 +22,9 @@ unsigned event_queue_generation(void);
 /* background threads started by init */
 
 void scheduler_start(void);
+/* Stop resets the query clock; already committed notes and tails finish.
+   Starting an already running transport is idempotent. */
+void scheduler_transport_set(int playing);
 void scheduler_stop(void);
 extern volatile int scheduler_running;
 extern double scheduler_start_time;

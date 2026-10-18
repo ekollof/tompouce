@@ -50,4 +50,33 @@ sandbox.setDirty(true);
 sandbox.source('terminal changed while source request was in flight');
 assert.equal(element('code').value, 'pasted edits');
 assert.equal(vm.runInContext('currentSource', sandbox), 'original source');
+async function reply(text,isError=false) {
+  requests.at(-1).resolve({ok:true,json:async()=>({result:{isError,content:[{text}]}})});
+  await new Promise(resolve=>setImmediate(resolve));
+}
+let apply=element('apply').onclick({target:element('apply')});
+assert.equal(requests.at(-1).body.name,'music_get_code');
+await reply('original source');
+assert.equal(requests.at(-1).body.name,'music_set_code');
+assert.equal(requests.at(-1).body.arguments.code,'pasted edits');
+assert.equal(requests.at(-1).body.arguments.autostart,true);
+await reply('Loaded 1 tracks.'); await apply;
+assert.equal(element('dirty').textContent,'Following session');
+// Telemetry may still say playing during a quick Stop/Play. Activation must
+// submit current source regardless of that stale display snapshot.
+element('code').value='pending Play edits'; sandbox.setDirty(true);
+apply=element('play').onclick({target:element('play')});
+await reply('pasted edits');
+assert.equal(requests.at(-1).body.arguments.code,'pending Play edits');
+assert.equal(requests.at(-1).body.arguments.autostart,true);
+await reply('Loaded 1 tracks.'); await apply;
+element('code').value='failed edit'; sandbox.setDirty(true);
+apply=element('evaluate').onclick({target:element('evaluate')});
+await reply('pending Play edits');
+assert.equal(requests.at(-1).body.arguments.code,'failed edit');
+await reply('Evaluation failed; last playable pattern retained.',true); await apply;
+assert.match(element('error').textContent,/Evaluation failed/);
+assert.equal(element('code').value,'failed edit');
+assert.equal(element('dirty').textContent,'Unapplied edits');
+assert.equal(element('evaluate').disabled,false);
 console.log('companion fast polling, independent animation, interpolation and stale/hidden handling ok');

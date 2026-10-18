@@ -97,6 +97,7 @@ try {
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
     { name: 'sine-440', code: `note(69).s('sine').gain(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-fractional-delay', code: `note(69).s('sine').gain(.5).clip(.025).dry(0).delay(1).delaytime(128.5/44100).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: .3, correlation: .99 },
     { name: 'sine-adsr', code: `note(69).s('sine').gain(.5).attack(.02).decay(.1).sustain(.4).release(.2).clip(.25)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-lowpass', code: `note(69).s('sine').gain(.5).lpf(800).lpq(1)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-pan-center', code: `note(69).s('sine').gain(.5).pan(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },

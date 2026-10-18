@@ -2,6 +2,80 @@
 
 ## Current work (2026-10-18)
 
+- [x] Match web slider ref semantics, default resolution and source-value edits;
+      bind parsed source sites rather than counting strings/comments or calls
+      in evaluation order. Retain shared slider identity and failed-eval state.
+- [x] Replace JavaScript whole-cycle lookahead with the pinned Cyclist query
+      windows; preserve fractional phase across tempo and pattern changes.
+      Compare actual native events against the upstream scheduler, and reuse
+      unchanged Csound orchestras across evaluation.
+- [x] Match the current web scheduler's event-onset `.cps()` changes, ordering
+      simultaneous tempo controls first, window requery and zero-tempo resume.
+      Verify Stop preserves committed/sounding notes and resets the next start
+      to cycle zero, and failed evaluation retains the running pattern/clock.
+      The offline snapshot is checked against live strudel.cc without real audio.
+- [x] Match F5/Play activation and stopped evaluation: compile pending editor
+      text, start only on success, retain already committed notes, and verify
+      TUI and companion actions against the live web mirror's toggle/evaluate.
+- [x] Preserve Csound lifetimes and loaded instruments across orchestra changes;
+      match ordered inline loads and URL caching, and compare held PCM/global
+      behavior against actual Csound WASM and deployed Strudel loaders.
+- [ ] Finish performance parity: verify sample-accurate native onsets and shared effect changes against
+      the web output. Maintain the full objective; these remaining lifecycle
+      cases are not proven by event-value/clock gates. Continue owned integration
+      QA and install each final result without changing the running user session.
+- [x] Match local-audio duck target existence at source preparation, including
+      orbit creation before rests/missing sources and retention across Stop/Play.
+- [ ] Match nested duck value coercion and external-output
+      routing against the web; distinguish local audio, Csound, MIDI and OSC.
+- [x] Match finite numeric duck attack/depth coercion for decimal strings,
+      booleans, nulls and singleton nested numeric arrays, with web depth PCM
+      and native ramp checks.
+- [ ] Match invalid/non-finite duck coercions, remaining JavaScript numeric
+      string forms and onset addition semantics, including cancellation when
+      WebAudio rejects a ramp after the callback has reanchored its gain.
+- [x] Match boolean/null onset addition (`true` adds one second; false/null
+      add zero), with actual web PCM and native minimum/return-time checks.
+- [x] Match string/singleton-array onset concatenation and independently
+      accepted/rejected ramp endpoints using the bundled stack-only number
+      formatter/parser, with web PCM and native endpoint/held-gain checks.
+- [ ] Remove or align the 127-byte normalized onset-string limit and verify
+      Unicode whitespace, non-finite/exotic string forms and late callbacks.
+- [x] Preserve cancellation and held gain on invalid/negative duck depth,
+      and retain an accepted downward ramp when invalid/non-finite attack
+      rejects its return. Web PCM and native ramp regressions cover both.
+- [ ] Match timing and visibility of duck automation error reports without
+      logging or allocating from the audio callback.
+- [x] Match duck target property-key coercion for canonical numeric strings,
+      singleton nested arrays, nulls and invalid colon/leading-zero strings.
+- [x] Preserve repeated duck targets and their original order with independent
+      control-only events and per-entry values, verified against web dispatch.
+- [x] Match shared delay automation equality guards at preparation time and keep
+      accepted parameter changes independent of source voices.
+- [x] Match fractional and sub-sample delay taps and the web feedback graph's
+      additional 128-frame cycle using independent browser/native PCM gates.
+- [x] Inherit room size/fade/low-pass/dimension per orbit and activate accepted
+      IRs during preparation. Verify native tail clearing on replacement and
+      exact retained PCM across omitted controls, evaluation and Stop/Play.
+- [x] Verify custom IR speed/offset inheritance and identity changes through
+      JavaScript scheduling and decoded native WAV fixtures.
+- [x] Verify IR slot syntax against the web: use `ir("name").set({i:0})`;
+      colon syntax is a literal sound name and is rejected by both hosts.
+- [ ] Finish generated-IR
+      asynchronous replacement and preparation failures; broaden live
+      delay-automation PCM comparisons.
+- [x] Preserve undefined versus explicit IR speed/offset metadata and reset
+      convolution history on every web-equivalent rebuild, even when the
+      immutable PCM kernel is cached. The deployed reference rebuilds when
+      omitted speed becomes explicit `irspeed(1)` and defaults other omitted
+      controls. Native decoded-WAV regressions verify the reset even when the
+      prepared PCM kernel is reused, and subsequent omission retains the tail.
+- [ ] Match the web voice-pool FIFO/fade policy and verify large backend render
+      bursts and scheduling load without dropping accepted onsets or controls.
+- [ ] Match Csound loader side effects before a later JS failure, failed URL
+      Promise caching and runtime worker diagnostics.
+- [ ] Verify MIDI/controller input, expression and live mapping changes against
+      the actual web REPL rather than inferring behavior from control names.
 - [ ] Remove the historical hand-written C statement/mini parser and legacy
       line dialect after migrating bundled examples, editor helpers and tests.
       The upstream JavaScript Strudel runtime is the supported direction; do

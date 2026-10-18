@@ -10,6 +10,10 @@ int javascript_check(const char *code, char *error, int errorlen, int *line);
 JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int errorlen);
 void javascript_free(JsProgram *program);
 void javascript_retain(JsProgram *program);
+/* Publish controls only after a successful program load. Failed compiles keep
+   the currently playing program's live values and UI bindings intact. */
+void javascript_activate_sliders(JsProgram *program);
+const char *javascript_source(const JsProgram *program);
 /* Owned JSON arrays. Generator queries run outside tracks_lock. */
 cJSON *javascript_query(JsProgram *program, double begin, double end);
 cJSON *javascript_query_cps(JsProgram *program, double begin, double end, double cps);
@@ -19,6 +23,7 @@ void javascript_request_visuals(JsProgram *program, const char *source);
 unsigned javascript_visual_revision(JsProgram *program);
 unsigned javascript_live_scope_mask(JsProgram *program, const char *source, int offset, int kind);
 void javascript_cache_spans(JsProgram *program, const cJSON *haps, double origin, double cycle_seconds);
+void javascript_cache_hap(JsProgram *program, const cJSON *hap, double origin, double cycle_seconds);
 int javascript_play_spans(const JsProgram *program, double now, int *off, int *len, int max);
 int javascript_play_styles(const JsProgram *program, double now, int *off, int *len,
                            uint32_t *color, unsigned *flags, int max);
@@ -35,5 +40,7 @@ int javascript_live_visual_copy(JsProgram *program, unsigned mask, int kind, Vis
                                 double *origin, double *seconds);
 void javascript_warn_control(JsProgram *program, const char *name);
 int javascript_prepare_csound(JsProgram *program, const cJSON *metadata, char *error, size_t size);
+int javascript_prepare_csound_from(JsProgram *program, const cJSON *metadata,
+                                   JsProgram *previous, char *error, size_t size);
 CsoundProgram *javascript_csound(JsProgram *program);
 #endif

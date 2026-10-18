@@ -1,4 +1,5 @@
 #include "scheduler.h"
+#include "slider.h"
 #include "js_audio.h"
 #include "websamp.h"
 #include "track.h"
@@ -360,6 +361,13 @@ static QNode *qhead = NULL;
 static pthread_mutex_t qlock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned qgeneration = 1;
 static int qcount;
+static double qnot_before = -HUGE_VAL;
+static _Thread_local struct {
+    QNode *head;
+    int count, active, failed;
+    unsigned generation;
+    double cutoff;
+} qstaging;
 
 /* note history for the piano roll (consumer writes, UI reads) */
 static NoteHist note_hist[NOTE_HIST_N];
@@ -401,13 +409,79 @@ void event_queue_clear(void) {
     pthread_mutex_lock(&qlock);
     while (qhead) { QNode *n = qhead; qhead = qhead->next; native_synth_release(n->ev.native_synth); stretch_release(n->ev.stretch_buffer); free(n); }
     qcount = 0;
+    qnot_before = -HUGE_VAL;
     if (++qgeneration == 0) qgeneration = 1;
     pthread_mutex_unlock(&qlock);
 }
 
-void event_queue_push(AudioEvent *ev) {
+void event_queue_new_program(double boundary) {
     pthread_mutex_lock(&qlock);
-    if ((ev->generation && ev->generation != qgeneration) || qcount >= 8192) {
+    QNode **link=&qhead;
+    while (*link) {
+        QNode *node=*link;
+        if (node->ev.time>=boundary) {
+            *link=node->next; qcount--;
+            native_synth_release(node->ev.native_synth); stretch_release(node->ev.stretch_buffer); free(node);
+        } else link=&node->next;
+    }
+    qnot_before=-HUGE_VAL;
+    if (++qgeneration==0) qgeneration=1;
+    pthread_mutex_unlock(&qlock);
+}
+
+void event_queue_refresh(double cutoff) {
+    pthread_mutex_lock(&qlock);
+    qstaging.active=1; qstaging.cutoff=cutoff; qstaging.generation=qgeneration;
+    pthread_mutex_unlock(&qlock);
+}
+
+int event_queue_refresh_finish(int success) {
+    if (!qstaging.active) return 0;
+    pthread_mutex_lock(&qlock);
+    int commit=success && !qstaging.failed && qgeneration==qstaging.generation;
+    double cutoff=fmax(qstaging.cutoff,audio_time_now()+.002);
+    QNode **link=&qhead;
+    while (commit && *link) {
+        QNode *node=*link;
+        if (node->ev.time>cutoff) {
+            *link=node->next; qcount--;
+            native_synth_release(node->ev.native_synth);
+            stretch_release(node->ev.stretch_buffer); free(node);
+        } else link=&node->next;
+    }
+    while (qstaging.head) {
+        QNode *node=qstaging.head; qstaging.head=node->next;
+        if (commit && node->ev.time>cutoff && qcount<8192) {
+            *link=node; link=&node->next; node->next=NULL; qcount++;
+        } else {
+            native_synth_release(node->ev.native_synth);
+            stretch_release(node->ev.stretch_buffer); free(node);
+        }
+    }
+    if (commit) qnot_before=cutoff;
+    memset(&qstaging,0,sizeof(qstaging));
+    pthread_mutex_unlock(&qlock);
+    return commit;
+}
+
+double event_queue_not_before(void) {
+    if (qstaging.active) return qstaging.cutoff;
+    pthread_mutex_lock(&qlock); double cutoff=qnot_before;
+    pthread_mutex_unlock(&qlock); return cutoff;
+}
+
+void event_queue_push(AudioEvent *ev) {
+    if (qstaging.active) {
+        if ((ev->generation && ev->generation!=qstaging.generation) || ev->time<=qstaging.cutoff) return;
+        if (qstaging.count>=8192) { qstaging.failed=1; return; }
+        QNode *node=malloc(sizeof(*node)); if (!node) { qstaging.failed=1; return; }
+        node->ev=*ev; native_synth_retain(ev->native_synth); stretch_retain(ev->stretch_buffer);
+        QNode **link=&qstaging.head;
+        while (*link && (*link)->ev.time<=ev->time) link=&(*link)->next;
+        node->next=*link; *link=node; qstaging.count++; return;
+    }
+    pthread_mutex_lock(&qlock);
+    if ((ev->generation && ev->generation != qgeneration) || ev->time<=qnot_before || qcount >= 8192) {
         pthread_mutex_unlock(&qlock); return;
     }
     QNode *node = malloc(sizeof(QNode));
@@ -518,11 +592,32 @@ unsigned event_queue_generation(void) {
 /* consumer thread */
 static pthread_t consumer_tid, generator_tid;
 
+/* Reserve native voice state before the next maximum-size render block.
+   MIDI/OSC and history stay on their due-time path. Native state allocation
+   happens here, outside both the audio callback and the queue lock. */
+static int prepare_queued_audio(double now) {
+    AudioEvent event; int found=0;
+    pthread_mutex_lock(&qlock);
+    for (QNode *node=qhead;node && node->ev.time<=now+.1;node=node->next) {
+        if (!node->ev.generation || node->ev.audio_prepared || node->ev.csound_only || node->ev.osc_only) continue;
+        node->ev.audio_prepared=1; event=node->ev; found=1;
+        native_synth_retain(event.native_synth); stretch_retain(event.stretch_buffer);
+        break;
+    }
+    pthread_mutex_unlock(&qlock);
+    if (found) {
+        audio_trigger_event(&event);
+        native_synth_release(event.native_synth); stretch_release(event.stretch_buffer);
+    }
+    return found;
+}
+
 static void *consumer_thread(void *arg) {
     (void)arg;
     while (scheduler_running) {
         double now = audio_time_now();
         for (;;) {
+            now=audio_time_now();
             pthread_mutex_lock(&qlock);
             QNode *n = qhead;
             if (n && n->ev.time <= now + 0.002) {
@@ -531,17 +626,17 @@ static void *consumer_thread(void *arg) {
                 qcount--;
                 free(n);
                 pthread_mutex_unlock(&qlock);
-                if (ev.osc_only && audio_is_playing() && !osc_output_send(&ev.osc,ev.time-audio_time_now()))
+                if (ev.osc_only && !osc_output_send(&ev.osc,ev.time-audio_time_now()))
                     log_console("OSC: output send failed");
-                audio_trigger_event(&ev);
+                if (!ev.audio_prepared) audio_trigger_event(&ev);
                 native_synth_release(ev.native_synth);
                 stretch_release(ev.stretch_buffer);
-                if (!ev.osc_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
+                if (!ev.control_only && !ev.osc_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
                     int vel = (int)(ev.gain * 127.0);
                     int dur = (int)(ev.duration * 1000.0);
                     midi_note(ev.midi_chan, ev.midi_note, vel, dur);
                 }
-                {
+                if (!ev.control_only) {
                     NoteHist h;
                     h.t0 = ev.time;
                     h.dur = ev.duration > 0 ? ev.duration : 0.25;
@@ -556,6 +651,7 @@ static void *consumer_thread(void *arg) {
                 }
             } else {
                 pthread_mutex_unlock(&qlock);
+                if (prepare_queued_audio(now)) continue;
                 break;
             }
         }
@@ -876,7 +972,7 @@ static void push_n_slice(Track *t, const PatEvent *pe, int index,
 }
 
 static void generate_track_cycle(Track *t, double cycle_start, int cycle_index) {
-    if (t->javascript) { js_audio_schedule(t->javascript,cycle_start,cycle_index,event_queue_generation()); return; }
+    if (t->javascript) return; /* JavaScript uses the short-window scheduler. */
     PatEventList list; patlist_init(&list);
     /* A signal statement has no mini-notation. Sample at each slice start. */
     if (t->sig && !t->pattern) sig_events(t->sig, &list, cycle_index);
@@ -1175,6 +1271,111 @@ int scheduler_editor_play_styles(double now, const char *editor, int *off, int *
     return n;
 }
 
+/* Called only on the generator, between query batches, with tracks_lock held.
+   No in-flight generator queries remain when the future queue is refreshed. */
+static int refresh_live_controls(double now) {
+    unsigned revision=slider_revision(); int changed=0;
+    for (int i=0;i<track_count;i++) if (tracks[i].slider_revision!=revision) changed=1;
+    if (!changed) return 0;
+    /* Csound has already accepted its lookahead score inside the renderer.
+       Replaying those onsets would duplicate voices. Keep that score intact;
+       query-time controls apply when the next unscheduled cycle is prepared. */
+    if (track_count==1 && javascript_csound(tracks[0].javascript)) {
+        tracks[0].slider_revision=revision; return 0;
+    }
+    double cutoff=now+.002, duration=audio_sec_per_cycle();
+    event_queue_refresh(cutoff);
+    for (int i=0;i<track_count;i++) {
+        Track *track=&tracks[i]; double value;
+        if (!track->javascript) {
+            if (slider_info(track->gain_slider,&value,NULL,NULL,NULL)) track->gain=fmax(0,fmin(2,value));
+            if (slider_info(track->lpf_slider,&value,NULL,NULL,NULL)) track->lpf_hz=fmax(0,fmin(18000,value));
+        }
+        /* Requery the current musical cycle, not cycle zero. Due events stay
+           queued; the cutoff rejects already-triggered onsets during refill. */
+        while (track->cycle_index>0 && track->next_cycle>cutoff) {
+            track->next_cycle-=duration; track->cycle_index--;
+        }
+        track->slider_revision=revision;
+    }
+    return 1;
+}
+
+/* tracks_lock held on entry and return. Match web Cyclist/zyklus: 50 ms
+   query windows, a 100 ms driver with 100 ms overlap, 10 ms initial phase and
+   100 ms output latency. Accepted audio/OSC/Csound events
+   are never withdrawn by a control change. External tempo pivots at the next
+   query boundary; event-level tempo pivots at its onset inside that window. */
+static int schedule_live_javascript(double now) {
+    if (track_count!=1 || !tracks[0].javascript) return 0;
+    if (!audio_is_playing()) return 1;
+    Track *track=&tracks[0];
+    if (track->js_seconds<=0) {
+        track->js_seconds=audio_sec_per_cycle();
+        track->js_origin=track->next_cycle-track->cycle_index*track->js_seconds;
+        track->js_cursor=track->cycle_index;
+        track->js_tick=now;
+        track->js_anchor_cycle=track->js_cursor;
+        track->js_anchor_time=track->next_cycle;
+        track->js_phase=track->next_cycle-.1;
+    }
+    double initial_bpm=audio_get_bpm(), seconds=initial_bpm>0?240/initial_bpm:HUGE_VAL;
+    if (seconds!=track->js_seconds) {
+        double boundary=track->js_phase+.1;
+        if (isfinite(seconds)) track->js_origin=boundary-track->js_cursor*seconds;
+        track->js_seconds=seconds;
+        track->js_anchor_cycle=track->js_cursor;
+        track->js_anchor_time=boundary;
+    }
+    track->slider_revision=slider_revision();
+    JsProgram *program=track->javascript;
+    javascript_retain(program);
+    unsigned generation=track->compile_generation;
+    unsigned transport_revision=track->transport_revision;
+    double origin=track->js_origin, begin=track->js_cursor, end=begin;
+    double anchor_cycle=track->js_anchor_cycle, anchor_time=track->js_anchor_time;
+    int event_tempo=0;
+    double phase=track->js_phase;
+    int query=now+1e-9>=track->js_tick;
+    if (query) track->js_tick=now+.1;
+    int audible=track->active && !track->mute;
+    pthread_mutex_unlock(&tracks_lock);
+    if (query && phase<now) {
+        double missed=ceil((now-phase)/.05);
+        begin+=missed*.05/seconds; end=begin; phase+=missed*.05;
+    }
+    while (query && phase<now+.2-1e-9) {
+        pthread_mutex_lock(&tracks_lock);
+        int current=track_count==1 && tracks[0].compile_generation==generation && tracks[0].transport_revision==transport_revision;
+        pthread_mutex_unlock(&tracks_lock);
+        if (!current) break;
+        phase=round(phase*10000)/10000;
+        end=begin+.05/seconds;
+        JsAudioClock clock={.seconds=seconds,.anchor_cycle=anchor_cycle,.anchor_time=anchor_time,.end=end};
+        /* Like Cyclist, an error in one callback must not stop the driver's
+           later windows. Keep any tempo checkpoint already accepted. */
+        if (phase>=now && audible && isfinite(seconds))
+            (void)js_audio_schedule_clock(program,&clock,begin,end,phase+.15,generation);
+        if (clock.seconds!=seconds || clock.anchor_cycle!=anchor_cycle || clock.anchor_time!=anchor_time) event_tempo=1;
+        seconds=clock.seconds; anchor_cycle=clock.anchor_cycle; anchor_time=clock.anchor_time;
+        if (isfinite(seconds)) origin=anchor_time-anchor_cycle*seconds;
+        end=clock.end; begin=end; phase+=.05;
+    }
+    if (isfinite(seconds)) javascript_update_visuals(program,now,origin,seconds);
+    javascript_free(program);
+    pthread_mutex_lock(&tracks_lock);
+    if (track_count==1 && tracks[0].compile_generation==generation && tracks[0].transport_revision==transport_revision) {
+        tracks[0].js_origin=origin; tracks[0].js_seconds=seconds;
+        tracks[0].js_anchor_cycle=anchor_cycle;
+        tracks[0].js_anchor_time=anchor_time; tracks[0].js_phase=phase;
+        if (event_tempo && audio_get_bpm()==initial_bpm) audio_set_bpm(240/seconds);
+        tracks[0].js_cursor=end;
+        tracks[0].cycle_index=tracks[0].js_cursor>=INT_MAX?INT_MAX:tracks[0].js_cursor<=0?0:(int)floor(tracks[0].js_cursor);
+        tracks[0].next_cycle=isfinite(seconds)?origin+tracks[0].cycle_index*seconds:phase+.1;
+    }
+    return 1;
+}
+
 static void *generator_thread(void *arg) {
     (void)arg;
     // align start
@@ -1182,6 +1383,21 @@ static void *generator_thread(void *arg) {
     while (scheduler_running) {
         pthread_mutex_lock(&tracks_lock);
         double now = audio_time_now();
+        if (schedule_live_javascript(now)) {
+            pthread_mutex_unlock(&tracks_lock);
+            if (song_on && song_ntracks>1) {
+                if (song_hold || song_advance_at<=0) song_advance_at=now+audio_sec_per_cycle();
+                if (now>=song_advance_at) { scheduler_song_step(); song_advance_at=now+audio_sec_per_cycle(); }
+            }
+            usleep(5000); continue;
+        }
+        if (!isfinite(audio_sec_per_cycle())) {
+            pthread_mutex_unlock(&tracks_lock); usleep(5000); continue;
+        }
+        unsigned refresh_generation=event_queue_generation();
+        double saved_next[MAX_TRACKS]; int saved_cycle[MAX_TRACKS];
+        for (int i=0;i<track_count;i++) { saved_next[i]=tracks[i].next_cycle; saved_cycle[i]=tracks[i].cycle_index; }
+        int refreshing=refresh_live_controls(now);
         double lookahead = now + 2.0;
         /* song mode: flag advance when audio crosses a cycle boundary.
            (cycle_index can't be used: the 2s lookahead schedules cycles
@@ -1196,31 +1412,6 @@ static void *generator_thread(void *arg) {
                     song_advance_at = now + audio_sec_per_cycle();
                 }
             }
-        }
-        /* Retain the program and release tracks_lock before executing JS or
-           resolving samples. A reload invalidates its queued generation. */
-        if (track_count == 1 && tracks[0].javascript) {
-            Track *t = &tracks[0];
-            JsProgram *program = t->javascript;
-            javascript_retain(program);
-            double starts[16]; int cycles[16], count = 0;
-            double duration = audio_sec_per_cycle();
-            unsigned generation = event_queue_generation();
-            if (t->next_cycle < now-4*duration) t->next_cycle = now;
-            double visual_origin = t->next_cycle-t->cycle_index*duration;
-            while (t->next_cycle <= lookahead && count < 16) {
-                if (t->active && !t->mute) {
-                    starts[count] = t->next_cycle; cycles[count++] = t->cycle_index;
-                }
-                t->next_cycle += duration; t->cycle_index++;
-            }
-            pthread_mutex_unlock(&tracks_lock);
-            for (int i = 0; i < count; i++) js_audio_schedule(program,starts[i],cycles[i],generation);
-            javascript_update_visuals(program,now,visual_origin,duration);
-            javascript_free(program);
-            if (song_adv_pending) { song_adv_pending = 0; scheduler_song_step(); }
-            usleep(5000);
-            continue;
         }
         int any_solo = 0;
         for (int i = 0; i < track_count; i++)
@@ -1247,7 +1438,8 @@ static void *generator_thread(void *arg) {
             }
             /* mute/solo: muted lines stay time-aligned but silent */
             int audible = !t->mute && (!any_solo || t->solo);
-            while (t->next_cycle <= lookahead) {
+            int generated=0;
+            while (t->next_cycle <= lookahead && generated++<128) {
                 double cycle_start = t->next_cycle;
                 int cycle_index = t->cycle_index;
                 // for slow_stride: generate only every Nth cycle
@@ -1257,6 +1449,9 @@ static void *generator_thread(void *arg) {
                 t->next_cycle += audio_sec_per_cycle();
                 t->cycle_index++;
             }
+        }
+        if (refreshing && !event_queue_refresh_finish(1) && event_queue_generation()==refresh_generation) {
+            for (int i=0;i<track_count;i++) { tracks[i].next_cycle=saved_next[i]; tracks[i].cycle_index=saved_cycle[i]; }
         }
         pthread_mutex_unlock(&tracks_lock);
         /* song auto-advance runs here (not in the UI thread) so headless
@@ -1289,6 +1484,27 @@ void scheduler_shutdown(void) {
 }
 void scheduler_start(void) {
     if (!scheduler_running) scheduler_init();
+}
+void scheduler_transport_set(int on) {
+    pthread_mutex_lock(&tracks_lock);
+    int was=audio_is_playing();
+    audio_toggle_play(on);
+    if (!on || !was) {
+        double now=audio_time_now();
+        for (int i=0;i<track_count;i++) if (tracks[i].javascript) {
+            Track *track=&tracks[i];
+            track->transport_revision++;
+            track->js_cursor=track->js_anchor_cycle=0;
+            track->cycle_index=0;
+            track->js_phase=on?round((now+.01)*10000)/10000:0;
+            track->js_anchor_time=track->js_phase+.1;
+            track->js_origin=track->js_anchor_time;
+            track->js_tick=on?now:HUGE_VAL;
+            track->js_seconds=audio_sec_per_cycle();
+            track->next_cycle=on?track->js_origin:0;
+        }
+    }
+    pthread_mutex_unlock(&tracks_lock);
 }
 void scheduler_stop(void) {
     scheduler_shutdown();

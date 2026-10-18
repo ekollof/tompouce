@@ -63,6 +63,8 @@ try {
   await browser.until(`document.querySelector('.cm-content').textContent.includes('gain(0)')`);
   await browser.evaluate(`document.getElementById('bpm').value='136';document.getElementById('tempo').click()`);
   await browser.until(`document.getElementById('health').textContent.includes('bpm=136')`);
+  await browser.evaluate(`document.getElementById('stop').click()`);
+  await browser.until(`document.getElementById('health').textContent.includes('playing=no')`);
   const code=`// Native Kabelsalat · owned silent QA\nnote("c4 e4 g4").K(sine(sFreq).mul(.1).out())\n  .gain(.2).room(.1)`;
   await browser.evaluate(`document.querySelector('.cm-content').focus()`);
   await browser.call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
@@ -71,6 +73,7 @@ try {
   assert.equal((await tool(port,'music_get_code')).trim(),'note(60).gain(0)');
   await browser.evaluate(`document.getElementById('apply').click()`);
   await browser.until(`document.getElementById('dirty').textContent.includes('Following')`);
+  await browser.until(`document.getElementById('health').textContent.includes('playing=yes')`);
   assert.equal((await tool(port,'music_get_code')).trim(),code);
   await browser.until(`document.getElementById('health').textContent.includes('voices=') && !document.getElementById('health').textContent.includes('voices=0/')`);
   await browser.evaluate(`Array.from(document.querySelectorAll('#sound-tabs button')).find(b=>b.textContent.toLowerCase().includes('synths')).click();document.getElementById('sound-query').value='bytebeat';document.getElementById('sound-query').dispatchEvent(new Event('input',{bubbles:true}))`);
@@ -78,8 +81,14 @@ try {
   await browser.screenshot(path.join(artifacts,'desktop.png'),true);
   await browser.evaluate(`document.getElementById('stop').click()`);
   await browser.until(`document.getElementById('health').textContent.includes('playing=no')`);
+  const restartCode='note("c5 e5").s("sine").gain(.1)';
+  await browser.evaluate(`document.querySelector('.cm-content').focus()`);
+  await browser.call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+  await browser.call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:2,windowsVirtualKeyCode:65});
+  await browser.call('Input.insertText',{text:restartCode});
   await browser.evaluate(`document.getElementById('play').click()`);
   await browser.until(`document.getElementById('health').textContent.includes('playing=yes')`);
+  assert.equal((await tool(port,'music_get_code')).trim(),restartCode);
   await browser.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await browser.until(`document.documentElement.clientWidth===390`);
   await browser.screenshot(path.join(artifacts,'mobile.png'),true);

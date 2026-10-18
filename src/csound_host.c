@@ -25,7 +25,7 @@
 #define CS_RING 4096
 #define CS_QUEUE 512
 #define CS_CODE_MAX (2*1024*1024)
-enum { CS_COMPILE = 1, CS_EVENT, CS_RENDER };
+enum { CS_COMPILE = 1, CS_EVENT, CS_RENDER, CS_UPDATE };
 typedef struct { unsigned command, length; } Message;
 typedef struct { int status; char error[1024]; } Reply;
 typedef struct {
@@ -37,12 +37,16 @@ struct CsoundProgram {
     atomic_int stop, active;
     atomic_ulong read_frame, write_frame;
     pthread_mutex_t lock;
+    pthread_mutex_t update_lock;
+    atomic_uint merge_requested, merge_completed;
     pthread_t thread;
-    int socket, started;
+    int socket, update_socket, started;
     pid_t child;
     double origin;
     Pending pending[CS_QUEUE];
     unsigned count;
+    char *loaded_urls[64];
+    unsigned url_count;
     float pcm[CS_RING][2];
 };
 
@@ -69,9 +73,19 @@ static int send_message(int fd, unsigned command, const void *data, size_t size)
     return transfer(fd,&header,sizeof(header),1) && (!size || transfer(fd,(void *)data,size,1));
 }
 
+static int receive_header(int fd, Message *header) {
+    /* Idle sessions may have no local output. Execution timeouts belong to
+       active requests, not to the interval between orchestra evaluations. */
+    struct pollfd ready={fd,POLLIN,0}; int status;
+    do { status=poll(&ready,1,-1); } while (status<0 && errno==EINTR);
+    return status>0 && transfer(fd,header,sizeof(*header),0);
+}
+
+static _Thread_local Reply *worker_reply;
 static void cs_message(CSOUND *engine, int attr, const char *text) {
-    (void)attr;
-    Reply *reply = csoundGetHostData(engine);
+    (void)engine; (void)attr;
+    Reply *reply=worker_reply;
+    if (!reply) return;
     size_t length = strlen(text), used = strlen(reply->error);
     if (length >= sizeof(reply->error)) { snprintf(reply->error,sizeof(reply->error),"%.1000s",text); return; }
     if (used+length >= sizeof(reply->error)) {
@@ -82,7 +96,7 @@ static void cs_message(CSOUND *engine, int attr, const char *text) {
 }
 
 /* Orchestra execution is isolated in a child with no file, network,
-   process-creation or exec syscalls. Only its private IPC fd is usable.
+   process-creation or exec syscalls. Only its private IPC fds are usable.
    The parent also imposes a timeout on compilation and each render block. */
 static int confine_worker(void) {
 #if defined(__x86_64__)
@@ -119,6 +133,32 @@ static int confine_worker(void) {
 #undef ALLOW_SYSCALL
 #endif
 }
+
+typedef struct { CSOUND *engine; atomic_int initialized; } WorkerCompiler;
+static void *compile_worker(void *opaque) {
+    WorkerCompiler *compiler=opaque;
+    Reply reply={0}; worker_reply=&reply;
+    /* This trusted thread is created before confinement. Orchestra code can
+       neither create threads nor obtain file/network access from either one. */
+    if (!confine_worker()) _exit(1);
+    for (;;) {
+        Message header;
+        if (!receive_header(4,&header) ||
+            header.command!=CS_UPDATE || !header.length || header.length>CS_CODE_MAX ||
+            !atomic_load_explicit(&compiler->initialized,memory_order_acquire)) break;
+        char *code=malloc((size_t)header.length+1);
+        if (!code || !transfer(4,code,header.length,0)) { free(code); break; }
+        code[header.length]=0; memset(&reply,0,sizeof(reply));
+#ifdef HAVE_CSOUND7
+        reply.status=csoundCompileOrc(compiler->engine,code,1);
+#else
+        reply.status=csoundCompileOrcAsync(compiler->engine,code);
+#endif
+        free(code);
+        if (!transfer(4,&reply,sizeof(reply),1)) break;
+    }
+    _exit(0);
+}
 #endif
 
 int csound_worker_main(void) {
@@ -126,6 +166,7 @@ int csound_worker_main(void) {
     return 1;
 #else
     Reply reply = {0};
+    worker_reply=&reply;
     struct rlimit memory = {512u*1024u*1024u,512u*1024u*1024u};
     if (setrlimit(RLIMIT_AS,&memory)) return 1;
     if (csoundInitialize(CSOUNDINIT_NO_SIGNAL_HANDLER|CSOUNDINIT_NO_ATEXIT) < 0) return 1;
@@ -145,16 +186,20 @@ int csound_worker_main(void) {
 #define COMPILE_ORC(e,s) csoundCompileOrc((e),(s))
 #define CHANNELS(e) csoundGetNchnls(e)
 #endif
-    if (csoundSetOption(engine,"-n") || csoundSetOption(engine,"-d") || csoundSetOption(engine,"-m0")) return 1;
-    /* Retain only the private transport after trusted plugin initialization. */
+    if (csoundSetOption(engine,"-n") || csoundSetOption(engine,"-d") ||
+        csoundSetOption(engine,"-m0") || csoundSetOption(engine,"--sample-accurate")) return 1;
+    WorkerCompiler compiler={.engine=engine}; atomic_init(&compiler.initialized,0);
+    pthread_t compiler_thread;
+    if (pthread_create(&compiler_thread,NULL,compile_worker,&compiler)) return 1;
+    /* Retain only the two private transports after trusted initialization. */
     close(0); close(1); close(2);
-    if (close_range(4,~0u,0)) return 1;
+    if (close_range(5,~0u,0)) return 1;
     if (clearenv()) return 1;
     if (!confine_worker()) return 1;
     int initialized = 0;
     for (;;) {
         Message header;
-        if (!transfer(3,&header,sizeof(header),0) || header.length > CS_CODE_MAX) break;
+        if (!receive_header(3,&header) || header.length > CS_CODE_MAX) break;
         char *data = NULL;
         if (header.length) {
             data = malloc((size_t)header.length+1);
@@ -176,6 +221,7 @@ int csound_worker_main(void) {
             if (!reply.status && (csoundGetKsmps(engine) != CS_BLOCK || CHANNELS(engine) != 2 || csoundGetSr(engine) != SR))
                 reply.status = -1;
             initialized = !reply.status;
+            atomic_store_explicit(&compiler.initialized,initialized,memory_order_release);
             if (!transfer(3,&reply,sizeof(reply),1)) { free(data); break; }
         } else if (header.command == CS_EVENT && data && initialized) {
 #ifdef HAVE_CSOUND7
@@ -185,7 +231,9 @@ int csound_worker_main(void) {
 #endif
         } else if (header.command == CS_RENDER && !data && initialized) {
             float output[CS_BLOCK][2] = {{0}};
-            if (!csoundPerformKsmps(engine)) {
+            int performed=csoundPerformKsmps(engine);
+            if (csoundGetKsmps(engine)!=CS_BLOCK || CHANNELS(engine)!=2 || csoundGetSr(engine)!=SR) { free(data); break; }
+            if (!performed) {
 #ifdef HAVE_CSOUND7
                 const cs_float *pcm = csoundGetSpout(engine);
 #else
@@ -209,7 +257,10 @@ static void *render_worker(void *opaque) {
     unsigned long frame = 0;
     while (!atomic_load(&program->stop)) {
         unsigned long read_frame = atomic_load_explicit(&program->read_frame,memory_order_acquire);
-        if (!atomic_load_explicit(&program->active,memory_order_acquire) || frame >= read_frame+512) {
+        unsigned merge=atomic_load_explicit(&program->merge_requested,memory_order_acquire);
+        int fence=merge!=atomic_load_explicit(&program->merge_completed,memory_order_relaxed);
+        if ((!fence && (!atomic_load_explicit(&program->active,memory_order_acquire) || frame >= read_frame+512)) ||
+            frame+CS_BLOCK>read_frame+CS_RING) {
             struct timespec pause = {0,1000000}; nanosleep(&pause,NULL); continue;
         }
         Pending pending[CS_QUEUE];
@@ -233,6 +284,7 @@ static void *render_worker(void *opaque) {
         }
         frame += CS_BLOCK;
         atomic_store_explicit(&program->write_frame,frame,memory_order_release);
+        if (fence) atomic_store_explicit(&program->merge_completed,merge,memory_order_release);
     }
     return NULL;
 failed:
@@ -240,6 +292,55 @@ failed:
     log_console("Csound: renderer stopped (error or execution timeout)");
     atomic_store(&program->stop,1);
     return NULL;
+}
+
+typedef struct { char *code; size_t used; char *urls[16]; unsigned count; } OrchestraLoads;
+static void finish_loads(CsoundProgram *program, OrchestraLoads *loads, int success) {
+    for (unsigned i=0;i<loads->count;i++) {
+        if (success) program->loaded_urls[program->url_count++]=loads->urls[i];
+        else free(loads->urls[i]);
+    }
+    free(loads->code);
+}
+static int prepare_loads(CsoundProgram *program, const cJSON *items, OrchestraLoads *loads, char *error, size_t size) {
+    memset(loads,0,sizeof(*loads));
+    if (!cJSON_IsArray(items) || cJSON_GetArraySize(items)>16) return 0;
+    loads->code=calloc(CS_CODE_MAX+1,1);
+    if (!loads->code) return 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item,items) {
+        const cJSON *inline_code=cJSON_GetObjectItemCaseSensitive(item,"code");
+        const cJSON *url=cJSON_GetObjectItemCaseSensitive(item,"url");
+        if (cJSON_IsString(inline_code) && !inline_code->valuestring[0]) continue;
+        int remote=!cJSON_IsString(inline_code) && cJSON_IsString(url);
+        char resolved[480];
+        if (remote) {
+            if (!websamp_resolve("",url->valuestring,resolved,sizeof(resolved))) {
+                snprintf(error,size,"Csound: invalid orchestra URL"); goto failed;
+            }
+            int cached=0;
+            for (unsigned i=0;i<program->url_count;i++) if (!strcmp(program->loaded_urls[i],resolved)) cached=1;
+            for (unsigned i=0;i<loads->count;i++) if (!strcmp(loads->urls[i],resolved)) cached=1;
+            if (cached) continue;
+            if (program->url_count+loads->count>=64) {
+                snprintf(error,size,"Csound: orchestra URL cache limit exceeded"); goto failed;
+            }
+            char *key=strdup_safe(resolved);
+            if (!key) goto failed;
+            loads->urls[loads->count++]=key;
+        }
+        char *downloaded=remote?websamp_fetch_text(resolved):NULL;
+        const char *text=cJSON_IsString(inline_code)?inline_code->valuestring:downloaded;
+        if (!text || strlen(text)+1>CS_CODE_MAX-loads->used) {
+            snprintf(error,size,"Csound: orchestra fetch failed or source exceeds limit"); free(downloaded); goto failed;
+        }
+        size_t length=strlen(text);
+        memcpy(loads->code+loads->used,text,length); loads->used+=length;
+        loads->code[loads->used++]='\n'; free(downloaded);
+    }
+    return 1;
+failed:
+    finish_loads(program,loads,0); loads->code=NULL; return 0;
 }
 #endif
 
@@ -251,60 +352,91 @@ CsoundProgram *csound_program_create(const cJSON *loads, char *error, size_t siz
 #else
     if (error && size) snprintf(error,size,"Csound: unable to initialize native renderer");
     if (!cJSON_IsArray(loads) || cJSON_GetArraySize(loads) > 16) return NULL;
-    char *code = calloc(CS_CODE_MAX+1,1);
-    if (!code) return NULL;
-    size_t used = 0;
-    const cJSON *load;
-    cJSON_ArrayForEach(load,loads) {
-        const cJSON *inline_code = cJSON_GetObjectItemCaseSensitive(load,"code");
-        const cJSON *url = cJSON_GetObjectItemCaseSensitive(load,"url");
-        char *downloaded = cJSON_IsString(url) ? websamp_fetch_text(url->valuestring) : NULL;
-        const char *text = cJSON_IsString(inline_code) ? inline_code->valuestring : downloaded;
-        if (!text || strlen(text)+1 > CS_CODE_MAX-used) {
-            snprintf(error,size,"Csound: orchestra fetch failed or source exceeds limit"); free(downloaded); free(code); return NULL;
-        }
-        size_t length = strlen(text);
-        memcpy(code+used,text,length); used += length; code[used++] = '\n';
-        free(downloaded);
-    }
-    if (!used) code[used++] = '\n';
     CsoundProgram *program = calloc(1,sizeof(*program));
-    if (!program) { free(code); return NULL; }
-    program->socket = -1; program->child = -1;
+    if (!program) return NULL;
+    program->socket = program->update_socket = -1; program->child = -1;
     atomic_init(&program->refs,1); atomic_init(&program->stop,0); atomic_init(&program->active,0);
     atomic_init(&program->read_frame,0); atomic_init(&program->write_frame,0);
-    if (pthread_mutex_init(&program->lock,NULL)) { free(code); free(program); return NULL; }
-    int sockets[2];
+    atomic_init(&program->merge_requested,0); atomic_init(&program->merge_completed,0);
+    if (pthread_mutex_init(&program->lock,NULL)) { free(program); return NULL; }
+    if (pthread_mutex_init(&program->update_lock,NULL)) { pthread_mutex_destroy(&program->lock); free(program); return NULL; }
+    OrchestraLoads batch;
+    if (!prepare_loads(program,loads,&batch,error,size)) { csound_program_free(program); return NULL; }
+    if (!batch.used) batch.code[batch.used++]='\n';
+    int sockets[2], updates[2];
     if (socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,sockets)) goto failed;
+    if (socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,updates)) { close(sockets[0]); close(sockets[1]); goto failed; }
+    program->socket=sockets[0]; program->update_socket=updates[0];
     char executable[4096];
     ssize_t length = readlink("/proc/self/exe",executable,sizeof(executable)-1);
-    if (length <= 0) { close(sockets[0]); close(sockets[1]); goto failed; }
+    if (length <= 0) { close(sockets[1]); close(updates[1]); goto failed; }
     executable[length] = 0;
     posix_spawn_file_actions_t actions;
-    if (posix_spawn_file_actions_init(&actions)) { close(sockets[0]); close(sockets[1]); goto failed; }
+    if (posix_spawn_file_actions_init(&actions)) { close(sockets[1]); close(updates[1]); goto failed; }
     int action_error = posix_spawn_file_actions_adddup2(&actions,sockets[1],3);
+    if (!action_error) action_error = posix_spawn_file_actions_adddup2(&actions,updates[1],4);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,0,"/dev/null",O_RDONLY,0);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,1,"/dev/null",O_WRONLY,0);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,2,"/dev/null",O_WRONLY,0);
-    if (!action_error && sockets[0] != 3) action_error = posix_spawn_file_actions_addclose(&actions,sockets[0]);
-    if (!action_error && sockets[1] != 3) action_error = posix_spawn_file_actions_addclose(&actions,sockets[1]);
+    int inherited[]={sockets[0],sockets[1],updates[0],updates[1]};
+    for (int i=0;i<4 && !action_error;i++) if (inherited[i]>4)
+        action_error=posix_spawn_file_actions_addclose(&actions,inherited[i]);
     char *args[] = {executable,"--csound-worker",NULL};
     extern char **environ;
     int spawned = action_error ? action_error : posix_spawn(&program->child,executable,&actions,NULL,args,environ);
     posix_spawn_file_actions_destroy(&actions);
-    close(sockets[1]);
-    if (spawned) { close(sockets[0]); goto failed; }
-    program->socket = sockets[0];
+    close(sockets[1]); close(updates[1]);
+    if (spawned) goto failed;
     Reply reply = {0};
-    if (!send_message(program->socket,CS_COMPILE,code,used) || !transfer(program->socket,&reply,sizeof(reply),0)) {
+    if (!send_message(program->socket,CS_COMPILE,batch.code,batch.used) || !transfer(program->socket,&reply,sizeof(reply),0)) {
         snprintf(error,size,"Csound: compilation failed or exceeded execution budget"); goto failed;
     }
     if (reply.status) { snprintf(error,size,"Csound: %.1000s",reply.error[0] ? reply.error : "orchestra compilation failed"); goto failed; }
     if (pthread_create(&program->thread,NULL,render_worker,program)) goto failed;
     program->started = 1;
-    free(code); return program;
+    finish_loads(program,&batch,1); return program;
 failed:
-    free(code); csound_program_free(program); return NULL;
+    finish_loads(program,&batch,0); csound_program_free(program); return NULL;
+#endif
+}
+
+CsoundUpdateResult csound_program_update(CsoundProgram *program, const cJSON *loads, char *error, size_t size) {
+#ifndef HAVE_CSOUND
+    (void)program; (void)loads; (void)error; (void)size; return 0;
+#else
+    if (!program || atomic_load(&program->stop)) return 0;
+    pthread_mutex_lock(&program->update_lock);
+    OrchestraLoads batch;
+    int ok=prepare_loads(program,loads,&batch,error,size);
+    if (!ok) { pthread_mutex_unlock(&program->update_lock); return 0; }
+    int rejected=0;
+    if (batch.used) {
+        unsigned long read=atomic_load_explicit(&program->read_frame,memory_order_acquire);
+        unsigned long written=atomic_load_explicit(&program->write_frame,memory_order_acquire);
+        Reply reply={0};
+        if (written>read+CS_RING-CS_BLOCK*2) {
+            snprintf(error,size,"Csound: renderer must advance before another orchestra update"); ok=0;
+        } else if (!send_message(program->update_socket,CS_UPDATE,batch.code,batch.used) ||
+                   !transfer(program->update_socket,&reply,sizeof(reply),0)) {
+            snprintf(error,size,"Csound: orchestra update failed or exceeded execution budget"); ok=0;
+        } else if (reply.status) {
+            snprintf(error,size,"Csound: %.1000s",reply.error[0]?reply.error:"orchestra compilation failed"); rejected=1;
+        } else {
+            unsigned merge=atomic_fetch_add_explicit(&program->merge_requested,1,memory_order_release)+1;
+            struct timespec start,now; clock_gettime(CLOCK_MONOTONIC,&start);
+            while (atomic_load_explicit(&program->merge_completed,memory_order_acquire)!=merge && !atomic_load(&program->stop)) {
+                struct timespec pause={0,1000000}; nanosleep(&pause,NULL);
+                clock_gettime(CLOCK_MONOTONIC,&now);
+                if (now.tv_sec-start.tv_sec+(now.tv_nsec-start.tv_nsec)/1e9>3) break;
+            }
+            if (atomic_load_explicit(&program->merge_completed,memory_order_acquire)!=merge) {
+                snprintf(error,size,"Csound: orchestra merge failed or exceeded execution budget"); ok=0;
+            }
+        }
+    }
+    finish_loads(program,&batch,ok);
+    pthread_mutex_unlock(&program->update_lock);
+    return !ok?CSOUND_UPDATE_FAILED:rejected?CSOUND_UPDATE_REJECTED:CSOUND_UPDATE_OK;
 #endif
 }
 
@@ -317,8 +449,10 @@ void csound_program_free(CsoundProgram *program) {
     if (program->child > 0) kill(program->child,SIGKILL);
     if (program->started) pthread_join(program->thread,NULL);
     if (program->socket >= 0) close(program->socket);
+    if (program->update_socket >= 0) close(program->update_socket);
     if (program->child > 0) { while (waitpid(program->child,NULL,0) < 0 && errno == EINTR) {} }
-    pthread_mutex_destroy(&program->lock); free(program);
+    for (unsigned i=0;i<program->url_count;i++) free(program->loaded_urls[i]);
+    pthread_mutex_destroy(&program->update_lock); pthread_mutex_destroy(&program->lock); free(program);
 }
 void csound_program_activate(CsoundProgram *program, double origin) {
     if (!program) return;

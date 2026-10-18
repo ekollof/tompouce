@@ -22,6 +22,14 @@ typedef struct Voice {
     int has_pan;
     double waveform_gain;
     double start_time;
+    unsigned long long onset_serial;
+    int onset_pending, onset_room;
+    int sampled_source, cut_pending;
+    double cut_time;
+    const ConvKernel *onset_ir;
+    double onset_delay_time, onset_delay_feedback;
+    unsigned onset_duck_mask;
+    double onset_duck_depth, onset_duck_attack;
     double note_off_time;
     double env;        // current env level
     int released;
@@ -86,6 +94,11 @@ double audio_cycle_beats(void);
 
 /* trigger a voice from an event; time is event time (may be <=now, trigger immediately) */
 void audio_trigger_event(AudioEvent *ev);
+int audio_prepare_delay(AudioEvent *ev);
+void audio_prepare_room(AudioEvent *ev);
+unsigned audio_register_orbit(int orbit);
+/* Bits 0..5 specify explicit size/fade/low-pass/dimension/speed/offset controls. */
+void audio_inherit_room(AudioEvent *ev, unsigned explicit_fields);
 
 /* Read-only text snapshot for music_debug. limit is rows per section (clamped 1..48).
    Returns bytes written, excluding the NUL, or -1. No paths or sample URLs. */

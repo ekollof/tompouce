@@ -2,7 +2,8 @@
 #define CONVOLUTION_H
 #define CONV_BLOCK 128
 #define CONV_FFT 256
-#define CONV_PARTS 1024
+/* Include the web's default two-second decay plus its 50% IR tail. */
+#define CONV_PARTS 1088
 typedef struct { float re, im; } ConvComplex;
 typedef struct ConvKernel {
     float head[2][CONV_BLOCK];

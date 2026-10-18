@@ -11,6 +11,9 @@ typedef struct Track {
     JsProgram *javascript;
     int visual_requests;
     unsigned compile_generation;
+    unsigned slider_revision;
+    unsigned transport_revision;
+    double js_origin, js_seconds, js_cursor, js_tick, js_anchor_cycle, js_anchor_time, js_phase;
     char keyword[16];
     Node *pattern;
     int pat_off;     /* byte offset of the pattern text in current_code, -1 if none */
@@ -24,6 +27,7 @@ typedef struct Track {
     int slow_stride;
     int rev;
     double gain;
+    int gain_slider, lpf_slider; /* legacy direct-control bindings, -1 if absent */
     int inst;
     int wt; // wavetable index when inst == INST_WT, else -1
     char bankfrag[64]; // unresolved bank name from | bank

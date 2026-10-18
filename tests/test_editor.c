@@ -1,7 +1,38 @@
 /* Exercise editor transactions without initializing a terminal or audio. */
+#define scheduler_start editor_test_scheduler_start
 #include "../src/tui.c"
+#undef scheduler_start
 #include <assert.h>
 #include <stdlib.h>
+
+static int scheduler_starts;
+void editor_test_scheduler_start(void) { scheduler_starts++; }
+
+static void test_performance_activation(void) {
+    scheduler_transport_set(0); event_queue_clear();
+    assert(track_load_from_code("note(60).gain(slider(.2))"));
+    assert(replace_code_with("note(72).gain(slider(.7))"));
+    int starts=scheduler_starts;
+    do_perform();
+    assert(audio_is_playing() && scheduler_starts==starts+1);
+    assert(strstr(current_code,"note(72)") && strstr(current_code,"slider(.7)"));
+    JsProgram *program=tracks[0].javascript;
+    tracks[0].js_cursor=.37;
+    assert(replace_code_with("note(76).gain(slider(.8))"));
+    do_perform();
+    assert(audio_is_playing() && tracks[0].javascript!=program && tracks[0].js_cursor==.37);
+    scheduler_transport_set(0);
+    program=tracks[0].javascript;
+    unsigned generation=event_queue_generation();
+    starts=scheduler_starts;
+    assert(replace_code_with("note(99); throw Error('bad performance edit')"));
+    do_perform();
+    assert(!audio_is_playing() && scheduler_starts==starts);
+    assert(tracks[0].javascript==program && event_queue_generation()==generation);
+    assert(strstr(status_msg,"Evaluation failed"));
+    assert(replace_code_with("note(60).gain(0)"));
+    assert(do_evaluate() && !audio_is_playing()); /* Document loading stays separate. */
+}
 
 static void vi_setup(const char *text) {
     assert(replace_code_with(text));
@@ -18,6 +49,58 @@ static void vi_expect(const char *expected) {
     if (strlen(flat)!=n+1 || memcmp(flat,expected,n) || flat[n]!='\n')
         fprintf(stderr,"vi buffer: wanted [%s], got [%s]\n",expected,flat);
     assert(strlen(flat)==n+1 && !memcmp(flat,expected,n) && flat[n]=='\n'); free(flat);
+}
+
+static void test_incomplete_slider_source(void) {
+    const char text[]="s(\"sawtooth\").lpf(200).lpenv(slider(2.28,0,8))";
+    assert(track_load_from_code("note(60).gain(0)"));
+    char prefix[sizeof(text)];
+    for (size_t length=0;length<sizeof(text);length++) {
+        memcpy(prefix,text,length); prefix[length]=0;
+        assert(replace_code_with(prefix));
+        slider_refresh_sites();
+        assert(slider_sites_count==0);
+    }
+    assert(track_load_from_code(text)); assert(replace_code_with(text));
+    slider_refresh_sites(); assert(slider_sites_count==1);
+    const char *partial[]={"slider()","slider(","slider(/* pending */)",
+        "slider(2,)","slider(-)","slider(,0,8)","slider?.()"};
+    for (size_t i=0;i<sizeof(partial)/sizeof(partial[0]);i++) {
+        assert(replace_code_with(partial[i]));
+        slider_refresh_sites();
+        char *actual=editor_flatten(); assert(actual);
+        assert(!strncmp(actual,partial[i],strlen(partial[i]))); free(actual);
+    }
+}
+
+static void test_slider_source(void) {
+    const char *text="// slider(.9) é\nconst label='slider(.8)';\nconst first=()=>slider(.2); const second=slider(.7);\nnote(60).gain(first()).pan(second)";
+    assert(track_load_from_code(text));
+    assert(replace_code_with(text));
+    slider_refresh_sites();
+    assert(slider_count()==2 && slider_sites_count==2);
+    /* Evaluation order is second, then first. Source order must not bind them. */
+    assert(slider_on_line(0,0)==-1 && slider_on_line(1,0)==-1);
+    int first=slider_on_line(2,20), second=slider_on_line(2,(int)(strstr(code_lines[2],"slider(.7)")-code_lines[2]));
+    assert(first==1 && second==0);
+    assert(slider_set(first,.4) && slider_write_value(first));
+    char *updated=editor_flatten(); assert(updated);
+    assert(strstr(updated,"first=()=>slider(0.4)") && strstr(updated,"second=slider(.7)"));
+    free(updated);
+    /* New, unevaluated controls may not hijack an existing live binding. */
+    assert(editor_replace(0,0,"note(99).gain(slider(.1));\n"));
+    assert(slider_on_line(0,0)==-1);
+    first=slider_on_line(3,20); assert(first==1);
+    assert(slider_set(first,.6) && slider_write_value(first));
+    updated=editor_flatten(); assert(updated);
+    assert(strstr(updated,"slider(.1)") && strstr(updated,"first=()=>slider(0.6)"));
+    free(updated);
+    unsigned generation=tracks[0].compile_generation;
+    assert(generation && slider_source_offset(first)>0);
+    assert(track_load_from_code("const get=()=>slider(.3); stack(note(60).gain(get()),note(64).gain(get()))"));
+    assert(slider_count()==1); /* One source site, shared by both calls. */
+    assert(replace_code_with("note(60).gain(0)"));
+    assert(track_load_from_code("note(60).gain(0)"));
 }
 static void test_vi_motions(void) {
     vi_setup("one.foo  two\n  three four");
@@ -458,6 +541,9 @@ int main(void) {
     test_completion();
     test_commands();
     test_tutor_copy();
+    test_performance_activation();
+    test_slider_source();
+    test_incomplete_slider_source();
     puts("editor, vi motions and inline braille layout ok");
     return 0;
 }

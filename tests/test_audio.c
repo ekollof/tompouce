@@ -33,6 +33,9 @@ static int sample_fixture(void) {
 static Voice *start_sample(AudioEvent *event) {
     for (int i=0;i<MAX_VOICES;i++) stretch_release(voices[i].stretch_buffer);
     memset(voices, 0, sizeof(voices));
+    /* These source/DSP checks render from onset; timestamp waiting is covered
+       separately by the live scheduler/callback harness. */
+    audio_time=fmax(audio_time,event->time);
     audio_trigger_event(event);
     assert(voices[0].active);
     return &voices[0];
@@ -363,8 +366,18 @@ int main(void) {
     AudioEvent routed;
     assert(js_audio_event(bus,0,2,&routed));
     assert(routed.orbit == 3 && routed.delay_send == .4);
-    assert(routed.duck_mask == ((1u<<1)|(1u<<5)));
+    assert(routed.duck_mask == 0); /* Web target keys do not expand colon lists. */
     assert(fabs(routed.duck_attack-.25) < 1e-9 && fabs(routed.duck_depth-.5) < 1e-9);
+    cJSON *array_bus=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"duckorbit\":[1,2],\"duckonset\":[0.02,0.04],\"duckattack\":[0.1,0.2],\"duckdepth\":[0.25,1]}}");
+    AudioEvent array_event; assert(array_bus && js_audio_event(array_bus,0,2,&array_event));
+    assert(array_event.duck_values && array_event.duck_mask==((1u<<1)|(1u<<2)));
+    assert(array_event.ducks[1].onset==.02 && array_event.ducks[1].attack==.1 && array_event.ducks[1].depth==.25);
+    assert(array_event.ducks[2].onset==.04 && array_event.ducks[2].attack==.2 && array_event.ducks[2].depth==1);
+    cJSON_Delete(array_bus);
+    cJSON *clip_zero=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"clip\":0,\"gain\":0,\"duckorbit\":2}}");
+    assert(clip_zero && js_audio_event(clip_zero,0,2,&array_event));
+    assert(array_event.duration==2 && array_event.gain==0 && array_event.duck_mask==(1u<<2));
+    cJSON_Delete(clip_zero);
     cJSON_Delete(bus);
 
     memset(voices, 0, sizeof(voices));

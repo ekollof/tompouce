@@ -90,6 +90,15 @@ static void test_filter_envelopes(void) {
 }
 
 int main(void) {
+    /* Public Superdough .room(1) supplies no duration override: the first
+       shared room uses generate()'s two-second default. */
+    cJSON *room_defaults=cJSON_Parse("{\"room\":1}"); assert(room_defaults);
+    DspParams room_params; dsp_params_read(&room_params,room_defaults);
+    assert(room_params.p[DSP_SIZE]==2 && room_params.p[DSP_ROOMFADE]==.1);
+    assert(room_params.p[DSP_ROOMLP]==15000 && room_params.p[DSP_ROOMDIM]==1000);
+    assert(convolution_prepare_reverb(room_params.p[DSP_SIZE],
+        room_params.p[DSP_ROOMFADE],room_params.p[DSP_ROOMLP],room_params.p[DSP_ROOMDIM]));
+    cJSON_Delete(room_defaults);
     test_standalone_file_event();
     double alias_naive = 0, alias_filtered = 0;
     for (int i = 0; i < 256; i++) {
@@ -158,7 +167,7 @@ int main(void) {
     assert(event.dsp.p[DSP_FMBASE] == 2 && event.dsp.p[DSP_FMBASE+1] == 1.5);
     cJSON_Delete(hap);
     hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"gain\":0}}");
-    assert(!js_audio_event(hap,0,2,&event));
+    assert(js_audio_event(hap,0,2,&event) && event.gain==0 && event.dsp.enabled);
     cJSON_Delete(hap);
     assert(!js_audio_event(NULL,0,2,&event));
 

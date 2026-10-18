@@ -53,7 +53,7 @@ def gm_supported():
     return GM_SUPPORTED
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     if name.startswith('GM synth') and not gm_supported():
@@ -233,11 +233,38 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                         assert b'\x1b_Ga=d,d=I,' in output[start:], (name, 'scroll left images behind')
             if vi:
                 assert b"VI:NORMAL" in re.sub(rb'\x1b\[[0-9;]*m', b'', output), (name, "vi startup config ignored")
+            if live_slider:
+                os.write(master,b'\x1bOS'); drain(.15)
+                match=re.search(rb'gen=(\d+)',screen_text(output)); assert match, screen_text(output)
+                slider_generation=match[1]
+                os.write(master,b'\x1bOS'); drain(.1)
             if keys:
                 terminal_keys(keys)
             drain(.3)
+            if transport is not None:
+                text=screen_text(output)
+                assert (b' PLAY ' if transport else b' STOP ') in text, (name,'transport state',text)
+            if source_state is not None:
+                text=screen_text(output)
+                assert b'source='+source_state in text, (name,'source state',text)
+            if live_slider:
+                if observed is not None:
+                    assert observed in screen_text(output), (name,'live value did not change',screen_text(output))
+                    observed=None
+                os.write(master,b'\x1bOS'); drain(.15)
+                text=screen_text(output)
+                match=re.search(rb'gen=(\d+)',text)
+                assert match and match[1]==slider_generation, (name,'slider recompiled/restarted the pattern',text)
+                if 'dirty' in name:
+                    assert b'source=pending F5' in text, (name,'slider applied unrelated edits',text)
+                os.write(master,b'\x1bOS'); drain(.1)
             if graphics == 'live':
-                assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels')
+                # Generator-side attachment and the first graphics frame are
+                # asynchronous; wait for the frame instead of a fixed sleep.
+                deadline=time.monotonic()+2
+                while b'\x1b_Ga=T,t=d,f=32,' not in output and time.monotonic()<deadline:
+                    drain(.05)
+                assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels',screen_text(output)[-6000:])
                 assert b'i=1414483201,p=1' in output, (name, 'live view did not place Kitty image')
             if graphics == 'braille' or name == 'Kitty hide inline cleanup':
                 assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'hidden images survived until exit')
@@ -404,8 +431,15 @@ check("pixel mouse selection", "one\ntwo\nthree",
       b"\x1b[<0;7;3M\x1b[<32;10;4M\x1b[<0;10;4m\x18", "\nthree", mouse_pixels=True)
 check("pixel mouse wheel", "zero\none\ntwo\nthree\nfour", b"\x1b[<65;10;5MX",
       "zero\none\ntwo\nXthree\nfour", mouse_pixels=True)
+check("slider incomplete call typing", '',
+      b's("sawtooth").lpf(200).lpenv(slider(', 's("sawtooth").lpf(200).lpenv(slider(')
+check("slider empty call typing", '',
+      b's("sawtooth").lpf(200).lpenv(slider())', 's("sawtooth").lpf(200).lpenv(slider())')
+check("slider expression typing", '',
+      b's("sawtooth").lpf(200).lpenv(slider(2.28,0,8))', 's("sawtooth").lpf(200).lpenv(slider(2.28,0,8))')
+
 check("pixel mouse slider", 's("hh").gain(slider(.5)).gain(0)',
-      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5)).gain(0)',
+      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(1)).gain(0)',
       observed=b"slider 1 = 1", mouse_pixels=True)
 check("pixel mouse pane focus", "one", b"\x1b[<0;90;4M\x1b[<0;90;4mX\x1b[<0;7;3MY", "Yone", mouse_pixels=True)
 check("mouse shift selection", "abcdef",
@@ -418,7 +452,36 @@ check("mouse selection", "one\ntwo\nthree",
       b"\x1b[<0;7;3M\x1b[<32;10;4M\x1b[<0;10;4m\x18", "\nthree")
 check("pane focus", "one", b"\x1b[<0;90;4M\x1b[<0;90;4mX\x1b[<0;7;3MY", "Yone")
 check("mouse slider", 's("hh").gain(slider(.5)).gain(0)',
-      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(.5)).gain(0)', observed=b"slider 1 = 1")
+      b"\x1b[<0;65;3M\x1b[<0;65;3m", 's("hh").gain(slider(1)).gain(0)', observed=b"slider 1 = 1")
+check("live slider keyboard preserves program", 'note(60).gain(slider(.5)).gain(0)',
+      b'\x1b[1;5C', 'note(60).gain(slider(0.501)).gain(0)', observed=b'slider 1 = 0.501', live_slider=True)
+check("live slider dirty source stays unapplied", 'note(60).gain(slider(.5)).gain(0)',
+      b'// pending\r\x1b[1;5C', '// pending\nnote(60).gain(slider(0.501)).gain(0)',
+      observed=b'slider 1 = 0.501', live_slider=True)
+check("live slider mouse preserves program", 'note(60).gain(slider(.5)).gain(0)',
+      b'\x1b[<0;65;3M\x1b[<0;65;3m', 'note(60).gain(slider(1)).gain(0)',
+      observed=b'slider 1 = 1', live_slider=True)
+check("live slider pixel mouse preserves program", 'note(60).gain(slider(.5)).gain(0)',
+      b'\x1b[<0;65;3M\x1b[<0;65;3m', 'note(60).gain(slider(1)).gain(0)',
+      observed=b'slider 1 = 1', live_slider=True, mouse_pixels=True)
+check("performance activation F5 starts stopped editor", 'note(60).gain(0)',
+      b'\x10\x1b[F;note(72).gain(0)\x1b[15~\x1bOS',
+      expected='note(60).gain(0);note(72).gain(0)',transport=True,source_state=b'evaluated')
+check("performance activation Play evaluates pending editor", 'note(60).gain(0)',
+      b'\x10\x1b[F;note(72).gain(0)\x10\x1bOS',
+      expected='note(60).gain(0);note(72).gain(0)',transport=True,source_state=b'evaluated')
+check("performance activation play command evaluates pending editor", 'note(60).gain(0)',
+      b'\x10\x1b[F;note(72).gain(0)\x1bOQ/play\r\x1bOS',
+      expected='note(60).gain(0);note(72).gain(0)',transport=True,source_state=b'evaluated')
+check("performance activation vi eval starts stopped editor", 'note(60).gain(0)',
+      b'\x10A;note(72).gain(0)\x1b:eval\r\x1bOS',vi=True,
+      expected='note(60).gain(0);note(72).gain(0)',transport=True,source_state=b'evaluated')
+check("performance activation failed F5 stays stopped", 'note(60).gain(0)',
+      b'\x10\x1b[F;throw Error("bad edit")\x1b[15~\x1bOS',
+      expected='note(60).gain(0);throw Error("bad edit")',transport=False,source_state=b'pending F5')
+check("performance activation failed Play stays stopped", 'note(60).gain(0)',
+      b'\x10\x1b[F;throw Error("bad edit")\x10\x1bOS',
+      expected='note(60).gain(0);throw Error("bad edit")',transport=False,source_state=b'pending F5')
 check("invalid mouse report", "one", b"\x1b[<999999999999999999999999;7;3M", "one")
 check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)

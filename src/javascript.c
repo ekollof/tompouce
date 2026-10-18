@@ -15,7 +15,9 @@
 #define JS_SPANS 2048
 
 struct JsProgram {
+    SliderBank *sliders;
     CsoundProgram *csound;
+    char *csound_source;
     atomic_uint refs;
     pthread_mutex_t lock;
     pthread_mutex_t spans_lock;
@@ -62,6 +64,37 @@ static JSValue host_slider(JSContext *ctx, JSValueConst self, int argc, JSValueC
         if (JS_ToFloat64(ctx, &v[i], argv[i]) < 0 || !isfinite(v[i]))
             return JS_ThrowTypeError(ctx, "slider arguments must be finite numbers");
     return JS_NewFloat64(ctx, slider_bind(v[0], v[1], v[2], v[3]));
+}
+
+static int utf8_offset(const char *s, int units);
+
+static JSValue host_slider_bind(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    double v[4]={0,0,1,.05};
+    for (int i=0;i<argc && i<4;i++)
+        if (JS_ToFloat64(ctx,&v[i],argv[i])<0 || !isfinite(v[i]))
+            return JS_ThrowTypeError(ctx,"slider arguments must be finite numbers");
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    int offset=-1;
+    if (argc>4) {
+        const char *id=JS_ToCString(ctx,argv[4]);
+        if (id && !strncmp(id,"slider_",7)) {
+            char *end; long position=strtol(id+7,&end,10);
+            if (!*end && position>=0 && position<=INT_MAX) offset=utf8_offset(program->source,(int)position);
+        }
+        if (id) JS_FreeCString(ctx,id);
+    }
+    int index=slider_bank_bind_site(program->sliders,offset,v[0],v[1],v[2],v[3]);
+    if (index<0) return JS_ThrowRangeError(ctx,"too many sliders");
+    return JS_NewInt32(ctx,index);
+}
+
+static JSValue host_slider_read(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self; int index; double value;
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    if (!argc || JS_ToInt32(ctx,&index,argv[0])<0 || !slider_bank_read(program->sliders,index,&value))
+        return JS_ThrowRangeError(ctx,"invalid slider binding");
+    return JS_NewFloat64(ctx,value);
 }
 
 static JSValue global_function(JSContext *ctx, const char *name) {
@@ -169,9 +202,11 @@ void javascript_free(JsProgram *p) {
     if (!p) return;
     if (atomic_fetch_sub_explicit(&p->refs,1,memory_order_acq_rel) != 1) return;
     csound_program_free(p->csound);
+    free(p->csound_source);
     if (p->context) JS_FreeContext(p->context);
     if (p->runtime) JS_FreeRuntime(p->runtime);
     free(p->source);
+    slider_bank_free(p->sliders);
     free(p->visual_notes);
     free(p->visual_requested); free(p->visual_pending); free(p->visual_source);
     free(p->highlight_map);
@@ -185,12 +220,44 @@ void javascript_retain(JsProgram *p) {
 }
 
 int javascript_prepare_csound(JsProgram *p, const cJSON *metadata, char *error, size_t size) {
+    return javascript_prepare_csound_from(p,metadata,NULL,error,size);
+}
+int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
+                                   JsProgram *previous, char *error, size_t size) {
     const cJSON *loads = cJSON_GetObjectItemCaseSensitive(metadata,"csound");
-    if (!cJSON_IsArray(loads)) return 1;
-    p->csound = csound_program_create(loads,error,size);
-    return p->csound != NULL;
+    if (cJSON_IsArray(loads) && cJSON_GetArraySize(loads)>16) {
+        snprintf(error,size,"Csound: too many orchestra loads"); return 0;
+    }
+    if (!cJSON_IsArray(loads) && (!previous || !previous->csound)) return 1;
+    p->csound_source=cJSON_IsArray(loads)?cJSON_PrintUnformatted(loads):
+        strdup_safe(previous->csound_source?previous->csound_source:"[]");
+    if (!p->csound_source) return 0;
+    if (previous && previous->csound) {
+        p->csound=previous->csound; csound_program_retain(p->csound);
+    } else {
+        cJSON *empty=cJSON_CreateArray();
+        if (!empty) return 0;
+        p->csound=csound_program_create(empty,error,size); cJSON_Delete(empty);
+        if (!p->csound) return 0;
+    }
+    /* Browser loaders apply sequentially to the same engine. Csound reports
+       orchestra syntax errors through messages, while its JS Promise resolves;
+       fetch/host failures still reject evaluation. Earlier successful loads
+       remain available when a later load is rejected. */
+    const cJSON *load;
+    cJSON_ArrayForEach(load,loads) {
+        cJSON *single=cJSON_CreateArray();
+        if (!single || !cJSON_AddItemReferenceToArray(single,(cJSON *)load)) { cJSON_Delete(single); return 0; }
+        CsoundUpdateResult result=csound_program_update(p->csound,single,error,size);
+        cJSON_Delete(single);
+        if (result==CSOUND_UPDATE_FAILED) return 0;
+        if (result==CSOUND_UPDATE_REJECTED) log_console("%s",error);
+    }
+    return 1;
 }
 CsoundProgram *javascript_csound(JsProgram *p) { return p ? p->csound : NULL; }
+void javascript_activate_sliders(JsProgram *p) { if (p) slider_bank_activate(p->sliders); }
+const char *javascript_source(const JsProgram *p) { return p?p->source:NULL; }
 
 static int initialize(JsProgram *p, char *error, int n) {
     p->runtime = JS_NewRuntime();
@@ -202,11 +269,14 @@ static int initialize(JsProgram *p, char *error, int n) {
     p->context = JS_NewContext(p->runtime);
     if (!p->context) return 0;
     JSContext *ctx = p->context;
+    JS_SetContextOpaque(ctx,p);
     JSValue global = JS_GetGlobalObject(ctx);
     int a = JS_SetPropertyStr(ctx, global, "__hostLog", JS_NewCFunction(ctx, host_log, "__hostLog", 1));
     int b = JS_SetPropertyStr(ctx, global, "__hostSlider", JS_NewCFunction(ctx, host_slider, "__hostSlider", 4));
+    int c = JS_SetPropertyStr(ctx, global, "__hostSliderBind", JS_NewCFunction(ctx, host_slider_bind, "__hostSliderBind", 4));
+    int d = JS_SetPropertyStr(ctx, global, "__hostSliderRead", JS_NewCFunction(ctx, host_slider_read, "__hostSliderRead", 1));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {
@@ -308,7 +378,9 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
     JsProgram *p = calloc(1, sizeof(*p));
     if (!p) return NULL;
     atomic_init(&p->refs,1);
-    if (pthread_mutex_init(&p->lock,NULL) != 0) { free(p); return NULL; }
+    p->sliders=slider_bank_create();
+    if (!p->sliders) { free(p); return NULL; }
+    if (pthread_mutex_init(&p->lock,NULL) != 0) { slider_bank_free(p->sliders); free(p); return NULL; }
     p->lock_ready = 1;
     if (pthread_mutex_init(&p->spans_lock,NULL) != 0) { javascript_free(p); return NULL; }
     p->lock_ready = 2;
@@ -372,7 +444,10 @@ static cJSON *query_events(JsProgram *p, double begin, double end, double cps, i
     if (!p || !isfinite(begin) || !isfinite(end) || begin < 0 || end <= begin || end - begin > 1.001) return NULL;
     pthread_mutex_lock(&p->lock);
     JS_UpdateStackTop(p->runtime);
-    p->deadline = now_seconds() + .2;
+    double query_started=now_seconds();
+    struct timespec cpu_started;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID,&cpu_started);
+    p->deadline = query_started + .2;
     JSContext *ctx = p->context;
     JSValue fn = global_function(ctx, "__query");
     JSValue args[4] = {JS_NewFloat64(ctx, begin), JS_NewFloat64(ctx, end),JS_NewFloat64(ctx,cps),JS_NewBool(ctx,probes)};
@@ -386,7 +461,11 @@ static cJSON *query_events(JsProgram *p, double begin, double end, double cps, i
         JSValue exception = JS_GetException(ctx);
         exception_text(ctx, exception, error, sizeof(error));
         JS_FreeValue(ctx, exception);
-        log_console("JavaScript query: %s", error);
+        struct timespec cpu_ended;
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID,&cpu_ended);
+        double cpu=(cpu_ended.tv_sec-cpu_started.tv_sec)+(cpu_ended.tv_nsec-cpu_started.tv_nsec)*1e-9;
+        log_console("JavaScript query: %s (arc %.17g..%.17g, cps %.9g, wall %.6fs, cpu %.6fs)",
+            error,begin,end,cps,now_seconds()-query_started,cpu);
     } else json = json_value(ctx, value);
     JS_FreeValue(ctx, value);
     pthread_mutex_unlock(&p->lock);
@@ -442,6 +521,13 @@ void javascript_cache_spans(JsProgram *p, const cJSON *haps, double origin, doub
         }
     }
     pthread_mutex_unlock(&p->spans_lock);
+}
+
+void javascript_cache_hap(JsProgram *p, const cJSON *hap, double origin, double seconds) {
+    if (!hap) return;
+    cJSON item=*hap; item.next=item.prev=NULL;
+    cJSON array={.type=cJSON_Array,.child=&item};
+    javascript_cache_spans(p,&array,origin,seconds);
 }
 
 int javascript_play_spans(const JsProgram *p, double now, int *off, int *len, int max) {

@@ -24,6 +24,99 @@ also work; a leading or trailing underscore mutes a label. `all` and `each`
 apply transforms to the collected patterns. Several statements can share a
 line, and statements and strings can span editor lines.
 
+`slider(value,min,max,step)` supplies a live control pattern. Register it with
+F5 once, then use Ctrl+Left/Right or drag its chip. Changes update upcoming
+note parameters without reevaluating source, resetting cycle phase, retriggering
+held notes or applying unrelated editor changes. The first numeric argument
+updates in the editor, so saving the song saves the performed value too.
+Parsed source locations keep the controls attached after edits; comments and
+strings cannot register controls. New controls require F5 before they are live.
+Each successfully loaded program owns its bindings, so a failed evaluation
+cannot replace the playing program's controls. F5 reads the source values again,
+as in the web REPL. Direct calls create live widgets. Aliases such as
+`const control=slider; control(.5)` and member calls return a fixed `pure()`
+pattern and emit the web fallback warning.
+For live arithmetic, use pattern operations such as `slider(700,200,3000,100).mul(2)`;
+ordinary JavaScript numeric coercion of a control Pattern is not supported.
+Top-level `setcpm`/`setcps` read numeric or Pattern arguments once at evaluation;
+moving a slider inside `setcpm(slider(30))` requires F5 to change tempo. Use
+`.cps(slider(...))` for query-time global tempo changes. A Pattern-valued
+`.cpm(...)` transform uses current scheduler CPS; numeric `.cpm(...)` keeps
+evaluation-time scaling, matching the web helper.
+
+JavaScript playback uses the web scheduler's 50 ms query windows,
+100 ms timer and overlap, and 100 ms output latency. Already submitted notes
+keep their values; the next query reads the new control. This applies equally
+to native audio, MIDI, OSC and Csound. External tempo changes pivot at the next
+unqueried fractional cycle, and evaluation while playing preserves that clock and the
+pending notes. Held native voices and effect tails continue. Csound evaluations
+share one Csound renderer, preserving sounding instances and loaded definitions
+across changed or omitted orchestra loads. Inline loads execute again on each
+evaluation; URL loads are cached after compilation, including `github:` aliases.
+Orchestra calls apply in order. Like the browser, an orchestra syntax error is
+reported in the console without rejecting an otherwise valid musical pattern.
+JavaScript exceptions, failed fetches and host failures still reject evaluation.
+
+Event `.cps()` follows the current live web scheduler: tempo controls are sorted
+before simultaneous notes, the change takes effect at its onset, and the rest
+of the query window is recomputed at the new tempo. Zero tempo pauses cycle
+advancement while sounding notes continue. As in the web REPL, a slider cannot
+resume its own zero-tempo pattern because there are no advancing queries;
+use an external BPM change or evaluate a positive `setcps`/`setcpm` value.
+There is no hidden 20–400 BPM clamp. Negative or non-finite tempos are rejected.
+
+Shared delay uses the web limit of one second and default feedback of .5.
+Zero delay time or feedback suspends new sends and parameter updates while
+existing shared tails continue. Parameter decisions use the web's current
+Float32 AudioParam value at preparation time; a future return value can be
+skipped when it already matches that current value. Accepted delay automation
+survives source removal or voice stealing, including zero-gain events.
+JavaScript delay taps interpolate fractional samples, including sub-sample
+times. Feedback repeats include the web graph's additional 128-frame cycle
+delay. Legacy direct-event delay keeps its original timing.
+
+Stop ends new scheduling and resets the next start to cycle zero. Already
+submitted notes and sounding envelopes/effect tails finish, as in the web REPL.
+F5, Ctrl+R in insert mode and `:eval` evaluate the current editor source and start a stopped
+transport only when evaluation succeeds. Ctrl+P and `/play` from stopped also
+evaluate pending editor text before starting, matching web Play. Committed
+notes survive Stop/evaluate/start; failed evaluation retains the prior pattern
+and transport state. Companion Apply, Evaluate and Play from stopped use the
+companion's current source with the same success-only activation. MCP
+`music_set_code` and `music_evaluate` expose optional `autostart: true`; their
+default remains false. Cold sound
+preparation that misses its onset is skipped rather than bursting late notes
+into the performance.
+
+Native voices are prepared ahead of playback and wait for their scheduled
+timestamp. Their source position and envelope remain frozen until onset;
+cut groups, ducking and orbit delay settings take effect at that timestamp.
+Offline callback tests check the exact first sample and chronological cut
+ordering independently of voice-slot order.
+
+The live pattern uses upstream `ref()`, matching the web REPL's slider
+implementation. `live_controls_reference` compares 135 queries against the
+pinned upstream implementation, including gain, pan, filter, arithmetic, masks,
+speed, effects and long notes. It also compares the native scheduler's event
+times, durations, pitches and gains against upstream Cyclist through live
+slider, tempo and pattern changes. A test-only snapshot of the current web
+scheduler additionally compares 30 finite native note schedules and 11 clock
+states through simultaneous tempo controls, pause/resume and stop/start.
+`cmake --build build --target test-controls-reference-web` verifies the snapshot
+against the deployed strudel.cc scheduler in a disposable browser, including
+failed evaluation and source lifetime on Stop. It never produces real audio.
+The pattern library and its historical event baselines stay pinned.
+`cmake --build build --target test-csound-reference-web` checks Csound lifecycle
+against the deployed loaders and actual Csound WASM in private offline contexts,
+including held PCM, redefined instruments, globals, syntax errors and URL caching.
+Native tests also check exact note onset, idle-session retention and confinement
+of the compiler thread. No orchestra compilation runs in the native audio callback.
+The default step matches the web widget's
+range divided by 1,000. These gates establish the tested control behavior;
+they do not establish complete browser audio, device or synthesis parity.
+Ordinary sliders do not continuously modulate already sounding voices in the
+web REPL; adding that behavior here would require a separate feature.
+
 Imports resolve the bundled modules:
 
 ```js
@@ -96,6 +189,11 @@ levels match the browser periodic-wave normalization. Saw and pulse discontinuit
 use polyBLEP corrections, and triangle starts at the sine phase. The maintained
 browser comparison covers representative waveforms and effects; broader parameter
 and full-song parity remains unverified.
+
+Zero-gain events remain silent but still prepare their sources and apply shared
+effect controls. Sample `cut` groups fade the previous sampled sources over
+10 ms before their effects, retaining their original graph lifetimes. As in the
+web REPL, oscillator sources ignore `cut`.
 
 This is not complete WebAudio/SuperDirt sound parity. ZzFX, bytebeat and a bounded
 Kabelsalat graph host are implemented natively (see below).
@@ -227,7 +325,7 @@ diagnostic, alongside broader unverified sound parity. See
 `ir` selects a registered sample as the orbit's convolution impulse:
 
 ```js
-note(60).s('piano').ir("RolandTR909_sd:0").room(.5).roomsize(.2)
+note(60).s('piano').ir("RolandTR909_sd").set({i:0}).room(.5).roomsize(.2)
 ```
 
 `irbegin` sets the source offset and `irspeed` selects its signed playback
@@ -238,19 +336,34 @@ IR duration; the original buffer length participates in WebAudio-style RMS
 normalization. The IR is prepared by the generator using existing sample
 maps, URL policy and decoders. The callback uses an immediate 128-tap head
 plus 128-frame FFT partitions for its tail, preserving zero onset latency.
-Stereo channels remain separate. Impulse changes reset that orbit's tail.
+Stereo channels remain separate. Prepared impulse changes select the shared
+convolver immediately and reset that orbit's tail on the next audio frame;
+an earlier accepted note does not restore its old impulse at onset.
 
-Limits: 131,072 active IR frames (about 2.97 seconds at 44.1 kHz) and 16 cached
+Limits: 139,264 active IR frames (about 3.16 seconds at 44.1 kHz) and 16 cached
 IR/size/speed/offset combinations per process. Excess limits or failed IR
 resolution reject the event and report a console warning; audio is not
 silently truncated or replaced by another reverb. Kernels are immutable and
 retained for the process lifetime.
 
+The initial `roomsize` defaults to two seconds, matching the web REPL.
+Omitted `roomsize`, `roomfade`, `roomlp` and `roomdim` controls retain the
+last accepted settings while the orbit reuses its room, including across
+evaluation and Stop/Play. Changing an explicit room parameter rebuilds the
+impulse and restores defaults for omitted parameters, matching the web REPL.
+Unchanged generated room settings reuse the impulse and preserve its tail.
+Custom IRs also retain omitted speed and offset while reusing the same resolved
+sample. Changing the sample, or an explicit room control, restores defaults for
+omitted controls before preparing the replacement kernel.
+An explicitly supplied IR speed or offset differs from an omitted one even
+when its numeric value equals the default. Such rebuilds reset convolution
+history even if the prepared PCM is already cached.
+
 `room` without `ir` now prepares a stereo convolution impulse with the upstream
 exponential decay, fade-in and gradual low-pass. `roomfade` defaults to .1,
 `roomlp` to 15000 and `roomdim` to 1000. A fixed random seed makes native rooms
 reproducible. These generated impulses have a separate 16-entry cache and fit
-up to about 1.98 seconds of decay (the IR lasts 1.5 times the decay). Longer
+up to about 2.10 seconds of decay (the IR lasts 1.5 times the decay). Longer
 rooms, zero size or an exhausted generated cache retain the native Schroeder
 fallback and report that limit once per program. Explicit `ir` failures still
 reject the event rather than silently substituting another impulse.
@@ -421,8 +534,26 @@ Limits remain: the editor source and each line grow until malloc fails
 query, 4,096 haps/events per query, 4 MiB query JSON, and 8,192 queued
 audio events. Long lines wrap on JavaScript tokens; `/wrap off` scrolls sideways. The audio
 callback does not allocate. `orbit` / `o` selects the delay and reverb bus (default 1).
-`duckorbit` / `duck` (a number or a `:` list) ducks those buses;
-`duckattack` is the return time and `duckdepth` is the depth.
+`duckorbit` / `duck` selects target buses by number or array. Canonical numeric
+strings and singleton nested arrays follow the web's target-key conversion;
+colon lists and leading-zero strings do not select numeric orbits. Targets
+that do not yet exist are skipped at preparation time. `duckattack` is the return time, defaulting to
+0.1 seconds with a 0.002-second minimum; `duckdepth` sets the minimum gain to
+`max(0.01, 1-sqrt(depth))`. Exponential ramps begin 10 ms before the note,
+reach their minimum at the note plus `duckonset`, then return to unity.
+Arrays of onset, attack and depth values map to the target array, reusing the
+first value for omitted entries. Depth zero still cancels the previous ramp.
+Repeated targets retain their order and per-entry controls; each target entry
+queues its own callback, including repeats of the same orbit.
+String and singleton nested-array onsets follow JavaScript concatenation when
+forming ramp times. Invalid depth holds the cancellation gain; an invalid
+return time holds the target of an accepted downward ramp. Normalized onset
+strings currently have a 127-byte limit; longer strings and full error-report
+parity remain under investigation.
+Accepted duck callbacks use an independent bounded timeline, so voice stealing,
+source preparation failure, Stop and program replacement retain them. Rest and
+missing-source events can still duck another bus. Missing sounds stay silent
+and report an error. As in Superdough, `clip(0)` falls back to full duration.
 
 ## Building and testing
 
@@ -439,8 +570,12 @@ Csound rendering runs in an isolated Linux process with bounded memory and
 execution time. After trusted engine initialization it cannot open files,
 create processes, or access the network; `loadOrc` fetching happens in the
 parent using the existing URL policy. The audio callback consumes buffered
-stereo PCM without IPC, allocation, or Csound calls. Failed orchestra loading
-keeps the previous playable program. Named instruments receive frequency,
+stereo PCM without IPC, allocation, or Csound calls. Failed fetching or host
+initialization keeps the previous playable program; orchestra syntax diagnostics
+retain existing definitions while allowing the new musical pattern, as above.
+The compiler thread has the same confinement as the renderer. Up to 16 loads
+per evaluation, 2 MiB of combined source per update and 64 cached orchestra URLs
+per Csound session are accepted. Named instruments receive frequency,
 gain, and the slash-separated Strudel control map as p4/p5/p6, matching the
 upstream bridge.
 

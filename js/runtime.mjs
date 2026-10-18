@@ -5,6 +5,7 @@ import * as tonal from '@strudel/tonal';
 import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
 import { installNative, prepareNative } from './native-synth.mjs';
+import { queryFraction } from './query-time.mjs';
 
 Object.assign(globalThis, core, mini, tonal);
 installNative(core);
@@ -33,6 +34,7 @@ let eachTransform;
 let allTransforms = [];
 let initialBpm = 120;
 let tempo;
+let queryCps;
 let sampleCalls = [];
 let source = '';
 let locations = [];
@@ -41,6 +43,7 @@ let visualSites = [];
 let visualTiles = new Map();
 let visualProbes = [], compiledVisualSites = [], nextProbe = 0, compiledHighlightAst;
 const visualAliases = new Set();
+const liveSliderReaders = new Map();
 const visualKinds = {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7};
 const visualKind = name => visualKinds[name?.replace(/^_/, '')] ?? 0;
 const nativeVisualOptions = new Set(('cycles playhead overscan minMidi maxMidi thickness scale pos trigger stretch steady inset size padding '+
@@ -73,6 +76,8 @@ function attachVisual(site, pattern, options = {}) {
    those of the original source. Hidden tags never change musical values. */
 function visualKey(node) {
   if (!node || typeof node !== 'object') return node;
+  if (node.type==='CallExpression' && node.callee.name==='slider' && node.arguments.length)
+    return {type:'CallExpression',callee:visualKey(node.callee),arguments:[{type:'LiveSlider'},...node.arguments.slice(1).map(visualKey)]};
   if (node.type==='CallExpression' && node.callee.type==='CallExpression' &&
       (visualKind(node.callee.callee.name) || visualAliases.has(node.callee.callee.name)) && node.arguments.length===1)
     return visualKey(node.arguments[0]);
@@ -180,6 +185,13 @@ function highlightMapping(ast, editor) {
   function compare(a,b) {
     a=highlightNode(a); b=highlightNode(b);
     if (a===null || b===null || typeof a!=='object' || typeof b!=='object') return a===b;
+    if (a.type==='CallExpression' && b.type==='CallExpression' && a.callee.name==='slider' && b.callee.name==='slider' &&
+        a.arguments.length===b.arguments.length && a.arguments.length) {
+      const read=liveSliderReaders.get(`slider_${a.arguments[0].start}`);
+      let live=false;
+      try { live=read && literalOption(b.arguments[0])===read(); } catch {}
+      if (live) return compare(a.callee,b.callee) && compare(a.arguments.slice(1),b.arguments.slice(1));
+    }
     if (Array.isArray(a) || Array.isArray(b)) {
       if (!Array.isArray(a) || !Array.isArray(b)) return false;
       const left=a.filter(node=>!visualDirective(node)), right=b.filter(node=>!visualDirective(node));
@@ -273,18 +285,34 @@ globalThis.all = (fn) => { allTransforms.push(fn); return core.silence; };
 globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
 core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
 globalThis.osc = pattern=>pattern.osc();
-globalThis.cpm = core.register('cpm', (value, pattern) => pattern._fast(Number(value) / 60 / ((tempo ?? initialBpm) / 240)));
+globalThis.cpm = core.register('cpm', (value, pattern) => pattern._fast(Number(value) / 60 / (queryCps ?? ((tempo ?? initialBpm) / 240))));
 modules['@strudel/core'] = { ...core, cpm: globalThis.cpm };
 globalThis.setcps = globalThis.setCps = (v) => {
   v = Number(core.isPattern(v) ? v.queryArc(0, 1)[0]?.value : v);
-  if (!Number.isFinite(v) || v <= 0) throw new Error('setcps requires a positive finite value');
-  tempo = Math.max(20, Math.min(400, v * 240));
+  if (!Number.isFinite(v) || v < 0 || !Number.isFinite(v*240)) throw new Error('setcps requires a nonnegative finite value');
+  tempo = v*240;
 };
-globalThis.setcpm = globalThis.setCpm = (v) => setcps(Number(v) / 60);
+globalThis.setcpm = globalThis.setCpm = (v) => {
+  v = core.isPattern(v) ? v.queryArc(0,1)[0]?.value : v;
+  setcps(Number(v) / 60);
+};
 globalThis.hush = () => { collecting = new Map(); selected = core.silence; };
-globalThis.sliderWithID = (_id, value, min = 0, max = 1, step) =>
-  __hostSlider(Number(value), Number(min), Number(max), Number(step ?? ((max - min) / 20)));
-globalThis.slider = (value, min, max, step) => sliderWithID('', value, min, max, step);
+globalThis.sliderWithID = (id, value, min = 0, max = 1, step) => {
+  const args=[Number(value),Number(min),Number(max),Number(step ?? ((max-min)/1000))];
+  // Reference/browser tooling without the native live-control host keeps its
+  // original numeric contract. Native patterns read controls at query time.
+  if (typeof __hostSliderBind !== 'function') return __hostSlider(...args);
+  const index=__hostSliderBind(...args, id);
+  const read=()=>__hostSliderRead(index);
+  liveSliderReaders.set(id,read);
+  return core.ref(read);
+};
+globalThis.slider = (value) => {
+  // Only direct calls are rewritten to source-bound sliderWithID widgets.
+  // Aliases/member calls have the web fallback's ordinary pure-pattern value.
+  __hostLog('slider will only work when the transpiler is used... passing value as is');
+  return core.pure(value);
+};
 globalThis.samples = async (...args) => {
   if (sampleCalls.length >= 64) throw new Error('Too many sample maps');
   sampleCalls.push(args);
@@ -405,8 +433,10 @@ function prepare(code) {
 }
 
 globalThis.__compile = async (code, bpm = 120) => {
+  liveSliderReaders.clear();
   collecting = new Map(); anonymous = 0; eachTransform = undefined; allTransforms = [];
   sampleCalls = []; tempo = undefined; initialBpm = bpm; visuals = 0; visualSites = []; visualTiles = new Map(); aliases = new Map();
+  queryCps=undefined;
   orchestraCalls = []; csoundUsed = false; pianoUsed = false;
   visualProbes=[]; visualAliases.clear();
   const result = prepare(code);
@@ -427,9 +457,14 @@ globalThis.__compile = async (code, bpm = 120) => {
 };
 
 globalThis.__query = (begin, end, cps, probes = false) => {
+  // The upstream query converts boundaries to rational time. Compare using
+  // those same boundaries: raw accumulated doubles can drop exact onsets.
+  const beginTime=queryFraction(core.Fraction,begin),endTime=queryFraction(core.Fraction,end);
+  begin=Number(beginTime); end=Number(endTime);
   core.setTime(() => begin);
   cps = Number.isFinite(cps) && cps > 0 ? cps : (tempo ?? initialBpm)/240;
-  const haps = selected.queryArc(begin, end, { _cps: cps });
+  queryCps=cps;
+  const haps = selected.queryArc(beginTime, endTime, { _cps: cps });
   if (haps.length > 4096) throw new Error('Pattern exceeds 4096 haps per query');
   const events = [];
   for (const hap of haps) {
@@ -454,6 +489,7 @@ globalThis.__query = (begin, end, cps, probes = false) => {
 /* Separate, bounded drawing queries. Only the generator calls this; no visual
    query is scheduled as audio, and the UI never executes user JavaScript. */
 globalThis.__visualQuery = (time, cps) => {
+  queryCps=cps;
   core.setTime(() => time);
   const started = Date.now(), windows = new Map(), jobs = [];
   const quantum = .125;

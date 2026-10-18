@@ -15,6 +15,9 @@ project license does not replace their notices. See:
 
 - thirdparty/ for vendored source licenses and native DSP attribution;
 - js/dist/licenses.txt for JavaScript dependency notices;
+- js/query-time.mjs for the MIT-licensed accelerated fraction.js clock conversion
+  (its notice is also embedded in js/dist/runtime.js);
+- tests/reference/web-cyclist.mjs for the AGPL Strudel scheduler test snapshot;
 - web/dist/licenses.txt for companion editor dependency notices;
 - README.md, "Sample banks", and the installed banks' licenses/ directory
   for sample attribution and license terms.

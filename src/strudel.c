@@ -154,6 +154,7 @@ void strudel_line_free(StrudelLine *s) {
 static void zero_line(StrudelLine *o) {
     memset(o, 0, sizeof(*o));
     o->gain = 0.8;
+    o->gain_slider=o->lpf_slider=-1;
     o->pan = 0;
     o->lpf = 0;
     o->att = o->dec = o->sus = o->rel = -1;
@@ -180,6 +181,7 @@ static void zero_line(StrudelLine *o) {
 typedef struct {
     int kind; /* 0 none, 1 num, 2 str, 3 call, 4 sig, 5 fn */
     double num;
+    int slider;
     char str[512];
     char call[32];
     double call_num;
@@ -474,6 +476,7 @@ static void fold_arrow_time(const Arg *a, double time, double *pre, double *slow
 
 static int parse_arg(const char **pp, Arg *a, const char *base) {
     memset(a, 0, sizeof(*a));
+    a->slider=-1;
     a->fn_speed = -1;
     a->fn_delay = -1;
     a->fn_add_at = -1;
@@ -488,7 +491,11 @@ static int parse_arg(const char **pp, Arg *a, const char *base) {
         return 1;
     }
     if (strncmp(p, "slider", 6) == 0) {
+        int index=slider_next_index();
+        const char *direct=p; double init,mn,mx,step;
+        int simple=slider_parse(&direct,&init,&mn,&mx,&step);
         if (take_number(&p, &a->num)) {
+            if (simple && sws(direct)==sws(p)) a->slider=index;
             a->kind = 1;
             *pp = p;
             return 1;
@@ -728,6 +735,7 @@ static int parse_methods(const char **pp, StrudelLine *o, const char *base) {
             if (a.fn_inst[0])
                 snprintf(o->jux_inst, sizeof(o->jux_inst), "%.31s", a.fn_inst);
         } else if (strcmp(name, "gain") == 0 && has_arg) {
+            o->gain_slider=a.kind==1?a.slider:-1;
             if (a.kind == 2) {
                 pat_mod(&o->gain_pat, a.str);
                 o->has_gain = 1;
@@ -739,6 +747,7 @@ static int parse_methods(const char **pp, StrudelLine *o, const char *base) {
                 o->has_gain = 1;
             }
         } else if ((strcmp(name, "lpf") == 0 || strcmp(name, "cutoff") == 0) && has_arg) {
+            o->lpf_slider=a.kind==1?a.slider:-1;
             if (a.kind == 4) {
                 o->lpf_sig = a.sig;
                 o->has_lpf = 1;

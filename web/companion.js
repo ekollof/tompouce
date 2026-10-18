@@ -32,26 +32,27 @@ globalThis.TompouceCompanion = { tool, insertSnippet(text) {
     code.dispatchEvent(new Event('input', {bubbles: true})); code.focus();
   }
 } };
-$('play').onclick = event => action(event.target, 'music_play');
+$('play').onclick = event => performSource(event.target);
 $('stop').onclick = event => action(event.target, 'music_stop');
-$('evaluate').onclick = event => action(event.target, 'music_evaluate');
+$('evaluate').onclick = event => performSource(event.target);
 $('tempo').onclick = event => {
   const bpm = Number($('bpm').value);
-  if (!Number.isFinite(bpm) || bpm < 20 || bpm > 400) { $('error').textContent = 'BPM must be between 20 and 400.'; return; }
+  if (!$('bpm').value.trim() || !Number.isFinite(bpm) || bpm < 0) { $('error').textContent = 'BPM must be a nonnegative finite number.'; return; }
   action(event.target, 'music_set_bpm', {bpm});
 };
-$('apply').onclick = async event => {
-  const button = event.target, code = $('code').value;
+$('apply').onclick = event => performSource(event.target);
+async function performSource(button) {
+  const code = $('code').value;
   button.disabled = true;
   try {
     // Detect edits made in the terminal since this tab last followed it.
     const remote = await tool('music_get_code');
     if (remote !== currentSource && !confirm('The terminal source changed. Replace it with this tab’s edits?')) return;
-    await tool('music_set_code', {code});
+    await tool('music_set_code', {code, autostart: true});
     currentSource = code; setDirty($('code').value !== code); $('error').textContent = '';
   } catch (error) { $('error').textContent = error.message; }
   finally { button.disabled = false; }
-};
+}
 $('reload').onclick = async () => {
   if (dirty && !confirm('Discard this tab’s unapplied edits?')) return;
   try { const code = await tool('music_get_code'); setDirty(false); source(code); }

@@ -114,7 +114,7 @@ at a time. F1 remains the Tompouce keybinding reference.
 - `src/osc_output.c` — timestamped native UDP OSC output
 - `src/pattern.c` — mini-notation parser (`* ! @ / ?`, euclid, `{}`, `<>`, rests)
 - `src/strudel.c` — statement lines (`note("c e").s("saw").lpf(800)`, `setcpm`)
-- `src/slider.c` — `slider()` live values (source text stays put)
+- `src/slider.c` — `slider()` live values and source-site bindings
 - `src/harmony.c` — Strudel chord symbols, scales, and scale degrees
 - `src/scheduler.c` — cycle-based scheduler with event queue
 - `src/track.c` — code-to-tracks compiler
@@ -152,6 +152,11 @@ stay in `build/`. `compile_commands.json` is generated for editor tooling.
 Equivalent commands without presets are `cmake -S . -B build -G Ninja`,
 `cmake --build build`, and `ctest --test-dir build --output-on-failure`.
 Other CMake generators are supported in separate build directories.
+
+Builds automatically use `ccache` when installed, including the installer's
+temporary builds. Disable it with `-DWITH_CCACHE=OFF`; an explicit
+`CMAKE_C_COMPILER_LAUNCHER` takes precedence. Inspect cache reuse with
+`ccache --show-stats`.
 
 Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`,
 `libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus
@@ -322,7 +327,7 @@ Keys:
 - `Tab` — complete a word in insert mode; indent two spaces in leading whitespace or a selection. `Shift+Tab` cycles completion backward, otherwise unindents.
 - Type code in the editor (left pane).
 - `F5` — evaluate code (`Ctrl+R` also evaluates outside vi normal mode)
-- `Ctrl+P` — play / stop
+- `Ctrl+P` — play / stop. Stop ends new scheduling; submitted notes and tails finish. Play restarts at cycle zero.
 - `F1` — toggle Tompouce keybinding cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
 - `F2` — AI prompt (supports `/bpm N`, `/play`, `/stop`, `/clear`, `/save`, `/load`, `/song`, `/rescan`)
 - `F4` — toggle internals/state pane: editor mode, pending evaluation/unsaved
@@ -336,7 +341,7 @@ Keys:
 - `F9` — track list pane (shows buffers, active highlighted)
 - `F10` / `F11` — narrow / widen the code pane
 - `F12` — piano roll + braille scope pane (per-voice pitch bars, live output scope)
-- `Ctrl+Left` / `Ctrl+Right` — nudge the `slider()` under the cursor (or the first slider). The source literal stays; F5 applies the new value. The code pane also draws a one-row roll of the cursor line and a one-row scope when it is tall enough.
+- `Ctrl+Left` / `Ctrl+Right` — nudge the live `slider()` on the cursor line (or the sole registered control). Mouse dragging also changes its live value. After the initial F5 registers the control, adjustments update upcoming notes without reevaluating source or restarting playback. The source literal updates too, so saving retains the performed value. The code pane also draws a one-row roll of the cursor line and a one-row scope when it is tall enough.
 - `Ctrl+T` — copy entire buffer to a new track (next in list)
 - `Ctrl+N` / `Ctrl+B` — next / previous track (loads into editor)
 - `Ctrl+D` — duplicate current line (vi `yy`+`p` does this too)

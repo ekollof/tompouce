@@ -71,6 +71,7 @@ typedef struct {
     double pan;
     double att, dec, sus, rel;
     int has_gain, has_lpf, has_pan, has_env;
+    int gain_slider, lpf_slider;
     double room;       /* <0 off; master verb */
     double delay;      /* <0 off; per-event delay send */
     double degrade;    /* <0 off; probability an event is dropped */

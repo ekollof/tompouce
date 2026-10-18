@@ -442,6 +442,9 @@ def main(argv=None):
             environment['PKG_CONFIG_PATH'] = str(tree / 'lib/pkgconfig') + os.pathsep + environment.get('PKG_CONFIG_PATH', '')
         with tempfile.TemporaryDirectory(prefix='tompouce-build-') as temporary:
             build = Path(temporary)
+            # Each installation has a new source root. Normalize compiler paths
+            # within it so unchanged sources can reuse the user's ccache.
+            environment.setdefault('CCACHE_BASEDIR', str(build))
             for name in ('CMakeLists.txt', 'README.md', 'LICENSE', 'NOTICE', 'strudeltutor.json'):
                 shutil.copy2(SOURCE / name, build / name)
             ignore = shutil.ignore_patterns('*.o', '*.d', '*.inc', 'node_modules', '__pycache__', '.git')

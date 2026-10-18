@@ -78,7 +78,8 @@ static struct termios saved_tty;
 static volatile sig_atomic_t quit_requested;
 static void handle_quit(int sig) { quit_requested = sig; }
 static int selected_byte(int line, int col);
-static void do_evaluate(void);
+static int do_evaluate(void);
+static void do_perform(void);
 static int show_docs = 0;
 static int show_state = 0;
 static int show_tracks = 0;
@@ -2397,7 +2398,112 @@ static int scope_level(double v);
 
 /* Slider index in source order. Cursor inside slider(...) wins;
    otherwise the first slider on the line. -1 when the line has none. */
+static char *slider_document;
+static unsigned slider_document_generation;
+static int slider_offsets[64];
+static struct { int index, a, b, call_a, call_b, line; } slider_sites[64];
+static int slider_sites_count;
+
+static void slider_record_site(TSNode node, const char *text) {
+    TSNode fn=ts_node_child_by_field_name(node,"function",8);
+    if (ts_node_is_null(fn) || strcmp(ts_node_type(fn),"identifier")) return;
+    int a=(int)ts_node_start_byte(fn), b=(int)ts_node_end_byte(fn);
+    if (b-a!=6 || memcmp(text+a,"slider",6)) return;
+    TSNode args=ts_node_child_by_field_name(node,"arguments",9);
+    if (ts_node_is_null(args)) return;
+    TSNode arg=ts_node_named_child(args,0);
+    /* Empty and partially typed calls are ordinary editor states. Tree-sitter
+       byte/point accessors must never receive a null child. */
+    if (ts_node_is_null(arg)) return;
+    const char *kind=ts_node_type(arg);
+    if (strcmp(kind,"number") && strcmp(kind,"unary_expression")) return;
+    int start=(int)ts_node_start_byte(arg), end=(int)ts_node_end_byte(arg);
+    for (int i=0;i<slider_count() && i<64;i++) if (slider_offsets[i]==start && slider_sites_count<64) {
+        int n=slider_sites_count++;
+        slider_sites[n].index=i; slider_sites[n].a=start; slider_sites[n].b=end;
+        slider_sites[n].call_a=a; slider_sites[n].call_b=(int)ts_node_end_byte(node);
+        slider_sites[n].line=(int)ts_node_start_point(node).row;
+        break;
+    }
+}
+
+static void slider_walk(TSNode node, const char *text, int depth) {
+    if (depth>128 || ts_node_is_null(node)) return;
+    const char *type=ts_node_type(node);
+    if (!strcmp(type,"comment") || !strcmp(type,"string") || !strcmp(type,"template_string")) return;
+    if (!strcmp(type,"call_expression")) slider_record_site(node,text);
+    for (uint32_t i=0;i<ts_node_named_child_count(node);i++) slider_walk(ts_node_named_child(node,i),text,depth+1);
+}
+
+static void slider_refresh_sites(void) {
+    static unsigned cached_hash;
+    unsigned hash=hash_code();
+    pthread_mutex_lock(&tracks_lock);
+    unsigned generation=track_count && tracks[0].javascript?tracks[0].compile_generation:0;
+    if (slider_document && generation==slider_document_generation && hash==cached_hash) {
+        pthread_mutex_unlock(&tracks_lock); return;
+    }
+    char *text=editor_flatten();
+    if (!text) { pthread_mutex_unlock(&tracks_lock); return; }
+    if (generation!=slider_document_generation || !slider_document) {
+        free(slider_document);
+        const char *source=track_count?javascript_source(tracks[0].javascript):NULL;
+        slider_document=strdup_safe(source?source:text);
+        slider_document_generation=generation;
+        slider_sites_count=0;
+        for (int i=0;i<64;i++) slider_offsets[i]=slider_source_offset(i);
+    }
+    pthread_mutex_unlock(&tracks_lock);
+    if (!slider_document) { free(text); return; }
+    if (strcmp(text,slider_document)) {
+        int old=(int)strlen(slider_document), size=(int)strlen(text), prefix=0, suffix=0;
+        while (prefix<old && prefix<size && slider_document[prefix]==text[prefix]) prefix++;
+        while (suffix<old-prefix && suffix<size-prefix && slider_document[old-1-suffix]==text[size-1-suffix]) suffix++;
+        for (int i=0;i<64;i++) {
+            int at=slider_offsets[i];
+            if (at<0) continue;
+            if (at>=old-suffix) slider_offsets[i]+=size-old;
+            else if (at>prefix) slider_offsets[i]=-1;
+        }
+    }
+    cached_hash=hash;
+    free(slider_document); slider_document=text; slider_sites_count=0;
+    if (!ts_parser) (void)ts_ensure("");
+    if (!ts_parser) return;
+    TSTree *tree=ts_parser_parse_string(ts_parser,NULL,text,(uint32_t)strlen(text));
+    if (tree) { slider_walk(ts_tree_root_node(tree),text,0); ts_tree_delete(tree); }
+}
+
+static int slider_write_value(int index) {
+    slider_refresh_sites();
+    double value;
+    if (!slider_info(index,&value,NULL,NULL,NULL)) return 0;
+    for (int i=0;i<slider_sites_count;i++) if (slider_sites[i].index==index) {
+        char number[48]; snprintf(number,sizeof(number),"%.15g",value);
+        int a=slider_sites[i].a, b=slider_sites[i].b, line=slider_sites[i].line;
+        int old_line=cur_line, old_col=cur_col, selected=sel_active, sl=sel_line, sc=sel_col;
+        int column=a-editor_offset(line,0), delta=(int)strlen(number)-(b-a);
+        if (!editor_replace(a,b,number)) return 0;
+        cur_line=old_line; cur_col=old_col;
+        if (cur_line==line && cur_col>column) cur_col=cur_col>=column+b-a?cur_col+delta:column+(int)strlen(number);
+        sel_active=selected; sel_line=sl; sel_col=sc;
+        if (sl==line && sc>column) sel_col=sc>=column+b-a?sc+delta:column+(int)strlen(number);
+        slider_refresh_sites();
+        return 1;
+    }
+    return 0;
+}
+
 static int slider_on_line(int line, int col) {
+    slider_refresh_sites();
+    if (slider_document_generation) {
+        int first=-1, at=editor_offset(line,col);
+        for (int i=0;i<slider_sites_count;i++) if (slider_sites[i].line==line) {
+            if (first<0) first=slider_sites[i].index;
+            if (at>=slider_sites[i].call_a && at<=slider_sites[i].call_b) return slider_sites[i].index;
+        }
+        return first;
+    }
     int idx = 0, first = -1, hit = -1;
     if (line < 0 || line >= code_line_count) return -1;
     for (int ln = 0; ln < code_line_count; ln++) {
@@ -2419,6 +2525,8 @@ static int slider_on_line(int line, int col) {
 
 /* Index under the cursor, or -1. Bind order matches left-to-right slider(. */
 static int slider_at_cursor(void) {
+    slider_refresh_sites();
+    if (slider_document_generation) return slider_on_line(cur_line,cur_col);
     int idx = 0;
     for (int ln = 0; ln < code_line_count; ln++) {
         const char *s = code_lines[ln];
@@ -3584,7 +3692,7 @@ static const DocLine cheat[] = {
     {3, "F9                Toggle the song track list"},
     {3, "F10 / F11         Narrow / widen the editor pane"},
     {3, "F12               Toggle piano roll + scope pane"},
-    {3, "Ctrl+Left/Right   Adjust slider at cursor, evaluate"},
+    {3, "Ctrl+Left/Right   Adjust live slider at cursor"},
     {0, ""},
     {1, "Songs and files"},
     {3, "F7                Toggle sequential song playback"},
@@ -3862,16 +3970,19 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     }
     if (h>=14) {
         int js=0, compiled=0; unsigned generation=0;
+        char *text=editor_flatten();
         pthread_mutex_lock(&tracks_lock);
         compiled=track_count;
         for (int i=0;i<track_count;i++) if (tracks[i].javascript) js++;
         if (track_count) generation=tracks[0].compile_generation;
+        const char *evaluated_source=track_count==1 && tracks[0].javascript?
+            javascript_source(tracks[0].javascript):current_code;
+        int evaluated=text && !strcmp(text,cstr(evaluated_source));
         pthread_mutex_unlock(&tracks_lock);
         state_line(&row,maxrow,c0+1,w-2,"engine=%s js=%d native=%d gen=%u queue-gen=%u",
             js?"QuickJS/Strudel":"native parser",js,compiled-js,generation,event_queue_generation());
-        char *text=editor_flatten();
         state_line(&row,maxrow,c0+1,w-2,"source=%s file=%s bytes=%zu lines=%d",
-            !text?"unknown":(!strcmp(text,cstr(current_code))?"evaluated":"pending F5"),
+            !text?"unknown":(evaluated?"evaluated":"pending F5"),
             !text?"unknown":(editor_written && !strcmp(text,editor_written)?"saved":"unsaved"),
             text?strlen(text):0,code_line_count);
         free(text);
@@ -4131,17 +4242,17 @@ static void draw_input(void) {
     if (used<cols) blank_inner(rows-1,used,cols-used);
 }
 
-static void do_evaluate(void) {
+static int do_evaluate(void) {
     char *buf = editor_flatten();
     if (!buf) {
         snprintf(status_msg, sizeof(status_msg), "out of memory");
-        return;
+        return 0;
     }
     if (!track_load_from_code(buf)) {
         snprintf(status_msg,sizeof(status_msg),"Evaluation failed; last playable pattern retained");
         note_synced(0);
         free(buf);
-        return;
+        return 0;
     }
     int spos = scheduler_song_pos();
     if (spos >= 0) scheduler_track_update(spos, buf); /* commit to active track */
@@ -4149,6 +4260,15 @@ static void do_evaluate(void) {
     snprintf(status_msg, 256, "Evaluated %d tracks", track_count);
     note_synced(1);
     free(buf);
+    return 1;
+}
+
+/* Explicit Evaluate and starting Play use the editor's current source, as
+   StrudelMirror.evaluate/toggle do. Loading a document remains independent. */
+static void do_perform(void) {
+    if (!do_evaluate()) return;
+    scheduler_transport_set(1);
+    scheduler_start();
 }
 
 static void duplicate_line(void) {
@@ -4336,14 +4456,19 @@ static void do_command_or_ai(const char *text) {
         char *cmd = strtok_r(tmp, " \t", &save);
         if (cmd && strcmp(cmd,"bpm")==0) {
             char *a = strtok_r(NULL, " \t", &save);
-            if (a) { audio_set_bpm(atof(a)); snprintf(status_msg,256,"BPM %.0f",audio_get_bpm()); }
+            if (a) {
+                char *end; double bpm=strtod(a,&end);
+                if (end!=a && !*end && isfinite(bpm) && bpm>=0 && (bpm==0 || isfinite(240/bpm))) {
+                    audio_set_bpm(bpm); snprintf(status_msg,256,"BPM %.0f",audio_get_bpm());
+                } else snprintf(status_msg,256,"BPM must be a nonnegative finite number");
+            }
         } else if (cmd && (!strcmp(cmd,"tutor") || !strcmp(cmd,"tutor!"))) {
             if (strtok_r(NULL," \t",&save)) snprintf(status_msg,sizeof(status_msg),"usage: /tutor[!]");
             else tutor_open(cmd[5]=='!');
         } else if (cmd && strcmp(cmd,"play")==0) {
-            audio_toggle_play(1); scheduler_start(); snprintf(status_msg,256,"playing");
+            if (!audio_is_playing()) do_perform();
         } else if (cmd && strcmp(cmd,"stop")==0) {
-            audio_toggle_play(0); snprintf(status_msg,256,"stopped");
+            scheduler_transport_set(0); snprintf(status_msg,256,"stopped");
         } else if (cmd && strcmp(cmd,"companion")==0) {
             char *arg = strtok_r(NULL," \t",&save);
             char *extra = strtok_r(NULL," \t",&save);
@@ -4655,7 +4780,7 @@ static void read_mouse(void) {
             if (t < 0) t = 0;
             if (t > 1) t = 1;
             if (slider_set(mouse_slider, lo + (hi - lo) * t)) {
-                do_evaluate();
+                (void)slider_write_value(mouse_slider);
                 double value;
                 if (slider_info(mouse_slider, &value, NULL, NULL, NULL))
                     snprintf(status_msg, sizeof(status_msg), "slider %d = %.3g", mouse_slider + 1, value);
@@ -4989,26 +5114,29 @@ void tui_run(void) {
             state_save(); /* persist session for next launch */
             break;
         } else if (ch == 16) {
-            if (audio_is_playing()) { audio_toggle_play(0); } else { audio_toggle_play(1); scheduler_start(); }
+            if (audio_is_playing()) { scheduler_transport_set(0); } else { do_perform(); }
             continue;
         } else if (ch == 2001 || ch == 2002) {
             int i = slider_at_cursor();
-            if (i < 0) i = 0;
+            if (i<0 && slider_count()==1 && (!slider_document_generation || slider_sites_count==1) &&
+                !strstr(code_lines[cur_line],"slider(")) i=0;
             if (slider_count() <= 0) {
                 snprintf(status_msg, sizeof(status_msg), "no slider in this buffer");
+            } else if (i<0) {
+                snprintf(status_msg,sizeof(status_msg),"no evaluated slider at cursor (F5 activates new controls)");
             } else if (!slider_nudge(i, ch == 2002 ? 1 : -1)) {
                 double v = 0;
                 slider_info(i, &v, NULL, NULL, NULL);
                 snprintf(status_msg, sizeof(status_msg), "slider %d stays %.3g", i + 1, v);
             } else {
-                do_evaluate();
                 double v = 0;
+                (void)slider_write_value(i);
                 slider_info(i, &v, NULL, NULL, NULL);
                 snprintf(status_msg, sizeof(status_msg), "slider %d = %.3g", i + 1, v);
             }
             continue;
         } else if (ch == SL_KEY_F(5) || ch == 18) {
-            do_evaluate();
+            do_perform();
             continue;
         } else if (ch == SL_KEY_F(2)) {
             input_mode = 1;

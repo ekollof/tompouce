@@ -18,7 +18,7 @@ static const Parameter parameters[] = {
     {"penv",0,-96,96}, {"pattack",.005,0,30}, {"pdecay",.1,0,30},
     {"psustain",0,0,1}, {"prelease",.1,0,30}, {"panchor",0,0,1},
     {"vib",0,0,200}, {"vibmod",.1,0,48}, {"room",0,0,1},
-    {"roomsize",1,0,10}, {"dry",1,0,1}, {"begin",0,0,1}, {"end",1,0,1},
+    {"roomsize",2,0,10}, {"dry",1,0,1}, {"begin",0,0,1}, {"end",1,0,1},
     {"loop",0,0,1}, {"loopBegin",0,0,1}, {"loopEnd",1,0,1},
     {"cut",0,0,65535}, {"clip",1,0,64}, {"pw",.5,.01,.99},
     {"pwrate",0,0,20000}, {"pwsweep",0,0,1}, {"unison",7,1,16}, {"spread",1,0,1},

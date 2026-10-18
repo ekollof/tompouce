@@ -7,6 +7,7 @@
 #include "wavetable.h"
 #include "stretch.h"
 #include <ctype.h>
+#include "js_number.h"
 
 static double control(const cJSON *value, const char *name, double initial, double min, double max) {
     const cJSON *p = cJSON_GetObjectItemCaseSensitive(value, name);
@@ -17,6 +18,69 @@ static double control(const cJSON *value, const char *name, double initial, doub
 static const char *text_control(const cJSON *value, const char *name) {
     const cJSON *p = cJSON_GetObjectItemCaseSensitive(value, name);
     return cJSON_IsString(p) ? p->valuestring : "";
+}
+
+static const cJSON *duck_item(const cJSON *value, const char *name, int index) {
+    const cJSON *item=cJSON_GetObjectItemCaseSensitive(value,name);
+    if (cJSON_IsArray(item)) {
+        const cJSON *entry=cJSON_GetArrayItem(item,index);
+        item=entry && !cJSON_IsNull(entry)?entry:cJSON_GetArrayItem(item,0);
+    }
+    return item;
+}
+
+static void duck_onset(const cJSON *value, int index, DuckControl *control) {
+    const cJSON *item=duck_item(value,"duckonset",index);
+    control->onset=0; control->string_onset=0; control->onset_text[0]=0;
+    int array=0;
+    for (int depth=0;cJSON_IsArray(item);depth++) {
+        array=1;
+        int count=cJSON_GetArraySize(item);
+        if (depth>=128 || count>1) {control->onset=NAN;return;}
+        if (!count) {item=NULL;break;}
+        item=cJSON_GetArrayItem(item,0);
+    }
+    if (array || cJSON_IsString(item)) {
+        const char *text=""; char number[32];
+        if (cJSON_IsString(item)) text=item->valuestring;
+        else if (cJSON_IsBool(item)) text=cJSON_IsTrue(item)?"true":"false";
+        else if (cJSON_IsNumber(item)) {
+            JSDTOATempMem temporary;
+            js_dtoa(number,item->valuedouble,10,0,JS_DTOA_FORMAT_FREE,&temporary);
+            text=number;
+        } else if (item && !cJSON_IsNull(item)) {control->onset=NAN;return;}
+        if (strlen(text)>=sizeof(control->onset_text)) {control->onset=NAN;return;}
+        snprintf(control->onset_text,sizeof(control->onset_text),"%s",text);
+        control->string_onset=1;
+    } else if (cJSON_IsBool(item)) control->onset=cJSON_IsTrue(item)?1:0;
+    else if (cJSON_IsNumber(item)) control->onset=item->valuedouble;
+    else if (item && !cJSON_IsNull(item)) control->onset=NAN;
+}
+
+static double duck_numeric(const cJSON *value, const char *name, int index, double fallback) {
+    const cJSON *item=duck_item(value,name,index);
+    if (!item) return fallback;
+    int array=0;
+    for (int depth=0;cJSON_IsArray(item);depth++) {
+        if (depth>=128) return NAN;
+        int count=cJSON_GetArraySize(item);
+        if (!count) return 0;
+        if (count!=1) return NAN;
+        item=cJSON_GetArrayItem(item,0); array=1;
+    }
+    if (cJSON_IsNull(item)) return 0;
+    if (cJSON_IsBool(item)) return array?NAN:(cJSON_IsTrue(item)?1:0);
+    if (cJSON_IsNumber(item)) return item->valuedouble;
+    if (cJSON_IsString(item)) {
+        const char *start=item->valuestring;
+        while (isspace((unsigned char)*start)) start++;
+        if (!*start) return 0;
+        char *end; double number=strtod(start,&end);
+        if (end==start) return NAN;
+        while (isspace((unsigned char)*end)) end++;
+        if (!*end) return number;
+    }
+    return NAN;
 }
 
 static int oscillator(const char *s) {
@@ -31,6 +95,63 @@ static int oscillator(const char *s) {
     if (!strcmp(s,"supersaw")) return INST_SUPERSAW;
     if (!strncmp(s,"wt:",3)) return INST_WT;
     return -1;
+}
+
+static int duck_target(const cJSON *target) {
+    /* Array property keys use Array.toString; only a chain of singleton
+       arrays can produce a canonical numeric orbit key. */
+    for (int depth=0;cJSON_IsArray(target);depth++) {
+        if (depth>=128 || cJSON_GetArraySize(target)!=1) return -1;
+        target=cJSON_GetArrayItem(target,0);
+    }
+    if (cJSON_IsNumber(target) && isfinite(target->valuedouble) &&
+        target->valuedouble>=0 && target->valuedouble<N_ORBITS &&
+        target->valuedouble==floor(target->valuedouble)) return target->valueint;
+    if (cJSON_IsString(target) && target->valuestring) for (int orbit=0;orbit<N_ORBITS;orbit++) {
+        char key[16]; snprintf(key,sizeof(key),"%d",orbit);
+        if (!strcmp(target->valuestring,key)) return orbit;
+    }
+    return -1;
+}
+
+static void duck_assign(const cJSON *v, const cJSON *target, int index, AudioEvent *ev) {
+    int orbit=duck_target(target);
+    if (orbit<0) return;
+    ev->duck_mask|=1u<<orbit; ev->duck_values=1;
+    duck_onset(v,index,&ev->ducks[orbit]);
+    double attack=duck_numeric(v,"duckattack",index,
+        duck_numeric(v,"duckatt",index,duck_numeric(v,"datt",index,.1)));
+    ev->ducks[orbit].attack=isnan(attack)?NAN:fmax(.002,attack);
+    ev->ducks[orbit].depth=duck_numeric(v,"duckdepth",index,1);
+}
+
+static void duck_controls(const cJSON *v, AudioEvent *ev) {
+    ev->duck_attack=fmax(.002,control(v,"duckattack",control(v,"duckatt",control(v,"datt",.1,0,10),0,10),0,10));
+    ev->duck_depth=control(v,"duckdepth",1,0,1);
+    ev->duck_onset=control(v,"duckonset",0,-10,10);
+    const cJSON *duck=cJSON_GetObjectItemCaseSensitive(v,"duckorbit");
+    if (!duck) duck=cJSON_GetObjectItemCaseSensitive(v,"duck");
+    if (cJSON_IsArray(duck)) {
+        int index=0;
+        const cJSON *target;
+        cJSON_ArrayForEach(target,duck) {
+            duck_assign(v,target,index,ev);
+            index++;
+        }
+    } else {
+        int o=duck_target(duck);
+        if (o>=0) ev->duck_mask=1u<<o;
+    }
+    if (ev->duck_mask && !ev->duck_values) {
+        ev->duck_values=1;
+        for (int o=0;o<N_ORBITS;o++) if (ev->duck_mask&(1u<<o)) {
+            duck_onset(v,0,&ev->ducks[o]);
+            double attack=duck_numeric(v,"duckattack",0,
+                duck_numeric(v,"duckatt",0,duck_numeric(v,"datt",0,.1)));
+            ev->ducks[o].attack=isnan(attack)?NAN:fmax(.002,attack);
+            ev->ducks[o].depth=duck_numeric(v,"duckdepth",0,1);
+        }
+    }
 }
 
 static double midi_value(const cJSON *v) {
@@ -69,12 +190,11 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
     ev->time = origin + begin->valuedouble * seconds;
     ev->duration = fmin(60,(end->valuedouble - begin->valuedouble) * seconds);
     double clip = control(v,"clip",1,0,64);
-    if (clip == 0) return 0;
+    if (clip == 0) clip=1; /* Superdough's clip || 1 fallback. */
     ev->duration = fmin(60,ev->duration * clip);
     ev->duration = control(v,"duration",ev->duration,.00001,60);
     ev->gain = control(v,"gain",.8,0,16) * control(v,"velocity",1,0,1) * control(v,"amp",1,0,16)
         * control(v,"busgain",1,0,16) * control(v,"overgain",1,0,16);
-    if (ev->gain <= 0) return 0;
     ev->pan = control(v,"pan",.5,0,1) * 2 - 1;
     ev->has_pan=cJSON_HasObjectItem(v,"pan");
     const char *envelope_names[4] = {"attack","decay","sustain","release"};
@@ -85,28 +205,15 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
     ev->sus = envelope[2]; ev->rel = envelope[3];
     ev->smp = ev->wt = ev->midi_chan = ev->midi_note = -1;
     ev->delay_send = control(v,"delay",0,0,1);
-    ev->delay_time = control(v,"delaytime",-1,0,1.99);
-    ev->delay_fb = control(v,"delayfeedback",-1,0,.98);
+    ev->delay_time = cJSON_HasObjectItem(v,"delaytime") ? control(v,"delaytime",0,0,1)
+        : control(v,"delaysync",.1875,0,64)*seconds;
+    ev->delay_time=fmin(1,ev->delay_time); /* Web orbit DelayNode maxDelayTime. */
+    ev->delay_fb = control(v,"delayfeedback",.5,0,.98);
+    /* Superdough does not create/update/send a delay when either parameter
+       is zero. Existing shared tails keep their previous automation. */
+    if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
     ev->orbit = (int)control(v,"orbit",control(v,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
-    ev->duck_attack = control(v,"duckattack",control(v,"duckatt",control(v,"datt",.2,0,10),0,10),0,10);
-    ev->duck_depth = control(v,"duckdepth",1,0,1);
-    {
-        const cJSON *duck = cJSON_GetObjectItemCaseSensitive(v,"duckorbit");
-        if (!duck) duck = cJSON_GetObjectItemCaseSensitive(v,"duck");
-        if (cJSON_IsNumber(duck) && isfinite(duck->valuedouble)) {
-            int o = (int)duck->valuedouble;
-            if (o >= 0 && o < N_ORBITS) ev->duck_mask = 1u << o;
-        } else if (cJSON_IsString(duck) && duck->valuestring) {
-            char text[64];
-            snprintf(text,sizeof(text),"%.63s",duck->valuestring);
-            char *save = NULL;
-            for (char *tok = strtok_r(text,":",&save); tok; tok = strtok_r(NULL,":",&save)) {
-                char *end = NULL;
-                long o = strtol(tok,&end,10);
-                if (end != tok && end && !*end && o >= 0 && o < N_ORBITS) ev->duck_mask |= 1u << o;
-            }
-        }
-    }
+    duck_controls(v,ev);
     ev->smp_speed = control(v,"speed",1,-8,8);
     if (cJSON_HasObjectItem(v,"stretch")) {
         double shift = control(v,"stretch",0,-4,16);
@@ -121,7 +228,6 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
     const char *sync[] = {"lpsync","hpsync","bpsync"};
     for (int i = 0; i < 3; i++)
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
-    if (cJSON_HasObjectItem(v,"delaysync")) ev->delay_time = control(v,"delaysync",.1875,0,64)*seconds;
     const char *sound = text_control(v,"s");
     int wavetable=!strncmp(sound,"wt_",3);
     if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;
@@ -175,20 +281,33 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
         if (!ev->native_synth) { log_console("native synth: unsupported program or preparation limit exceeded"); return 0; }
     }
     const cJSON *ir = cJSON_GetObjectItemCaseSensitive(value,"ir");
+    ev->room_params_valid=1; ev->room_sample=-1;
+    ev->room_speed=control(value,"irspeed",1,-8,8);
+    ev->room_begin=control(value,"irbegin",0,0,1);
+    if (ir && ev->dsp.p[DSP_ROOM]>0) {
+        if (!cJSON_IsString(ir) || !ir->valuestring[0]) return 0;
+        char token[256];
+        int n=snprintf(token,sizeof(token),"%s:%d",ir->valuestring,
+            (int)floor(control(value,"i",1,-1000000,1000000)+.5));
+        if (n<0 || (size_t)n>=sizeof(token)) return 0;
+        ev->room_sample=websamp_acquire(token,-1);
+        if (ev->room_sample<0) return 0;
+    }
+    const char *room_names[]={"roomsize","roomfade","roomlp","roomdim","irspeed","irbegin"};
+    unsigned room_explicit=0;
+    for (int i=0;i<6;i++) {
+        const cJSON *parameter=cJSON_GetObjectItemCaseSensitive(value,room_names[i]);
+        if (cJSON_IsNumber(parameter) && isfinite(parameter->valuedouble)) room_explicit|=1u<<i;
+    }
+    if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(value,"size"))) room_explicit|=1;
+    audio_inherit_room(ev,room_explicit);
     if (!ir && ev->dsp.p[DSP_ROOM]>0)
         ev->ir_kernel=convolution_prepare_reverb(ev->dsp.p[DSP_SIZE],ev->dsp.p[DSP_ROOMFADE],ev->dsp.p[DSP_ROOMLP],ev->dsp.p[DSP_ROOMDIM]);
     if (ir && ev->dsp.p[DSP_ROOM] > 0) {
-        if (!cJSON_IsString(ir) || !ir->valuestring[0]) return 0;
-        char token[256];
-        int n = snprintf(token,sizeof(token),"%s:%d",ir->valuestring,
-            (int)floor(control(value,"i",1,-1000000,1000000)+.5));
-        if (n < 0 || (size_t)n >= sizeof(token)) return 0;
-        int sample = websamp_acquire(token,-1);
-        if (sample < 0) return 0;
         if (ev->dsp.p[DSP_SIZE] == 0) ev->dsp.p[DSP_ROOM] = 0;
         else {
-            ev->ir_kernel = convolution_prepare(sample,ev->dsp.p[DSP_SIZE],
-                control(value,"irspeed",1,-8,8),control(value,"irbegin",0,0,1));
+            ev->ir_kernel = convolution_prepare(ev->room_sample,ev->dsp.p[DSP_SIZE],
+                ev->room_speed,ev->room_begin);
             if (!ev->ir_kernel) return 0;
         }
     }
@@ -261,18 +380,29 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
             }
         }
     }
-    return 1;
+    return ev->smp>=0;
 }
 
-void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation) {
+int js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation) {
     double seconds = audio_sec_per_cycle();
-    cJSON *haps = javascript_query_audio(program,cycle_index,cycle_index+1.0,1/seconds);
-    if (!cJSON_IsArray(haps)) { cJSON_Delete(haps); return; }
-    double origin = cycle_start - cycle_index * seconds;
-    javascript_cache_spans(program,haps,origin,seconds);
-    const cJSON *hap;
-    cJSON_ArrayForEach(hap,haps) {
+    return js_audio_schedule_arc(program,cycle_start-cycle_index*seconds,seconds,cycle_index,cycle_index+1.0,generation);
+}
+
+int js_audio_schedule_arc(JsProgram *program, double origin, double seconds,
+                          double begin, double end, unsigned generation) {
+    JsAudioClock clock={.seconds=seconds,.anchor_time=origin,.end=end};
+    return js_audio_schedule_clock(program,&clock,begin,end,origin+end*seconds,generation);
+}
+
+static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
+                          double seconds, unsigned generation) {
+    if (!isfinite(time) || !isfinite(seconds) || seconds<=0) return;
+    const cJSON *begin=cJSON_GetObjectItemCaseSensitive(hap,"begin");
+    double origin=time-begin->valuedouble*seconds;
+    double cutoff=event_queue_not_before();
+        if (time<=cutoff || time+1/SR<audio_time_now()) return;
         const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap,"value");
+        javascript_cache_hap(program,hap,origin,seconds);
         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
             AudioEvent ev;
             if (js_audio_event(hap,origin,seconds,&ev)) {
@@ -281,17 +411,38 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
                     ev.osc_only=1; ev.generation=generation; event_queue_push(&ev);
                 } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
             }
-            continue;
+            return;
         }
+        AudioEvent controls={.generation=generation,.time=time,.control_only=1,
+            .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+        controls.dsp.enabled=1;
+        controls.orbit=(int)control(value,"orbit",control(value,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
+        duck_controls(value,&controls);
+        unsigned existing=audio_register_orbit(controls.orbit);
+        const cJSON *targets=cJSON_GetObjectItemCaseSensitive(value,"duckorbit");
+        if (!targets) targets=cJSON_GetObjectItemCaseSensitive(value,"duck");
+        if (cJSON_IsArray(targets)) {
+            int index=0; const cJSON *target;
+            cJSON_ArrayForEach(target,targets) {
+                controls.duck_mask=0;
+                duck_assign(value,target,index++,&controls);
+                controls.duck_mask &= existing;
+                if (controls.duck_mask) event_queue_push(&controls);
+            }
+        } else {
+            controls.duck_mask &= existing;
+            if (controls.duck_mask) event_queue_push(&controls);
+        }
+        if (!strcmp(text_control(value,"s"),"~")) return;
         const cJSON *field;
         cJSON_ArrayForEach(field,value) {
             const char *name = field->string;
             if (!name || *name == '_' || dsp_supports_control(name)) continue;
-            const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan",
+            const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
                 "attack","decay","sustain","release","speed","detune","delay","delaytime",
                 "delayfeedback","midichan","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
                 "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
-                "duckdepth","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
+                "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
                 "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
                 "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
             int implemented = 0;
@@ -299,26 +450,111 @@ void js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, 
             if (!implemented) javascript_warn_control(program,name);
         }
         AudioEvent ev;
-        if (!js_audio_event(hap,origin,seconds,&ev)) continue;
+        if (!js_audio_event(hap,origin,seconds,&ev)) return;
         ev.generation = generation;
+        ev.duck_mask=0; /* Independently committed above, including failed sources. */
         if (cJSON_HasObjectItem(value,"csound")) {
-            if (!csound_program_schedule(javascript_csound(program),value,ev.time,ev.duration,ev.freq))
+            pthread_mutex_lock(&tracks_lock);
+            int current=generation==event_queue_generation();
+            int scheduled=current && csound_program_schedule(javascript_csound(program),value,ev.time,ev.duration,ev.freq);
+            if (current && !scheduled)
                 javascript_warn_control(program,"csound (renderer unavailable or event rejected)");
-            else { ev.csound_only = 1; event_queue_push(&ev); }
-            continue;
+            else if (scheduled) { ev.csound_only = 1; event_queue_push(&ev); }
+            pthread_mutex_unlock(&tracks_lock);
+            return;
         }
         if (!resolve_sample(&ev,value)) {
             native_synth_release(ev.native_synth);
             stretch_release(ev.stretch_buffer);
             if (cJSON_HasObjectItem(value,"ir"))
                 javascript_warn_control(program,"ir (sample unavailable or convolution limit exceeded)");
-            continue;
+            else javascript_warn_control(program,"sound (sample unavailable or unknown source)");
+            return;
+        }
+        if (ev.time+1/SR<audio_time_now()) {
+            native_synth_release(ev.native_synth); stretch_release(ev.stretch_buffer);
+            javascript_warn_control(program,"late sound preparation (note skipped)");
+            return;
         }
         if (ev.dsp.p[DSP_ROOM]>0 && !ev.ir_kernel && !cJSON_HasObjectItem(value,"ir"))
             javascript_warn_control(program,"generated room (IR duration/cache limit; using native Schroeder fallback)");
-        event_queue_push(&ev);
+        pthread_mutex_lock(&tracks_lock);
+        int current=generation==event_queue_generation();
+        if (current && audio_prepare_delay(&ev)) {
+            audio_prepare_room(&ev);
+            event_queue_push(&ev);
+        }
+        else if (current) javascript_warn_control(program,"delay (pending control capacity exceeded)");
+        pthread_mutex_unlock(&tracks_lock);
         native_synth_release(ev.native_synth);
         stretch_release(ev.stretch_buffer);
+}
+
+typedef struct { const cJSON *hap; int index; } OrderedHap;
+static int hap_order(const void *left, const void *right) {
+    const OrderedHap *a=left,*b=right;
+    double ta=cJSON_GetObjectItemCaseSensitive(a->hap,"begin")->valuedouble;
+    double tb=cJSON_GetObjectItemCaseSensitive(b->hap,"begin")->valuedouble;
+    if (ta<tb) return -1;
+    if (ta>tb) return 1;
+    int ca=cJSON_HasObjectItem(cJSON_GetObjectItemCaseSensitive(a->hap,"value"),"cps");
+    int cb=cJSON_HasObjectItem(cJSON_GetObjectItemCaseSensitive(b->hap,"value"),"cps");
+    return ca!=cb?cb-ca:a->index-b->index;
+}
+
+int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
+                            double begin, double end, double tick_end, unsigned generation) {
+    clock->end=end;
+    for (int pass=0;pass<32;pass++) {
+        cJSON *haps=javascript_query_audio(program,begin,end,1/clock->seconds);
+        if (!cJSON_IsArray(haps)) { cJSON_Delete(haps); return 0; }
+        int count=cJSON_GetArraySize(haps);
+        if (count>4096) { cJSON_Delete(haps); return 0; }
+        OrderedHap *ordered=count?malloc((size_t)count*sizeof(*ordered)):NULL;
+        if (count && !ordered) { cJSON_Delete(haps); return 0; }
+        const cJSON *hap; int n=0;
+        cJSON_ArrayForEach(hap,haps) {
+            const cJSON *onset=cJSON_GetObjectItemCaseSensitive(hap,"begin");
+            const cJSON *finish=cJSON_GetObjectItemCaseSensitive(hap,"end");
+            const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+            if (!cJSON_IsNumber(onset) || !cJSON_IsNumber(finish) || !cJSON_IsObject(value) ||
+                !isfinite(onset->valuedouble) || !isfinite(finish->valuedouble) || finish->valuedouble<onset->valuedouble) {
+                javascript_warn_control(program,"invalid scheduled hap"); continue;
+            }
+            ordered[n]=(OrderedHap){hap,n}; n++;
+        }
+        count=n;
+        if (count) qsort(ordered,(size_t)count,sizeof(*ordered),hap_order);
+        int changed=0;
+        for (int i=0;i<count;i++) {
+            hap=ordered[i].hap;
+            double onset=cJSON_GetObjectItemCaseSensitive(hap,"begin")->valuedouble;
+            double target=(onset-clock->anchor_cycle)*clock->seconds+clock->anchor_time;
+            if (!isfinite(target) || target>tick_end+1e-9) continue;
+            const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+            const cJSON *cps=cJSON_GetObjectItemCaseSensitive(value,"cps");
+            double event_seconds=clock->seconds;
+            if (cps) {
+                if (!cJSON_IsNumber(cps) || !isfinite(cps->valuedouble) || cps->valuedouble<0 ||
+                    (cps->valuedouble>0 && !isfinite(1/cps->valuedouble)) || !isfinite(240*cps->valuedouble)) {
+                    javascript_warn_control(program,"cps (requires a nonnegative finite tempo)"); continue;
+                }
+                event_seconds=cps->valuedouble==0?HUGE_VAL:1/cps->valuedouble;
+            }
+            schedule_hap(program,hap,target,event_seconds,generation);
+            if (cps && event_seconds!=clock->seconds) {
+                clock->seconds=event_seconds;
+                clock->anchor_cycle=onset; clock->anchor_time=target;
+                changed=1;
+            }
+        }
+        free(ordered); cJSON_Delete(haps);
+        if (!changed) return 1;
+        begin=end;
+        end=clock->anchor_cycle+(tick_end-clock->anchor_time)/clock->seconds;
+        clock->end=end;
+        if (end<begin || !isfinite(clock->seconds)) return 1;
     }
-    cJSON_Delete(haps);
+    javascript_warn_control(program,"cps (too many tempo changes in one scheduling window)");
+    return 0;
 }

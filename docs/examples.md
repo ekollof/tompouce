@@ -163,7 +163,8 @@ lead: note("eb4 g4 bb4 c5").slow(2).s('triangle')
   .decay(0.2).sustain(0).delay(0.15).gain(0.3)._pianoroll()
 ```
 
-F5 registers the slider; Ctrl+Left/Right adjusts its live value and reevaluates.
+F5 registers the slider; Ctrl+Left/Right adjusts its live value without
+reevaluating source or restarting playback. Upcoming notes use the new value.
 The inline roll follows the lead's final two-cycle timing.
 
 ## 12. Strudel wavetable banks

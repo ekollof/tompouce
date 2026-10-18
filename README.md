@@ -14,6 +14,8 @@ format remain compatible.
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 
+![Tompouce running Bass fugue with an inline vertical piano roll and console](docs/images/tompouce.png)
+
 ## Install
 
 Clone the complete project and install on Linux x86_64:

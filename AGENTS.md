@@ -2,6 +2,19 @@
 
 Project: **Tompouce** – a terminal live-coding environment for music in C, with MCP support.
 
+### Audible tutorial defaults (2026-10-18)
+
+Raised the common Strudeltutor gain from 0.08 to 0.5 (about +16 dB), with
+corresponding increases for chords, bass, hats, patterns and commented answers.
+Instructions match the new values; lesson 01's starter remains intentionally
+silent. All 22 starters and 22 answers compile/query/render four cycles offline
+with finite PCM and no clipping; maximum measured peak is 0.3809 (-8.4 dBFS).
+The user explicitly chose to update only the bundled tutorial. Updated the
+installed examples/strudeltutor.json through the installer's atomic writer;
+existing config copies, progress, live source and engine were left untouched.
+This data-only update needs no binary rebuild/restart; existing copies retain
+their saved levels by design.
+
 ### Stopped-editor highlight bounds (2026-10-18)
 
 The tutorial's random yellow blocks in comments were an out-of-bounds read,

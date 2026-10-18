@@ -5,7 +5,7 @@ Access requires a GitHub account with permission to this repository.
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 
-![Tompouce running Bass fugue with an inline vertical piano roll and console](docs/images/tompouce.png)
+![Tompouce running Bell dub with inline waveform and spectrum visualizations and console](docs/images/tompouce.png)
 
 ## Why?
 

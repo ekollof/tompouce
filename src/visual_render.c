@@ -136,21 +136,29 @@ static void roll(TerminalImage *im, const VisualOptions *o, const VisualNote *no
                  double now, double origin, double seconds) {
     double span=o->cycles*seconds, from=now-span*o->playhead;
     double low=o->min_midi,high=o->max_midi;
-    int sound_rows[GRAPHICS_NOTES], sound_count=0;
-    for (int i=0;i<count;i++) if (*notes[i].sound) {
+    int sound_rows[GRAPHICS_NOTES], sound_count=0, melodic=0;
+    for (int i=0;i<count;i++) {
+        if (notes[i].end<from || notes[i].start>from+span) continue;
+        if (!*notes[i].sound) { melodic++; continue; }
         int j=0;
         while (j<sound_count && strcmp(notes[sound_rows[j]].sound,notes[i].sound)) j++;
         if (j==sound_count) sound_rows[sound_count++]=i;
     }
+    for (int i=0;i<sound_count;i++) for (int j=i+1;j<sound_count;j++)
+        if (strcmp(notes[sound_rows[i]].sound,notes[sound_rows[j]].sound)>0) {
+            int index=sound_rows[i]; sound_rows[i]=sound_rows[j]; sound_rows[j]=index;
+        }
     if (o->autorange) {
         low=128; high=-128;
-        for (int i=0;i<count;i++) if (notes[i].end>=from && notes[i].start<=from+span) {
+        for (int i=0;i<count;i++) if (!*notes[i].sound && notes[i].end>=from && notes[i].start<=from+span) {
             low=fmin(low,notes[i].pitch); high=fmax(high,notes[i].pitch);
         }
         if (high<low) { low=48; high=72; }
-        if (high-low<12) { double mid=(high+low)/2; low=mid-6; high=mid+6; }
+        low=floor(low); high=ceil(high);
+        if (high-low<12) { double mid=floor((high+low)/2); low=mid-6; high=mid+6; }
     }
     int left=o->vertical?0:terminal_graphics_plot_left(im), width=im->width-left;
+    int top=o->vertical && !im->compact && im->height>=30?14:0, height=im->height-top;
     RollOrder order[GRAPHICS_NOTES]; int lane[GRAPHICS_NOTES],lanes[GRAPHICS_NOTES];
     double ends[GRAPHICS_NOTES];
     for (int i=0;i<count;i++) order[i]=(RollOrder){&notes[i],i};
@@ -166,44 +174,76 @@ static void roll(TerminalImage *im, const VisualOptions *o, const VisualNote *no
         for (int j=first;j<last;j++) lanes[order[j].index]=used;
         first=last;
     }
-    if (left && !sound_count) for (int p=(int)ceil(low);p<=high && p<=127;p++) {
-        double v=(p-low+.5)/(high-low+1); if (!o->flip_values) v=1-v;
-        int y=(int)(v*im->height),h=(int)fmax(1,im->height/(high-low+1));
-        line(im,left,y,im->width-1,y,p%12?0x60708030u:0x60708080u,0);
-        int pc=(p%12+12)%12,black=pc==1 || pc==3 || pc==6 || pc==8 || pc==10;
-        for (int yy=y-h/2;yy<=y+h/2;yy++) for (int x=left-7;x<left-1;x++)
-            terminal_graphics_pixel(im,x,yy,black?0x303d42ffu:0xa5b9beffu);
-    }
     int onsets[GRAPHICS_NOTES][4],marked=0;
     double values[GRAPHICS_NOTES]; int rows=0;
-    if (o->fold) for (int i=0;i<count;i++) {
+    if (o->fold) for (int i=0;i<count;i++) if (!*notes[i].sound && notes[i].end>=from && notes[i].start<=from+span) {
         int j=0; while (j<rows && values[j]!=notes[i].pitch) j++;
         if (j==rows && rows<GRAPHICS_NOTES) values[rows++]=notes[i].pitch;
     }
     if (o->fold) for (int i=0;i<rows;i++) for (int j=i+1;j<rows;j++)
         if (values[j]<values[i]) { double v=values[i]; values[i]=values[j]; values[j]=v; }
+    double pitch_rows=melodic?(o->fold?rows:ceil(high-low+1)):0;
+    double total_rows=fmax(1,pitch_rows+sound_count);
+    int axis_size=o->vertical?im->width:im->height;
+    int label_step=(int)ceil(28*total_rows/fmax(1,axis_size));
+    if (label_step<1) label_step=1;
+    for (int row=0;row<(int)ceil(total_rows);row++) {
+        double v=(row+.5)/total_rows;
+        if (o->vertical?o->flip_values:!o->flip_values) v=1-v;
+        int center=(int)(v*axis_size), half=(int)fmax(1,axis_size/total_rows/2);
+        char label[16]; label[0]=0;
+        int note=(int)round(o->fold && row<rows?values[row]:low+row);
+        if (row<pitch_rows) {
+            int pc=(note%12+12)%12,black=pc==1 || pc==3 || pc==6 || pc==8 || pc==10;
+            uint32_t key=black?0x303d42ffu:0xa5b9beffu;
+            if (o->vertical) {
+                line(im,center,top,center,im->height-1,note%12?0x60708030u:0x60708080u,0);
+                if (top) for (int x=center-half;x<center+half;x++) for (int y=top-4;y<top-1;y++)
+                    terminal_graphics_pixel(im,x,y,key);
+            } else {
+                line(im,left,center,im->width-1,center,note%12?0x60708030u:0x60708080u,0);
+                if (left) for (int y=center-half;y<center+half;y++) for (int x=left-7;x<left-1;x++)
+                    terminal_graphics_pixel(im,x,y,key);
+            }
+            if (row%label_step==0) terminal_graphics_note_label(note,label,sizeof(label));
+        } else {
+            int index=row-(int)pitch_rows;
+            if (index<sound_count) snprintf(label,sizeof(label),"%.8s",notes[sound_rows[index]].label);
+        }
+        if (*label && !im->compact) {
+            if (top) {
+                int cell_width=(int)(axis_size/total_rows)*(row<pitch_rows?label_step:1);
+                int scale=(int)strlen(label)*8<=cell_width?2:1;
+                int text_width=(int)strlen(label)*4*scale;
+                if (text_width>cell_width) label[cell_width/(4*scale)]=0;
+                text_width=(int)strlen(label)*4*scale;
+                terminal_graphics_text(im,(int)clamp(center-text_width/2,0,im->width-1),0,label,scale);
+            } else if (left) terminal_graphics_text(im,2,(int)clamp(center-5,0,im->height-10),label,2);
+        }
+    }
     for (int i=0;i<count;i++) {
         const VisualNote *n=&notes[i]; int active=n->start<=now && n->end>now;
         if (n->end<from || n->start>from+span || (o->hide_negative && n->start<origin) ||
             (o->hide_inactive && !active) || (!*n->sound && (n->pitch<low || n->pitch>high))) continue;
-        double v=(n->pitch-low+.5)/(high-low+1), cell=1/(high-low+1);
+        double v=n->pitch-low+.5, cell=1/total_rows;
         if (o->fold && rows) {
             int j=0; while (j<rows && values[j]!=n->pitch) j++;
-            v=(j+.5)/rows; cell=1.0/rows;
+            v=j+.5;
         }
         if (*n->sound && sound_count) {
             int j=0; while (j<sound_count && strcmp(notes[sound_rows[j]].sound,n->sound)) j++;
-            v=(j+.5)/sound_count; cell=1.0/sound_count;
+            v=pitch_rows+j+.5;
         }
+        v/=total_rows;
         v+=cell*((lane[i]+.5)/lanes[i]-.5);
         cell/=lanes[i];
-        if (!o->flip_values) v=1-v;
+        if (o->vertical?o->flip_values:!o->flip_values) v=1-v;
         double a=clamp((n->start-from)/span,0,1), b=clamp((n->end-from)/span,0,1);
         if (o->flip_time) { double t=a; a=1-b; b=1-t; }
         int x0,x1,y0,y1;
         if (o->vertical) {
             x0=(int)((v-cell*.4)*im->width); x1=(int)((v+cell*.4)*im->width);
-            y0=(int)(a*(im->height-1)); y1=(int)(b*(im->height-1));
+            y0=top+(int)(a*(height-1)); y1=top+(int)(b*(height-1));
         } else {
             x0=left+(int)(a*(width-1)); x1=left+(int)(b*(width-1));
             y0=(int)((v-cell*.4)*im->height); y1=(int)((v+cell*.4)*im->height);
@@ -211,32 +251,29 @@ static void roll(TerminalImage *im, const VisualOptions *o, const VisualNote *no
         x0=(int)clamp(x0,0,im->width-1); x1=(int)clamp(x1,x0,im->width-1);
         y0=(int)clamp(y0,0,im->height-1); y1=(int)clamp(y1,y0,im->height-1);
         uint32_t c=ink(o,n,active);
+        /* Braille has no opacity: preserve a quiet note's geometry. */
+        if (im->compact && (c&255)) c=(c&0xffffff00u)|255u;
         int fill=active?o->fill_active:o->fill, stroke=active?o->stroke_active:o->stroke;
         for (int y=y0;y<=y1;y++) for (int x=x0;x<=x1;x++)
             if (fill || (stroke && (x==x0 || x==x1 || y==y0 || y==y1))) terminal_graphics_pixel(im,x,y,c);
         if (n->start>=from) {
-            onsets[marked][0]=x0; onsets[marked][1]=y0;
-            onsets[marked][2]=o->vertical?x1:x0; onsets[marked++][3]=o->vertical?y0:y1;
+            int onset_x=o->flip_time?x1:x0, onset_y=o->flip_time?y1:y0;
+            onsets[marked][0]=o->vertical?x0:onset_x;
+            onsets[marked][1]=o->vertical?onset_y:y0;
+            onsets[marked][2]=o->vertical?x1:onset_x;
+            onsets[marked++][3]=o->vertical?onset_y:y1;
         }
-        if (o->labels && !im->compact && x1-x0>8 && y1-y0>=5)
-            terminal_graphics_text(im,x0+1,y0,active&&*n->active_label?n->active_label:n->label,1);
+        if (o->labels && !im->compact && x1-x0>8 && y1-y0>=5) {
+            char text[10];
+            int limit=(x1-x0-1)/4; if (limit>9) limit=9;
+            snprintf(text,sizeof(text),"%.*s",limit,active&&*n->active_label?n->active_label:n->label);
+            terminal_graphics_text(im,x0+1,y0,text,1);
+        }
     }
     for (int i=0;i<marked;i++) line(im,onsets[i][0],onsets[i][1],onsets[i][2],onsets[i][3],0xffbe50ffu,0);
     double p=o->flip_time?1-o->playhead:o->playhead;
-    if (o->vertical) line(im,0,p*(im->height-1),im->width-1,p*(im->height-1),o->playhead_color,0);
+    if (o->vertical) line(im,0,top+p*(height-1),im->width-1,top+p*(height-1),o->playhead_color,0);
     else line(im,left+p*(width-1),0,left+p*(width-1),im->height-1,o->playhead_color,0);
-    int step=12;
-    const int steps[]={1,2,3,4,6,12};
-    for (int i=0;i<6;i++) if (steps[i]>=12*(high-low+1)/im->height) { step=steps[i]; break; }
-    if (left && !sound_count) for (int note=(int)ceil(low/step)*step;note<=high && note<=127;note+=step) {
-        char label[16]; terminal_graphics_note_label(note,label,sizeof(label));
-        double v=(note-low+.5)/(high-low+1); if (!o->flip_values) v=1-v;
-        terminal_graphics_text(im,2,(int)clamp(v*im->height-5,0,im->height-10),label,2);
-    }
-    if (left && sound_count) for (int i=0;i<sound_count;i++) {
-        double v=(i+.5)/sound_count; if (!o->flip_values) v=1-v;
-        terminal_graphics_text(im,2,(int)clamp(v*im->height-2,0,im->height-5),notes[sound_rows[i]].label,1);
-    }
 }
 
 static void polar(TerminalImage *im, const VisualOptions *o, const VisualNote *notes, int count,

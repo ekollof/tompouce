@@ -2,6 +2,8 @@
 #include "js_audio.h"
 #include "common.h"
 #include "slider.h"
+#include "terminal_graphics.h"
+#include <unistd.h>
 #include <assert.h>
 
 static cJSON *read_json(const char *path) {
@@ -111,7 +113,30 @@ static void check_piano_roll_events(const char *code) {
     javascript_free(plain); javascript_free(roll); free(scoped);
 }
 
-int main(void) {
+static int preview_bass_roll(void) {
+    cJSON *song=read_json("bassfugue.json"), *metadata=NULL;
+    const char *code=cJSON_GetStringValue(get(song,"code")); assert(code);
+    char error[512];
+    JsProgram *program=javascript_compile(code,240,&metadata,error,sizeof(error)); assert(program);
+    const char *call=strstr(code,"pianoroll"); assert(call);
+    unsigned mask=javascript_scope_mask(program,(int)(call-code),VISUAL_PIANOROLL); assert(mask);
+    for (int i=0;i<24;i++) { javascript_update_visuals(program,10,0,1); usleep(130000); }
+    static VisualNote notes[VISUAL_CACHE_NOTES]; static TerminalImage image;
+    static TerminalFeedbackState state;
+    VisualOptions options; assert(javascript_visual_options(program,mask,&options));
+    int count=javascript_visual_copy(program,mask,notes,VISUAL_CACHE_NOTES,NULL,NULL); assert(count);
+    image.width=768; image.height=128;
+    terminal_graphics_feedback(&image,&state,VISUAL_PIANOROLL,&options,notes,count,NULL,0,10,0,1);
+    printf("\033[2J\033[1;1HBass fugue: mixed pitch/drum roll (%d notes), no audio\n",count);
+    assert(terminal_graphics_send(stdout,77,&image,2,1,110,9,0,128));
+    fputs("\033[13;1HPress Enter to close.",stdout); fflush(stdout); (void)getchar();
+    terminal_graphics_delete(stdout,77);
+    javascript_free(program); cJSON_Delete(metadata); cJSON_Delete(song);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc>1 && !strcmp(argv[1],"--roll-preview")) return preview_bass_roll();
     cJSON *corpus = read_json("tests/fixtures/strudel-examples.json");
     cJSON *reference = read_json("tests/fixtures/strudel-example-events.json");
     const cJSON *examples = get(corpus,"examples"), *references = get(reference,"examples");

@@ -4,6 +4,22 @@ Project: **Tompouce** – a terminal live-coding environment for music in C, wit
 
 ### Native visual feedback continuation (2026-10-18)
 
+Mixed vertical roll follow-up: screenshots of live Bass fugue showed drum
+categories each filling a third of the chart and overlapping compressed bass
+notes. The renderer now excludes drums from melodic auto-range, allocates one
+uniform lane system to pitches/categories, and sorts drum keys consistently.
+Vertical rolls have a top keyboard/name rail and low-to-high pitch left-to-right;
+horizontal rolls retain their left rail. Quiet-note geometry remains visible
+in braille. Tests cover mixed lane widths, axis pixels and quiet compact bars.
+`tests/test_examples --roll-preview` shows actual Bass fugue data without audio.
+Live screenshots /tmp/tompouce-roll-live-{1,2}.png and corrected preview
+/tmp/tompouce-roll-corrected-preview.png are temporary evidence, not build inputs.
+Orientation audit: punchcard and wordfall use the same corrected roll renderer.
+Fixed reversed-time onset markers (use the trailing screen edge when flipTime
+is set), and clip note label text to its bar width. Raster regressions exercise
+all 24 kind/vertical/flipTime/flipValues combinations, including label containment.
+Scope/spectrum/spiral/pitchwheel retain fixed native orientations.
+
 Empty Arpoon roll follow-up: read-only live MCP confirmed visual queries were
 interrupting at the 50 ms budget, leaving the roll cache empty. The adapter now
 fills 1/8-cycle tiles near the playhead first, stops starting queries after a

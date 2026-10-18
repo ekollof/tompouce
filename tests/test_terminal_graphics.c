@@ -171,7 +171,55 @@ static void test_feedback(void) {
     for (int i=0;i<image.width*image.height;i++)
         if (image.rgba[i*4]==255 && image.rgba[i*4+1]==190 && image.rgba[i*4+2]==80) amber++;
     assert(amber>=4); /* Two same-pitch onset markers survive subsequent fills. */
+    VisualNote mixed[3]={{.start=9,.end=11,.pitch=36,.gain=1,.label="C2"},
+        {.start=9,.end=11,.pitch=0,.gain=1,.label="BD",.sound="bd:0"},
+        {.start=9,.end=11,.pitch=0,.gain=1,.label="HH",.sound="hh:0"}};
+    scope_options.vertical=1; scope_options.playhead=.5;
+    terminal_graphics_feedback(&image,NULL,VISUAL_PIANOROLL,&scope_options,mixed,3,NULL,0,10,0,1);
+    int runs=0,longest=0,length=0;
+    for (int x=0;x<image.width;x++) {
+        const unsigned char *pixel=image.rgba+((size_t)80*image.width+x)*4;
+        int bar=pixel[0]==90 && pixel[1]==215 && pixel[2]==245;
+        if (bar) { if (!length) runs++; length++; if (length>longest) longest=length; }
+        else length=0;
+    }
+    assert(runs==3 && longest<40); /* Drums share uniform lanes with pitched notes. */
+    int guide_pixels=0;
+    for (int i=0;i<image.width*14;i++) if (image.rgba[i*4+3]) guide_pixels++;
+    assert(guide_pixels>0); /* Vertical pitch guide is above the time plot. */
+    mixed[0].gain=.3; image.compact=1; image.width=200; image.height=16;
+    terminal_graphics_feedback(&image,NULL,VISUAL_PIANOROLL,&scope_options,mixed,3,NULL,0,10,0,1);
+    const unsigned char *bass=image.rgba+((size_t)10*image.width+86)*4;
+    assert(bass[0]==90 && bass[1]==215 && bass[2]==245 && bass[3]==255);
     image.compact=0;
+}
+
+static void test_orientations(void) {
+    const int kinds[]={VISUAL_PIANOROLL,VISUAL_PUNCHCARD,VISUAL_WORDFALL};
+    const VisualNote note={.start=9,.end=10,.pitch=60,.gain=1,.label="LONG LABEL THAT MUST FIT"};
+    for (int k=0;k<3;k++) for (int vertical=0;vertical<2;vertical++)
+        for (int reverse=0;reverse<2;reverse++) for (int flip=0;flip<2;flip++) {
+            VisualOptions options; visual_options(&options,kinds[k],NULL);
+            options.vertical=vertical; options.flip_time=reverse; options.flip_values=flip;
+            options.labels=1;
+            image.width=400; image.height=128; image.compact=0;
+            terminal_graphics_feedback(&image,NULL,kinds[k],&options,&note,1,NULL,0,10,0,1);
+            int onset=vertical?14+(int)((reverse?.75:.25)*113):72+(int)((reverse?.75:.25)*327);
+            int amber=0;
+            for (int p=0;p<(vertical?image.width:image.height);p++) {
+                size_t at=(size_t)(vertical?onset:p)*image.width+(vertical?p:onset);
+                const unsigned char *pixel=image.rgba+at*4;
+                if (pixel[0]==255 && pixel[1]==190 && pixel[2]==80) amber++;
+            }
+            assert(amber>0);
+            if (vertical) {
+                int y=14+(int)((reverse?.5:.25)*113)+2;
+                for (int x=0;x<image.width;x++) {
+                    const unsigned char *pixel=image.rgba+((size_t)y*image.width+x)*4;
+                    if (pixel[0]==190 && pixel[1]==210 && pixel[2]==225) assert(x>=187 && x<=212);
+                }
+            }
+        }
 }
 
 int main(int argc, char **argv) {
@@ -212,7 +260,7 @@ int main(int argc, char **argv) {
         terminal_graphics_delete(stdout,77); terminal_graphics_delete(stdout,78);
         return 0;
     }
-    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback();
+    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_orientations();
     puts("Kitty waveform, piano roll, clipped chunked transport and capability checks ok");
     return 0;
 }

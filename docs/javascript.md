@@ -239,6 +239,12 @@ playhead. `cycles`, `playhead`, `vertical`, `labels`, `flipTime`, `flipValues`,
 supported. Wordfall defaults to vertical labelled notes. Drum sounds occupy
 separate categorical rows. Overlapping same-pitch notes retain lanes and onset
 markers where resolution permits.
+Mixed pitched/percussion rolls use a single uniform lane layout; drum sample
+indices do not affect the melodic auto-range. Horizontal rolls have note guides
+on the left; vertical rolls have a keyboard/label rail across the top, with
+low pitches on the left by default. Quiet notes keep their geometry in braille.
+These orientation options apply to piano roll, punchcard and wordfall; scope,
+spectrum, spiral and pitchwheel currently keep their fixed native geometry.
 
 Spiral supports `stretch`, `steady`, `inset`, `padding`, `fade`, `logSpiral`,
 size/thickness and playhead/color options. Pitchwheel preserves fractional

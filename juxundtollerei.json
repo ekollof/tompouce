@@ -1,0 +1,8 @@
+{
+	"app":	"strudelterm",
+	"version":	2,
+	"bpm":	120,
+	"code":	"\nnote(\"c3 eb3 g3 bb3\").palindrome()\n.s('sawtooth')\n.jux(x=>x.rev().color('green').s('sawtooth'))\n.off(1/4, x=>x.add(note(\"<7 12>/2\")).slow(2).late(.005).s('triangle'))\n.lpf(sine.range(200,2000).slow(8))\n.lpa(.2).lpenv(-2)\n.decay(.05).sustain(0)\n.room(.6)\n.delay(.5).delaytime(.1).delayfeedback(.4)\n.pianoroll()\n",
+	"tracks":	["\nnote(\"c3 eb3 g3 bb3\").palindrome()\n.s('sawtooth')\n.jux(x=>x.rev().color('green').s('sawtooth'))\n.off(1/4, x=>x.add(note(\"<7 12>/2\")).slow(2).late(.005).s('triangle'))\n.lpf(sine.range(200,2000).slow(8))\n.lpa(.2).lpenv(-2)\n.decay(.05).sustain(0)\n.room(.6)\n.delay(.5).delaytime(.1).delayfeedback(.4)\n.pianoroll()\n"],
+	"active":	0
+}

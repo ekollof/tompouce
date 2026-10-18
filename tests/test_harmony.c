@@ -50,6 +50,17 @@ int main(void) {
     expect_n("deg2", harmony_degree_midi(2, 0, root, steps, n), 51);
     expect_n("deg7", harmony_degree_midi(7, 0, root, steps, n), 60);
 
+    expect_n("G1 minor", harmony_scale("G1 minor", &root, steps, 12, &n), 1);
+    expect_n("G1 root", root, 31);
+    expect_n("G1 deg0", harmony_degree_midi(0, 0, root, steps, n), 31);
+    expect_n("G1 deg2", harmony_degree_midi(2, 0, root, steps, n), 34);
+    expect_n("G1 deg5", harmony_degree_midi(5, 0, root, steps, n), 39);
+
+    expect_n("G4 minor", harmony_scale("G4 minor", &root, steps, 12, &n), 1);
+    expect_n("G4 root", root, 67);
+    expect_n("G4 deg0", harmony_degree_midi(0, 0, root, steps, n), 67);
+    expect_n("G4 deg5", harmony_degree_midi(5, 0, root, steps, n), 75);
+
     expect_n("C4:major", harmony_scale("C4:major", &root, steps, 12, &n), 1);
     expect_n("maj root", root, 60);
     expect_n("deg4", harmony_degree_midi(4, 0, root, steps, n), 67);

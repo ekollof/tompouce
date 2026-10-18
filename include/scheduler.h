@@ -9,6 +9,10 @@ void scheduler_shutdown(void);
 void event_queue_clear(void);
 void event_queue_push(AudioEvent *ev);
 int event_queue_depth(void);
+/* Read-only text of the next queued events. limit is clamped 1..48.
+   Returns bytes written, excluding the NUL, or -1. */
+int scheduler_debug_queue(char *out, size_t outlen, int limit);
+unsigned event_queue_generation(void);
 /* background threads started by init */
 
 void scheduler_start(void);
@@ -22,12 +26,14 @@ typedef struct {
     double dur;   /* scheduled duration */
     int midi;     /* display pitch 0-127 (drums mapped to GM) */
     int is_drum;
+    unsigned scope_mask, generation;
 } NoteHist;
 
 /* recent triggered notes, oldest first; returns count (<= max) */
 int note_hist_copy(NoteHist *out, int max);
-#define MAX_SONG_TRACKS 32
-#define SONG_CODE_LEN 65536
+/* Growable song list. SONG_TRACK_CEILING is a memory guard, not a
+   musical bar limit. Each snapshot is an exact-size heap string. */
+#define SONG_TRACK_CEILING 8192
 
 /* Song list: each track holds an entire code buffer (all voices).
    Live mode loops the editor buffer; song mode plays one track
@@ -52,10 +58,12 @@ void scheduler_track_prev(void);
 int scheduler_track_move(int i, int j);
 int scheduler_track_remove(int i);/* song advance step (called by generator when a cycle finishes) */
 void scheduler_song_step(void);
-/* copy of track i's code into buf (1 on success) */
+/* copy of track i's code into buf (1 on success). Truncates to buflen. */
 int scheduler_track_code(int i, char *buf, int buflen);
-/* replace the whole song list (clamped to MAX_SONG_TRACKS) and load the
-   active buffer into the engine; active clamped into range. n<=0 clears. */
+/* malloc'd copy of track i, or NULL. Caller frees. */
+char *scheduler_track_dup(int i);
+/* replace the whole song list (grows until SONG_TRACK_CEILING) and load
+   the active buffer into the engine; active clamped into range. n<=0 clears. */
 void scheduler_song_replace(const char **codes, int n, int active);
 /* overwrite track i's code (F5 commit); silent no-op when out of range */
 void scheduler_track_update(int i, const char *code);
@@ -66,5 +74,9 @@ void scheduler_song_sync(void);
 /* editor-follow request for the next position change (MCP actions) */
 void scheduler_song_follow(void);
 int scheduler_song_follow_consume(void);
+/* Byte spans in current_code that are sounding at audio time `now`.
+   Each span is half-open [off, off+len). Returns how many were written. */
+int scheduler_play_spans(double now, int *off, int *len, int max);
+int scheduler_play_styles(double now, int *off, int *len, uint32_t *color, unsigned *flags, int max);
 
 #endif

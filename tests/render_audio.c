@@ -1,0 +1,80 @@
+/* Offline diagnostic executable: production callback, no audio device/UI. */
+#include "../src/audio.c"
+#include "../src/js_audio.c"
+#include <stdint.h>
+
+static int compare_events(const void *a, const void *b) {
+    const AudioEvent *left = a, *right = b;
+    return (left->time > right->time) - (left->time < right->time);
+}
+
+int main(int argc, char **argv) {
+    log_console_stderr(1);
+    if (argc != 3) { fprintf(stderr,"usage: %s request.json output.f32\n",argv[0]); return 1; }
+    FILE *input = fopen(argv[1],"rb");
+    if (!input) return 1;
+    char *source = malloc(2*1024*1024+1);
+    if (!source) { fclose(input); return 1; }
+    size_t size = fread(source,1,2*1024*1024,input);
+    int extra = fgetc(input), failed = ferror(input);
+    fclose(input);
+    source[size] = 0;
+    cJSON *request = !failed && extra == EOF ? cJSON_Parse(source) : NULL;
+    free(source);
+    const cJSON *code = cJSON_GetObjectItemCaseSensitive(request,"code");
+    const cJSON *sound = cJSON_GetObjectItemCaseSensitive(request,"sound");
+    const cJSON *cycles = cJSON_GetObjectItemCaseSensitive(request,"cycles");
+    const cJSON *cps = cJSON_GetObjectItemCaseSensitive(request,"cps");
+    if (!cJSON_IsString(code) || !cJSON_IsString(sound) || !cJSON_IsNumber(cycles) ||
+        !cJSON_IsNumber(cps) || !isfinite(cycles->valuedouble) || cycles->valuedouble < 1 ||
+        cycles->valuedouble > 32 || !isfinite(cps->valuedouble) || cps->valuedouble < .1 || cps->valuedouble > 2) {
+        cJSON_Delete(request); return 1;
+    }
+    char error[512]; cJSON *metadata = NULL;
+    JsProgram *program = javascript_compile(code->valuestring,cps->valuedouble*240,&metadata,error,sizeof(error));
+    if (!program) { fprintf(stderr,"%s\n",error); cJSON_Delete(request); return 1; }
+    char *samples = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(metadata,"samples"));
+    if (!samples) { cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
+    websamp_load_arguments(samples);
+    free(samples);
+    cJSON *haps = cJSON_CreateArray();
+    for (double begin = 0; haps && begin < cycles->valuedouble; begin += 1) {
+        cJSON *part = javascript_query_cps(program,begin,fmin(begin+1,cycles->valuedouble),cps->valuedouble);
+        if (!cJSON_IsArray(part)) { cJSON_Delete(part); cJSON_Delete(haps); haps = NULL; break; }
+        cJSON *item;
+        while ((item = cJSON_DetachItemFromArray(part,0))) {
+            if (!cJSON_AddItemToArray(haps,item)) { cJSON_Delete(item); cJSON_Delete(haps); haps = NULL; break; }
+        }
+        cJSON_Delete(part);
+    }
+    int count = cJSON_GetArraySize(haps);
+    AudioEvent *events = calloc((size_t)count+1,sizeof(*events));
+    if (!events || !cJSON_IsArray(haps)) { fprintf(stderr,"pattern query failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
+    int used = 0; const cJSON *hap;
+    cJSON_ArrayForEach(hap,haps) {
+        const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap,"value");
+        if (*sound->valuestring && strcmp(text_control(value,"s"),sound->valuestring)) continue;
+        AudioEvent event;
+        if (!js_audio_event(hap,0,1/cps->valuedouble,&event)) continue;
+        if (!resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0)) {
+            fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
+        }
+        events[used++] = event;
+    }
+    qsort(events,(size_t)used,sizeof(*events),compare_events);
+    FILE *output = fopen(argv[2],"wb");
+    if (!output) { free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
+    playing = 1; audio_set_reference_mode(1);
+    long frames = lround(cycles->valuedouble/cps->valuedouble*SR);
+    int next = 0, ok = 1;
+    for (long frame = 0; frame < frames; frame++) {
+        while (next < used && lround(events[next].time*SR) <= frame) audio_trigger_event(&events[next++]);
+        float stereo[2];
+        pa_callback(NULL,stereo,1,NULL,0,NULL);
+        if (fwrite(stereo,sizeof(float),2,output) != 2) { ok = 0; break; }
+    }
+    if (fclose(output)) ok = 0;
+    fprintf(stderr,"rendered %ld stereo frames, %d events at %.0f Hz\n",frames,used,SR);
+    free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request);
+    return ok ? 0 : 1;
+}

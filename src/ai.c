@@ -10,7 +10,7 @@ static pthread_t ai_tid;
 static int ai_busy = 0;
 static char *ai_result = NULL;
 static char ai_prompt_copy[2048];
-static char ai_context_copy[65536];
+static char *ai_context_copy;
 static int curl_ok = 0;
 
 #define AI_MAX_BODY (256u * 1024u)
@@ -127,7 +127,7 @@ static void *ai_worker(void *arg) {
             cJSON *sys = cJSON_CreateObject();
             cJSON_AddStringToObject(sys, "role", "system");
             const char *sysprompt =
-                "You generate StrudelTerm code. Output ONLY a fenced code block. "
+                "You generate Tompouce code. Output ONLY a fenced code block. "
                 "Grammar: each line is either 'bpm N' or a track: "
                 "'drum <mini-notation>' for drum sounds (bd sd hh cp tom), "
                 "'notes'/'n'/'bass'/'lead'/'chord' <mini-notation> for pitch. "
@@ -135,14 +135,18 @@ static void *ai_worker(void *arg) {
                 "'-' is a rest, like '~'. "
                 "Chords use ireal symbols (Cm7, C^7, C-7). Keyword chord treats bare C as major and C7 as dominant. "
                 "On note tracks c7 is the note C7; cm7 is a chord. "
-                "Mini-notation: space-separated steps, [ ] groups, * repeat, ~ rest, < > alternate. "
+                "Mini-notation: space-separated steps, [ ] groups, * repeat, ! replicate, "
+                "@ elongate, / slow across cycles, ? degrade, bd(3,8) euclid, "
+                "{a b, c} polymeter, a|b choice, ~ rest, < > alternate. "
+                "A line may be note(\"c e g\").s(\"saw\").lpf(800) or s(\"bd\").gain(slider(0.5)). "
+                "setcpm(x) sets BPM to x*4. "
                 "Transforms after '|': fast N, slow N, rev, gain X, sound/inst sine|saw|sawtooth|square|tri|noise, "
                 "scale C:minor (then degrees 0 2 4; root octave defaults to 3), "
                 "transpose N, arp 0 1 2 1, adsr A:D:S:R, lfo freq 4 1, vib 4:.1, lpf Hz, pw 0.2. "
                 "No extra explanation.";
             cJSON_AddStringToObject(sys, "content", sysprompt);
             cJSON_AddItemToArray(msgs, sys);
-            if (ai_context_copy[0]) {
+            if (ai_context_copy && ai_context_copy[0]) {
                 cJSON *ctx = cJSON_CreateObject();
                 cJSON_AddStringToObject(ctx, "role", "user");
                 // shorten context maybe
@@ -219,13 +223,17 @@ void ai_request_async(const char *prompt, const char *context_code) {
     ai_busy = 1;
     if (prompt) { strncpy(ai_prompt_copy, prompt, sizeof(ai_prompt_copy)-1); ai_prompt_copy[sizeof(ai_prompt_copy)-1] = 0; }
     else ai_prompt_copy[0] = 0;
-    if (context_code) {
-        if (strlen(context_code) >= sizeof(ai_context_copy)) {
-            // truncate
-            strncpy(ai_context_copy, context_code, sizeof(ai_context_copy)-1);
-        } else snprintf(ai_context_copy, sizeof(ai_context_copy), "%s", context_code);
-        ai_context_copy[sizeof(ai_context_copy)-1] = 0;
-    } else ai_context_copy[0] = 0;
+    free(ai_context_copy);
+    ai_context_copy = NULL;
+    if (context_code && context_code[0]) {
+        size_t n = strlen(context_code);
+        if (n > 4000) n = 4000; /* outbound prompt keeps this prefix */
+        ai_context_copy = malloc(n + 1);
+        if (ai_context_copy) {
+            memcpy(ai_context_copy, context_code, n);
+            ai_context_copy[n] = 0;
+        }
+    }
     pthread_create(&ai_tid, NULL, ai_worker, NULL);
     pthread_detach(ai_tid);
     pthread_mutex_unlock(&ai_lock);

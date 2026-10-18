@@ -211,6 +211,18 @@ int harmony_scale(const char *spec, int *root_out, int *steps, int max, int *nst
         type = colon + 1;
         if (!buf[0] || !type[0]) return 0;
         if (!parse_pitch_head(buf, 3, 1, &root, NULL)) return 0;
+    } else {
+        /* "G1 minor" / "G4 minor": pitch head, then a mode name. */
+        const char *rest = NULL;
+        int pitched = 0;
+        if (parse_pitch_head(buf, 3, 1, &root, &rest) && rest && *rest) {
+            while (*rest == ' ' || *rest == '\t') rest++;
+            if (*rest) {
+                type = rest;
+                pitched = 1;
+            }
+        }
+        if (!pitched) root = 48;
     }
     if (!scale_fill(type, steps, max, nsteps)) return 0;
     *root_out = root;

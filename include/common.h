@@ -13,8 +13,9 @@
 
 #define MAX_TRACKS 32
 #define MAX_LINE 512
-#define MAX_CODE_LINES 512
-#define MAX_CODE_LINE_LEN 256
+/* Editor text, song snapshots, and the JS source grow until malloc fails.
+   Byte offsets are int, so one buffer stops near 2 GiB. The audio callback
+   does not allocate and does not hold that text. */
 #define MAX_CONSOLE 256
 #define MAX_VOICES 128
 #define SR 44100.0
@@ -36,7 +37,8 @@ void mkdir_p(const char *path);
 
 /* Directory under $xdg_env/<xdg_leaf>, or $HOME/<home_leaf> when that env
    is missing. Rejects relative bases, control bytes, and ".." segments.
-   Writes "" when no safe base exists or the result does not fit. */
+   Tompouce roots migrate an existing strudelterm directory when the new root
+   is absent. Writes "" when no safe base exists or the result does not fit. */
 void user_dir(char *out, size_t outlen, const char *xdg_env,
               const char *xdg_leaf, const char *home_leaf);
 

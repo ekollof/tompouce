@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "sources": {
+    "dough": {"repo": "felixroos/dough-samples", "commit": "9eacfc86ec4393e68a463ff52b01c19cfaa77f38", "credits": ["README.md"]},
+    "dirt": {"repo": "tidalcycles/Dirt-Samples", "commit": "c74fc80f8db8038f6a33648ffef5ac00a07ad402", "credits": ["README.md", "bass1/_readme_and_license.txt", "bass2/_readme_and_license.txt", "bass3/_readme_and_license.txt", "num/_readme_and_license.txt", "tabla2/__license.txt", "voodoo/ReadMe.txt"]},
+    "uzu": {"repo": "tidalcycles/uzu-drumkit", "commit": "2f3e05c70ab4d73ad053a1467adec89bd27377a0", "credits": ["LICENSE", "README.md"]},
+    "machines": {"repo": "ritchse/tidal-drum-machines", "commit": "6577395a4d05031728ced2ec3e5637fa89d8be48", "credits": ["README.md"]},
+    "vcsl": {"repo": "sgossner/VCSL", "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e", "credits": ["LICENSE", "README.md"], "path_prefixes": {"Struck Membranophones/": "Membranophones/Struck Membranophones/"}},
+    "mrid": {"repo": "yaxu/mrid", "commit": "5ba409cabb2893e6e8a52a15a2812c35585cdadb", "credits": ["README.md"]}
+  },
+  "catalogs": [
+    {"name": "Dirt-Samples", "manifest_source": "dirt", "manifest": "strudel.json", "destination": "Dirt-Samples/strudel.json", "audio_source": "dirt", "audio_prefix": "", "samples": "Dirt-Samples", "profile": "core"},
+    {"name": "Salamander piano", "manifest_source": "dough", "manifest": "piano.json", "destination": "dough-samples/piano.json", "audio_source": "dough", "audio_prefix": "piano", "samples": "dough-samples/piano", "profile": "core"},
+    {"name": "Tidal drum machines", "manifest_source": "dough", "manifest": "tidal-drum-machines.json", "destination": "dough-samples/tidal-drum-machines.json", "audio_source": "machines", "audio_prefix": "machines", "samples": "tidal-drum-machines/machines", "profile": "core"},
+    {"name": "uzu drumkit", "manifest_source": "uzu", "manifest": "strudel.json", "destination": "uzu-drumkit/strudel.json", "audio_source": "uzu", "audio_prefix": "", "samples": "uzu-drumkit", "profile": "core"},
+    {"name": "VCSL", "manifest_source": "dough", "manifest": "vcsl.json", "destination": "dough-samples/vcsl.json", "audio_source": "vcsl", "audio_prefix": "", "samples": "VCSL", "profile": "all"},
+    {"name": "Mridangam", "manifest_source": "dough", "manifest": "mridangam.json", "destination": "dough-samples/mridangam.json", "audio_source": "mrid", "audio_prefix": "", "samples": "mrid", "profile": "all"}
+  ]
+}

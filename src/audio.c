@@ -2,9 +2,12 @@
 #include <portaudio.h>
 #include <math.h>
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdatomic.h>
 #include "wavetable.h"
 #include "sampler.h"
 #include "midi.h"
+#include "convolution.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the S-Lang
@@ -18,6 +21,8 @@ static void alsa_silent(const char *file, int line, const char *func,
 static PaStream *stream = NULL;
 static double bpm = 120.0;
 static int playing = 0;
+static atomic_int reference_mode;
+void audio_set_reference_mode(int on) { atomic_store(&reference_mode,on != 0); }
 static unsigned long audio_block_frames = 256;
 
 void audio_set_block(unsigned long n) {
@@ -31,6 +36,33 @@ static double fx_drive = 0.0;
 static double fx_cutoff = 1.0;
 static double fx_delay = 0.0;
 static double fx_verb = 0.0;
+/* Per-orbit delay. <0 keeps Strudel's defaults: 3/16 of a cycle, feedback 0.5.
+   Ducking drops that orbit on a trigger and releases over duck_atk seconds. */
+#define ORBIT_DELAY 88200
+static double orbit_dt[N_ORBITS];
+static double orbit_fb[N_ORBITS];
+static double duck_depth[N_ORBITS];
+static double duck_atk[N_ORBITS];
+static double duck_t[N_ORBITS];
+static int orbits_ready;
+static ConvState convolvers[N_ORBITS];
+static _Atomic(const ConvKernel *) requested_ir[N_ORBITS];
+
+static void orbits_ensure(void) {
+    if (orbits_ready) return;
+    for (int i = 0; i < N_ORBITS; i++) {
+        orbit_dt[i] = -1.0;
+        orbit_fb[i] = -1.0;
+    }
+    orbits_ready = 1;
+}
+
+static double orbit_duck_gain(int orbit) {
+    if (orbit < 0 || orbit >= N_ORBITS) return 1;
+    if (duck_depth[orbit] <= 0 || duck_atk[orbit] <= 0 || duck_t[orbit] >= duck_atk[orbit])
+        return 1;
+    return 1 - duck_depth[orbit] * (1 - duck_t[orbit] / duck_atk[orbit]);
+}
 
 void audio_fx_set(const char *name, double v) {
     if (!name || !isfinite(v)) return;
@@ -44,11 +76,62 @@ void audio_fx_set(const char *name, double v) {
 static double audio_time = 0.0;
 static Voice voices[MAX_VOICES];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
+static CsoundProgram *csound_program;
+
+void audio_set_csound(CsoundProgram *program) {
+    csound_program_retain(program);
+    pthread_mutex_lock(&voice_lock);
+    CsoundProgram *old = csound_program;
+    csound_program = program;
+    csound_program_activate(program,audio_time);
+    pthread_mutex_unlock(&voice_lock);
+    csound_program_free(old);
+}
 
 /* scope ring for the viz pane: single writer (callback), lock-free reader */
 #define SCOPE_N 4096
 static float scope_buf[SCOPE_N];
 static unsigned scope_pos = 0;
+
+/* Fixed lock-free snapshots. Generation tags prevent a re-evaluated call site
+   from displaying samples left behind by the previous program. */
+_Static_assert(ATOMIC_LLONG_LOCK_FREE == 2,"pattern scopes require lock-free 64-bit atomics");
+static atomic_ullong pattern_scope[N_PATTERN_SCOPES][SCOPE_N];
+static atomic_uint pattern_scope_pos;
+static unsigned pattern_scope_generation[N_PATTERN_SCOPES]; /* voice_lock */
+static double pattern_scope_frame[N_PATTERN_SCOPES]; /* callback only */
+
+int audio_pattern_scope_copy(unsigned mask, unsigned generation, float *out, int n) {
+    if (!out || n <= 0) return 0;
+    if (n > SCOPE_N) n = SCOPE_N;
+    int feeds[N_PATTERN_SCOPES], count = 0;
+    for (int i = 0; mask; i++, mask >>= 1) if (mask&1u) feeds[count++] = i;
+    unsigned position = atomic_load_explicit(&pattern_scope_pos,memory_order_acquire);
+    for (int j = 0; j < n; j++) {
+        double value = 0;
+        unsigned at = (position-(unsigned)n+(unsigned)j)&(SCOPE_N-1);
+        if (position >= (unsigned)(n-j)) for (int i = 0; i < count; i++) {
+            unsigned long long packed = atomic_load_explicit(&pattern_scope[feeds[i]][at],memory_order_relaxed);
+            if (generation && (unsigned)(packed>>32) == generation) {
+                unsigned bits = (unsigned)packed; float sample;
+                memcpy(&sample,&bits,sizeof(sample)); value += sample;
+            }
+        }
+        out[j] = (float)value;
+    }
+    return n;
+}
+
+static void pattern_scope_publish(void) {
+    unsigned position = atomic_load_explicit(&pattern_scope_pos,memory_order_relaxed);
+    for (int i = 0; i < N_PATTERN_SCOPES; i++) {
+        float sample = (float)pattern_scope_frame[i]; unsigned bits;
+        memcpy(&bits,&sample,sizeof(bits));
+        unsigned long long packed = ((unsigned long long)pattern_scope_generation[i]<<32)|bits;
+        atomic_store_explicit(&pattern_scope[i][position&(SCOPE_N-1)],packed,memory_order_relaxed);
+    }
+    atomic_store_explicit(&pattern_scope_pos,position+1,memory_order_release);
+}
 
 int audio_scope_copy(float *out, int n) {
     if (!out || n <= 0) return 0;
@@ -111,17 +194,47 @@ double midi_to_freq(int midi) {
     return 440.0 * pow(2.0, (midi - 69)/12.0);
 }
 
+/* Printable ASCII only, so a hap token cannot break the snapshot line. */
+static void dbg_token(char *dst, size_t n, const char *src) {
+    size_t w = 0;
+    if (!dst || n == 0) return;
+    if (src) {
+        for (size_t i = 0; src[i] && w + 1 < n; i++) {
+            unsigned char c = (unsigned char)src[i];
+            if (c <= 32 || c >= 127) c = '_';
+            dst[w++] = (char)c;
+        }
+    }
+    if (w == 0) dst[w++] = '-';
+    dst[w] = 0;
+}
+
 static void trigger_voice(Voice *v, AudioEvent *ev) {
     memset(v, 0, sizeof(Voice));
+    v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
+    for (int i = 0; i < N_PATTERN_SCOPES; i++) if (ev->scope_mask&(1u<<i)) pattern_scope_generation[i] = ev->generation;
+    dbg_token(v->token, sizeof(v->token), ev->token);
+    if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
+    if (ev->dsp.enabled && ev->inst == INST_SUPERSAW) dsp_init(&v->dsp_right,&ev->dsp);
+    v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
     v->inst = ev->is_drum ? ev->inst : ev->inst;
     // if drum token, map
     if (ev->is_drum) {
-        if (strcmp(ev->token, "bd")==0) v->inst = INST_KICK;
-        else if (strcmp(ev->token, "sd")==0 || strcmp(ev->token,"sn")==0) v->inst = INST_SNARE;
-        else if (strcmp(ev->token, "hh")==0 || strcmp(ev->token,"hat")==0) v->inst = INST_HH;
-        else if (strcmp(ev->token, "cp")==0 || strcmp(ev->token,"clap")==0) v->inst = INST_CP;
-        else if (strcmp(ev->token, "tom")==0) v->inst = INST_TOM;
+        /* hh:1 is the same drum as hh; the number picks a sample. */
+        char base[64];
+        const char *tok = ev->token;
+        const char *col = strchr(ev->token, ':');
+        if (col && col > ev->token && (size_t)(col - ev->token) < sizeof(base)) {
+            memcpy(base, ev->token, (size_t)(col - ev->token));
+            base[col - ev->token] = 0;
+            tok = base;
+        }
+        if (strcmp(tok, "bd")==0) v->inst = INST_KICK;
+        else if (strcmp(tok, "sd")==0 || strcmp(tok, "sn")==0) v->inst = INST_SNARE;
+        else if (strcmp(tok, "hh")==0 || strcmp(tok, "hat")==0) v->inst = INST_HH;
+        else if (strcmp(tok, "cp")==0 || strcmp(tok, "clap")==0) v->inst = INST_CP;
+        else if (strcmp(tok, "tom")==0) v->inst = INST_TOM;
         else v->inst = INST_HH;
     }
     v->freq = ev->freq > 0 ? ev->freq : 440.0;
@@ -139,8 +252,37 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->vdec = ev->dec;
     v->vsus = ev->sus;
     v->pw = ev->pw;
-    v->lpf_hz = ev->lpf;
+    v->lpf_hz = ev->dsp.enabled ? 0 : ev->lpf;
     v->lpf_z = 0;
+    v->lpq = ev->lpq;
+    v->lpenv = ev->lpenv;
+    v->has_lpenv = ev->has_lpenv;
+    v->lpa = ev->lpa;
+    v->smp_end = (ev->smp_end > 0.0 && ev->smp_end <= 1.0) ? ev->smp_end : 1.0;
+    if (ev->dsp.enabled) {
+        v->smp_end = ev->dsp.p[DSP_END];
+        v->smp_begin = ev->dsp.p[DSP_BEGIN];
+    }
+    v->delay_send = ev->delay_send;
+    v->orbit = ev->orbit;
+    if (v->orbit < 0 || v->orbit >= N_ORBITS) v->orbit = 0;
+    orbits_ensure();
+    if (ev->dsp.enabled && ev->dsp.p[DSP_ROOM] > 0)
+        atomic_store_explicit(&requested_ir[v->orbit],ev->ir_kernel,memory_order_release);
+    /* Only a voice that is actually sending may retune the orbit delay.
+       A zeroed event must not collapse the time to 0. */
+    if (ev->delay_send > 0.0) {
+        if (ev->delay_time >= 0) orbit_dt[v->orbit] = ev->delay_time;
+        if (ev->delay_fb >= 0) orbit_fb[v->orbit] = ev->delay_fb;
+    }
+    if (ev->duck_mask && ev->duck_depth > 0) {
+        for (int o = 0; o < N_ORBITS; o++) {
+            if ((ev->duck_mask & (1u << o)) == 0) continue;
+            duck_depth[o] = ev->duck_depth > 1 ? 1 : ev->duck_depth;
+            duck_atk[o] = ev->duck_attack > 0 ? ev->duck_attack : 0;
+            duck_t[o] = 0;
+        }
+    }
     v->lfo_tgt = ev->lfo_tgt;
     v->lfo_wave = ev->lfo_wave;
     v->lfo_hz = ev->lfo_hz;
@@ -151,26 +293,295 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->wtpos = 0;
     v->smp = ev->smp;
     v->smpbuf = NULL;
+    v->smp_channels = 0;
     v->smplen = 0;
     v->smppos = 0;
     v->smpstep = 1.0;
     v->smp_gate = ev->smp_gate;
+    v->stretch_factor = ev->stretch > 0 ? ev->stretch : 1;
+    for (int i = 0; i < 4; i++) v->grain_age[i] = 1024;
     if (ev->smp >= 0) {
-        smp_get(ev->smp, &v->smpbuf, &v->smplen);
+        smp_get_stereo(ev->smp, &v->smpbuf, &v->smplen,&v->smp_channels);
+        if (ev->dsp.enabled && v->smp_channels == 2)
+            dsp_init(&v->dsp_right, &ev->dsp);
         if (v->smpbuf && v->smplen > 0 && ev->freq > 0) {
             double base = midi_to_freq(smp_base_midi(ev->smp));
-            if (base > 0) {
-                v->smpstep = ev->freq / base;
-                if (v->smpstep < 0.125) v->smpstep = 0.125;
-                if (v->smpstep > 8.0) v->smpstep = 8.0;
-            }
+            if (base > 0) v->smpstep = ev->freq / base;
+        }
+        /* 0 is natural speed. Negative speed walks the buffer backwards. */
+        double sp = ev->dsp.enabled ? ev->smp_speed : ((ev->smp_speed != 0.0) ? ev->smp_speed : 1.0);
+        v->smpstep *= sp;
+        double mag = fabs(v->smpstep);
+        if (ev->dsp.enabled) {
+            if (mag > 0 && mag < .001) mag = .001;
+        } else if (mag < 0.05) mag = 0.05;
+        if (mag > (ev->dsp.enabled ? 4096 : 8)) mag = ev->dsp.enabled ? 4096 : 8;
+        v->smpstep = (v->smpstep < 0.0) ? -mag : mag;
+        if (ev->dsp.enabled && v->smpstep < 0) {
+            double begin = v->smp_begin;
+            v->smp_begin = 1-v->smp_end; v->smp_end = 1-begin;
+            double loop_begin = v->dsp.control.p[DSP_LOOPBEGIN];
+            v->dsp.control.p[DSP_LOOPBEGIN] = 1-v->dsp.control.p[DSP_LOOPEND];
+            v->dsp.control.p[DSP_LOOPEND] = 1-loop_begin;
+        }
+        if (v->smpstep < 0.0 && v->smplen > 1)
+            v->smppos = fmax(0,(ev->dsp.enabled ? v->smplen*v->smp_end : ceil(v->smplen*v->smp_end))-1);
+        else v->smppos = v->smplen*v->smp_begin;
+        if (v->smp_end <= v->smp_begin) v->active = 0;
+        if (ev->dsp.enabled && !v->smp_gate && mag > 0) {
+            v->gate_end = v->start_time+v->smplen*(v->smp_end-v->smp_begin)/(mag*SR);
+            v->note_off_time = v->gate_end;
         }
     }
 }
 
+/* WebAudio exponentialRampToValueAtTime: equal ratio per unit time. */
+static double exp_seg(double a, double b, double u) {
+    if (u <= 0.0) return a;
+    if (u >= 1.0) return b;
+    if (a < 1.0) a = 1.0;
+    if (b < 1.0) b = 1.0;
+    return a * pow(b / a, u);
+}
+
+/* Value of the filter envelope at `age` seconds, before release.
+   start is the frequency at the beginning of the attack, peak is the
+   frequency at the end of it. The segment targets match createFilter;
+   the path between them is exponential. */
+static double filter_adsr(double age, double start, double peak,
+                          double attack, double decay, double sus) {
+    if (age < attack) {
+        double u = attack > 0.0 ? age / attack : 1.0;
+        return exp_seg(start, peak, u);
+    }
+    if (sus >= 1.0) return peak;
+    double sustain_fc = start + sus * (peak - start);
+    if (age < attack + decay) {
+        double dlt = decay > 0.0 ? (age - attack) / decay : 1.0;
+        return exp_seg(peak, sustain_fc, dlt);
+    }
+    return sustain_fc;
+}
+
+/* Strudel createFilter, anchor 0: the two ends are `fc` and
+   `fc * 2^|lpenv|`. A negative lpenv starts at the high end, so
+   lpenv(-4) at 800 Hz falls from 12800 Hz to 800 Hz. Setting lpa
+   with no filter decay holds that end (sustain 1). Otherwise the
+   default envelope is 5 ms attack, 140 ms decay, sustain 0. */
+static double voice_fc(const Voice *V, double fc) {
+    if (fc <= 0.0) return 0.0;
+    if (V->has_lpenv) {
+        double env_abs = fabs(V->lpenv);
+        double start = fc;
+        double peak = fc * pow(2.0, env_abs);
+        double attack, decay, sus, rel, held, at;
+        if (V->lpenv < 0.0) {
+            double swap = start;
+            start = peak;
+            peak = swap;
+        }
+        if (V->lpa > 0.0) {
+            attack = V->lpa;
+            decay = 0.001;
+            sus = 1.0;
+            rel = 0.01;
+        } else {
+            attack = 0.005;
+            decay = 0.14;
+            sus = 0.0;
+            rel = 0.1;
+        }
+        if (attack < 0.001) attack = 0.001;
+        if (V->released) {
+            at = V->release_time - V->start_time;
+            if (at < 0.0) at = 0.0;
+            held = filter_adsr(at, start, peak, attack, decay, sus);
+            if (rel < 0.005) rel = 0.005;
+            double u = (audio_time - V->release_time) / rel;
+            if (u < 0.0) u = 0.0;
+            if (u > 1.0) u = 1.0;
+            fc = exp_seg(held, start, u);
+        } else {
+            fc = filter_adsr(V->age, start, peak, attack, decay, sus);
+        }
+    }
+    if (fc < 20.0) fc = 20.0;
+    if (fc > 18000.0) fc = 18000.0;
+    return fc;
+}
+
+static double apply_lpf(Voice *V, double x, double fc) {
+    if (fc <= 0.0) return x;
+    if (V->lpq > 0.05) {
+        double Q = V->lpq;
+        if (Q > 24.0) Q = 24.0;
+        double w0 = 2.0 * M_PI * fc / SR;
+        double cw = cos(w0);
+        double sw = sin(w0);
+        double alpha = sw / (2.0 * Q);
+        double a0 = 1.0 + alpha;
+        double b0 = ((1.0 - cw) * 0.5) / a0;
+        double b1 = (1.0 - cw) / a0;
+        double b2 = b0;
+        double a1 = (-2.0 * cw) / a0;
+        double a2 = (1.0 - alpha) / a0;
+        double y = b0 * x + b1 * V->bx1 + b2 * V->bx2 - a1 * V->by1 - a2 * V->by2;
+        if (!isfinite(y)) y = 0.0;
+        if (y > 1.5) y = 1.5;
+        if (y < -1.5) y = -1.5;
+        V->bx2 = V->bx1;
+        V->bx1 = x;
+        V->by2 = V->by1;
+        V->by1 = y;
+        return y;
+    }
+    double coef = 1.0 - exp(-2.0 * M_PI * fc / SR);
+    V->lpf_z += coef * (x - V->lpf_z);
+    return V->lpf_z;
+}
+
+/* Recent triggers. Short hats die before a live-voice poll. */
+#define DBG_RING 48
+typedef struct {
+    char token[24];
+    int slot, inst, smp, channels, smplen, orbit, active, released;
+    double t, freq, gain, age, gate, att, dec, sus, rel;
+    double begin, end, pos, step;
+    double cut, q, ft, fc, hcut, hq, hfc, band, bq, bfc, delay, shape;
+} DbgRow;
+
+static DbgRow dbg_ring[DBG_RING];
+static int dbg_pos;
+static int dbg_count;
+
+static void dbg_from_voice(DbgRow *r, const Voice *v, int slot) {
+    double gate = v->gate_end - v->start_time;
+    memset(r, 0, sizeof(*r));
+    memcpy(r->token, v->token, sizeof(r->token));
+    r->token[sizeof(r->token) - 1] = 0;
+    if (!r->token[0]) r->token[0] = '-';
+    r->slot = slot;
+    r->inst = v->inst;
+    r->smp = v->smp;
+    r->channels = v->smp_channels;
+    r->smplen = v->smplen;
+    r->orbit = v->orbit;
+    r->active = v->active;
+    r->released = v->released;
+    r->t = v->start_time;
+    r->freq = v->freq;
+    r->gain = v->amp;
+    r->age = v->age;
+    r->gate = isfinite(gate) && gate > 0 ? gate : 0;
+    r->att = v->vatt;
+    r->dec = v->vdec;
+    r->sus = v->vsus;
+    r->rel = v->vrel;
+    r->begin = v->smp_begin;
+    r->end = v->smp_end;
+    r->pos = v->smppos;
+    r->step = v->smpstep;
+    r->delay = v->delay_send;
+    if (v->dsp.control.enabled) {
+        const DspParams *p = &v->dsp.control;
+        r->cut = p->p[DSP_LPF];
+        r->q = p->p[DSP_LPQ];
+        r->ft = p->p[DSP_FTYPE];
+        r->fc = dsp_filter_frequency(p, 0, v->age, r->gate);
+        r->hcut = p->p[DSP_HPF];
+        r->hq = p->p[DSP_HPQ];
+        r->hfc = dsp_filter_frequency(p, 1, v->age, r->gate);
+        r->band = p->p[DSP_BPF];
+        r->bq = p->p[DSP_BPQ];
+        r->bfc = dsp_filter_frequency(p, 2, v->age, r->gate);
+        r->shape = p->p[DSP_SHAPE];
+    } else {
+        r->cut = v->lpf_hz;
+        r->q = v->lpq;
+        r->ft = -1;
+        r->fc = voice_fc(v, v->lpf_hz);
+    }
+}
+
+static void dbg_push(const Voice *v, int slot) {
+    dbg_from_voice(&dbg_ring[dbg_pos], v, slot);
+    dbg_pos = (dbg_pos + 1) % DBG_RING;
+    if (dbg_count < DBG_RING) dbg_count++;
+}
+
+static size_t dbg_add(char *out, size_t cap, size_t pos, const char *fmt, ...) {
+    va_list ap;
+    int n;
+    if (!out || cap == 0) return 0;
+    if (pos >= cap) return cap - 1;
+    va_start(ap, fmt);
+    n = vsnprintf(out + pos, cap - pos, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        out[pos] = 0;
+        return pos;
+    }
+    if ((size_t)n >= cap - pos) return cap - 1;
+    return pos + (size_t)n;
+}
+
+static size_t dbg_row(char *out, size_t cap, size_t pos, const char *kind, const DbgRow *r) {
+    return dbg_add(out, cap, pos,
+        "%s%d inst=%s tok=%s freq=%.2f gain=%.3f age=%.3f gate=%.3f "
+        "att=%.3f dec=%.3f sus=%.3f rel=%.3f off=%d "
+        "smp=%d ch=%d begin=%.3f end=%.3f pos=%.2f len=%d step=%.3f "
+        "cut=%.3f q=%.3f ft=%.0f fc=%.2f hcut=%.3f hq=%.3f hfc=%.2f "
+        "band=%.3f bq=%.3f bfc=%.2f orb=%d dly=%.3f shape=%.3f at=%.3f\n",
+        kind, r->slot, audio_inst_name(r->inst), r->token,
+        r->freq, r->gain, r->age, r->gate,
+        r->att, r->dec, r->sus, r->rel, r->released,
+        r->smp, r->channels, r->begin, r->end, r->pos, r->smplen, r->step,
+        r->cut, r->q, r->ft, r->fc, r->hcut, r->hq, r->hfc,
+        r->band, r->bq, r->bfc, r->orbit, r->delay, r->shape, r->t);
+}
+
+int audio_debug_snapshot(char *out, size_t outlen, int limit) {
+    DbgRow live[DBG_RING];
+    DbgRow trig[DBG_RING];
+    int nlive = 0, ntrig = 0, active = 0, i;
+    size_t pos = 0;
+    if (!out || outlen < 2) return -1;
+    if (limit < 1) limit = 1;
+    if (limit > DBG_RING) limit = DBG_RING;
+    out[0] = 0;
+    pthread_mutex_lock(&voice_lock);
+    for (i = 0; i < MAX_VOICES; i++) {
+        if (!voices[i].active) continue;
+        active++;
+        if (nlive < limit) dbg_from_voice(&live[nlive++], &voices[i], i);
+    }
+    ntrig = dbg_count < limit ? dbg_count : limit;
+    for (i = 0; i < ntrig; i++) {
+        int idx = (dbg_pos - 1 - i + DBG_RING * 2) % DBG_RING;
+        trig[i] = dbg_ring[idx];
+    }
+    pthread_mutex_unlock(&voice_lock);
+    pos = dbg_add(out, outlen, pos,
+        "t=%.3f playing=%s bpm=%.1f pool=%d/%d\n"
+        "fx drive=%.3f cutoff=%.3f delay=%.3f verb=%.3f\n"
+        "voices %d showing %d\n",
+        audio_time, playing ? "yes" : "no", bpm, active, MAX_VOICES,
+        fx_drive, fx_cutoff, fx_delay, fx_verb, active, nlive);
+    for (i = 0; i < nlive; i++) pos = dbg_row(out, outlen, pos, "v", &live[i]);
+    pos = dbg_add(out, outlen, pos, "triggers %d\n", ntrig);
+    for (i = 0; i < ntrig; i++) pos = dbg_row(out, outlen, pos, "t", &trig[i]);
+    return (int)pos;
+}
+
 void audio_trigger_event(AudioEvent *ev) {
+    if (ev->csound_only) return;
     if (!playing) return; // still trigger? allow
     pthread_mutex_lock(&voice_lock);    // find free voice
+    if (ev->dsp.enabled && ev->dsp.p[DSP_CUT] > 0) {
+        for (int i = 0; i < MAX_VOICES; i++)
+            if (voices[i].dsp.control.enabled &&
+                voices[i].dsp.control.p[DSP_CUT] == ev->dsp.p[DSP_CUT]) voices[i].active = 0;
+    }
     int chosen = -1;
     for (int i = 0; i < MAX_VOICES; i++) {
         if (!voices[i].active) { chosen = i; break; }
@@ -190,7 +601,172 @@ void audio_trigger_event(AudioEvent *ev) {
         }
     }
     trigger_voice(&voices[chosen], ev);
+    dbg_push(&voices[chosen], chosen);
     pthread_mutex_unlock(&voice_lock);
+}
+
+typedef struct {
+    double left, right, delay_l, delay_r, room_l, room_r, room_size;
+} VoiceMix;
+
+static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
+    double left = v->pan <= 0 ? 1 : 1-v->pan;
+    double right = v->pan >= 0 ? 1 : 1+v->pan;
+    if (v->dsp.control.enabled) {
+        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW;
+        double pan = fmax(-1,fmin(1,v->pan));
+        if (!stereo) {
+            l *= cos((pan+1)*M_PI/4); r *= sin((pan+1)*M_PI/4);
+        } else if (pan <= 0) {
+            l += r*cos((pan+1)*M_PI/2); r *= sin((pan+1)*M_PI/2);
+        } else {
+            r += l*sin(pan*M_PI/2); l *= cos(pan*M_PI/2);
+        }
+        left = right = 1;
+    }
+    double dry = v->dsp.control.enabled ? v->dsp.control.p[DSP_DRY] : 1;
+    unsigned scope_mask = v->scope_mask;
+    for (int i = 0; scope_mask; i++, scope_mask >>= 1) if ((scope_mask&1u) && v->scope_generation == pattern_scope_generation[i])
+        pattern_scope_frame[i] += (l*left+r*right)*dry*.5;
+    mix->left += l*left*dry; mix->right += r*right*dry;
+    mix->delay_l += l*left*v->delay_send;
+    mix->delay_r += r*right*v->delay_send;
+    if (v->dsp.control.enabled) {
+        double room = v->dsp.control.p[DSP_ROOM];
+        mix->room_l += l*left*room; mix->room_r += r*right*room;
+        if (room > 0) mix->room_size = v->dsp.control.p[DSP_SIZE];
+    }
+}
+
+static void mix_voice(Voice *v, double sample, VoiceMix *mix) {
+    sample = dsp_process(&v->dsp,sample,v->age,v->gate_end-v->start_time);
+    route_voice(v,sample,sample,mix);
+}
+
+static void mix_supersaw(Voice *v, double amplitude, VoiceMix *mix) {
+    double age = v->age, gate = v->gate_end-v->start_time;
+    double left = dsp_process(&v->dsp,v->dsp.supersaw_l*amplitude,age,gate);
+    double right = dsp_process(&v->dsp_right,v->dsp.supersaw_r*amplitude,age,gate);
+    route_voice(v,left,right,mix);
+}
+
+static void native_reverb(int orbit, VoiceMix *mix) {
+    static float comb[N_ORBITS][2][4][16384], allpass[N_ORBITS][2][2][2048];
+    static unsigned pos[N_ORBITS], ap_pos[N_ORBITS];
+    static double size[N_ORBITS];
+    const int lengths[] = {1116,1188,1277,1356};
+    if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
+    const ConvKernel *kernel = atomic_load_explicit(&requested_ir[orbit],memory_order_acquire);
+    convolution_set(&convolvers[orbit],kernel);
+    if (kernel) {
+        double left, right;
+        convolution_process(&convolvers[orbit],mix->room_l,mix->room_r,&left,&right);
+        mix->left += left; mix->right += right;
+        return;
+    }
+    if (mix->room_size >= 0) size[orbit] = mix->room_size;
+    else if (size[orbit] == 0) size[orbit] = 1;
+    for (int ch = 0; ch < 2; ch++) {
+        double input = ch ? mix->room_r : mix->room_l, wet = 0;
+        for (int k = 0; k < 4; k++) {
+            int delay = (int)(lengths[k]*(.25+size[orbit]*.75)) + ch*23;
+            if (delay > 16383) delay = 16383;
+            unsigned read = (pos[orbit]-(unsigned)delay)&16383;
+            double sample = comb[orbit][ch][k][read];
+            comb[orbit][ch][k][pos[orbit]&16383] = (float)tanh(input+sample*.84);
+            wet += sample*.25;
+        }
+        for (int k = 0; k < 2; k++) {
+            unsigned read = (ap_pos[orbit]-(unsigned)(k ? 441 : 556))&2047;
+            double sample = allpass[orbit][ch][k][read];
+            allpass[orbit][ch][k][ap_pos[orbit]&2047] = (float)(wet+sample*.5);
+            wet = sample-wet*.5;
+        }
+        if (ch) mix->right += wet*.4; else mix->left += wet*.4;
+    }
+    pos[orbit]++; ap_pos[orbit]++;
+}
+
+/* Event sends stay on their orbit. The TUI fx delay is a separate master line. */
+static void orbit_delay(int orbit, VoiceMix *mix) {
+    static float dbuf[N_ORBITS][2][ORBIT_DELAY];
+    static int dpos[N_ORBITS];
+    if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
+    double b = bpm < 20 ? 120 : bpm;
+    double dt = orbit_dt[orbit] >= 0 ? orbit_dt[orbit] : (0.75 * 60.0 / b);
+    double fb = orbit_fb[orbit] >= 0 ? orbit_fb[orbit] : 0.5;
+    if (fb > 0.98) fb = 0.98;
+    if (fb < 0) fb = 0;
+    if (dt > 1.99) dt = 1.99;
+    if (dt < 1.0 / SR) dt = 1.0 / SR;
+    int dl = (int)(dt * SR);
+    if (dl < 1) dl = 1;
+    if (dl >= ORBIT_DELAY) dl = ORBIT_DELAY - 1;
+    int rp = dpos[orbit] - dl;
+    if (rp < 0) rp += ORBIT_DELAY;
+    float de_l = dbuf[orbit][0][rp], de_r = dbuf[orbit][1][rp];
+    dbuf[orbit][0][dpos[orbit]] = (float)(mix->delay_l + de_l * fb);
+    dbuf[orbit][1][dpos[orbit]] = (float)(mix->delay_r + de_r * fb);
+    if (++dpos[orbit] >= ORBIT_DELAY) dpos[orbit] = 0;
+    mix->left += de_l;
+    mix->right += de_r;
+}
+
+static double source_value(const Voice *v, double position, int channel) {
+    if (v->dsp.control.p[DSP_LOOP] > 0) {
+        double lo = v->smplen*v->dsp.control.p[DSP_LOOPBEGIN];
+        double hi = v->smplen*v->dsp.control.p[DSP_LOOPEND];
+        if (hi > lo && ((v->smpstep >= 0 && position >= hi) || (v->smpstep < 0 && position < lo))) {
+            position = lo+fmod(position-lo,hi-lo);
+            if (position < lo) position += hi-lo;
+        }
+    }
+    if (position < 0 || position >= v->smplen || !isfinite(position)) return 0;
+    int index = (int)position;
+    double fraction = position-index;
+    double a = v->smpbuf[(size_t)index*2+channel];
+    double b = index+1 < v->smplen ? v->smpbuf[(size_t)(index+1)*2+channel] : a;
+    return a+(b-a)*fraction;
+}
+
+/* Four Hann grains with waveform-aligned starts. Transport and pitch have
+   separate rates; both channels share the alignment and grain positions.
+   Fixed work/storage, no decoder/cache access or allocation here. */
+static void stretch_sample(Voice *v, double step, double *left, double *right) {
+    double pitch_step = step*v->stretch_factor;
+    if ((v->stretch_tick & 255u) == 0) {
+        unsigned slot = (v->stretch_tick/256u)&3u;
+        double start = v->smppos;
+        unsigned previous = (slot+3u)&3u;
+        if (v->grain_age[previous] < 1024) {
+            double reference = v->grain_pos[previous], best = 0;
+            /* Bound the search in source frames, independent of speed. */
+            for (int offset = -192; offset <= 192; offset += 4) {
+                double candidate = v->smppos+offset, xy = 0, xx = 0, yy = 0;
+                if (candidate < 0 || candidate >= v->smplen) continue;
+                for (int j = 0; j < 32; j++) {
+                    double a = source_value(v,reference+j*pitch_step,0);
+                    double b = source_value(v,candidate+j*pitch_step,0);
+                    xy += a*b; xx += a*a; yy += b*b;
+                }
+                double score = xx*yy > 1e-20 ? xy/sqrt(xx*yy)-abs(offset)*.00001 : 0;
+                if (score > best) { best = score; start = candidate; }
+            }
+        }
+        v->grain_pos[slot] = start; v->grain_age[slot] = 0;
+    }
+    *left = *right = 0;
+    double weight_sum = 0;
+    for (int i = 0; i < 4; i++) {
+        if (v->grain_age[i] >= 1024) continue;
+        double weight = .5-.5*cos(2*M_PI*v->grain_age[i]/1024.0);
+        *left += weight*source_value(v,v->grain_pos[i],0);
+        *right += weight*source_value(v,v->grain_pos[i],1);
+        weight_sum += weight;
+        v->grain_age[i]++; v->grain_pos[i] += pitch_step;
+    }
+    if (weight_sum > 1e-12) { *left /= weight_sum; *right /= weight_sum; }
+    v->stretch_tick++;
 }
 
 /* Audio callback */
@@ -199,40 +775,87 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
     (void)input; (void)timeInfo; (void)statusFlags; (void)userData;
     float *out = (float*)output;
     for (unsigned long i = 0; i < frameCount; i++) {
+        VoiceMix mixes[N_ORBITS];
+        memset(pattern_scope_frame,0,sizeof(pattern_scope_frame));
+        for (int o = 0; o < N_ORBITS; o++) {
+            mixes[o] = (VoiceMix){0};
+            mixes[o].room_size = -1;
+        }
         double L = 0, R = 0;
+        double cs_l = 0, cs_r = 0;
+        double duck_g[N_ORBITS];
+        orbits_ensure();
         if (playing) {
             pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
             for (int v = 0; v < MAX_VOICES; v++) {
                 Voice *V = &voices[v];
                 if (!V->active) continue;
+                int orbit = V->orbit;
+                if (orbit < 0 || orbit >= N_ORBITS) orbit = 0;
+                VoiceMix *vm = &mixes[orbit];
                 double age = V->age;
                 // envelope
                 double env = 0;
                 // ADSR (for synth). For drums use custom.
                 int is_drum = (V->inst >= INST_KICK && V->inst <= INST_TOM);
-                if (V->smpbuf && (int)V->smppos < V->smplen) {
+                int smp_lim = V->smplen;
+                double lower = 0;
+                /* Legacy notes use a hard slice. WebAudio samples run to the
+                   buffer boundary; end sets the default envelope gate, so
+                   release can continue beyond the slice. Explicit clip/loop/
+                   release instead use the hap duration set by trigger_voice. */
+                if (!V->dsp.control.enabled) {
+                    lower = V->smplen * V->smp_begin;
+                    if (V->smp_end > 0.0 && V->smp_end < 1.0) {
+                        smp_lim = (int)(V->smplen * V->smp_end);
+                        if (smp_lim < 1) smp_lim = 1;
+                    }
+                }
+                if (V->smpbuf && V->smppos >= 0.0 && (int)V->smppos < smp_lim) {
                     /* one-shot bank sample, mono center, linear interp.
-                       Gated voices (melodic banks) stop at note end. */
+                       Gated voices (melodic banks) stop at note end.
+                       A negative step plays the buffer backwards. */
                     if (V->smp_gate && !V->released && audio_time >= V->note_off_time)
                         V->released = 1;
                     double g = 1.0;
-                    if (V->smp_gate && V->released) {
+                    if (V->dsp.control.enabled) {
+                        double gate = V->gate_end-V->start_time;
+                        if (age >= gate) V->released = 1;
+                        g = dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
+                        if (age >= gate+V->vrel) { V->active = 0; continue; }
+                    } else if (V->smp_gate && V->released) {
                         double r = V->vrel >= 0 ? V->vrel : 0.08;
                         if (r < 0.005) r = 0.005;
                         double rt = audio_time - V->note_off_time;
                         if (rt >= r) { V->active = 0; continue; }
                         g = 1.0 - rt / r;
                     }
-                    int i0 = (int)V->smppos;
-                    double fr = V->smppos - i0;
-                    double a = V->smpbuf[i0];
-                    double b = (i0 + 1 < V->smplen) ? V->smpbuf[i0 + 1] : 0.0;
-                    double s = (a + (b - a) * fr) * V->amp * g;
-                    L += s; R += s;
-                    V->smppos += V->smpstep;
+                    double left = source_value(V,V->smppos,0), right = source_value(V,V->smppos,1);
+                    double transport = V->smpstep*dsp_pitch_multiplier(&V->dsp.control,age,V->gate_end-V->start_time);
+                    if (V->stretch_factor > 0 && V->stretch_factor != 1) stretch_sample(V,transport,&left,&right);
+                    double s = left*V->amp*g;
+                    if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
+                        right *= V->amp*g;
+                        double gate = V->gate_end-V->start_time;
+                        route_voice(V,dsp_process(&V->dsp,s,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
+                    } else {
+                        if (V->smp_channels == 2) s = (s+right*V->amp*g)*.5;
+                        if (V->lpf_hz > 0.0) s = apply_lpf(V, s, voice_fc(V, V->lpf_hz));
+                        mix_voice(V,s,vm);
+                    }
+                    V->smppos += transport;
                     V->age += dt;
-                    if ((int)V->smppos >= V->smplen) V->active = 0;
+                    if (V->dsp.control.enabled && V->dsp.control.p[DSP_LOOP] > 0) {
+                        double lo = V->smplen*V->dsp.control.p[DSP_LOOPBEGIN];
+                        double hi = V->smplen*V->dsp.control.p[DSP_LOOPEND];
+                        if (hi > lo && ((V->smpstep >= 0 && V->smppos >= hi) ||
+                                        (V->smpstep < 0 && V->smppos < lo))) {
+                            V->smppos = lo + fmod(V->smppos-lo,hi-lo);
+                            if (V->smppos < lo) V->smppos += hi-lo;
+                        }
+                    }
+                    if (V->smppos < lower || V->smppos >= smp_lim) V->active = 0;
                     continue;
                 } else if (V->smpbuf) { V->active = 0; continue; }
                 if (is_drum) {
@@ -249,7 +872,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         // phase
                         V->phase += (2*M_PI * V->freq)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI)) * env;
-                        L += s * V->amp * 0.9; R += s * V->amp * 0.9;
+                        mix_voice(V,s*V->amp*.9,vm);
                     } else if (V->inst == INST_SNARE) {
                         double t = age;
                         double dur = 0.25;
@@ -259,7 +882,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double tone = wt_sample(V->wt, 200.0*audio_time); // fixed 200
                         double s = (0.7*noise + 0.3*tone)*env;
-                        L += s * V->amp * 0.7; R += s * V->amp * 0.7;
+                        mix_voice(V,s*V->amp*.7,vm);
                     } else if (V->inst == INST_HH) {
                         double t = age;
                         double dur = 0.08;
@@ -270,7 +893,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         static double prev = 0;
                         double hp = noise - prev; prev = noise*0.5 + prev*0.5; // crude
                         double s = hp*env;
-                        L += s * V->amp * 0.5; R += s * V->amp * 0.5;
+                        mix_voice(V,s*V->amp*.5,vm);
                     } else if (V->inst == INST_CP) {
                         double t = age;
                         double dur = 0.2;
@@ -278,7 +901,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double env = exp(-t*12.0);
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double s = noise*env;
-                        L += s * V->amp * 0.6; R += s * V->amp * 0.6;
+                        mix_voice(V,s*V->amp*.6,vm);
                     } else if (V->inst == INST_TOM) {
                         double t = age;
                         double dur = 0.3;
@@ -287,7 +910,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double pitch = V->freq;
                         V->phase += (2*M_PI * pitch)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI))*env;
-                        L += s * V->amp * 0.8; R += s * V->amp * 0.8;
+                        mix_voice(V,s*V->amp*.8,vm);
                     }
                 } else {
                     // synth with ADSR gate until note_off
@@ -318,12 +941,18 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         if (rt >= r) { V->active = 0; envtarget = 0; }
                         else envtarget = V->release_start_level * (1.0 - rt/r);
                     }
-                    V->env += (envtarget - V->env) * 0.02; // smooth
+                    if (V->dsp.control.enabled)
+                        V->env = dsp_envelope(age,V->gate_end-V->start_time,a,d,sus,r);
+                    else V->env += (envtarget - V->env) * 0.02;
                     env = V->env;
                     /* one LFO per voice: triangle, sine, saw, square */
                     double freq = V->freq;
                     double amp = V->amp;
                     double pwuse = V->pw;
+                    if (V->dsp.control.enabled && V->dsp.control.p[DSP_PWRATE] > 0) {
+                        const double *p = V->dsp.control.p;
+                        pwuse += sin(2*M_PI*age*p[DSP_PWRATE])*p[DSP_PWSWEEP];
+                    }
                     double fc = V->lpf_hz;
                     if (V->lfo_tgt > 0 && V->lfo_hz > 0.0) {
                         double u = V->lfo_phase / (2.0 * M_PI);
@@ -353,6 +982,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         }
                     }
                     // oscillator
+                    freq = dsp_frequency(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time);
                     double phaseinc = (2*M_PI * freq)/SR;
                     double sample = 0;
                     int w = V->inst;
@@ -381,32 +1011,62 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                             double t = V->phase/(2*M_PI); t -= floor(t);
                             sample = 4.0*fabs(t-0.5)-1.0; break;
                         }
-                        case INST_NOISE: sample = ((double)rand()/RAND_MAX)*2-1; break;
+                        case INST_NOISE: sample = V->dsp.control.enabled ? dsp_noise(&V->dsp,0) : ((double)rand()/RAND_MAX)*2-1; break;
+                        case INST_PINK: sample = dsp_noise(&V->dsp,1); break;
+                        case INST_BROWN: sample = dsp_noise(&V->dsp,2); break;
+                        case INST_SUPERSAW: sample = dsp_supersaw(&V->dsp,freq); break;
+                        case INST_ADDITIVE: sample = dsp_additive(&V->dsp.control,V->phase,freq); break;
                         default: sample = sin(V->phase); break;
                     }
+                    if (V->dsp.control.enabled) {
+                        if (V->inst == INST_SAW) sample = dsp_oscillator(0,V->phase,freq,.5);
+                        else if (V->inst == INST_SQUARE) sample = dsp_oscillator(1,V->phase,freq,pwuse >= 0 ? pwuse : .5);
+                        else if (V->inst == INST_TRI) sample = dsp_oscillator(2,V->phase,freq,.5);
+                    }
                     if (V->lpf_hz > 0.0 || V->lfo_tgt == 3) {
-                        if (fc < 20.0) fc = 20.0;
-                        if (fc > 18000.0) fc = 18000.0;
-                        double coef = 1.0 - exp(-2.0 * M_PI * fc / SR);
-                        V->lpf_z += coef * (sample - V->lpf_z);
-                        sample = V->lpf_z;
+                        double base = (V->lfo_tgt == 3) ? fc : V->lpf_hz;
+                        sample = apply_lpf(V, sample, voice_fc(V, base));
                     }
                     V->phase += phaseinc;
-                    if (V->phase > 2*M_PI) V->phase -= 2*M_PI;
+                    if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
                     V->age += dt;
                     double smp = sample * env * amp;
-                    // pan
-                    double lg = (V->pan <= 0) ? 1.0 : 1.0 - V->pan;
-                    double rg = (V->pan >= 0) ? 1.0 : 1.0 + V->pan;
-                    L += smp * lg;
-                    R += smp * rg;
+                    /* Superdough oscillator sources have a fixed 0.3 gain
+                       before the amplitude envelope and effects. */
+                    if (V->dsp.control.enabled) { smp *= .3; amp *= .3; }
+                    if (V->inst == INST_SUPERSAW) mix_supersaw(V,env*amp,vm);
+                    else mix_voice(V,smp,vm);
                     (void)age;
                     continue;
                 }
                 V->age += dt;
             }
+            csound_program_sample(csound_program,&cs_l,&cs_r);
+            for (int o = 0; o < N_ORBITS; o++) {
+                duck_g[o] = orbit_duck_gain(o);
+                duck_t[o] += dt;
+            }
+            pattern_scope_publish();
+            pthread_mutex_unlock(&voice_lock);
+        } else {
+            pthread_mutex_lock(&voice_lock);
+            double discard_l = 0, discard_r = 0;
+            csound_program_sample(csound_program,&discard_l,&discard_r);
+            for (int o = 0; o < N_ORBITS; o++) {
+                duck_g[o] = orbit_duck_gain(o);
+                duck_t[o] += 1.0 / SR;
+            }
+            pattern_scope_publish();
             pthread_mutex_unlock(&voice_lock);
         }
+        for (int o = 0; o < N_ORBITS; o++) {
+            native_reverb(o, &mixes[o]);
+            orbit_delay(o, &mixes[o]);
+            L += mixes[o].left * duck_g[o];
+            R += mixes[o].right * duck_g[o];
+        }
+        L += cs_l;
+        R += cs_r;
         /* ---- master fx chain (all params plain doubles, lock-free) ---- */
         {
             int fx_on = fx_drive > 0.001 || fx_cutoff < 0.999 ||
@@ -426,24 +1086,6 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     lp_l += a * (L - lp_l);
                     lp_r += a * (R - lp_r);
                     L = lp_l; R = lp_r;
-                }
-                /* delay: dotted-eighth feedback, capped 1.5s */
-                {
-                    static float dbuf[2][88200];
-                    static int dpos = 0;
-                    double dt = 0.75 * 60.0 / (bpm < 20 ? 120 : bpm);
-                    if (dt > 1.5) dt = 1.5;
-                    if (dt < 0.02) dt = 0.02;
-                    int dl = (int)(dt * SR);
-                    int rp = dpos - dl;
-                    if (rp < 0) rp += 88200;
-                    float de_l = dbuf[0][rp], de_r = dbuf[1][rp];
-                    dbuf[0][dpos] = (float)(L + de_l * 0.35);
-                    dbuf[1][dpos] = (float)(R + de_r * 0.35);
-                    dpos++;
-                    if (dpos >= 88200) dpos = 0;
-                    L += de_l * fx_delay * 0.5;
-                    R += de_r * fx_delay * 0.5;
                 }
                 /* schroeder verb: 4 combs + 2 allpass, mono-ized send */
                 {
@@ -474,8 +1116,35 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 }
             }
         }
-        /* DC blocker + tanh soft-clip limiter (replaces hard clip) */
+        /* TUI `fx delay` is its own master send. Pattern `.delay()` uses orbit_delay.
+           Keep ticking after the knob returns to 0 so the tail can finish. */
         {
+            static float dbuf[2][ORBIT_DELAY];
+            static int dpos = 0;
+            double b = bpm < 20 ? 120 : bpm;
+            double dt = 0.75 * 60.0 / b;
+            if (dt > 1.99) dt = 1.99;
+            int dl = (int)(dt * SR);
+            if (dl < 1) dl = 1;
+            if (dl >= ORBIT_DELAY) dl = ORBIT_DELAY - 1;
+            int rp = dpos - dl;
+            if (rp < 0) rp += ORBIT_DELAY;
+            float de_l = dbuf[0][rp], de_r = dbuf[1][rp];
+            double send = fx_delay > 0.001 ? fx_delay : 0;
+            dbuf[0][dpos] = (float)(L * send + de_l * 0.5);
+            dbuf[1][dpos] = (float)(R * send + de_r * 0.5);
+            if (++dpos >= ORBIT_DELAY) dpos = 0;
+            if (send > 0 || de_l > 1e-5f || de_l < -1e-5f || de_r > 1e-5f || de_r < -1e-5f) {
+                L += de_l;
+                R += de_r;
+            }
+        }
+        /* DC blocker + tanh soft-clip limiter (replaces hard clip) */
+        if (atomic_load_explicit(&reference_mode,memory_order_relaxed)) {
+            /* Superdough's default destination gain is unity. Do not
+               color every native event with the legacy DC/drive stage. */
+            L = fmax(-1,fmin(1,L)); R = fmax(-1,fmin(1,R));
+        } else {
             static double dc_l = 0, dc_r = 0, lp_l = 0, lp_r = 0;
             double x = L - dc_l + 0.995 * lp_l;
             dc_l = L; lp_l = x; L = x;
@@ -517,6 +1186,7 @@ void audio_init(void) {
 void audio_shutdown(void) {
     midi_shutdown();
     if (stream) { Pa_StopStream(stream); Pa_CloseStream(stream); stream=NULL; }
+    audio_set_csound(NULL);
     Pa_Terminate();
 }
 void audio_toggle_play(int on) { playing = on ? 1 : 0; }
@@ -539,6 +1209,10 @@ const char *audio_inst_name(int inst) {
         case INST_CP: return "clap";
         case INST_TOM: return "tom";
         case INST_WT: return "wt";
+        case INST_SUPERSAW: return "supersaw";
+        case INST_PINK: return "pink";
+        case INST_BROWN: return "brown";
+        case INST_ADDITIVE: return "additive";
         default: return "?";
     }
 }

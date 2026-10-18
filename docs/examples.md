@@ -1,4 +1,4 @@
-# StrudelTerm example gallery
+# Tompouce example gallery
 
 All snippets are copy-pasteable into the editor (`F5` evaluates) or via
 MCP `music_set_code`. Verified against the parser in `src/track.c` /
@@ -10,18 +10,43 @@ Syntax recap (what actually works today):
 - Pattern tokens are space-separated steps in one cycle (1 cycle = 4 beats).
 - `[ a b ]` groups steps into a single step slot.
 - `< a b >` picks one alternative per cycle (`cycle_index % n`).
-- `tok*N` repeats a token inside its slot (clamped 1–64).
+- `tok*N` repeats a token inside its slot (clamped 1–64). A fractional
+  `*` (`bd*1.5`) speeds the step without the integer repeat path.
+- `tok!N` splices N copies into the parent (`c!3 e` is four steps).
+  `tok@N` is temporal weight (`c@3 e` is 3/4 then 1/4). In `< >`, `@N`
+  holds for N cycles.
+- `tok/N` is Strudel slow: the pattern stretches across N cycles.
+  `[c a f e]/2` plays `c a` on cycle 0 and `f e` on cycle 1.
+  `| slow N` is different: the whole track sounds only every Nth cycle.
+- `tok?` / `tok?0.2` drops events (degradeBy, default 0.5), seeded by
+  the cycle so the lookahead matches playback.
+- `a | b` inside the pattern chooses one side per cycle. `|` before a
+  transform name is still the track bar, not a choice.
+- `bd(3,8)` and `bd(3,8,rot)` are postfix Euclidean rhythms.
+  `{bd sd hh, cp lt}` is a polymeter: later lists cycle at the first
+  list's step size.
 - `~`, `_`, `-`, `rest` are rests. `a,b` stacks both over the same span (a chord).
 - Transforms after `|`: `rev`, `fast N` (1–64), `slow N` (1–64),
   `gain X` (0–2), `inst sine|saw|sqr|square|tri|triangle|noise`.
-- `/N` after a token is parsed but currently has no audible effect — avoid it.
+- One pattern per line may also be a call: `note("c e g").s("saw").lpf(800)`,
+  `s("bd sd").gain(slider(0.5))`, `setcpm(45)` or `setcpm(120/4)`
+  (numeric arguments do `+ - * / %` and parentheses; BPM = cycles/min × 4,
+  so `120/4` is 30 cycles/min and 120 BPM). A `/` inside quotes is slow.
+  `slider(v)` / `slider(v,min,max,step)` keeps the literal in the
+  source; Ctrl+Left / Ctrl+Right nudge the live value.
 - Drum tokens: `bd` kick, `sd`/`sn` snare, `hh`/`hat` hat (also the
   fallback for unknown tokens), `cp`/`clap` clap, `tom` tom.
 - Note tokens: `c d e f g a b` with `#`/`b` accidentals plus octave
   (e.g. `c4`, `eb4`, `f#3`), or a raw MIDI number (e.g. `60`).
 - Default instruments: `bass`→saw, `lead`→square, `notes`/`melody`→tri,
   `noise`→noise, everything else→sine.
-- Limits: max 32 tracks, 512-char lines, 64 kB code buffer.
+- Limits: 32 voices in one buffer, song tracks grow until a safety
+  ceiling of 8192. The editor source grows until memory runs out
+  (offsets stop near 2 GiB). Long lines wrap on JavaScript tokens;
+  arrows follow the wrapped rows. `/wrap off` scrolls
+  with the cursor. The code pane
+  draws a one-row roll of the cursor line and a one-row scope when
+  the pane is tall enough. F12 is the full roll.
 
 ## 1. Hello beat
 

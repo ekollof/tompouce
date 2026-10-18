@@ -1,4 +1,4 @@
-# StrudelTerm manual acceptance checklist
+# Tompouce manual acceptance checklist
 
 Build: `make clean && make` must finish with zero warnings under
 `-Wall -Wextra`. Mark each box after verifying on a real terminal
@@ -7,11 +7,11 @@ Build: `make clean && make` must finish with zero warnings under
 ## Build and launch
 
 - [ ] `make clean && make` succeeds, no warnings/errors.
-- [ ] `./strudelterm` opens the S-Lang UI (status bar, code pane, console
+- [ ] `./tompouce` opens the S-Lang UI (status bar, code pane, console
       pane, prompt line) with no crash.
-- [ ] `./strudelterm --mcp` stays headless (no UI) and answers
+- [ ] `./tompouce --mcp` stays headless (no UI) and answers
       `{"jsonrpc":"2.0","id":1,"method":"ping"}` with `{"result":{}}`.
-- [ ] `./strudelterm --mcp --ui` from a terminal shows the UI and accepts keys.
+- [ ] `./tompouce --mcp --ui` from a terminal shows the UI and accepts keys.
 
 ## Editor and vi mode
 - [ ] Typing inserts text at a visible cursor (block highlight + hardware cursor).
@@ -42,7 +42,7 @@ Build: `make clean && make` must finish with zero warnings under
       a matching parent are collapsed; empty query lists top-level banks).
 - [ ] `Enter` on a bank appends `| bank <dir>` to a drum line (or adds a
       `drum ... | bank <dir>` line); `Esc`/`F6` closes.
-- [ ] While indexing, pane shows `indexing... N files`; `STRUDELTERM_BANKS`
+- [ ] While indexing, pane shows `indexing... N files`; `TOMPOUCE_BANKS`
       override is honored when set.
 - [ ] Second launch loads the index from LevelDB in ~ms (console shows
       `banks index loaded`); touching a bank dir triggers a rescan.
@@ -87,7 +87,7 @@ Build: `make clean && make` must finish with zero warnings under
 - [ ] `euclid(3,8,bd)` and `every(2,sd)` play the expected rhythms.
 - [ ] `| shuffle` varies order per cycle; `| degrade 0.5` thins events.
 - [ ] `| mute` silences a line; `| solo` solos all solo lines.
-- [ ] `| midi 0` emits notes on ALSA client `strudelterm` (check `aconnect`).
+- [ ] `| midi 0` emits notes on ALSA client `tompouce` (check `aconnect`).
 - [ ] `fx drive/cutoff/delay/verb` lines take effect without clicks/dropouts.
 - [ ] `s <bank-path> ...` plays one-shots; missing files are silent.
 - [ ] `music_session save/load/list/delete` round-trips; `../x` rejected.
@@ -95,7 +95,7 @@ Build: `make clean && make` must finish with zero warnings under
 - [ ] `music_track move/remove` reorder and delete; `strudel://tracks`
       lists `{index, active, preview}`.
 - [ ] `--bpm 140 --code 'drum bd'` starts primed; `--mcp-port` answers ping.
-- [ ] Quit persists `~/.config/strudelterm/state.json`; relaunch restores.
+- [ ] Quit persists `~/.config/tompouce/state.json`; relaunch restores.
 - [ ] `F10`/`F11` move the split; small terminals don't flicker.
 - [ ] No `ALSA lib ...` text ever appears inside the UI (silenced via
       `snd_lib_error_set_handler`; verify by snapshotting rows 2-20).
@@ -104,7 +104,7 @@ Build: `make clean && make` must finish with zero warnings under
 
 ## MCP (headless)
 
-- [ ] `initialize` returns `protocolVersion`, `serverInfo.name == strudelterm`.
+- [ ] `initialize` returns `protocolVersion`, `serverInfo.name == tompouce`.
 - [ ] `tools/list` contains all eleven `music_*` tools.
 - [ ] `music_set_code` with §11 returns `Loaded 5 tracks.`
 - [ ] `music_get_status` reflects bpm/track count/playing.

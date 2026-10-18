@@ -1,7 +1,12 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "common.h"
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <ctype.h>
+#include <errno.h>
 
 static char console_buf[MAX_CONSOLE][MAX_LINE];
 static int console_head = 0;
@@ -148,6 +153,27 @@ void user_dir(char *out, size_t outlen, const char *xdg_env,
         }
     }
     if (!base) return;
+    /* Migrate the legacy application root only when the new root is absent.
+       Decide at the root, so config, sessions, modules and sounds agree. */
+    const char *app = strstr(leaf, "tompouce");
+    if (app && (app == leaf || app[-1] == '/') &&
+        (app[8] == '/' || app[8] == '\0')) {
+        char current[1024], legacy[1024];
+        size_t prefix = (size_t)(app - leaf);
+        struct stat st;
+        int a = snprintf(current, sizeof(current), "%s/%.*stompouce", base, (int)prefix, leaf);
+        int b = snprintf(legacy, sizeof(legacy), "%s/%.*sstrudelterm", base, (int)prefix, leaf);
+        if (a > 0 && (size_t)a < sizeof(current) &&
+            b > 0 && (size_t)b < sizeof(legacy) &&
+            lstat(current, &st) != 0 && errno == ENOENT &&
+            lstat(legacy, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (renameat2(AT_FDCWD, legacy, AT_FDCWD, current, RENAME_NOREPLACE) != 0 &&
+                errno != EEXIST) {
+                log_console("cannot migrate old application directory: %s", strerror(errno));
+                return;
+            }
+        }
+    }
     int n = snprintf(out, outlen, "%s/%s", base, leaf);
     if (n < 0 || (size_t)n >= outlen) out[0] = 0;
 }

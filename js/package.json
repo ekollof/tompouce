@@ -1,0 +1,13 @@
+{
+  "name": "tompouce-language",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "node build.mjs"},
+  "dependencies": {
+    "@strudel/core": "1.2.6",
+    "@strudel/mini": "1.2.6",
+    "@strudel/tonal": "1.2.6",
+    "@strudel/transpiler": "1.2.6"
+  },
+  "devDependencies": {"esbuild": "0.25.12"}
+}

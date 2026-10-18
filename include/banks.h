@@ -11,6 +11,11 @@ int banks_failed(void);     /* 1 if root missing/unreadable */
    substring). Returns total match count (may exceed max). */
 int banks_search(const char *query, const char **out, int max);
 
+/* Relative directory whose path has one component equal to name
+   (case-insensitive, not a substring). First index hit wins.
+   Copies that directory into out. Returns 1 on success. */
+int banks_dir_named(const char *name, char *out, int outlen);
+
 /* Distinct bank dirs matching query (case-insensitive substring on the
    dir or anything under it). Children with a matching parent are
    collapsed, so results are banks/kits, not kit pieces. Empty query
@@ -24,7 +29,7 @@ int banks_search_dirs(const char *query, char dirs[][512], int *counts, int max)
    dir is missing/unreadable. */
 int banks_list_dir(const char *reldir, const char *query, char out[][512], int max);
 
-/* Start background index using STRUDELTERM_BANKS, ./assets/banks, or the
+/* Start background index using TOMPOUCE_BANKS, ./assets/banks, or the
    repo checkout path (first existing dir wins). Safe to call repeatedly. */
 void banks_ensure_default(void);
 

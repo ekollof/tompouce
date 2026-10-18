@@ -13,4 +13,9 @@ int mcp_read_frame(int fd, char **out); /* read one newline-delimited frame */
 void mcp_poll(void);
 /* "pipe", "127.0.0.1:N", or "off" */
 void mcp_status(char *out, size_t n);
+/* Foreground UI: current TCP port, or enable a private ephemeral listener.
+   Returns 0 for stdio sessions or listen failure. */
+int mcp_companion_port(void);
+/* Idle foreground wait; wakes for terminal input or MCP activity. */
+void mcp_wait_input(int terminal_fd, int timeout_ms);
 #endif

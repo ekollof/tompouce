@@ -1,4 +1,18 @@
-# StrudelTerm architecture
+# Tompouce architecture
+
+JavaScript buffers now have a second input path: `javascript.c` embeds
+QuickJS and the upstream Strudel libraries, and `js_audio.c` converts queried
+haps into native `AudioEvent`s. `dsp.c` implements the additional native
+filters, modulation, synthesis helpers, and effects. JavaScript and sample
+resolution run outside `tracks_lock`; only C DSP runs in the audio callback.
+`csound_host.c` compiles and renders orchestras in a confined native child
+process. A background thread transfers stereo blocks into a bounded atomic
+ring; the audio callback only consumes PCM. Csound events still enter the
+scheduler's note history for visualization. Failed orchestra compilation
+keeps the last playable program, and replacing it releases the old renderer.
+The original C parser path described below remains for the line dialect.
+See [JavaScript and native audio](javascript.md) for the updated contracts,
+source-location highlighting, limits, coverage, and dependency licenses.
 
 ## Overview
 
@@ -47,7 +61,9 @@ console ring buffer feeds both UI console pane and music_get_console.
 |---|---|---|
 | `src/common.c` | timing, `trim`, `strdup_safe`, console ring buffer | `log_console`, `console_line`, `now_seconds` |
 | `src/audio.c` | tempo (`bpm` 20–400), note→MIDI→freq, voice pool, PortAudio callback | `audio_set_bpm`, `audio_trigger_event`, `note_name_to_midi`, `midi_to_freq` |
-| `src/pattern.c` | mini-notation parse + per-cycle expansion | `parse_pattern_text`, `expand_node`, `node_free` |
+| `src/pattern.c` | mini-notation parse + per-cycle expansion (`! @ / ?`, euclid, `{}`) | `parse_pattern_text`, `expand_node`, `node_free` |
+| `src/strudel.c` | statement lines (`note().lpf()`, `setcpm`) | `strudel_parse` |
+| `src/slider.c` | live `slider()` values; source text is not rewritten | `slider_bind`, `slider_nudge` |
 | `src/harmony.c` | Strudel chord symbols, scales, degrees | `harmony_chord`, `harmony_scale`, `harmony_degree_midi` |
 | `src/track.c` | source → `Track tracks[32]` + `current_code` | `track_load_from_code` |
 | `src/scheduler.c` | generator + consumer threads, sorted event queue | `scheduler_init/shutdown/start`, `event_queue_push/clear` |
@@ -93,9 +109,12 @@ console ring buffer feeds both UI console pane and music_get_console.
 
 | Resource | Limit | Where |
 |---|---|---|
-| Tracks | 32 | `MAX_TRACKS` |
-| Code buffer / line | 64 kB / 512 B | `current_code`, `MAX_LINE` |
-| Editor | 512 lines × 256 cols | `MAX_CODE_LINES/LEN` |
+| Tracks | 32 | `MAX_TRACKS` (voices in one buffer) |
+| Song tracks | 8192 | `SONG_TRACK_CEILING` (heap list, exact-size strings) |
+| Editor source | grows until malloc fails; offsets stop near 2 GiB | `current_code`, `SOURCE_MAX` |
+| Editor display | wrap on JS tokens by default; arrows follow visual rows; `/wrap off` sidescrolls | `editor_wrap`, tree-sitter-javascript, config `"wrap"` |
+| Editor undo | full snapshots until malloc fails; typing runs coalesce | Ctrl+Z / Ctrl+Y, vi `u` |
+| Console line | 512 B | `MAX_LINE` |
 | Pattern nesting | 32 deep | `Ctx.depth` |
 | `*N` / `fast` / `slow` | 1–64 | parser + track compiler |
 | Gain | 0–2 | track compiler |
@@ -106,7 +125,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 
 ## Modes
 
-- `./strudelterm` — interactive S-Lang UI only.
-- `./strudelterm --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
-- `./strudelterm --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
+- `./tompouce` — interactive S-Lang UI only.
+- `./tompouce --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
+- `./tompouce --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
   stdin is a pipe. From a terminal, MCP listens on `127.0.0.1:18789`.

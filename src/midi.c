@@ -72,7 +72,7 @@ void midi_init(void) {
         seq = NULL;
         return;
     }
-    snd_seq_set_client_name(seq, "strudelterm");
+    snd_seq_set_client_name(seq, "tompouce");
     seq_port = snd_seq_create_simple_port(seq, "out",
         SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
         SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);

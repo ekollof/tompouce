@@ -286,6 +286,89 @@ int banks_failed(void) {
     return f;
 }
 
+#define DIR_CACHE 32
+static struct {
+    char name[64];
+    char rel[512];
+    int count;
+    int hit;
+    int used;
+} dir_cache[DIR_CACHE];
+static unsigned dir_cache_next;
+
+int banks_dir_named(const char *name, char *out, int outlen) {
+    char key[64];
+    char found[512];
+    size_t nlen, i;
+    int hit = 0;
+    int e;
+    if (!name || !out || outlen <= 1) return 0;
+    nlen = strlen(name);
+    if (nlen == 0 || nlen >= sizeof(key)) return 0;
+    for (i = 0; i < nlen; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c <= 32 || c >= 127 || c == '/' || c == '\\') return 0;
+        key[i] = (char)tolower(c);
+    }
+    key[nlen] = 0;
+    found[0] = 0;
+    pthread_mutex_lock(&banks_lock);
+    for (i = 0; i < DIR_CACHE; i++) {
+        int wr;
+        if (!dir_cache[i].used || dir_cache[i].count != n_entries) continue;
+        if (strcmp(dir_cache[i].name, key) != 0) continue;
+        if (!dir_cache[i].hit) {
+            pthread_mutex_unlock(&banks_lock);
+            return 0;
+        }
+        wr = snprintf(out, (size_t)outlen, "%s", dir_cache[i].rel);
+        pthread_mutex_unlock(&banks_lock);
+        return wr > 0 && wr < outlen;
+    }
+    for (e = 0; e < n_entries && !hit; e++) {
+        const char *p = entries[e];
+        const char *start = p;
+        const char *q;
+        for (q = p; ; q++) {
+            size_t len;
+            size_t k;
+            int eq;
+            if (*q != '/' && *q != 0) continue;
+            if (*q == 0) break;
+            len = (size_t)(q - start);
+            eq = len == nlen;
+            for (k = 0; eq && k < nlen; k++)
+                if (tolower((unsigned char)start[k]) != (unsigned char)key[k]) eq = 0;
+            if (eq) {
+                size_t dirlen = (size_t)(q - p);
+                if (dirlen > 0 && dirlen < sizeof(found)) {
+                    memcpy(found, p, dirlen);
+                    found[dirlen] = 0;
+                    hit = 1;
+                }
+                break;
+            }
+            start = q + 1;
+        }
+    }
+    {
+        unsigned slot = dir_cache_next++ % DIR_CACHE;
+        int wr = snprintf(dir_cache[slot].name, sizeof(dir_cache[slot].name), "%s", key);
+        dir_cache[slot].rel[0] = 0;
+        if (hit) snprintf(dir_cache[slot].rel, sizeof(dir_cache[slot].rel), "%s", found);
+        dir_cache[slot].count = n_entries;
+        dir_cache[slot].hit = hit && wr > 0 && (size_t)wr < sizeof(dir_cache[slot].name);
+        dir_cache[slot].used = 1;
+        if (!dir_cache[slot].hit) hit = 0;
+    }
+    if (!hit || snprintf(out, (size_t)outlen, "%s", found) >= outlen) {
+        pthread_mutex_unlock(&banks_lock);
+        return 0;
+    }
+    pthread_mutex_unlock(&banks_lock);
+    return 1;
+}
+
 int banks_search(const char *query, const char **out, int max) {
     if (!query) query = "";
     if (max < 0) max = 0;
@@ -441,12 +524,12 @@ static leveldb_t *ldb_open(const char *path) {
     return db;
 }
 
-/* cache dir: $XDG_CACHE_HOME/strudelterm or ~/.cache/strudelterm */
+/* cache dir: $XDG_CACHE_HOME/tompouce or ~/.cache/tompouce */
 static void ldb_path(char *out, size_t outlen) {
     char base[1024];
     if (!out || outlen == 0) return;
     out[0] = 0;
-    user_dir(base, sizeof(base), "XDG_CACHE_HOME", "strudelterm", ".cache/strudelterm");
+    user_dir(base, sizeof(base), "XDG_CACHE_HOME", "tompouce", ".cache/tompouce");
     if (!base[0]) return;
     mkdir_p(base);
     int n = snprintf(out, outlen, "%s/banks.ldb", base);
@@ -635,7 +718,8 @@ static void ldb_store(leveldb_t *db, const char *root) {
 /* resolve banks root into out; 1 if a usable dir was found */
 static int resolve_root(char *out, size_t outlen) {
     struct stat st;
-    const char *e = getenv("STRUDELTERM_BANKS");
+    const char *e = getenv("TOMPOUCE_BANKS");
+    if (!e || !e[0]) e = getenv("STRUDELTERM_BANKS");
     if (e && strlen(e) < 900) {
         snprintf(out, outlen, "%s", e);
         out[outlen - 1] = 0;

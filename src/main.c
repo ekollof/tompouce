@@ -5,9 +5,11 @@
 #include "ai.h"
 #include "mcp.h"
 #include "banks.h"
+#include "csound_host.h"
 #include <string.h>
 
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1],"--csound-worker")) return csound_worker_main();
     int mcp = 0;
     int ui = 0;
     int mcp_port = 0;
@@ -29,7 +31,7 @@ int main(int argc, char **argv) {
             if (p > 0 && p < 65536) mcp_port = (int)p;
         }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("usage: strudelterm [--mcp [--ui]] [--mcp-port N] [--bpm N] [--block N] [--code ...]\n");
+            printf("usage: tompouce [--mcp [--ui]] [--mcp-port N] [--bpm N] [--block N] [--code ...]\n");
             printf("  --mcp --ui from a terminal serves MCP on 127.0.0.1:%d (or --mcp-port).\n", MCP_DEFAULT_PORT);
             return 0;
         }

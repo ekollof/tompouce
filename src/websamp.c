@@ -53,9 +53,19 @@ static unsigned web_gen = 1;
 static unsigned call_gen = 1;
 static pthread_mutex_t web_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Concurrent preparation must not write the same .part file. Web loadCache
-   shares one fetch promise per URL; one process-wide fetch lock is the native
-   equivalent while decoding remains parallel. */
-static pthread_mutex_t download_lock = PTHREAD_MUTEX_INITIALIZER;
+   shares one fetch promise per URL; hashed download locks keep same-URL jobs
+   serialized while decoding and unrelated fetches stay parallel. */
+#define DOWNLOAD_LOCK_COUNT 16
+static pthread_mutex_t download_locks[DOWNLOAD_LOCK_COUNT] = {
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER
+};
 
 static int is_ident_char(int c) {
     return isalnum(c) || c == '_';
@@ -863,9 +873,10 @@ static int download_audio_unlocked(const char *url, char *path_out, int pathlen)
 }
 
 static int download_audio(const char *url, char *path_out, int pathlen) {
-    pthread_mutex_lock(&download_lock);
+    pthread_mutex_t *lock=&download_locks[fnv64(url)%DOWNLOAD_LOCK_COUNT];
+    pthread_mutex_lock(lock);
     int ok = download_audio_unlocked(url, path_out, pathlen);
-    pthread_mutex_unlock(&download_lock);
+    pthread_mutex_unlock(lock);
     return ok;
 }
 

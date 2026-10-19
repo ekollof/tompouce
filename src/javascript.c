@@ -298,30 +298,6 @@ static int initialize(JsProgram *p, char *error, int n) {
     return 1;
 }
 
-/* Only the traditional line dialect bypasses the full JavaScript runtime. */
-int javascript_is_code(const char *code) {
-    if (!code) return 0;
-    const char *p = code;
-    while (*p) {
-        while (isspace((unsigned char)*p)) p++;
-        if (*p == '#' || (p[0] == '/' && p[1] == '/')) {
-            while (*p && *p != '\n') p++;
-            continue;
-        }
-        if (!*p) return 0;
-        const char *words[] = {"bpm", "drum", "drums", "notes", "note", "n", "sound", "s", "bass", "lead", "chord", "melody", "noise", "fx", "stop", NULL};
-        for (int i = 0; words[i]; i++) {
-            size_t n = strlen(words[i]);
-            if (strncmp(p, words[i], n) != 0 || !isspace((unsigned char)p[n])) continue;
-            const char *q = p + n;
-            while (*q == ' ' || *q == '\t') q++;
-            if (*q != '(') return 0;
-        }
-        return 1;
-    }
-    return 0;
-}
-
 int javascript_check(const char *code, char *error, int n, int *line) {
     JsProgram p = {0};
     p.deadline = now_seconds()+.03;

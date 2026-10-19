@@ -155,7 +155,6 @@ static int editor_complete(int backwards, int explicit_request) {
                               !strcmp(call,"note") || !strcmp(call,"scale"));
     if (size>=COMPLETION_WORD || (!size && !explicit_request && !after_dot && !known_string)) return 0;
     char prefix[COMPLETION_WORD]; memcpy(prefix,line+start,(size_t)size); prefix[size]=0;
-    if (!quote && start>0 && !javascript_is_code(line)) { complete_legacy_cursor(); return 1; }
     completion.target=1; completion.start=start; completion.end=end; completion.line=cur_line;
     completion.index=-1; completion.hash=hash_code();
     completion.prefix_len=size;
@@ -176,13 +175,11 @@ static int editor_complete(int backwards, int explicit_request) {
         } else { completion_reset(); return 0; }
     } else if (after_dot) completion_list(strudel_method_words,prefix);
     else {
-        completion_list(kw_cands,prefix);
         completion_list(strudel_global_words,prefix);
     }
     if (!completion.count) {
         completion_reset();
-        if (explicit_request) complete_legacy_cursor();
-        else snprintf(status_msg,sizeof(status_msg),"no completion");
+        snprintf(status_msg,sizeof(status_msg),"no completion");
         return 1;
     }
     /* Match the prefix, but replace the full token if the cursor is inside it. */

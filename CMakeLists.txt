@@ -157,8 +157,8 @@ target_include_directories(tree_sitter_javascript PRIVATE thirdparty/tree-sitter
 target_compile_options(tree_sitter_javascript PRIVATE -w -fwrapv)
 
 add_library(tompouce_core STATIC
-    src/common.c src/audio.c src/pattern.c src/harmony.c src/slider.c src/strudel.c
-    src/xform.c src/track.c src/scheduler.c src/ai.c src/tui.c src/mcp.c src/wavetable.c
+    src/common.c src/audio.c src/slider.c
+    src/track.c src/scheduler.c src/ai.c src/tui.c src/mcp.c src/wavetable.c
     src/banks.c src/sampler.c src/websamp.c src/midi.c src/songfile.c src/javascript.c
     src/js_audio.c src/dsp.c src/csound_host.c src/convolution.c src/companion.c
     src/sounds.c src/sound_store.c src/terminal_graphics.c src/visual.c src/visual_render.c

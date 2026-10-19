@@ -101,12 +101,6 @@ static void test_custom_room_schedule(void) {
     free(saved); user_sounds_reload();
 }
 
-static void refresh(double now) {
-    pthread_mutex_lock(&tracks_lock);
-    refresh_live_controls(now);
-    pthread_mutex_unlock(&tracks_lock);
-}
-
 static void live_tick(double now) {
     audio_time=now;
     pthread_mutex_lock(&tracks_lock);
@@ -996,8 +990,13 @@ static void test_csound_callback_continuity(void) {
     assert(track_load_from_code("await loadCsound('invalid orchestra'); note(72).csound('HeldCallback')"));
     assert(javascript_csound(tracks[0].javascript)==renderer); csound_callback_level();
     assert(!track_load_from_code("throw Error('failed musical edit')")); csound_callback_level();
-    assert(track_load_from_code("bpm 120\nnotes c4"));
-    assert(!csound_program);
+    assert(track_load_from_code("note(60).gain(0)"));
+    assert(javascript_csound(tracks[0].javascript)==renderer);
+    /* End this owned fixture explicitly; JS evaluations retain definitions. */
+    audio_set_csound(NULL);
+    pthread_mutex_lock(&tracks_lock);
+    javascript_free(tracks[0].javascript); memset(&tracks[0],0,sizeof(tracks[0])); track_count=0;
+    pthread_mutex_unlock(&tracks_lock);
     audio_toggle_play(0); event_queue_clear();
 }
 #endif
@@ -1047,7 +1046,8 @@ int main(int argc, char **argv) {
     assert(voice>=0);
     Voice before=voices[voice];
     assert(slider_nudge(0,1) && slider_set(1,1500));
-    refresh(audio_time);
+    event_queue_refresh(audio_time+.002);
+    tracks[0].cycle_index=5; tracks[0].next_cycle=origin+5*duration;
     assert(tracks[0].javascript==program && tracks[0].solo==1);
     assert(event_queue_generation()==generation && playing && audio_time==10.25);
     assert(song_advance_at==123 && song_hold==1);
@@ -1098,38 +1098,14 @@ int main(int argc, char **argv) {
     for (int i=0;i<5;i++) {
         assert(slider_nudge(1,i%2?-1:1));
         tracks[0].cycle_index=7; tracks[0].next_cycle=origin+7*duration;
-        refresh(audio_time);
+        event_queue_refresh(audio_time+.002);
+        tracks[0].cycle_index=5; tracks[0].next_cycle=origin+5*duration;
         js_audio_schedule(program,tracks[0].next_cycle,tracks[0].cycle_index,generation);
         event_queue_refresh_finish(1);
         assert(tracks[0].javascript==program && event_queue_generation()==generation);
         assert(fabs(tracks[0].next_cycle-tracks[0].cycle_index*duration-origin)<1e-9);
     }
-    /* Legacy direct gain/cutoff bindings also update without rebuilding nodes. */
-    event_queue_refresh(audio_time+.002);
-    js_audio_schedule(program,origin+5*duration,5,generation);
-    assert(track_load_from_code("bpm 120\nnotes c4 e4 | gain slider(.3,0,1,.1) | lpf slider(700,200,2000,100)"));
-    event_queue_refresh_finish(1);
-    assert(event_queue_depth()==0); /* A fresh compile cancels an obsolete transaction. */
-    Node *pattern=tracks[0].pattern; generation=event_queue_generation();
-    tracks[0].cycle_index=7; tracks[0].next_cycle=origin+7*duration;
-    assert(slider_nudge(0,1) && slider_nudge(1,1)); refresh(audio_time);
-    assert(tracks[0].pattern==pattern && tracks[0].cycle_index==5);
-    assert(fabs(tracks[0].gain-.4)<1e-9 && tracks[0].lpf_hz==800);
-    assert(event_queue_generation()==generation);
-    generate_track_cycle(&tracks[0],tracks[0].next_cycle,tracks[0].cycle_index);
-    event_queue_refresh_finish(1);
-    assert(track_load_from_code("bpm 120\nnote(\"c4 e4\").gain(slider(.2,0,1,.1)).lpf(slider(600,200,2000,100))"));
-    pattern=tracks[0].pattern; generation=event_queue_generation();
-    tracks[0].cycle_index=7; tracks[0].next_cycle=origin+7*duration;
-    assert(slider_nudge(0,1) && slider_nudge(1,1)); refresh(audio_time);
-    assert(tracks[0].pattern==pattern && tracks[0].cycle_index==5);
-    assert(fabs(tracks[0].gain-.3)<1e-9 && tracks[0].lpf_hz==700);
-    assert(event_queue_generation()==generation);
-    generate_track_cycle(&tracks[0],tracks[0].next_cycle,tracks[0].cycle_index);
-    event_queue_refresh_finish(1);
-    audio_toggle_play(0); assert(slider_nudge(0,1)); refresh(audio_time);
-    event_queue_refresh_finish(1);
-    assert(!playing && tracks[0].pattern==pattern);
+    audio_toggle_play(0); event_queue_clear();
 #ifdef HAVE_CSOUND
     assert(track_load_from_code("await loadCsound`instr Tone\na1 oscili p5,p4\nout a1,a1\nendin`; "
                                "note(\"c4*4\").csound('Tone').gain(slider(.25,0,1,.05))"));
@@ -1139,7 +1115,7 @@ int main(int argc, char **argv) {
     tracks[0].cycle_index=7; tracks[0].next_cycle=origin+7*duration;
     js_audio_schedule(program,origin+6*duration,6,generation);
     int queued=event_queue_depth(); assert(queued==4);
-    assert(slider_nudge(0,1)); refresh(audio_time);
+    assert(slider_nudge(0,1)); live_tick(audio_time);
     assert(tracks[0].javascript==program && javascript_csound(program)==renderer);
     assert(tracks[0].cycle_index==7 && tracks[0].next_cycle==origin+7*duration);
     assert(event_queue_depth()==queued && event_queue_generation()==generation && !playing);

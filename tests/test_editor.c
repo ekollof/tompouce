@@ -8,6 +8,25 @@
 static int scheduler_starts;
 void editor_test_scheduler_start(void) { scheduler_starts++; }
 
+static void test_retired_language(void) {
+    assert(track_load_from_code("note(60).gain(slider(.3))"));
+    JsProgram *program=tracks[0].javascript;
+    unsigned generation=event_queue_generation();
+    const char *retired[]={"bpm 120\nnotes c4","drum bd sd",
+        "note(60)\nnotes e4","notes c4 | gain .5","fx drive .5"};
+    for (unsigned i=0;i<sizeof(retired)/sizeof(retired[0]);i++) {
+        assert(!track_load_from_code(retired[i]));
+        assert(tracks[0].javascript==program && event_queue_generation()==generation);
+        double gain;
+        assert(slider_info(0,&gain,NULL,NULL,NULL) && gain==.3);
+        assert(!strcmp(current_code,retired[i]));
+    }
+    assert(track_load_from_code("// silent JavaScript"));
+    cJSON *haps=javascript_query(tracks[0].javascript,0,1);
+    assert(cJSON_IsArray(haps) && !cJSON_GetArraySize(haps)); cJSON_Delete(haps);
+    assert(track_load_from_code(""));
+}
+
 static void test_performance_activation(void) {
     scheduler_transport_set(0); event_queue_clear();
     assert(track_load_from_code("note(60).gain(slider(.2))"));
@@ -183,10 +202,10 @@ static void test_completion(void) {
     assert(!editor_complete(0,1)); vi_expect("/* comment\n.ga");
     completion_setup("note(60).s(\"squ",-1);
     assert(editor_complete(0,1)); vi_expect("note(60).s(\"square");
-    completion_setup("bp",-1); assert(editor_complete(0,1)); vi_expect("bpm");
+    completion_setup("setcp",-1); assert(editor_complete(0,1)); vi_expect("setcpm");
     completion_setup("note(60).",-1); assert(editor_complete(0,0)); vi_expect("note(60).");
     assert(completion.count>1 && strstr(status_msg,"Tab cycles"));
-    completion_setup("note c4 | sl",-1); assert(editor_complete(0,1)); vi_expect("note c4 | slow");
+    completion_setup("note(60).slo",-1); assert(editor_complete(0,1)); vi_expect("note(60).slow");
 }
 static void test_commands(void) {
     char root[]="/tmp/tompouce-ex-XXXXXX", file[1024], missing[1024], saved[1024];
@@ -541,7 +560,7 @@ int main(void) {
     test_completion();
     test_commands();
     test_tutor_copy();
-    test_performance_activation();
+    test_retired_language(); test_performance_activation();
     test_slider_source();
     test_incomplete_slider_source();
     puts("editor, vi motions and inline braille layout ok");

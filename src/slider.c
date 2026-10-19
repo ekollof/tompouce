@@ -1,5 +1,4 @@
 #include "slider.h"
-#include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,60 +48,6 @@ void slider_bank_activate(SliderBank *bank) {
     pthread_mutex_lock(&slider_lock);
     bank->refs++; release_locked(active_bank); active_bank=bank;
     pthread_mutex_unlock(&slider_lock);
-}
-
-static const char *skip(const char *p) {
-    while (p && (*p == ' ' || *p == '\t')) p++;
-    return p ? p : "";
-}
-
-int slider_parse(const char **pp, double *init, double *mn, double *mx, double *st) {
-    if (!pp || !*pp || !init || !mn || !mx || !st) return 0;
-    const char *p = skip(*pp);
-    if (strncmp(p, "slider", 6) != 0) return 0;
-    p += 6;
-    p = skip(p);
-    if (*p != '(') return 0;
-    p++;
-    char *end = NULL;
-    double a = strtod(p, &end);
-    if (end == p || !isfinite(a)) return 0;
-    p = skip(end);
-    double b = 0, c = 1, d = 0;
-    int nargs = 1;
-    if (*p == ',') {
-        p = skip(p + 1);
-        b = strtod(p, &end);
-        if (end == p || !isfinite(b)) return 0;
-        p = skip(end);
-        if (*p != ',') return 0;
-        p = skip(p + 1);
-        c = strtod(p, &end);
-        if (end == p || !isfinite(c)) return 0;
-        p = skip(end);
-        nargs = 3;
-        if (*p == ',') {
-            p = skip(p + 1);
-            d = strtod(p, &end);
-            if (end == p || !isfinite(d)) return 0;
-            p = skip(end);
-            nargs = 4;
-        }
-    }
-    if (*p != ')') return 0;
-    p++;
-    if (nargs < 3) { b = 0; c = 1; }
-    if (c < b) { double t = b; b = c; c = t; }
-    if (nargs < 4 || d <= 0) {
-        d = (c - b) / 1000.0;
-        if (d <= 0) d = 1;
-    }
-    *init = a;
-    *mn = b;
-    *mx = c;
-    *st = d;
-    *pp = p;
-    return 1;
 }
 
 static double bind_locked(SliderBank *bank, double init, double mn, double mx, double step) {
@@ -178,31 +123,9 @@ int slider_source_offset(int index) {
     return offset;
 }
 
-int slider_next_index(void) {
-    pthread_mutex_lock(&slider_lock); int index=active_bank->pass;
-    pthread_mutex_unlock(&slider_lock); return index;
-}
-
 unsigned slider_revision(void) {
     pthread_mutex_lock(&slider_lock); unsigned revision=sl_revision;
     pthread_mutex_unlock(&slider_lock); return revision;
-}
-
-int slider_or_number(const char *tok, double *out) {
-    if (!tok || !out) return 0;
-    if (strncmp(tok, "slider", 6) == 0) {
-        const char *p = tok;
-        double init, mn, mx, st;
-        if (!slider_parse(&p, &init, &mn, &mx, &st)) return 0;
-        if (*p != 0) return 0;
-        *out = slider_bind(init, mn, mx, st);
-        return 1;
-    }
-    char *end = NULL;
-    double v = strtod(tok, &end);
-    if (end == tok || (end && *end) || !isfinite(v)) return 0;
-    *out = v;
-    return 1;
 }
 
 int slider_count(void) {

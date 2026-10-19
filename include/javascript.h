@@ -5,7 +5,6 @@
 #include "visual.h"
 
 typedef struct JsProgram JsProgram;
-int javascript_is_code(const char *code);
 int javascript_check(const char *code, char *error, int errorlen, int *line);
 JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int errorlen);
 void javascript_free(JsProgram *program);

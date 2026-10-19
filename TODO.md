@@ -71,10 +71,3 @@ user's running source, playback and routing untouched.
       verify ordering and effects when multiple output callbacks are combined.
 - [ ] Verify MIDI/controller input, expression and live mapping changes against
       the actual web REPL rather than inferring behavior from control names.
-
-## Legacy dialect migration
-
-- [ ] Migrate bundled examples, editor helpers, tests and other dependencies
-      before removing the historical C statement/mini parser and line dialect.
-      Keep existing legacy users working until they have a migration path.
-      Do not expand the retired parser or implement its archived roadmap.

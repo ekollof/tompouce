@@ -112,10 +112,7 @@ at a time. F1 remains the Tompouce keybinding reference.
 - `src/audio_output.c` — PipeWire/PulseAudio/JACK/ALSA output selection
 - `src/native_synth.c` — ZzFX, bytebeat and bounded Kabelsalat playback
 - `src/osc_output.c` — timestamped native UDP OSC output
-- `src/pattern.c` — mini-notation parser (`* ! @ / ?`, euclid, `{}`, `<>`, rests)
-- `src/strudel.c` — statement lines (`note("c e").s("saw").lpf(800)`, `setcpm`)
 - `src/slider.c` — `slider()` live values and source-site bindings
-- `src/harmony.c` — Strudel chord symbols, scales, and scale degrees
 - `src/scheduler.c` — cycle-based scheduler with event queue
 - `src/track.c` — code-to-tracks compiler
 - `src/ai.c` — LLM-assisted code generation (OpenAI-compatible)
@@ -329,19 +326,20 @@ Keys:
 - `F5` — evaluate code (`Ctrl+R` also evaluates outside vi normal mode)
 - `Ctrl+P` — play / stop. Stop ends new scheduling; submitted notes and tails finish. Play restarts at cycle zero.
 - `F1` — toggle Tompouce keybinding cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
+- `Ctrl+L` — hide / restore the console; the editor expands when no other right-hand panels are open.
 - `F2` — AI prompt (supports `/bpm N`, `/play`, `/stop`, `/clear`, `/save`, `/load`, `/song`, `/rescan`)
 - `F4` — toggle internals/state pane: editor mode, pending evaluation/unsaved
   changes, undo history, engine generations, graphics/inline status, audio/MIDI,
   sample-bank index, song/hold state, voices, queue and per-track timing.
 - `F3` — toggle vi editor mode; `:` opens commands in vi normal mode (Tab completes). Motions, operators and search are listed below.
-- `Ctrl+Space` — explicit completion for Strudel functions/methods, note/sound/scale strings and legacy keywords; repeated Tab/Shift+Tab cycles candidates.
+- `Ctrl+Space` — explicit completion for Strudel functions/methods, note/sound/scale strings; repeated Tab/Shift+Tab cycles candidates.
 - `F6` — browse samples, drum-machines, synths, wavetables, user sounds and import-sounds. The search bar sits above persistent category tabs; Left/Right changes category while retaining the query. Manifest arrays and pitch regions remain one sound entry; drum-machine components are grouped under their bank name. Enter opens a bank or inserts a sound; Tab inserts the selected bank using its listed instruments. All and local-banks include standalone audio files only when no loaded manifest references them. Custom Strudel JSON maps under the banks root are discovered at startup; known catalogs retain their existing precedence. Import-sounds accepts a folder path in its own field. Backspace with an empty query goes up a bank, then returns to All. Insertion replaces the source selection without evaluating; F5 applies it.
 - `F7` — song mode: play track buffers in sequence from track 0 (`/song [on|off|hold]`)
 - `F8` — hold current track (loop it inside song mode)
 - `F9` — track list pane (shows buffers, active highlighted)
 - `F10` / `F11` — narrow / widen the code pane
 - `F12` — piano roll + braille scope pane (per-voice pitch bars, live output scope)
-- `Ctrl+Left` / `Ctrl+Right` — nudge the live `slider()` on the cursor line (or the sole registered control). Mouse dragging also changes its live value. After the initial F5 registers the control, adjustments update upcoming notes without reevaluating source or restarting playback. The source literal updates too, so saving retains the performed value. The code pane also draws a one-row roll of the cursor line and a one-row scope when it is tall enough.
+- `Ctrl+Left` / `Ctrl+Right` — nudge the live `slider()` on the cursor line (or the sole registered control). Mouse dragging also changes its live value. After the initial F5 registers the control, adjustments update upcoming notes without reevaluating source or restarting playback. The source literal updates too, so saving retains the performed value. The code pane also draws a one-row history of accepted notes and a one-row scope when it is tall enough.
 - `Ctrl+T` — copy entire buffer to a new track (next in list)
 - `Ctrl+N` / `Ctrl+B` — next / previous track (loads into editor)
 - `Ctrl+D` — duplicate current line (vi `yy`+`p` does this too)
@@ -443,24 +441,22 @@ The PTY script builds the checkout executable before running. Set
 Flags: `--bpm N`, `--block N` (audio frames 64–4096), `--code '...'`,
 `--mcp-port N` (TCP instead of stdio), `--mcp [--ui]`, `--help`.
 
-Mini-notation also has `tok!N` (replicate), `tok@N` (elongate), `tok/N` (slow across cycles; `| slow` still means every Nth cycle), `tok?` (degrade), `bd(3,8)`, `{a b, c d}`, and `a|b` choice inside a pattern. A line may be a call instead: `s("bd sd").gain(slider(0.5))`, `setcpm(45)` (BPM = cycles per minute × 4).
-
-Language extras follow [Strudel](https://strudel.cc) names: comma chords (`c4,e4,g4`),
-`n` / `chord` with ireal symbols (`Cm7`, `C^7`), `| scale C:minor` (degrees, root octave 3),
-`| arp 0 1 2`, `| sound sawtooth`, `| adsr .01:.1:.6:.2`, `| lfo freq 4 1`, `| vib 4:.1`,
-`| transpose N`, `| lpf Hz`. Also `s <bank-path>`, `fx drive|cutoff|delay|verb X`,
-`euclid`, `every`, `| shuffle`, `| degrade`, `| mute`, `| solo`, `| midi CH`.
-Pink and brown are aliases of white noise. `| lpf` is per voice; `fx cutoff` stays the master filter.
+JavaScript Strudel is the only source language. Quoted mini-notation supports
+replication, elongation, alternation, Euclidean rhythms and polymeter through
+the pinned upstream runtime. The retired C parser and line dialect are removed;
+use `setcpm(BPM / 4)` and method chains instead of `bpm N` and pipe transforms.
 Session auto-restores on launch; `/rescan` picks up added banks.
 
 Example code:
 
-```
-bpm 128
-drum bd sd [bd bd] sd
-drum hh hh hh hh | fast 2
-bass c2 e2 g2 c3 | rev
-lead c4 e4 g4 c5
+```js
+setcpm(128 / 4)
+stack(
+  s("bd sd [bd bd] sd"),
+  s("hh*8"),
+  note("c2 e2 g2 c3").s("sawtooth").rev(),
+  note("c4 e4 g4 c5").s("square")
+)
 ```
 
 AI uses `OPENAI_API_KEY` (and optional `OPENAI_BASE_URL`, `OPENAI_MODEL`). Without a key, offline templates are used.

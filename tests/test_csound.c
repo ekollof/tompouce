@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
     log_console_stderr(1);
     assert(javascript_csound(tracks[0].javascript)==registry);
     render(registry,"Ordered",0);
-    assert(track_load_from_code("bpm 120\nnotes c4"));
+    assert(track_load_from_code("note(60).gain(0)"));
     FILE *file = fopen("tests/fixtures/strudel-examples.json","rb");
     assert(file);
     char text[65536]; size_t size = fread(text,1,sizeof(text)-1,file);

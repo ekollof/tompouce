@@ -81,6 +81,7 @@ static int selected_byte(int line, int col);
 static int do_evaluate(void);
 static void do_perform(void);
 static int show_docs = 0;
+static int show_console = 1;
 static int show_state = 0;
 static int show_tracks = 0;
 static int show_viz = 0;
@@ -1850,12 +1851,7 @@ static void draw_status(void) {
 
 /* ---- syntax highlight: token classes, SLsmg color objects ----
    0 normal 2 keyword 3 note 4 drum 5 transform 6 comment 7 rest 8 number */
-static int is_drum_tok(const char *t) {
-    static const char *drums[] = {"bd","sd","sn","hh","hat","cp","clap","tom",NULL};
-    for (int i = 0; drums[i]; i++)
-        if (strcmp(t, drums[i]) == 0) return 1;
-    return 0;
-}
+
 static int is_transform_tok(const char *t) {
     static const char *ts[] = {
         "rev","fast","slow","gain","pan","inst","s","sound","bank","mute","solo","midi",
@@ -1866,12 +1862,6 @@ static int is_transform_tok(const char *t) {
     };
     for (int i = 0; ts[i]; i++)
         if (strcmp(t, ts[i]) == 0) return 1;
-    return 0;
-}
-static int is_track_kw(const char *t) {
-    static const char *ks[] = {"drum","drums","sound","note","notes","n","bass","lead","melody","noise","chord","s",NULL};
-    for (int i = 0; ks[i]; i++)
-        if (strcmp(t, ks[i]) == 0) return 1;
     return 0;
 }
 static int is_number_tok(const char *t) {
@@ -2184,19 +2174,6 @@ static int draw_hl_statement(const char *line, int maxw) {
     return col;
 }
 
-static int line_is_statement(const char *line) {
-    const char *p = line;
-    while (*p == ' ' || *p == '\t') p++;
-    if (p[0] == '$' && p[1] == ':') {
-        p += 2;
-        while (*p == ' ' || *p == '\t') p++;
-    }
-    if (!isalpha((unsigned char)*p)) return 0;
-    while (isalnum((unsigned char)*p) || *p == '_') p++;
-    while (*p == ' ' || *p == '\t') p++;
-    return *p == '(';
-}
-
 /* highlighted code line (without line-number prefix); maxw = pane width-2 */
 static int draw_hl_line(const char *line, int maxw) {
     int col = 0;
@@ -2232,84 +2209,7 @@ static int draw_hl_line(const char *line, int maxw) {
     while (*p == ' ' || *p == '\t') p++;
     if (*p == '#' || (p[0] == '/' && p[1] == '/')) { hl_put(line, (int)strlen(line), 6, &col, maxw); return col; }
     if (*p == 0) { hl_put(line, (int)strlen(line), 0, &col, maxw); return col; }
-    if (line_is_statement(line) || *p == '.' || *p == '"' || *p == '\'' || *p == '`' ||
-        strstr(p, ".range(") || strstr(p, ".segment("))
-        return draw_hl_statement(line, maxw);
-    /* first word */
-    char w[64]; int wi = 0;
-    while (*p && *p != ' ' && *p != '\t' && wi < 63) w[wi++] = *p++;
-    w[wi] = 0;
-    if (!is_track_kw(w) && strcmp(w,"bpm") && strcmp(w,"stop") && strcmp(w,"fx"))
-        return draw_hl_statement(line,maxw);
-    hl_put(line,(int)(p-line)-wi,0,&col,maxw);
-    if (strcmp(w, "bpm") == 0) {
-        hl_put(p - wi, wi, 2, &col, maxw);
-        while (*p) {
-            if (*p == ' ' || *p == '\t') { hl_put(p, 1, 0, &col, maxw); p++; continue; }
-            char t[64]; int ti = 0;
-            while (*p && *p != ' ' && *p != '\t' && ti < 63) t[ti++] = *p++;
-            t[ti] = 0;
-            hl_put(p - ti, ti, is_number_tok(t) ? 8 : 0, &col, maxw);
-        }
-        return col;
-    }
-    if (strcmp(w, "stop") == 0 || strcmp(w, "fx") == 0) {
-        hl_put(p - wi, wi, 2, &col, maxw);
-        col += draw_hl_statement(p, maxw - col);
-        return col;
-    }
-    if (!is_track_kw(w)) {
-        return draw_hl_statement(line,maxw);
-    }
-    hl_put(p - wi, wi, 2, &col, maxw);
-    int drumtrk = (strncmp(w, "drum", 4) == 0 || strcmp(w, "sound") == 0);
-    int xform = 0;
-    while (*p) {
-        if (*p == ' ' || *p == '\t') { hl_put(p, 1, 0, &col, maxw); p++; continue; }
-        if (p[0] == '/' && p[1] == '/') { hl_put(p, (int)strlen(p), 6, &col, maxw); break; }
-        if (*p == '|') {
-            hl_put(p++, 1, 0, &col, maxw);
-            const char *next = p;
-            while (*next == ' ' || *next == '\t') next++;
-            char name[64]; int n = 0;
-            while (isalpha((unsigned char)*next) && n < (int)sizeof(name) - 1) name[n++] = *next++;
-            name[n] = 0;
-            xform = is_transform_tok(name);
-            continue;
-        }
-        if (*p == ':' || *p == '%' || *p == '^') {
-            hl_put(p++, 1, 8, &col, maxw); continue;
-        }
-        if (*p == '[' || *p == ']' || *p == '<' || *p == '>') { hl_put(p, 1, 0, &col, maxw); p++; continue; }
-        if (*p == '(' || *p == ')' || *p == ',' || *p == '{' || *p == '}') {
-            hl_put(p, 1, 0, &col, maxw); p++; continue;
-        }
-        char t[64]; int ti = 0;
-        while (*p && *p != ' ' && *p != '\t' && *p != '|' &&
-               *p != '[' && *p != ']' && *p != '<' && *p != '>' &&
-               *p != '(' && *p != ')' && *p != ',' && *p != '{' && *p != '}' &&
-               *p != '*' && *p != '!' && *p != '@' && *p != '/' && *p != '?' &&
-               *p != ':' && *p != '%' && *p != '^' &&
-               ti < 63) t[ti++] = *p++;
-        t[ti] = 0;
-        int obj = 0;
-        if (ti > 0) {
-            if (is_rest_tok(t)) obj = 7;
-            else if (is_number_tok(t)) obj = 8;
-            else if (xform) obj = 5;
-            else if (drumtrk) obj = 4;
-            else obj = is_drum_tok(t) ? 0 : 3;
-            hl_put(p - ti, ti, obj, &col, maxw);
-        }
-        /* *N !N @N /N ?p suffixes in number color */
-        while (*p == '*' || *p == '!' || *p == '@' || *p == '/' || *p == '?') {
-            hl_put(p, 1, 8, &col, maxw); p++;
-            int di = 0;
-            while (*p && (isdigit((unsigned char)*p) || *p == '.') && di < 15) { di++; p++; }
-            if (di) hl_put(p - di, di, 8, &col, maxw);
-        }
-    }
-    return col;
+    return draw_hl_statement(line,maxw);
 }
 
 /* FNV-1a over editor text; recheck patterns only when it changes */
@@ -2321,27 +2221,6 @@ static unsigned hash_code(void) {
         h ^= 0x9e3779b9u;
     }
     return h;
-}
-
-/* mirror of track.c line splitting: pattern part of a track line, if any */
-static const char *line_pattern_part(const char *line, char *out, size_t outlen) {
-    const char *p = line;
-    while (*p == ' ' || *p == '\t') p++;
-    if (!*p || *p == '#') return NULL;
-    char w[32];
-    int k = 0;
-    while (*p && *p != ' ' && *p != '\t' && k < 31) w[k++] = *p++;
-    w[k] = 0;
-    if (strcmp(w, "bpm") == 0 || strcmp(w, "fx") == 0 || strcmp(w, "stop") == 0)
-        return NULL;
-    if (!is_track_kw(w)) return NULL;
-    while (*p == ' ' || *p == '\t') p++;
-    if (!*p) return NULL;
-    /* up to transform separator, like split_transforms */
-    size_t n = 0;
-    while (p[n] && p[n] != '|' && n + 1 < outlen) { out[n] = p[n]; n++; }
-    out[n] = 0;
-    return n ? out : NULL;
 }
 
 static int line_err_clear(void) {
@@ -2361,36 +2240,15 @@ static void recheck_patterns(void) {
     if (!line_err_clear()) return;
     char *code = editor_flatten();
     if (!code) return;
-    if (javascript_is_code(code)) {
-        int line = 1;
-        char error[256] = {0};
-        if (!javascript_check(code,error,sizeof(error),&line)) {
-            if (line < 1) line = 1;
-            if (line > code_line_count) line = code_line_count;
-            line_err[line-1] = 1;
-            snprintf(first_err,sizeof(first_err),"L%d: %.200s",line,error);
-        }
-        free(code);
-        return;
+    int line=1;
+    char error[256]={0};
+    if (!javascript_check(code,error,sizeof(error),&line)) {
+        if (line<1) line=1;
+        if (line>code_line_count) line=code_line_count;
+        line_err[line-1]=1;
+        snprintf(first_err,sizeof(first_err),"L%d: %.200s",line,error);
     }
     free(code);
-    for (int i = 0; i < code_line_count; i++) {
-        size_t L = strlen(code_lines[i]) + 1;
-        char *part = malloc(L);
-        if (!part) continue;
-        const char *pat = line_pattern_part(code_lines[i], part, L);
-        if (pat) {
-            Node *n = parse_pattern_text(pat);
-            node_free(n);
-            const char *e = pattern_last_error();
-            if (e && *e) {
-                line_err[i] = 1;
-                if (!first_err[0])
-                    snprintf(first_err, sizeof(first_err), "L%d: %.200s", i + 1, e);
-            }
-        }
-        free(part);
-    }
 }
 
 
@@ -2559,58 +2417,26 @@ static void draw_slider_chip(int row, int col, int width, int idx) {
     draw_text(row, col, lab, width, 8);
 }
 
-/* Pattern text of one editor line: a quoted call, else the track pattern. */
-static int line_pattern_text(const char *line, char *out, size_t outlen) {
-    if (!line || !out || outlen < 2) return 0;
-    const char *q = line;
-    while (*q && *q != '"' && *q != '\'' && *q != '`') q++;
-    if (*q) {
-        char quote = *q++;
-        size_t k = 0;
-        while (*q && *q != quote && k + 1 < outlen) {
-            if (*q == '\\' && q[1]) q++;
-            out[k++] = *q++;
-        }
-        out[k] = 0;
-        if (*q == quote && k > 0) return 1;
-    }
-    return line_pattern_part(line, out, outlen) != NULL;
-}
-
+/* Recent accepted notes; never parse or evaluate user code on the UI thread. */
 static void draw_line_roll(int row, int c0, int w) {
-    if (w < 8) return;
-    int rw = w;
-    if (rw > 240) rw = 240;
-    char strip[241];
-    for (int i = 0; i < rw; i++) strip[i] = '.';
-    strip[rw] = 0;
-    char pat[8192];
-    const char *src = (cur_line >= 0 && cur_line < code_line_count) ? code_lines[cur_line] : "";
-    if (line_pattern_text(src, pat, sizeof(pat))) {
-        Node *n = parse_pattern_text(pat);
-        if (n) {
-            PatEventList ev;
-            patlist_init(&ev);
-            expand_node(n, &ev, 0.0, 1.0, 0);
-            for (int i = 0; i < ev.n; i++) {
-                const char *tok = ev.items[i].token;
-                if (!tok[0] || is_rest_tok(tok) || strcmp(tok, "-") == 0) continue;
-                int x0 = (int)(ev.items[i].start * rw);
-                int x1 = (int)((ev.items[i].start + ev.items[i].dur) * rw);
-                if (x0 < 0) x0 = 0;
-                if (x1 <= x0) x1 = x0 + 1;
-                if (x1 > rw) x1 = rw;
-                char ch = '#';
-                if (isalpha((unsigned char)tok[0])) ch = (char)tolower((unsigned char)tok[0]);
-                for (int x = x0; x < x1; x++) strip[x] = ch;
-            }
-            patlist_free(&ev);
-            node_free(n);
-        }
+    if (w<8) return;
+    int rw=w>240?240:w;
+    char strip[241]; memset(strip,'.',(size_t)rw); strip[rw]=0;
+    NoteHist notes[NOTE_HIST_N];
+    int count=note_hist_copy(notes,NOTE_HIST_N);
+    double now=audio_time_now(),span=audio_sec_per_cycle();
+    if (!isfinite(span) || span<=0) span=2;
+    double from=now-span;
+    for (int i=0;i<count;i++) {
+        if (notes[i].t0>now || notes[i].t0+notes[i].dur<from) continue;
+        int first=(int)(fmax(0,(notes[i].t0-from)/span)*rw);
+        int last=(int)(fmin(1,(notes[i].t0+notes[i].dur-from)/span)*rw);
+        if (last<=first) last=first+1;
+        if (last>rw) last=rw;
+        for (int x=first;x<last && x<rw;x++) strip[x]='#';
     }
-    SLsmg_gotorc(row, c0);
-    SLsmg_write_nstring(strip, (unsigned)rw);
-    if (rw < w) blank_inner(row, c0 + rw, w - rw);
+    SLsmg_gotorc(row,c0); SLsmg_write_nstring(strip,(unsigned)rw);
+    if (rw<w) blank_inner(row,c0+rw,w-rw);
 }
 
 static void draw_mini_scope(int row, int c0, int w) {
@@ -3132,168 +2958,6 @@ static void editor_indent(int backwards) {
     free(text);
 }
 
-static const char *kw_cands[] = {"bpm","stop","drum","drums","sound","note","notes","n","chord","bass","lead","melody","noise","s","fx",NULL};
-static const char *xform_cands[] = {
-    "rev","fast","slow","gain","inst","sound","bank","mute","solo","midi",
-    "att","decay","sustain","rel","adsr","scale","transpose","arp","lfo","vib",
-    "pw","lpf","cutoff","shuffle","degrade",NULL};
-static const char *inst_cands[] = {"sine","saw","sawtooth","sqr","square","tri","triangle","noise","white","wt",NULL};
-static const char *drum_cands[] = {"bd","sd","sn","hh","hat","cp","clap","tom","~",NULL};
-static char note_pool[40][16];
-static int note_pool_init = 0;
-
-static void insert_text(const char *txt) {
-    if (!txt || !lines_ready() || cur_line < 0 || cur_line >= code_line_count) return;
-    int L = (int)strlen(code_lines[cur_line]);
-    if (cur_col < 0) cur_col = 0;
-    if (cur_col > L) cur_col = L;
-    int tl = (int)strlen(txt);
-    if (tl <= 0) return;
-    undo_begin(UNDO_TYPE);
-    if (!line_splice(cur_line, cur_col, 0, txt, tl)) {
-        undo_abort();
-        snprintf(status_msg, sizeof(status_msg), "out of memory");
-        return;
-    }
-    cur_col += tl;
-    undo_commit();
-}
-
-static void complete_legacy_cursor(void) {
-    char *line = code_lines[cur_line];
-    int L = (int)strlen(line);
-    if (cur_col > L) cur_col = L;
-    int s = cur_col;
-    while (s > 0 && line[s-1] != ' ' && line[s-1] != '\t' && line[s-1] != '[' &&
-           line[s-1] != ']' && line[s-1] != '<' && line[s-1] != '>' && line[s-1] != '|') s--;
-    char prefix[64];
-    int plen = cur_col - s;
-    if (plen >= 63) plen = 63;
-    memcpy(prefix, line + s, (size_t)plen);
-    prefix[plen] = 0;
-    int first = 1;
-    for (int i = 0; i < s; i++)
-        if (line[i] != ' ' && line[i] != '\t') { first = 0; break; }
-    char prev[64] = {0};
-    if (!first) {
-        int e = s;
-        while (e > 0 && (line[e-1] == ' ' || line[e-1] == '\t')) e--;
-        int b = e;
-        while (b > 0 && line[b-1] != ' ' && line[b-1] != '\t' && line[b-1] != '|') b--;
-        int pl = e - b;
-        if (pl > 63) pl = 63;
-        if (pl > 0) { memcpy(prev, line + b, (size_t)pl); prev[pl] = 0; }
-    }
-    int bar = 0;
-    for (int i = 0; i < s; i++) if (line[i] == '|') { bar = 1; break; }
-    char firstw[64] = {0};
-    {
-        int i = 0;
-        while (line[i] == ' ' || line[i] == '\t') i++;
-        int k = 0;
-        while (line[i] && line[i] != ' ' && line[i] != '\t' && k < 63) firstw[k++] = line[i++];
-        firstw[k] = 0;
-    }
-    int drumtrk = (strncmp(firstw, "drum", 4) == 0 || strcmp(firstw, "sound") == 0);
-
-    const char *cands[80];
-    int nc = 0;
-    char wtbuf[16][48];
-    if (first) {
-        for (int i = 0; kw_cands[i] && nc < 80; i++) cands[nc++] = kw_cands[i];
-    } else if (strcmp(prev, "inst") == 0 || strcmp(prev, "sound") == 0 ||
-               (bar && strcmp(prev, "s") == 0)) {
-        for (int i = 0; inst_cands[i] && nc < 60; i++) cands[nc++] = inst_cands[i];
-        int nw = wt_count();
-        if (nw > 15) nw = 15;
-        for (int i = 0; i < nw && nc < 80; i++) {
-            snprintf(wtbuf[i], sizeof(wtbuf[i]), "wt:%s", wt_name(i));
-            cands[nc++] = wtbuf[i];
-        }
-    } else if (strcmp(prev, "fast") == 0 || strcmp(prev, "slow") == 0 || strcmp(prev, "gain") == 0 ||
-               strcmp(prev, "transpose") == 0 || strcmp(prev, "add") == 0 ||
-               strcmp(prev, "pw") == 0 || strcmp(prev, "lpf") == 0 || strcmp(prev, "cutoff") == 0 ||
-               strcmp(prev, "att") == 0 || strcmp(prev, "attack") == 0 ||
-               strcmp(prev, "decay") == 0 || strcmp(prev, "dec") == 0 ||
-               strcmp(prev, "sustain") == 0 || strcmp(prev, "sus") == 0 ||
-               strcmp(prev, "rel") == 0 || strcmp(prev, "release") == 0) {
-        snprintf(status_msg, sizeof(status_msg), "number expected");
-        return;
-    } else if (strcmp(prev, "scale") == 0) {
-        static const char *sc[] = {"C:major","C:minor","C:dorian","C:mixolydian","A:minor:pentatonic","C:blues",NULL};
-        for (int i = 0; sc[i] && nc < 80; i++) cands[nc++] = sc[i];
-    } else if (strcmp(prev, "lfo") == 0) {
-        static const char *lc[] = {"gain","freq","pitch","lpf","pw","sine","triangle","saw","square",NULL};
-        for (int i = 0; lc[i] && nc < 80; i++) cands[nc++] = lc[i];
-    } else if (strcmp(prev, "arp") == 0) {
-        snprintf(status_msg, sizeof(status_msg), "arp index pattern, e.g. 0 1 2 1");
-        return;
-    } else if (strcmp(firstw, "fx") == 0) {
-        static const char *fxc[] = {"drive","cutoff","delay","verb",NULL};
-        for (int i = 0; fxc[i] && nc < 80; i++) cands[nc++] = fxc[i];
-    } else if (bar) {
-        for (int i = 0; xform_cands[i] && nc < 80; i++) cands[nc++] = xform_cands[i];
-    } else if (drumtrk) {
-        for (int i = 0; drum_cands[i] && nc < 80; i++) cands[nc++] = drum_cands[i];
-    } else {
-        if (!note_pool_init) {
-            const char *lets = "cdefgab";
-            int n = 0;
-            for (int o = 2; o <= 5 && n < 32; o++)
-                for (int li = 0; lets[li] && n < 32; li++) {
-                    snprintf(note_pool[n], sizeof(note_pool[n]), "%c%d", lets[li], o);
-                    n++;
-                }
-            snprintf(note_pool[n], sizeof(note_pool[n]), "%s", "~");
-            n++;
-            snprintf(note_pool[n], sizeof(note_pool[n]), "%s", "rest");
-            n++;
-            note_pool_init = n;
-        }
-        for (int i = 0; i < note_pool_init && nc < 80; i++) cands[nc++] = note_pool[i];
-    }
-
-    const char *m[80];
-    int nm = 0;
-    for (int i = 0; i < nc; i++)
-        if (strncmp(cands[i], prefix, (size_t)plen) == 0) m[nm++] = cands[i];
-    if (nm == 0) { snprintf(status_msg, sizeof(status_msg), "no completion"); return; }
-    /* longest common extension beyond prefix */
-    int ext = plen;
-    for (;;) {
-        char c = 0;
-        int ok = 1;
-        for (int i = 0; i < nm; i++) {
-            if (m[i][ext] == 0) { ok = 0; break; }
-            if (c == 0) c = m[i][ext];
-            else if (m[i][ext] != c) { ok = 0; break; }
-        }
-        if (!ok) break;
-        ext++;
-    }
-    if (ext > plen) {
-        char ins[64];
-        int il = ext - plen;
-        if (il > 63) il = 63;
-        memcpy(ins, m[0] + plen, (size_t)il);
-        ins[il] = 0;
-        insert_text(ins);
-    }
-    if (nm == 1) {
-        snprintf(status_msg, sizeof(status_msg), "completed: %s", m[0]);
-    } else {
-        char lst[256]; int lp = 0;
-        lst[0] = 0;
-        for (int i = 0; i < nm && lp < 220; i++) {
-            int wlen = snprintf(lst + lp, sizeof(lst) - (size_t)lp, "%s%s", i ? " | " : "", m[i]);
-            if (wlen < 0) break;
-            lp += wlen;
-        }
-        lst[sizeof(lst)-1] = 0;
-        snprintf(status_msg, sizeof(status_msg), "%.240s", lst);
-    }
-}
-
 /* ---- bank search ---- */
 
 #include "tui_completion.h"
@@ -3639,6 +3303,8 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
     if (mid < 24) mid = 24;
     if (mid > cols - 20) mid = cols - 20;
     if (mid < 0) mid = 0;
+    if (!show_console && !show_docs && !show_state && !show_tracks && !search_mode && !file_mode)
+        mid = cols;
     int h = rows - 3 - viz_h;
     if (h < 0) h = 0;
     int w = cols - mid;
@@ -3652,14 +3318,24 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
         if (need > 12) need = 12;
         if (h - sh - need >= 5) th = need;
     }
+    if (!show_console && !show_docs && !search_mode && !file_mode) {
+        if (sh) sh=h-th;
+        else if (th) th=h;
+    }
     *mid_out = mid; *h_out = h; *w_out = w; *state_h_out = sh; *track_h_out = th;
+}
+
+static void toggle_console(void) {
+    show_console=!show_console;
+    if (!show_console) pane_focus=0;
+    graphics_redraw=1;
+    snprintf(status_msg,sizeof(status_msg),show_console?"console shown":"console hidden (Ctrl+L restores)");
 }
 
 static void draw_console_at(int r0, int c0, int h, int w) {
     if (h < 3 || w < 4) return;
     SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
-    SLsmg_write_string(show_docs ? " console (F1:back) " : " console (F1:help) ");
+    (void)draw_text(r0,c0+2," console (Ctrl+L:hide) ",w-4,0);
     int visible = h - 2;
     int cnt = console_count_get();
     int start = (cnt <= visible) ? 0 : (cnt - visible);
@@ -3684,6 +3360,7 @@ static const DocLine cheat[] = {
     {1, "Playback and panels"},
     {3, "F5                Evaluate the editor buffer"},
     {3, "Ctrl+P            Play / stop"},
+    {3, "Ctrl+L            Hide / restore console"},
     {3, "F1                Toggle this keybinding reference"},
     {3, "F2                Open AI / application command prompt"},
     {3, "F3                Toggle vi editing mode"},
@@ -3844,9 +3521,11 @@ static int write_styled(const char *text, int style) {
 static void draw_docs_at(int r0, int c0, int h, int w) {
     if (h < 3 || w < 8) return;
     SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
-    SLsmg_write_string(" keybindings (F1:back PgUp/PgDn:scroll) ");
+    (void)draw_text(r0,c0+2," keybindings (F1:back PgUp/PgDn:scroll) ",w-4,0);
     int visible = h - 2;
+    /* Blank logical lines and the area beyond the text wrap limit must also
+       overwrite the previous pane, including full-width editor sliders. */
+    for (int row=0;row<visible;row++) blank_inner(r0+1+row,c0+1,w-2);
     int vw = w - 2;
     if (vw > 250) vw = 250;
     /* count total visual rows first to clamp scroll */
@@ -3980,7 +3659,7 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         int evaluated=text && !strcmp(text,cstr(evaluated_source));
         pthread_mutex_unlock(&tracks_lock);
         state_line(&row,maxrow,c0+1,w-2,"engine=%s js=%d native=%d gen=%u queue-gen=%u",
-            js?"QuickJS/Strudel":"native parser",js,compiled-js,generation,event_queue_generation());
+            "QuickJS/Strudel",js,compiled-js,generation,event_queue_generation());
         state_line(&row,maxrow,c0+1,w-2,"source=%s file=%s bytes=%zu lines=%d",
             !text?"unknown":(evaluated?"evaluated":"pending F5"),
             !text?"unknown":(editor_written && !strcmp(text,editor_written)?"saved":"unsaved"),
@@ -4006,11 +3685,8 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     for (int i = 0; i < n && row < maxrow; i++) {
         Track *t = &tracks[i];
         double wait = t->next_cycle - now;
-        const char *inm = (t->inst == INST_WT && t->wt >= 0) ? wt_name(t->wt) : audio_inst_name(t->inst);
-        snprintf(b, sizeof(b), "%d %.12s f%d s%d %s g%.1f %.10s %s%s cyc%d %+.1fs",
-            i, t->keyword, t->fast_repeat, t->slow_stride,
-            t->rev ? "rev" : "   ", t->gain,
-            inm, t->mute ? "M" : " ", t->solo ? "S" : " ", t->cycle_index, wait);
+        snprintf(b,sizeof(b),"%d JavaScript %s%s cyc%d %+.1fs",i,
+            t->mute?"M":" ",t->solo?"S":" ",t->cycle_index,wait);
         int used = draw_text(row, c0+1, b, w-2, 0);
         if (used < w - 2) blank_inner(row, c0+1+used, w-2-used);
         row++;
@@ -4204,7 +3880,8 @@ static void draw_right_pane(void) {
     if (search_mode) draw_search_at(1, mid, top_h, w);
     else if (file_mode) draw_file_at(1, mid, top_h, w);
     else if (show_docs) draw_docs_at(1, mid, top_h, w);
-    else draw_console_at(1, mid, top_h, w);
+    else if (show_console) draw_console_at(1, mid, top_h, w);
+    else for (int row=1;row<1+top_h;row++) blank_inner(row,mid,w);
     if (th > 0) draw_tracks_at(1 + top_h, mid, th, w);
     if (sh > 0) draw_state_at(1 + top_h + th, mid, sh, w);
 }
@@ -5055,6 +4732,7 @@ void tui_run(void) {
         if (ch == 26) { editor_undo(); continue; }
         if (ch == 25) { editor_redo(); continue; }
         if (ch == 27 && pane_focus) { pane_focus = 0; continue; }
+        if (ch == 12) { toggle_console(); continue; } /* Ctrl+L, including vi and console focus. */
         if (pane_focus && vi_mode && vi_normal && ch==':' && vi_handle_normal(ch)) continue;
         if (pane_focus && ch != 17 && ch != 16 && ch != SL_KEY_NPAGE && ch != SL_KEY_PPAGE &&
             !(ch >= SL_KEY_F(1) && ch <= SL_KEY_F(12))) continue;

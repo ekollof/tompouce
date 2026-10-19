@@ -107,8 +107,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 - `src/sounds.c` supplies F6, companion and MCP catalogs. Prefer bank manifests
   over individual components. Explicit sample maps override imports, then
   defaults. Import assets through the confined manifest-based sound store.
-- The historical C statement/mini parser remains until its users migrate; its
-  archived roadmap is not the current JavaScript implementation plan.
+- JavaScript Strudel is the only source language. Keep mini-notation and tonal
+  parsing in the pinned upstream runtime; do not restore the retired C parser.
 
 ## Security and code quality
 

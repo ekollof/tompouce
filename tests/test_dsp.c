@@ -179,8 +179,8 @@ int main(void) {
     assert(!track_load_from_code("const voice = ;"));
     assert(tracks[0].javascript == playing && event_queue_generation() == generation);
     javascript_retain(playing);
-    assert(track_load_from_code("bpm 120\nnotes c4 e4"));
-    assert(!tracks[0].javascript);
+    assert(track_load_from_code("note(\"c4 e4\").gain(0)"));
+    assert(tracks[0].javascript && tracks[0].javascript!=playing);
     cJSON *haps = javascript_query(playing,0,1);
     assert(cJSON_GetArraySize(haps) == 1);
     cJSON_Delete(haps); javascript_free(playing);

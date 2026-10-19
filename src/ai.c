@@ -86,17 +86,17 @@ static void offline_generate(const char *prompt, char **out) {
     res[0] = 0;
     const char *p = prompt ? prompt : "";
     if (strstr(p,"techno") || strstr(p,"dance")) {
-        snprintf(res, 1024, "bpm 138\ndrum bd ~ bd ~\ndrum ~ sd ~ sd\ndrum hh hh hh hh | fast 2\nbass c2 ~ e2 g2 | fast 2\nlead c4 e4 g4 c5 | rev");
+        snprintf(res, 1024, "setcpm(138/4)\n$: stack(s(\"bd ~ bd ~\"),s(\"~ sd ~ sd\"),s(\"hh*8\"),note(\"c2 ~ e2 g2\").s(\"sawtooth\").fast(2),note(\"c4 e4 g4 c5\").s(\"square\").rev())");
     } else if (strstr(p,"ambient") || strstr(p,"chill")) {
-        snprintf(res, 1024, "bpm 72\nnotes c4 e4 g4 b4\tnotes e4 g4 b4 d5 | slow 2\nbass c2 ~ ~ ~ | slow 2");
+        snprintf(res, 1024, "setcpm(72/4)\n$: stack(note(\"c4 e4 g4 b4\").s(\"triangle\"),note(\"e4 g4 b4 d5\").s(\"triangle\").slow(2),note(\"c2 ~ ~ ~\").s(\"sawtooth\").slow(2))");
     } else if (strstr(p,"happy") || strstr(p,"major")) {
-        snprintf(res, 1024, "bpm 120\nnotes c4 d4 e4 f4 g4 a4 b4 c5\nbass c3 g2 a2 e3");
+        snprintf(res, 1024, "setcpm(120/4)\n$: stack(note(\"c4 d4 e4 f4 g4 a4 b4 c5\").s(\"triangle\"),note(\"c3 g2 a2 e3\").s(\"sawtooth\"))");
     } else if (strstr(p,"sad") || strstr(p,"minor")) {
-        snprintf(res, 1024, "bpm 80\nnotes c4 eb4 g4 bb4\nbass c2 eb2 g2 bb2 | slow 2");
+        snprintf(res, 1024, "setcpm(80/4)\n$: stack(note(\"c4 eb4 g4 bb4\").s(\"triangle\"),note(\"c2 eb2 g2 bb2\").s(\"sawtooth\").slow(2))");
     } else if (strstr(p,"funk") || strstr(p,"groove")) {
-        snprintf(res, 1024, "bpm 105\nnotes c4 ~ e4 g4 ~ bb4 c5 ~\nbass c2 ~ ~ eb2 ~ g2 ~ ~ | gain 0.9\ndrum bd ~ sd ~");
+        snprintf(res, 1024, "setcpm(105/4)\n$: stack(note(\"c4 ~ e4 g4 ~ bb4 c5 ~\").s(\"triangle\"),note(\"c2 ~ ~ eb2 ~ g2 ~ ~\").s(\"sawtooth\").gain(.9),s(\"bd ~ sd ~\"))");
     } else {
-        snprintf(res, 1024, "bpm 120\ndrum bd sd bd sd\ndrum hh hh hh hh\nbass c2 e2 g2 c3");
+        snprintf(res, 1024, "setcpm(120/4)\n$: stack(s(\"bd sd bd sd\"),s(\"hh*4\"),note(\"c2 e2 g2 c3\").s(\"sawtooth\"))");
     }
     *out = res;
 }
@@ -128,21 +128,11 @@ static void *ai_worker(void *arg) {
             cJSON_AddStringToObject(sys, "role", "system");
             const char *sysprompt =
                 "You generate Tompouce code. Output ONLY a fenced code block. "
-                "Grammar: each line is either 'bpm N' or a track: "
-                "'drum <mini-notation>' for drum sounds (bd sd hh cp tom), "
-                "'notes'/'n'/'bass'/'lead'/'chord' <mini-notation> for pitch. "
-                "Notes: c4 eb3 or MIDI numbers. Comma stacks the same time: c4,e4,g4. "
-                "'-' is a rest, like '~'. "
-                "Chords use ireal symbols (Cm7, C^7, C-7). Keyword chord treats bare C as major and C7 as dominant. "
-                "On note tracks c7 is the note C7; cm7 is a chord. "
-                "Mini-notation: space-separated steps, [ ] groups, * repeat, ! replicate, "
-                "@ elongate, / slow across cycles, ? degrade, bd(3,8) euclid, "
-                "{a b, c} polymeter, a|b choice, ~ rest, < > alternate. "
-                "A line may be note(\"c e g\").s(\"saw\").lpf(800) or s(\"bd\").gain(slider(0.5)). "
-                "setcpm(x) sets BPM to x*4. "
-                "Transforms after '|': fast N, slow N, rev, gain X, sound/inst sine|saw|sawtooth|square|tri|noise, "
-                "scale C:minor (then degrees 0 2 4; root octave defaults to 3), "
-                "transpose N, arp 0 1 2 1, adsr A:D:S:R, lfo freq 4 1, vib 4:.1, lpf Hz, pw 0.2. "
+                "Use JavaScript Strudel with note(), s(), stack(), and method chains. "
+                "Set tempo using setcpm(BPM/4). Put mini-notation inside quoted strings. "
+                "Use ~ for rests, .s('sawtooth') for synths, .gain(slider(.5)) for live controls, "
+                ".fast(N), .slow(N), .rev(), .lpf(Hz), .scale('C:minor') and .add(N). "
+                "For multiple patterns return stack(...), or use $: statements. "
                 "No extra explanation.";
             cJSON_AddStringToObject(sys, "content", sysprompt);
             cJSON_AddItemToArray(msgs, sys);

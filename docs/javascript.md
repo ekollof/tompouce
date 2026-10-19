@@ -145,10 +145,11 @@ This is an embedded ECMAScript host, not Node.js or a browser: there
 is no filesystem/process API, DOM, WebAudio, Hydra, or browser input-device API.
 Additional JavaScript modules require an explicit addition to the bundle.
 
-The original `bpm` / `drum` / `notes` / `| transform` line dialect still uses
-the existing forgiving C parser. The first non-comment statement selects the
-language; keep a buffer in one dialect. This historical parser is marked for
-removal after its examples, editor helpers and tests migrate to JavaScript.
+JavaScript Strudel is the only source language. The historical C mini/statement
+parser and `bpm` / `drum` / `notes` / `| transform` line dialect have been removed.
+Use `setcpm(BPM / 4)`, `s("bd sd")`, `note("c4 e4")` and JavaScript method chains.
+Retired syntax reports an evaluation error and retains the last playable program.
+Quoted mini-notation remains supported by the upstream Strudel runtime.
 
 ## Native audio coverage
 
@@ -539,8 +540,8 @@ widgets are present. F12 independently toggles the larger visualization pane.
 A failed JavaScript evaluation retains the last playable program and reports
 the error. The editor keeps the failed source for correction; it does not
 highlight the old program against the new source. MCP evaluation tools return
-an error result for the failed evaluation. The legacy parser still keeps its
-partial-pattern behavior.
+an error result for the failed evaluation. Empty or comment-only JavaScript
+buffers evaluate successfully as silent patterns.
 
 Compilation and sample-map loading happen outside the track lock. JavaScript
 queries and sample resolution also run outside that lock, in the generator.

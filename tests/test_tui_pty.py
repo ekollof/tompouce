@@ -487,13 +487,21 @@ check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)
 check("SIGINT cleanup", "", stop_signal=signal.SIGINT)
 check("disable editor scope", "", b'\x1bOQ/scope off\r', expected='', observed=b'editor scope off')
+check("hide console hotkey", 'note(60).gain(0)', b'\x0c',
+      expected='note(60).gain(0)', observed=b'console hidden')
+check("restore console hotkey", 'note(60).gain(0)', b'\x0c\x0c',
+      expected='note(60).gain(0)', observed=b'console shown')
+check("hide console from focus", 'note(60).gain(0)',
+      b'\x1b[<0;90;4M\x1b[<0;90;4m\x0cX', expected='Xnote(60).gain(0)')
+check("hide console in vi mode", 'note(60).gain(0)', b'\x0c',
+      expected='note(60).gain(0)', observed=b'console hidden', vi=True)
 check("F4 state diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", vi=True, observed=b'mode=VI:N')
 check("Tab indentation", "", b'\tX', expected='  X')
 check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')
 check("Tab undo", "", b'\t\x1a', expected='')
-check("Ctrl Space completion", "", b'bp\x00', expected='bpm')
+check("Ctrl Space completion", "", b'setcp\x00', expected='setcpm')
 check("Strudel method Tab completion", 'note(60).ga', b'\x1b[F\t(0)', expected='note(60).gain(0)')
 check("Strudel method Ctrl Space completion", 'note(60).ga', b'\x1b[F\x00(0)', expected='note(60).gain(0)')
 check("Strudel sound completion", 'note(60).s("squ', b'\x1b[F\t").gain(0)', expected='note(60).s("square").gain(0)')
@@ -562,7 +570,7 @@ if not CASE_FILTER or 'tutor' in CASE_FILTER or CASE_FILTER in 'tutor shortcut':
     check('tutor disables song advancement', 'one', b'\x1bOQ/load Existing.json\r\x1bOQ/song on\r\x1bOQ/tutor!\r\x1bOS',
           expected=tutor_intro, command_files=True, observed=b'song=off')
     assert tutorial.read_bytes() == tutorial_before, 'tutor shortcut changed the bundled save'
-check("Notcurses CSI-u completion", "", b'bp\x1b[32;5u', expected='bpm')
+check("Notcurses CSI-u completion", "", b'setcp\x1b[32;5u', expected='setcpm')
 check("Notcurses shifted associated text", "", b'\x1b[97;2;65u\x1b[49;2;33u\x1b[57;2;40u', expected='A!(')
 check("Notcurses shifted plain text", "", b'A!(){}_+"', expected='A!(){}_+"')
 check("Notcurses associated Unicode text", "", b'\x1b[101;1;101;769u\x1b[50;2;233u', expected='e\u0301é')

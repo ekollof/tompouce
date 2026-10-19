@@ -579,8 +579,6 @@ int main(void) {
     cJSON_Delete(meta);
     assert(!javascript_query(program,0,1));
     javascript_free(program);
-    assert(javascript_is_code("const p = note('c4'); p"));
-    assert(!javascript_is_code("bpm 120\ndrum bd sd"));
     int line = 0;
     assert(javascript_check("const p = x => x.fast(2);\np(note('c4'))",error,sizeof(error),&line));
     assert(!javascript_check("const p = ;",error,sizeof(error),&line));

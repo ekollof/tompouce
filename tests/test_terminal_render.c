@@ -12,6 +12,55 @@ static void check_input_readiness(void) {
     assert(SLang_getkey()=='x');
 }
 
+static void check_console_toggle(void) {
+    int mid,h,w,sh,th;
+    assert(show_console && !show_docs && !show_state && !show_tracks && !search_mode && !file_mode);
+    right_geom(&mid,&h,&w,&sh,&th);
+    int split=mid;
+    char *source=editor_flatten(); assert(source);
+    pane_focus=1; toggle_console();
+    assert(!show_console && !pane_focus);
+    right_geom(&mid,&h,&w,&sh,&th);
+    assert(mid==cols && !w && !sh && !th);
+    draw_code(); draw_right_pane();
+    show_docs=1;
+    right_geom(&mid,&h,&w,&sh,&th); assert(mid==split && w>0);
+    show_docs=0; search_mode=1;
+    right_geom(&mid,&h,&w,&sh,&th); assert(mid==split && w>0);
+    search_mode=0; file_mode=1;
+    right_geom(&mid,&h,&w,&sh,&th); assert(mid==split && w>0);
+    file_mode=0; show_state=1;
+    right_geom(&mid,&h,&w,&sh,&th); assert(mid==split && sh==h);
+    show_state=0;
+    toggle_console(); right_geom(&mid,&h,&w,&sh,&th);
+    assert(show_console && mid==split);
+    char *after=editor_flatten(); assert(after && !strcmp(source,after));
+    free(source); free(after);
+}
+
+static void check_help_clears_slider(void) {
+    assert(show_console && !show_docs);
+    slider_begin(); slider_bind(.5,0,1,.1);
+    toggle_console();
+    for (int cycle=0;cycle<3;cycle++) {
+        draw_code();
+        /* At the harness's 80-column split, the introductory help text wraps
+           onto two rows, followed by an empty row at screen row 5. */
+        draw_slider_chip(5,cols-17,16,0);
+        SLsmg_Char_Type cell;
+        SLsmg_gotorc(5,cols-17); assert(!SLsmg_char_at(&cell) && cell.color==8);
+        show_docs=1; docs_scroll=0;
+        draw_code(); draw_right_pane();
+        int mid,h,w,sh,th; right_geom(&mid,&h,&w,&sh,&th);
+        for (int x=mid+1;x<cols-1;x++) {
+            SLsmg_gotorc(5,x); assert(!SLsmg_char_at(&cell));
+            assert(cell.nchars==1 && cell.wchars[0]==' ' && cell.color!=8);
+        }
+        show_docs=0;
+    }
+    toggle_console();
+}
+
 static void theme_fixture(const char *path, int wal, unsigned seed) {
     FILE *f=fopen(path,"w"); assert(f);
     if (wal) {
@@ -366,6 +415,8 @@ int main(void) {
     check_state_modes();
     check_theme_watch();
     check_input_readiness();
+    check_console_toggle();
+    check_help_clears_slider();
     SLsmg_reset_smg();
     puts("terminal highlight cells and indentation ok");
     return 0;

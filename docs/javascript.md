@@ -368,13 +368,25 @@ An explicitly supplied IR speed or offset differs from an omitted one even
 when its numeric value equals the default. Such rebuilds reset convolution
 history even if the prepared PCM is already cached.
 
-`room` without `ir` now prepares a stereo convolution impulse with the upstream
+`room` without `ir` prepares a stereo convolution impulse on a dedicated worker,
+with a bounded 32-request FIFO queue. Live scheduling does not wait for generation.
+The old convolver and its sounding tail remain active until a completed kernel
+is published; that publication resets the old convolution history on the next
+audio frame. An initial pending room has no wet output. Accepted requests survive
+evaluation and Stop/Play. As on the web, an older generated completion can replace
+an intervening custom IR. Multiple generated requests complete in FIFO order;
+arbitrary browser worker completion races are not reproduced.
+
+The generated impulse follows the upstream
 exponential decay, fade-in and gradual low-pass. `roomfade` defaults to .1,
 `roomlp` to 15000 and `roomdim` to 1000. A fixed random seed makes native rooms
 reproducible. These generated impulses have a separate 16-entry cache and fit
 up to about 2.10 seconds of decay (the IR lasts 1.5 times the decay). Longer
-rooms, zero size or an exhausted generated cache retain the native Schroeder
-fallback and report that limit once per program. Explicit `ir` failures still
+rooms, zero size, exhausted caches, a full request queue or worker startup failure
+retain the previous room and report a console diagnostic. Failed initial generation
+leaves the wet output silent. Parameter equality guards retain the requested
+settings even after failure; change a parameter to request another generation.
+Explicit `ir` failures still
 reject the event rather than silently substituting another impulse.
 
 The browser capture harness checks dry piano, synths, envelopes, filters,
@@ -550,7 +562,8 @@ numbers reject events produced by an obsolete program. The audio callback
 executes neither JavaScript nor file/network operations.
 
 Limits remain: the editor source and each line grow until malloc fails
-(byte offsets stop near 2 GiB), 128 simultaneous voices, 12 effect orbits,
+(byte offsets stop near 2 GiB), 128 current source slots plus up to 128 retiring
+graphs, 12 effect orbits,
 128 MiB per JS runtime, two seconds per compilation, 200 ms per pattern
 query, 4,096 haps/events per query, 4 MiB query JSON, and 8,192 queued
 audio events. Long lines wrap on JavaScript tokens; `/wrap off` scrolls sideways. The audio

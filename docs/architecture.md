@@ -92,8 +92,10 @@ console ring buffer feeds both UI console pane and music_get_console.
    Visual queries and source mappings use the same retained program.
 4. The consumer thread pops events due within 2 ms and calls
    `audio_trigger_event()`, which replaces the earliest inserted voice if all
-   128 are busy, independently of its target time or gain. Eviction currently
-   cuts immediately; web-compatible retiring fades remain outstanding.
+   128 are busy, independently of its target time or gain. A separate pool of
+   up to 128 retiring graphs renders eviction fades until the incoming target
+   plus 250 ms. Its overflow replaces the earliest-ending graph and reports a
+   console diagnostic. Resource destruction stays outside the callback.
 5. The PortAudio callback renders synth (sine/saw/square/tri/noise + ADSR) or
    drum voices (kick/snare/hat/clap/tom) and advances `audio_time`.
 6. Status and errors go to the console ring buffer, visible in the UI pane
@@ -131,6 +133,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 | MCP frame | 1 MiB, oversized dropped | `mcp_read_frame` |
 | Console | 256 lines | `MAX_CONSOLE` |
 | Voices | 128 | `MAX_VOICES` |
+| Retiring source graphs | 128 | separate bounded slots in `audio.c`; overflow is reported |
 
 ## Modes
 

@@ -144,8 +144,35 @@ deployed web pool in a disposable browser with offline rendering. It fills the
 insertion FIFO, and captures eviction gain ramps and stops at the incoming
 target time plus 250 ms. Rests and missing sounds also evict before source
 selection; zero gain still creates a source. Native saturated allocation uses
-insertion FIFO, with regression coverage for out-of-order targets and reused slots. Native
-eviction still cuts immediately: retiring graphs, envelope automation and
-rest-triggered eviction remain open, so this is not full pool parity.
+insertion FIFO, with regression coverage for out-of-order targets and reused slots.
+Incoming stretch events apply the web's 40 ms preroll before calculating the
+eviction stop deadline; the deployed pool reference also gates this case.
+
+`node scripts/voice-eviction-reference-qa.mjs /tmp/eviction-reference` captures
+real registered sine/piano gain automation using private offline contexts. It
+replaces only the input waveform with DC, keeping the actual source gain node,
+pool registration and eviction calls. Ordinary oscillator eviction inserts a
+ramp into the existing ADSR timeline; sampled-source eviction ramps a separate
+unity cut gain from preparation time. Both stop at incoming target + 250 ms.
+Native retiring graphs implement these selected behaviors without resetting
+phase, DSP state or shared sends. The callback harness verifies expected sine
+and sample PCM, shared delay output after retirement, surviving duck callbacks,
+bit-identical 1/64/4,096/8,192-frame rendering, and bounded overflow diagnostics.
+Native-state ownership is separately checked through retirement and cleanup.
+Rest/missing-source eviction, cut interactions, short/coincident envelope
+endpoints, per-voice effect tails after source stop and the remaining source
+types need broader independent comparisons;
+this does not establish complete pool or scheduling-overload parity.
+
+Generated room preparation runs outside the scheduler and callback. The
+`room` CTest holds the worker at a deterministic barrier while checking the
+actual convolver output against a retained history, then verifies completion,
+failure retention, initially silent wet output, bounded queue overflow and
+worker shutdown/restart. `effects-reference-qa.mjs` checks actual web buffer
+handoff, an intervening custom IR and failed zero-duration generation's retained
+buffer and updated parameter guards. Static waveform gates deliberately prepare
+completed IRs before rendering; they do not measure asynchronous completion
+latency or prove source-side failure parity. Multiple generated requests use a
+single FIFO worker; browser completion races remain open.
 
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

@@ -26,6 +26,8 @@ typedef struct Voice {
     int onset_pending, onset_room;
     int sampled_source, cut_pending;
     double cut_time;
+    int retiring;
+    double retire_end, retire_anchor, retire_level;
     const ConvKernel *onset_ir;
     double onset_delay_time, onset_delay_feedback;
     unsigned onset_duck_mask;
@@ -98,6 +100,8 @@ void audio_trigger_event(AudioEvent *ev);
 void audio_report_errors(void);
 int audio_prepare_delay(AudioEvent *ev);
 void audio_prepare_room(AudioEvent *ev);
+/* Offline verification only; never call from the live scheduler or callback. */
+void audio_wait_room_preparation(void);
 unsigned audio_register_orbit(int orbit);
 /* Bits 0..5 specify explicit size/fade/low-pass/dimension/speed/offset controls. */
 void audio_inherit_room(AudioEvent *ev, unsigned explicit_fields);

@@ -4,7 +4,7 @@
 #include <assert.h>
 
 static void clear_voices(void) {
-    for (int i=0;i<MAX_VOICES;i++) {
+    for (int i=0;i<VOICE_SLOTS;i++) {
         native_synth_state_free(voices[i].native_state); native_synth_state_free(voices[i].native_right);
         stretch_release(voices[i].stretch_buffer);
     }
@@ -41,6 +41,29 @@ static AudioEvent prepare_gm(const char *code) {
     AudioEvent event; assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value));
     assert(event.stretch_buffer && !event.native_synth && !event.is_drum);
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
+}
+
+static void test_retiring_resources(void) {
+    const char *sources[]={"note(60).s('bytebeat').bbexpr('t*5')",
+        "note(60).s('sine').K(audioin().mul(.5).out())"};
+    for (unsigned source=0;source<sizeof(sources)/sizeof(sources[0]);source++) {
+        clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
+        AudioEvent event=prepare(sources[source]); audio_trigger_event(&event);
+        NativeSynthState *left=voices[0].native_state,*right=voices[0].native_right;
+        assert(left && (!native_synth_effect(event.native_synth) || right));
+        native_synth_release(event.native_synth);
+        AudioEvent silent={.time=.1,.duration=1,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
+            .gain=0,.att=.001,.dec=.05,.sus=.6,.rel=.01,.midi_chan=-1,.midi_note=-1,
+            .delay_prepared=1,.room_prepared=1};
+        dsp_params_init(&silent.dsp); silent.dsp.enabled=1;
+        for (int i=0;i<MAX_VOICES;i++) audio_trigger_event(&silent);
+        assert(voices[MAX_VOICES].native_state==left && voices[MAX_VOICES].native_right==right);
+        assert(voices[MAX_VOICES].retiring && !voices[0].native_state);
+        float output[1024];
+        for (int i=0;i<32;i++) pa_callback(NULL,output,512,NULL,0,NULL);
+        assert(!voices[MAX_VOICES].active && voices[MAX_VOICES].native_state==left);
+        clear_voices(); /* The owning state references are freed exactly once, off callback. */
+    }
 }
 
 static void test_gm(void) {
@@ -134,6 +157,7 @@ int main(void) {
     snd_lib_error_set_handler(alsa_silent);
 #endif
     test_gm();
+    test_retiring_resources();
     test_wavetable_banks();
     const char *waves[]={"zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise"};
     for (int i=0;i<7;i++) {

@@ -762,7 +762,8 @@ static void test_room_preparation(void) {
     assert(track_load_from_code("note(60).gain(0).room(1).roomsize(.1).roomfade(.02).roomlp(9000).roomdim(500).orbit(10)"));
     js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation());
     assert(qhead && qhead->ev.room_prepared && qhead->ev.time>=1);
-    const ConvKernel *first=qhead->ev.ir_kernel;
+    audio_wait_room_preparation();
+    const ConvKernel *first=atomic_load(&requested_ir[10]);
     assert(first && atomic_load(&requested_ir[10])==first);
     double old_energy=0;
     for (int frame=0;frame<1500;frame++) {
@@ -788,13 +789,14 @@ static void test_room_preparation(void) {
     event_queue_clear();
     assert(track_load_from_code("note(60).gain(0).room(1).roomsize(.1).orbit(10)"));
     js_audio_schedule(tracks[0].javascript,1.5,0,event_queue_generation());
-    assert(qhead && qhead->ev.ir_kernel==first);
+    assert(qhead && !qhead->ev.room_rebuild && atomic_load(&requested_ir[10])==first);
     assert(qhead->ev.dsp.p[DSP_ROOMFADE]==.02 && qhead->ev.dsp.p[DSP_ROOMDIM]==500);
     event_queue_clear();
     assert(track_load_from_code("note(60).gain(0).room(1).roomsize(.2).orbit(10)"));
     js_audio_schedule(tracks[0].javascript,2,0,event_queue_generation());
     assert(qhead && qhead->ev.room_prepared);
-    const ConvKernel *second=qhead->ev.ir_kernel;
+    audio_wait_room_preparation();
+    const ConvKernel *second=atomic_load(&requested_ir[10]);
     assert(second && second!=first && atomic_load(&requested_ir[10])==second);
     assert(qhead->ev.dsp.p[DSP_ROOMFADE]==.1 && qhead->ev.dsp.p[DSP_ROOMLP]==15000);
     assert(qhead->ev.dsp.p[DSP_ROOMDIM]==1000);
@@ -812,7 +814,7 @@ static void test_room_preparation(void) {
     assert(track_load_from_code("note(64).gain(0).room(1).orbit(10)"));
     audio_toggle_play(1);
     js_audio_schedule(tracks[0].javascript,3,0,event_queue_generation());
-    assert(qhead && qhead->ev.ir_kernel==second && qhead->ev.dsp.p[DSP_SIZE]==.2);
+    assert(qhead && !qhead->ev.room_rebuild && atomic_load(&requested_ir[10])==second && qhead->ev.dsp.p[DSP_SIZE]==.2);
     assert(qhead->ev.dsp.p[DSP_ROOMFADE]==.1 && qhead->ev.dsp.p[DSP_ROOMDIM]==1000);
     double retained_energy=0;
     for (int frame=0;frame<512;frame++) {
@@ -1169,5 +1171,6 @@ int main(int argc, char **argv) {
     assert(event_queue_depth()==0); /* Malformed user haps may not crash sorting. */
     assert(track_load_from_code("note(60).gain(0)"));
     puts("Live sliders preserve program, cycle phase, due events, voices, transport and song state; future parameters update without duplicate onsets");
+    stop_room_worker();
     return 0;
 }

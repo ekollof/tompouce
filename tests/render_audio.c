@@ -60,6 +60,11 @@ int main(int argc, char **argv) {
             fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
         }
         events[used++] = event;
+        /* Static waveform gates intentionally use completed IRs. Live pending
+           and failure behavior is exercised separately by the room harness. */
+        if (event.dsp.p[DSP_ROOM]>0 && event.room_sample<0)
+            events[used-1].ir_kernel=convolution_prepare_reverb(event.dsp.p[DSP_SIZE],
+                event.dsp.p[DSP_ROOMFADE],event.dsp.p[DSP_ROOMLP],event.dsp.p[DSP_ROOMDIM]);
     }
     qsort(events,(size_t)used,sizeof(*events),compare_events);
     FILE *output = fopen(argv[2],"wb");

@@ -300,8 +300,6 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
     }
     if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(value,"size"))) room_explicit|=1;
     audio_inherit_room(ev,room_explicit);
-    if (!ir && ev->dsp.p[DSP_ROOM]>0)
-        ev->ir_kernel=convolution_prepare_reverb(ev->dsp.p[DSP_SIZE],ev->dsp.p[DSP_ROOMFADE],ev->dsp.p[DSP_ROOMLP],ev->dsp.p[DSP_ROOMDIM]);
     if (ir && ev->dsp.p[DSP_ROOM] > 0) {
         if (ev->dsp.p[DSP_SIZE] == 0) ev->dsp.p[DSP_ROOM] = 0;
         else {
@@ -483,8 +481,6 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
             javascript_warn_control(program,"late sound preparation (note skipped)");
             return;
         }
-        if (ev.dsp.p[DSP_ROOM]>0 && !ev.ir_kernel && !cJSON_HasObjectItem(value,"ir"))
-            javascript_warn_control(program,"generated room (IR duration/cache limit; using native Schroeder fallback)");
         pthread_mutex_lock(&tracks_lock);
         int current=generation==event_queue_generation();
         if (current && audio_prepare_delay(&ev)) {

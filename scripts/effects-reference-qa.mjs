@@ -387,11 +387,19 @@ async function generatedRoomHandoff() {
   const old=room.buffer;
   orbit.getReverb(.06,.01,9000,500);
   const retainedWhilePending=room.buffer===old;
+  const intervening=context.createBuffer(2,4410,44100);
+  orbit.getReverb(.06,.01,9000,500,intervening,1,0);
   const deadline=performance.now()+5000;
-  while(room.buffer===old && performance.now()<deadline)
+  while(room.buffer===intervening && performance.now()<deadline)
     await new Promise(resolve=>setTimeout(resolve,10));
   const result={retainedWhilePending,replacedWhenReady:room.buffer!==old,
+    replacedInterveningCustom:room.buffer!==intervening,
     frames:room.buffer?.length,duration:room.duration};
+  const completed=room.buffer;
+  let threw=false,retryThrew=false;
+  try {orbit.getReverb(0,.01,9000,500);} catch {threw=true;}
+  try {orbit.getReverb(0,.01,9000,500);} catch {retryThrew=true;}
+  result.failure={threw,retryThrew,retained:room.buffer===completed,duration:room.duration};
   await context.startRendering();
   return result;
 }
@@ -460,6 +468,10 @@ try {
   assert.equal(handoff.retainedWhilePending,true,
     'generated replacement must retain the old convolver buffer until ready');
   assert.equal(handoff.replacedWhenReady,true,'generated replacement must eventually activate');
+  assert.equal(handoff.replacedInterveningCustom,true,
+    'an older generated completion still replaces an intervening custom IR');
+  assert.deepEqual(handoff.failure,{threw:true,retryThrew:false,retained:true,duration:0},
+    'failed generation retains the buffer and updated equality guards');
   assert.equal(handoff.duration,.06);
   assert.deepEqual(methods.roomSourceDefault,{calls:[Array(7).fill(null),[]],
     duration:2,fade:.1,lp:15000,dim:1000},

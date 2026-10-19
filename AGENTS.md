@@ -76,7 +76,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   transport, accepted events and history. `src/js_audio.c` prepares native events
   from haps. `current_code` is heap-owned through `current_code_set`; compiled
   source may differ after a failed evaluation or unapplied editor change.
-- `src/audio.c` renders stereo at 44.1 kHz with 128 voices and 12 orbits.
+- `src/audio.c` renders stereo at 44.1 kHz with 128 current sources, up to 128
+  retiring graphs and 12 orbits. Retiring references remain callback-safe.
   `src/audio_output.c` selects PipeWire, PulseAudio, PortAudio JACK, then ALSA.
   Runtime disconnects must not silently restart playback.
 - The audio callback must not allocate/free voice state, decode, fetch, execute

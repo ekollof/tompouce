@@ -40,6 +40,8 @@ async function capture() {
     let missingError;
     try {await superdough({s:'tompouce_qa_nonexistent_sound'},.5,.1,.5,0);}
     catch(error) {missingError=String(error);}
+    await superdough({s:'sine',qaId:131,note:60,gain:0},.6,.1,.5,0);
+    await superdough({s:'sine',qaId:132,note:60,gain:0,stretch:1},.7,.1,.5,0);
     await context.startRendering();
     return {calls,afterNotes,afterRest,afterSilent,created:held.length,missingError};
   } finally {sound.onTrigger=original;Math.random=random;}
@@ -52,11 +54,12 @@ try {
   await browser.until('typeof superdough==="function"',20000);
   const result=await browser.evaluate('('+capture.toString()+')()');
   const expected=[{id:0,time:.2-128*.0001+.25},
-    {id:1,time:.2-129*.0001+.25},{id:2,time:.55},{id:3,time:.75}];
+    {id:1,time:.2-129*.0001+.25},{id:2,time:.55},{id:3,time:.75},
+    {id:4,time:.7-.04+.25}];
   assert.equal(result.afterNotes,4,'128-source pool must evict one source per new note');
   assert.equal(result.afterRest,6,'rest must evict before source selection');
   assert.equal(result.afterSilent,6,'rest leaves a free pool slot for the silent source');
-  assert.equal(result.created,131,'zero gain still creates a registered source');
+  assert.equal(result.created,133,'zero gain still creates a registered source');
   assert.match(result.missingError,/not found/,'missing sound must fail after eviction');
   assert.equal(result.calls.length,expected.length*2);
   expected.forEach(({id,time},index)=>{

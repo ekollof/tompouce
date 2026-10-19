@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <limits.h>
 #include "js_number.h"
 #include "wavetable.h"
 #include "sampler.h"
@@ -85,6 +86,17 @@ static double room_parameters[N_ORBITS][6];
 static int room_samples[N_ORBITS];
 static unsigned room_defined[N_ORBITS];
 static int room_created[N_ORBITS];
+static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic unsigned prepared_rooms;
+typedef struct { int orbit; double parameters[4]; } RoomRequest;
+enum { ROOM_REQUESTS=32 };
+static RoomRequest room_requests[ROOM_REQUESTS];
+static unsigned room_head,room_count;
+static int room_worker_started,room_worker_busy,room_worker_stop;
+static pthread_t room_worker;
+static pthread_mutex_t room_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t room_wake=PTHREAD_COND_INITIALIZER;
+static unsigned room_failures;
 static _Atomic unsigned created_orbits;
 
 unsigned audio_register_orbit(int orbit) {
@@ -100,6 +112,77 @@ static void publish_room(int orbit, const ConvKernel *kernel, int rebuild) {
     atomic_fetch_add(&ir_revision[orbit],1);
     atomic_store(&requested_ir[orbit],kernel);
     atomic_fetch_add(&ir_revision[orbit],1);
+}
+
+static void *prepare_rooms(void *unused) {
+    (void)unused;
+    pthread_mutex_lock(&room_lock);
+    for (;;) {
+        while (!room_count && !room_worker_stop) pthread_cond_wait(&room_wake,&room_lock);
+        if (room_worker_stop) break;
+        RoomRequest request=room_requests[room_head];
+        room_head=(room_head+1)%ROOM_REQUESTS; room_count--; room_worker_busy=1;
+        pthread_mutex_unlock(&room_lock);
+        const double *p=request.parameters;
+        const ConvKernel *kernel=convolution_prepare_reverb(p[0],p[1],p[2],p[3]);
+        pthread_mutex_lock(&voice_lock);
+        if (kernel) publish_room(request.orbit,kernel,1);
+        else if (room_failures<UINT_MAX) room_failures++;
+        pthread_mutex_unlock(&voice_lock);
+        pthread_mutex_lock(&room_lock);
+        room_worker_busy=0; pthread_cond_broadcast(&room_wake);
+    }
+    room_count=0; room_worker_busy=0; pthread_cond_broadcast(&room_wake);
+    pthread_mutex_unlock(&room_lock);
+    return NULL;
+}
+
+/* Thread creation must not extend a callback-shared voice_lock window. */
+static int start_room_worker(void) {
+    pthread_mutex_lock(&room_lock);
+    if (!room_worker_started) {
+        room_worker_stop=0;
+        if (pthread_create(&room_worker,NULL,prepare_rooms,NULL)) {
+            pthread_mutex_unlock(&room_lock); return 0;
+        }
+        room_worker_started=1;
+    }
+    int ready=!room_worker_stop;
+    pthread_mutex_unlock(&room_lock);
+    return ready;
+}
+
+/* Producer only, with voice_lock held. Worker never holds room_lock while
+   acquiring voice_lock. Requests own scalar parameters and process-lived IRs. */
+static int request_room(const AudioEvent *event) {
+    pthread_mutex_lock(&room_lock);
+    if (!room_worker_started || room_count==ROOM_REQUESTS || room_worker_stop) {
+        pthread_mutex_unlock(&room_lock); return 0;
+    }
+    RoomRequest *request=&room_requests[(room_head+room_count++)%ROOM_REQUESTS];
+    request->orbit=event->orbit;
+    for (int i=0;i<4;i++) request->parameters[i]=event->dsp.p[room_fields[i]];
+    pthread_cond_signal(&room_wake);
+    pthread_mutex_unlock(&room_lock);
+    return 1;
+}
+
+/* Offline tools only. Live scheduling and rendering never wait for IR work. */
+void audio_wait_room_preparation(void) {
+    pthread_mutex_lock(&room_lock);
+    while (room_count || room_worker_busy) pthread_cond_wait(&room_wake,&room_lock);
+    pthread_mutex_unlock(&room_lock);
+}
+
+static void stop_room_worker(void) {
+    pthread_mutex_lock(&room_lock);
+    int started=room_worker_started;
+    room_worker_stop=1; pthread_cond_broadcast(&room_wake);
+    pthread_mutex_unlock(&room_lock);
+    if (started) pthread_join(room_worker,NULL);
+    pthread_mutex_lock(&room_lock);
+    room_worker_started=0; room_head=room_count=0;
+    pthread_mutex_unlock(&room_lock);
 }
 
 static void orbits_ensure(void) {
@@ -140,8 +223,11 @@ void audio_fx_set(const char *name, double v) {
 }
 static double silent_clock_origin;
 static int silent_clock;
-static Voice voices[MAX_VOICES];
-static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Current sources and bounded retiring graphs have separate physical slots.
+   Moving a Voice transfers its prepared references; the callback never frees. */
+enum { VOICE_SLOTS = MAX_VOICES*2 };
+static Voice voices[VOICE_SLOTS];
+static unsigned retirement_overflow;
 /* Producers already hold voice_lock. Only the scheduler formats/logs errors;
    the callback writes bounded records, including when playback is stopped. */
 enum { DUCK_ERROR_CAPACITY = 64 };
@@ -161,6 +247,8 @@ void audio_report_errors(void) {
     pthread_mutex_lock(&voice_lock);
     unsigned count=duck_error_count;
     int overflow=duck_error_overflow;
+    unsigned lost_tails=retirement_overflow; retirement_overflow=0;
+    unsigned failed_rooms=room_failures; room_failures=0;
     memcpy(errors,duck_errors,count*sizeof(*errors));
     duck_error_count=0; duck_error_overflow=0;
     pthread_mutex_unlock(&voice_lock);
@@ -168,6 +256,8 @@ void audio_report_errors(void) {
         log_console("duck: orbit %d rejected %s ramp at %.6f s",errors[i].orbit,
                     errors[i].returning?"return":"downward",errors[i].time);
     if (overflow) log_console("duck: additional automation errors omitted");
+    if (lost_tails) log_console("voices: retirement capacity exceeded; %u fading graphs replaced early",lost_tails);
+    if (failed_rooms) log_console("room: %u IR preparations failed or exceeded queue/cache limits; previous room retained",failed_rooms);
 }
 static CsoundProgram *csound_program;
 static double next_voice_onset=HUGE_VAL;
@@ -489,6 +579,8 @@ void audio_prepare_room(AudioEvent *event) {
     if (!event || event->room_prepared) return;
     if (event->dsp.enabled && event->dsp.p[DSP_ROOM]>0 &&
         event->orbit>=0 && event->orbit<N_ORBITS) {
+        int generated=event->room_params_valid && event->room_sample<0 && !event->ir_kernel;
+        int ready=!generated || !event->room_rebuild || start_room_worker();
         pthread_mutex_lock(&voice_lock);
         if (event->room_params_valid) {
             for (int i=0;i<4;i++) room_parameters[event->orbit][i]=event->dsp.p[room_fields[i]];
@@ -498,7 +590,10 @@ void audio_prepare_room(AudioEvent *event) {
             room_defined[event->orbit]=event->room_defined;
             room_created[event->orbit]=1;
         }
-        publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
+        atomic_fetch_or(&prepared_rooms,1u<<event->orbit);
+        if (generated) {
+            if (event->room_rebuild && (!ready || !request_room(event)) && room_failures<UINT_MAX) room_failures++;
+        } else publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
         pthread_mutex_unlock(&voice_lock);
     }
     event->room_prepared=1;
@@ -530,7 +625,7 @@ static void voice_onset(Voice *v) {
         }
     }
     double cut=v->dsp.control.enabled && v->sampled_source?v->dsp.control.p[DSP_CUT]:0;
-    if (cut>0) for (int i=0;i<MAX_VOICES;i++) {
+    if (cut>0) for (int i=0;i<VOICE_SLOTS;i++) {
         Voice *old=&voices[i];
         if (old!=v && old->active && old->sampled_source && old->dsp.control.enabled && old->dsp.control.p[DSP_CUT]==cut &&
             (old->start_time<v->start_time ||
@@ -545,9 +640,9 @@ static void dispatch_voice_onsets(void) {
     dispatch_delays_locked();
     dispatch_ducks_locked();
     if (next_voice_onset>audio_time+1e-10) return;
-    int due[MAX_VOICES], count=0;
+    int due[VOICE_SLOTS], count=0;
     next_voice_onset=HUGE_VAL;
-    for (int i=0;i<MAX_VOICES;i++) {
+    for (int i=0;i<VOICE_SLOTS;i++) {
         Voice *v=&voices[i];
         if (!v->active || !v->onset_pending) continue;
         if (v->start_time>audio_time+1e-10) { next_voice_onset=fmin(next_voice_onset,v->start_time); continue; }
@@ -895,7 +990,7 @@ static size_t dbg_row(char *out, size_t cap, size_t pos, const char *kind, const
 int audio_debug_snapshot(char *out, size_t outlen, int limit) {
     DbgRow live[DBG_RING];
     DbgRow trig[DBG_RING];
-    int nlive = 0, ntrig = 0, active = 0, i;
+    int nlive = 0, ntrig = 0, active = 0, retiring = 0, i;
     size_t pos = 0;
     if (!out || outlen < 2) return -1;
     if (limit < 1) limit = 1;
@@ -907,6 +1002,7 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit) {
         active++;
         if (nlive < limit) dbg_from_voice(&live[nlive++], &voices[i], i);
     }
+    for (i=MAX_VOICES;i<VOICE_SLOTS;i++) retiring+=voices[i].active!=0;
     ntrig = dbg_count < limit ? dbg_count : limit;
     for (i = 0; i < ntrig; i++) {
         int idx = (dbg_pos - 1 - i + DBG_RING * 2) % DBG_RING;
@@ -914,15 +1010,76 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit) {
     }
     pthread_mutex_unlock(&voice_lock);
     pos = dbg_add(out, outlen, pos,
-        "t=%.3f playing=%s bpm=%.1f pool=%d/%d\n"
+        "t=%.3f playing=%s bpm=%.1f pool=%d/%d retiring=%d/%d\n"
         "fx drive=%.3f cutoff=%.3f delay=%.3f verb=%.3f\n"
         "voices %d showing %d\n",
-        audio_time, playing ? "yes" : "no", bpm, active, MAX_VOICES,
+        audio_time, playing ? "yes" : "no", bpm, active, MAX_VOICES, retiring, MAX_VOICES,
         fx_drive, fx_cutoff, fx_delay, fx_verb, active, nlive);
     for (i = 0; i < nlive; i++) pos = dbg_row(out, outlen, pos, "v", &live[i]);
     pos = dbg_add(out, outlen, pos, "triggers %d\n", ntrig);
     for (i = 0; i < ntrig; i++) pos = dbg_row(out, outlen, pos, "t", &trig[i]);
     return (int)pos;
+}
+
+typedef struct {
+    NativeSynthState *left, *right;
+    const StretchBuffer *stretch;
+} VoiceResources;
+
+static VoiceResources voice_resources(const Voice *voice) {
+    return (VoiceResources){voice->native_state,voice->native_right,voice->stretch_buffer};
+}
+
+/* Match inserting a linear ramp into the source's existing gain automation.
+   Oscillator gain is its ADSR; sampled sources have a separate unity cut gain.
+   In particular, do not multiply an oscillator envelope by a second fade. */
+static VoiceResources retire_voice_locked(int chosen, double incoming_time) {
+    int slot=MAX_VOICES;
+    for (;slot<VOICE_SLOTS;slot++) if (!voices[slot].active) break;
+    if (slot==VOICE_SLOTS) {
+        slot=MAX_VOICES;
+        for (int i=MAX_VOICES+1;i<VOICE_SLOTS;i++)
+            if (voices[i].retire_end<voices[slot].retire_end) slot=i;
+        if (retirement_overflow<UINT_MAX) retirement_overflow++;
+    }
+    VoiceResources displaced=voice_resources(&voices[slot]);
+    voices[slot]=voices[chosen];
+    Voice *voice=&voices[slot];
+    voice->retiring=1;
+    voice->retire_end=incoming_time+.25;
+    voice->retire_anchor=audio_time; voice->retire_level=1;
+    if (!voice->sampled_source && !native_synth_enveloped(voice->native_program)) {
+        double gate=fmax(0,voice->gate_end-voice->start_time);
+        double attack=fmax(.001,voice->vatt),decay=fmax(0,voice->vdec);
+        double sustain=fmax(0,fmin(1,voice->vsus)),release=fmax(.005,voice->vrel);
+        double times[]={0,fmin(attack,gate),fmin(attack+decay,gate),gate,gate+release};
+        voice->retire_anchor=voice->start_time; voice->retire_level=0;
+        for (unsigned i=0;i<sizeof(times)/sizeof(times[0]);i++) {
+            double at=voice->start_time+times[i];
+            if (at<voice->retire_end && at>=voice->retire_anchor) {
+                voice->retire_anchor=at;
+                voice->retire_level=dsp_envelope(times[i],gate,attack,decay,sustain,release);
+            }
+        }
+    }
+    return displaced;
+}
+
+static double retiring_envelope(const Voice *voice, double envelope) {
+    if (!voice->retiring || audio_time<voice->retire_anchor) return envelope;
+    double span=voice->retire_end-voice->retire_anchor;
+    return span>0 ? voice->retire_level*fmax(0,(voice->retire_end-audio_time)/span) : 0;
+}
+
+static double source_cut_gain(const Voice *voice) {
+    double cut=voice->cut_pending?fmax(0,1-(audio_time-voice->cut_time)/.01):1;
+    if (!voice->retiring) return cut;
+    if (voice->cut_pending && voice->cut_time<voice->retire_end) {
+        if (voice->cut_time+.01<voice->retire_end) return cut;
+        if (audio_time<voice->cut_time) return 1;
+        return fmax(0,(voice->retire_end-audio_time)/(voice->retire_end-voice->cut_time));
+    }
+    return retiring_envelope(voice,1);
 }
 
 void audio_trigger_event(AudioEvent *ev) {
@@ -945,9 +1102,9 @@ void audio_trigger_event(AudioEvent *ev) {
     NativeSynthState *prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
     if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
     if (ev->native_synth && !prepared) {
-        NativeSynthState *retired[MAX_VOICES*2]; int count=0;
+        NativeSynthState *retired[VOICE_SLOTS*2]; int count=0;
         pthread_mutex_lock(&voice_lock);
-        for (int i=0;i<MAX_VOICES;i++) if (!voices[i].active && voices[i].native_state) {
+        for (int i=0;i<VOICE_SLOTS;i++) if (!voices[i].active && voices[i].native_state) {
             retired[count++]=voices[i].native_state; voices[i].native_state=NULL;
             if (voices[i].native_right) { retired[count++]=voices[i].native_right; voices[i].native_right=NULL; }
         }
@@ -973,17 +1130,17 @@ void audio_trigger_event(AudioEvent *ev) {
             }
         }
     }
-    NativeSynthState *previous=voices[chosen].native_state;
-    NativeSynthState *previous_right=voices[chosen].native_right;
-    const StretchBuffer *previous_stretch=voices[chosen].stretch_buffer;
+    /* Superdough applies the vocoder's 40 ms preroll before pool eviction. */
+    double source_time=ev->time-(ev->stretch>0?.04:0);
+    VoiceResources previous=voices[chosen].active?retire_voice_locked(chosen,source_time):voice_resources(&voices[chosen]);
     trigger_voice(&voices[chosen], ev);
     voices[chosen].native_state=prepared;
     voices[chosen].native_right=prepared_right;
     dbg_push(&voices[chosen], chosen);
     pthread_mutex_unlock(&voice_lock);
-    native_synth_state_free(previous);
-    native_synth_state_free(previous_right);
-    stretch_release(previous_stretch);
+    native_synth_state_free(previous.left);
+    native_synth_state_free(previous.right);
+    stretch_release(previous.stretch);
 }
 
 typedef struct {
@@ -1060,6 +1217,8 @@ static void native_reverb(int orbit, VoiceMix *mix) {
         mix->left += left; mix->right += right;
         return;
     }
+    /* A WebAudio convolver with no completed buffer has no wet output. */
+    if (atomic_load(&prepared_rooms)&(1u<<orbit)) return;
     if (mix->room_size >= 0) size[orbit] = mix->room_size;
     else if (size[orbit] == 0) size[orbit] = 1;
     for (int ch = 0; ch < 2; ch++) {
@@ -1170,9 +1329,14 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
             dispatch_voice_onsets();
-            for (int v = 0; v < MAX_VOICES; v++) {
+            for (int v = 0; v < VOICE_SLOTS; v++) {
                 Voice *V = &voices[v];
                 if (!V->active) {
+                    if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
+                    continue;
+                }
+                if (V->retiring && audio_time>=V->retire_end-1e-10) {
+                    V->active=0;
                     if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
                     continue;
                 }
@@ -1183,7 +1347,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 double age = V->age;
                 /* Sample cut fades the source before its downstream effects;
                    retain the graph until its original envelope/lifetime ends. */
-                double cut_gain=V->cut_pending ? fmax(0,1-(audio_time-V->cut_time)/.01) : 1;
+                double cut_gain=source_cut_gain(V);
                 if (V->stretch_buffer) {
                     const float *pcm=stretch_pcm(V->stretch_buffer);
                     if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) {
@@ -1199,7 +1363,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 if (V->inst==INST_NATIVE) {
                     double gate=V->gate_end-V->start_time, left=0,right=0;
                     int own_envelope=native_synth_enveloped(V->native_program);
-                    double env=own_envelope?1:dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
+                    double env=retiring_envelope(V,own_envelope?1:dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel));
                     double tail=native_synth_tail(V->native_program);
                     if ((tail>=0 && age>=gate+fmax(V->vrel,tail)) ||
                         !native_synth_process(V->native_state,age,gate,V->freq,V->start_time,0,0,&left,&right)) {
@@ -1359,7 +1523,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     if (V->dsp.control.enabled)
                         V->env = dsp_envelope(age,V->gate_end-V->start_time,a,d,sus,r);
                     else V->env += (envtarget - V->env) * 0.02;
-                    env = V->env;
+                    env = retiring_envelope(V,V->env);
                     /* one LFO per voice: triangle, sine, saw, square */
                     double freq = V->freq;
                     double amp = V->amp;
@@ -1590,11 +1754,14 @@ void audio_init(void) {
 #endif
     midi_init();
     memset(voices, 0, sizeof(voices));
+    retirement_overflow=0;
     pending_duck_count=0; pending_duck_serial=0;
     duck_error_count=0; duck_error_overflow=0;
     pending_delay_count=0; pending_delay_serial=0;
     memset(web_delay_created,0,sizeof(web_delay_created));
     memset(room_created,0,sizeof(room_created));
+    atomic_store(&prepared_rooms,0);
+    room_failures=0;
     atomic_store(&created_orbits,0);
     memset(web_duck,0,sizeof(web_duck));
     playing = 1;
@@ -1602,10 +1769,11 @@ void audio_init(void) {
     if (silent_clock) silent_clock_origin=now_seconds()-audio_time;
 }
 void audio_shutdown(void) {
+    stop_room_worker();
     midi_shutdown();
     audio_output_stop();
     silent_clock=0;
-    for (int i=0;i<MAX_VOICES;i++) {
+    for (int i=0;i<VOICE_SLOTS;i++) {
         native_synth_state_free(voices[i].native_state); voices[i].native_state=NULL;
         native_synth_state_free(voices[i].native_right); voices[i].native_right=NULL;
         stretch_release(voices[i].stretch_buffer); voices[i].stretch_buffer=NULL;

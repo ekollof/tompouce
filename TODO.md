@@ -37,16 +37,23 @@ a separate measured design; it is not part of the initial preparation pool.
 - [ ] Extend verified fractional sample onsets to live source, tempo, transport
       and shared-effect changes against actual web output. Event-value and
       clock gates alone do not establish performance parity.
-- [ ] Finish web voice-pool eviction fades and verify backend bursts under
+- [ ] Extend web voice-pool eviction coverage and verify backend bursts under
       scheduling/preparation load without dropping accepted onsets or controls.
-      Saturated native allocation now uses verified insertion FIFO; eviction
-      still cuts immediately. The web ramps/stops at incoming target + 250 ms,
-      and even rests evict before source selection. Preserve retiring graphs
-      with bounded resources and verify synth/sample envelope differences.
-      The prepared-event callback harness covers 64 notes plus 64 independent
-      duck callbacks at 1–8,192 frames; it does not prove overload/underrun safety.
-- [ ] Finish generated-IR asynchronous replacement and preparation-failure
-      behavior; broaden live delay-automation PCM comparisons.
+      FIFO and ordinary synth/sample gain ramps now retain bounded retiring
+      graphs until incoming target + 250 ms. Check rest/missing-source eviction,
+      cut-group interactions, short/coincident ADSR endpoints, per-voice effect
+      tails after source stop and the remaining native source types against
+      actual web PCM. The 128 retiring-graph bound
+      reports overflow and replaces the graph with the earliest stop deadline.
+      Prepared saturation checks preserve shared delay tails and independent
+      duck callbacks across 1–8,192-frame bursts; they do not prove producer
+      scheduling or underrun safety under preparation load.
+- [ ] Broaden live shared-effect comparisons: delay automation PCM, overlapping
+      generated-IR completion races and source-side effects of failed generation.
+      Generated rooms now use a bounded worker queue, retain the old convolver
+      until completion and preserve it on preparation failure. Deterministic
+      pending/failure/tail/overflow checks and web buffer/parameter-guard checks
+      cover this handoff; the single worker completes generated requests FIFO.
 - [ ] Finish remaining invalid/non-finite duck coercions, JavaScript numeric
       string forms and onset addition semantics, including cancellation after
       the callback has reanchored its gain.

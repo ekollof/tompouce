@@ -51,7 +51,7 @@ const artifacts=process.argv[2]??'/tmp/tompouce-voice-pool-reference';
 const browser=await BrowserClient.create();
 try {
   await browser.page('https://strudel.cc/');
-  await browser.until('typeof superdough==="function"',20000);
+  await browser.until('typeof superdough==="function" && typeof getSound==="function" && getSound("sine")?.onTrigger',20000);
   const result=await browser.evaluate('('+capture.toString()+')()');
   const expected=[{id:0,time:.2-128*.0001+.25},
     {id:1,time:.2-129*.0001+.25},{id:2,time:.55},{id:3,time:.75},

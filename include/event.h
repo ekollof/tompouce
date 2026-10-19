@@ -46,6 +46,7 @@ typedef struct {
     int csound_only;     /* scheduled by native renderer; retain UI note history */
     int osc_only;
     int control_only;   /* shared controls with no source/MIDI/history event */
+    int eviction_only;  /* failed/rest source still removes a full pool's oldest entry */
     int audio_prepared; /* consumer reserved a timestamped voice before onset */
     int delay_prepared; /* generator accepted shared AudioParam automation */
     int room_prepared;  /* shared convolver selected during source preparation */

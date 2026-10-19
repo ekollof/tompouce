@@ -644,6 +644,11 @@ static void voice_onset(Voice *v) {
             duck_atk[o]=fmax(0,v->onset_duck_attack); duck_t[o]=0;
         }
     }
+}
+
+/* Web sample cut schedules gain automation when the source is prepared.
+   Its future unity set also overrides an earlier pool-retirement ramp. */
+static void prepare_source_cut(Voice *v) {
     double cut=v->dsp.control.enabled && v->sampled_source?v->dsp.control.p[DSP_CUT]:0;
     if (cut>0) for (int i=0;i<VOICE_SLOTS;i++) {
         Voice *old=&voices[i];
@@ -721,6 +726,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->released = 0;
     v->vatt = ev->att;
     v->vrel = ev->rel;
+    v->graph_end=v->note_off_time+fmax(0,v->vrel);
     v->vdec = ev->dec;
     v->vsus = ev->sus;
     v->pw = ev->pw;
@@ -1076,7 +1082,7 @@ static VoiceResources retire_voice_locked(int chosen, double incoming_time) {
         voice->retire_anchor=voice->start_time; voice->retire_level=0;
         for (unsigned i=0;i<sizeof(times)/sizeof(times[0]);i++) {
             double at=voice->start_time+times[i];
-            if (at<voice->retire_end && at>=voice->retire_anchor) {
+            if (at<=voice->retire_end && at>=voice->retire_anchor) {
                 voice->retire_anchor=at;
                 voice->retire_level=dsp_envelope(times[i],gate,attack,decay,sustain,release);
             }
@@ -1092,9 +1098,9 @@ static double retiring_envelope(const Voice *voice, double envelope) {
 }
 
 static double source_cut_gain(const Voice *voice) {
-    double cut=voice->cut_pending?fmax(0,1-(audio_time-voice->cut_time)/.01):1;
+    double cut=voice->cut_pending?fmax(0,fmin(1,1-(audio_time-voice->cut_time)/.01)):1;
     if (!voice->retiring) return cut;
-    if (voice->cut_pending && voice->cut_time<voice->retire_end) {
+    if (voice->cut_pending && voice->cut_time<=voice->retire_end) {
         if (voice->cut_time+.01<voice->retire_end) return cut;
         if (audio_time<voice->cut_time) return 1;
         return fmax(0,(voice->retire_end-audio_time)/(voice->retire_end-voice->cut_time));
@@ -1102,9 +1108,33 @@ static double source_cut_gain(const Voice *voice) {
     return retiring_envelope(voice,1);
 }
 
+/* A rest or failed source removes an entry without inserting a replacement. */
+static int oldest_full_pool_voice(void) {
+    int chosen=0;
+    for (int i=0;i<MAX_VOICES;i++) {
+        if (!voices[i].active) return -1;
+        if (voices[i].onset_serial<voices[chosen].onset_serial) chosen=i;
+    }
+    return chosen;
+}
+
 void audio_trigger_event(AudioEvent *ev) {
     if (ev->csound_only || ev->osc_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
+    if (ev->eviction_only) {
+        VoiceResources previous={0};
+        pthread_mutex_lock(&voice_lock);
+        if (silent_clock) audio_time=audio_time_now();
+        int chosen=oldest_full_pool_voice();
+        if (chosen>=0) {
+            previous=retire_voice_locked(chosen,ev->time-(ev->stretch>0?.04:0));
+            memset(&voices[chosen],0,sizeof(voices[chosen]));
+        }
+        pthread_mutex_unlock(&voice_lock);
+        native_synth_state_free(previous.left); native_synth_state_free(previous.right);
+        stretch_release(previous.stretch);
+        return;
+    }
     if (!ev->control_only) audio_register_orbit(ev->orbit);
     if (ev->dsp.enabled && ev->duck_mask) for (int o=0;o<N_ORBITS;o++) if (ev->duck_mask&(1u<<o)) {
         if (!audio_prepare_duck_timer(o,ev->time)) return;
@@ -1158,6 +1188,7 @@ void audio_trigger_event(AudioEvent *ev) {
     double source_time=ev->time-(ev->stretch>0?.04:0);
     VoiceResources previous=voices[chosen].active?retire_voice_locked(chosen,source_time):voice_resources(&voices[chosen]);
     trigger_voice(&voices[chosen], ev);
+    prepare_source_cut(&voices[chosen]);
     voices[chosen].native_state=prepared;
     voices[chosen].native_right=prepared_right;
     dbg_push(&voices[chosen], chosen);
@@ -1219,6 +1250,13 @@ static void mix_supersaw(Voice *v, double amplitude, VoiceMix *mix) {
     double left = dsp_process(&v->dsp,v->dsp.supersaw_l*amplitude,age,gate);
     double right = dsp_process(&v->dsp_right,v->dsp.supersaw_r*amplitude,age,gate);
     route_voice(v,left,right,mix);
+}
+
+static int voice_has_effect_tail(const Voice *v) {
+    const double *p=v->dsp.control.p;
+    return v->dsp.control.enabled && (native_synth_effect(v->native_program) ||
+        p[DSP_LPF]>0 || p[DSP_HPF]>0 || p[DSP_BPF]>0 || p[DSP_VOWEL]>=0 ||
+        p[DSP_PHASER]>0 || p[DSP_CHORUS]>0 || p[DSP_COARSE]>1);
 }
 
 static void native_reverb(int orbit, VoiceMix *mix) {
@@ -1360,6 +1398,17 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     continue;
                 }
                 if (V->retiring && audio_time>=V->retire_end-1e-10) {
+                    /* stop() silences the source, while its downstream nodes
+                       remain connected until the original graph cleanup. */
+                    if (voice_has_effect_tail(V) && audio_time<V->graph_end) {
+                        double gate=V->gate_end-V->start_time;
+                        double left=dsp_process(&V->dsp,0,V->age,gate),right=left;
+                        if(V->smp_channels==2 || V->inst==INST_SUPERSAW || V->inst==INST_NATIVE)
+                            right=dsp_process(&V->dsp_right,0,V->age,gate);
+                        route_voice(V,left,right,&mixes[V->orbit]);
+                        V->age+=dt;
+                        continue;
+                    }
                     V->active=0;
                     if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
                     continue;

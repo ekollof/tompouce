@@ -40,10 +40,13 @@ a separate measured design; it is not part of the initial preparation pool.
 - [ ] Extend web voice-pool eviction coverage and verify backend bursts under
       scheduling/preparation load without dropping accepted onsets or controls.
       FIFO and ordinary synth/sample gain ramps now retain bounded retiring
-      graphs until incoming target + 250 ms. Check rest/missing-source eviction,
-      cut-group interactions, short/coincident ADSR endpoints, per-voice effect
-      tails after source stop and the remaining native source types against
-      actual web PCM. The 128 retiring-graph bound
+      graphs through source stop at incoming target + 250 ms, retaining downstream
+      effect tails until original cleanup. Explicit rests and failed sources now
+      remove a full pool's oldest entry without reserving a replacement. A 54-case
+      web/native gate covers short/coincident ADSR, same-group sample cuts and
+      selected filter ring-out. Broaden cut ordering, other per-voice effect
+      graphs and the remaining native source types against actual web PCM.
+      The 128 retiring-graph bound
       reports overflow and replaces the graph with the earliest stop deadline.
       Prepared saturation checks preserve shared delay tails and independent
       duck callbacks across 1–8,192-frame bursts; they do not prove producer

@@ -432,6 +432,14 @@ static int schedule_local_ducks(const cJSON *value, double time, unsigned genera
     return 1;
 }
 
+static void schedule_source_eviction(double time, double stretch, unsigned generation) {
+    AudioEvent ev={.time=time,.stretch=stretch,.generation=generation,
+        .control_only=1,.eviction_only=1,.smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+    pthread_mutex_lock(&tracks_lock);
+    if (generation==event_queue_generation()) event_queue_push(&ev);
+    pthread_mutex_unlock(&tracks_lock);
+}
+
 static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
                           double seconds, unsigned generation) {
     if (!isfinite(time) || !isfinite(seconds) || seconds<=0) return;
@@ -454,7 +462,11 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
         int csound=cJSON_HasObjectItem(value,"csound");
         if (!csound) {
             if (!schedule_local_ducks(value,time,generation)) return;
-            if (!strcmp(text_control(value,"s"),"~")) return;
+            const char *sound=text_control(value,"s");
+            if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) {
+                schedule_source_eviction(time,cJSON_HasObjectItem(value,"stretch")?1:0,generation);
+                return;
+            }
         }
         const cJSON *field;
         cJSON_ArrayForEach(field,value) {
@@ -487,6 +499,7 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
             return;
         }
         if (!resolve_sample(&ev,value)) {
+            schedule_source_eviction(ev.time,ev.stretch,generation);
             native_synth_release(ev.native_synth);
             stretch_release(ev.stretch_buffer);
             if (cJSON_HasObjectItem(value,"ir"))

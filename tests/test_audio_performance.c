@@ -217,8 +217,125 @@ static void test_retirement_capacity(void) {
     memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
 }
 
-int main(void) {
+static void test_empty_source_eviction(void) {
+    memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+    voice_onset_serial=0; retirement_overflow=0;
+    AudioEvent note={.time=.1,.duration=1,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
+        .gain=0,.att=.02,.dec=.03,.sus=.6,.rel=.1,.midi_chan=-1,.midi_note=-1,
+        .delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&note.dsp); note.dsp.enabled=1;
+    for(int i=0;i<MAX_VOICES;i++) audio_trigger_event(&note);
+    AudioEvent absent={.time=.3,.control_only=1,.eviction_only=1,.stretch=1};
+    audio_trigger_event(&absent);
+    assert(audio_active_voices()==MAX_VOICES-1 && !voices[0].active);
+    assert(voices[MAX_VOICES].active && voices[MAX_VOICES].onset_serial==1);
+    assert(fabs(voices[MAX_VOICES].retire_end-.51)<1e-12);
+    audio_trigger_event(&absent); /* The vacated Map entry stays free. */
+    assert(!voices[MAX_VOICES+1].active && audio_active_voices()==MAX_VOICES-1);
+    audio_trigger_event(&note); assert(voices[0].onset_serial==MAX_VOICES+1);
+    absent.stretch=0; audio_trigger_event(&absent);
+    assert(!voices[1].active && voices[MAX_VOICES+1].onset_serial==2);
+    assert(fabs(voices[MAX_VOICES+1].retire_end-.55)<1e-12);
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
+static void test_coincident_retirement_endpoint(void) {
+    memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+    AudioEvent note={.time=.1,.duration=.7,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
+        .gain=.1,.att=.4,.dec=.3,.sus=.2,.rel=.4,.midi_chan=-1,.midi_note=-1,
+        .delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&note.dsp); note.dsp.enabled=1;
+    for(int i=0;i<MAX_VOICES;i++) {
+        audio_trigger_event(&note); voices[i].freq=0; voices[i].phase=M_PI/2; note.gain=0;
+    }
+    static float pcm[44100*2]; render_interval(pcm,8960,128);
+    note.time=.25; audio_trigger_event(&note);
+    render_interval(pcm+8960*2,44100-8960,128);
+    for(int i=8960;i<44100;i++) {
+        double expected=i<22050?.03*(i/SR-.1)/.4:0;
+        assert(fabs(pcm[i*2]-expected)<1e-7 && fabs(pcm[i*2+1]-expected)<1e-7);
+    }
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
+static void render_retiring_filter_tail(int sample, unsigned long block, float *pcm) {
+    memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+    AudioEvent note={.time=.1,.duration=.7,.inst=INST_SINE,.freq=midi_to_freq(60),.smp=sample,.wt=-1,
+        .gain=.1,.smp_speed=1,.smp_gate=1,.att=.001,.dec=.001,.sus=1,.rel=.1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&note.dsp); note.dsp.enabled=1;
+    note.dsp.p[DSP_LPF]=100; note.dsp.p[DSP_LPQ]=10;
+    for(int i=0;i<MAX_VOICES;i++) {audio_trigger_event(&note);note.gain=0;}
+    render_interval(pcm,8960,block); note.time=.3; audio_trigger_event(&note);
+    render_interval(pcm+8960*2,26460-8960,block);
+    assert(voices[MAX_VOICES].active && audio_time>voices[MAX_VOICES].retire_end);
+    render_interval(pcm+26460*2,44100-26460,block);
+    assert(!voices[MAX_VOICES].active);
+    double energy=0;
+    for(int frame=24255;frame<26460;frame++) energy+=pcm[frame*2]*pcm[frame*2];
+    assert(energy>1e-12);
+    for(int frame=39691;frame<44100;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
+}
+
+static void test_retiring_filter_tail(void) {
+    static float reference[44100*2],actual[44100*2];
+    int sample=constant_sample();
+    render_retiring_filter_tail(sample,1,reference);
+    render_retiring_filter_tail(sample,8192,actual);
+    assert(!memcmp(reference,actual,sizeof(reference)));
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
+static void voice_reference(void) {
+    size_t capacity=1024*1024; char *input=malloc(capacity); assert(input);
+    size_t length=fread(input,1,capacity-1,stdin);
+    assert(!ferror(stdin) && feof(stdin)); input[length]=0;
+    cJSON *tests=cJSON_Parse(input),*results=cJSON_CreateArray(); assert(tests && results);
+    int sample=constant_sample();
+    const cJSON *test;
+    cJSON_ArrayForEach(test,tests) {
+        memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+        voice_onset_serial=0; pending_duck_count=pending_delay_count=0;
+        audio_set_reference_mode(1); audio_toggle_play(1);
+        const cJSON *value=cJSON_GetObjectItemCaseSensitive(test,"value");
+        int synth=!strcmp(cJSON_GetObjectItemCaseSensitive(test,"sound")->valuestring,"sine");
+        AudioEvent note={.time=.1,.duration=cJSON_GetObjectItemCaseSensitive(test,"duration")->valuedouble,
+            .inst=INST_SINE,.freq=synth?0:midi_to_freq(60),.smp=synth?-1:sample,.wt=-1,
+            .gain=.1,.smp_speed=1,.smp_gate=1,.midi_chan=-1,.midi_note=-1,
+            .delay_prepared=1,.room_prepared=1};
+        const char *names[]={"attack","decay","sustain","release"};
+        const double defaults[]={.001,.05,.6,.01}; double envelope[4];
+        dsp_read_adsr(value,names,defaults,envelope);
+        note.att=envelope[0]; note.dec=envelope[1]; note.sus=envelope[2]; note.rel=envelope[3];
+        dsp_params_read(&note.dsp,value);
+        const cJSON *cut=cJSON_GetObjectItemCaseSensitive(test,"cut");
+        for(int i=0;i<MAX_VOICES;i++) {
+            audio_trigger_event(&note); voices[i].phase=M_PI/2;
+            if(synth) voices[i].freq=0;
+            note.gain=0;
+        }
+        if(cJSON_IsTrue(cut)) {voices[0].dsp.control.p[DSP_CUT]=1;note.dsp.p[DSP_CUT]=1;}
+        static float pcm[44100*2];
+        render_interval(pcm,8960,128);
+        note.time=cJSON_GetObjectItemCaseSensitive(test,"incoming")->valuedouble;
+        audio_trigger_event(&note);
+        render_interval(pcm+8960*2,44100-8960,128);
+        cJSON *points=cJSON_CreateArray(); assert(points);
+        const cJSON *point;
+        cJSON_ArrayForEach(point,cJSON_GetObjectItemCaseSensitive(test,"points")) {
+            int frame=cJSON_GetObjectItemCaseSensitive(point,"frame")->valueint;
+            assert(frame>=0 && frame<44100);
+            cJSON_AddItemToArray(points,cJSON_CreateNumber(pcm[frame*2]/(synth?.03:.0125)));
+        }
+        cJSON_AddItemToArray(results,points);
+    }
+    char *json=cJSON_PrintUnformatted(results); assert(json); puts(json); free(json);
+    cJSON_Delete(tests); cJSON_Delete(results); free(input);
+}
+
+int main(int argc, char **argv) {
     log_console_stderr(0);
+    if(argc>1 && !strcmp(argv[1],"--voice-reference")) {voice_reference();return 0;}
     const double rates[]={.75,1,2,-.75,-1,-2};
     const unsigned long blocks[]={1,64,128,256,4096,8192};
     static float reference[PERFORMANCE_FRAMES*2],actual[PERFORMANCE_FRAMES*2];
@@ -241,6 +358,9 @@ int main(void) {
     voice_pool_fifo();
     test_retirement_pcm();
     test_retirement_capacity();
+    test_empty_source_eviction();
+    test_coincident_retirement_endpoint();
+    test_retiring_filter_tail();
     puts("Fractional/reverse PCM, FIFO retirement fades, shared delay tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
     return 0;
 }

@@ -54,7 +54,7 @@ for (const sound of ['sine','piano']) {
   const browser=await BrowserClient.create();
   try {
     await browser.page('https://strudel.cc/');
-    await browser.until('typeof superdough==="function"',20000);
+    await browser.until(`typeof superdough==="function" && typeof getSound==="function" && getSound(${JSON.stringify(sound)})?.onTrigger`,20000);
     const result=await browser.evaluate('('+capture.toString()+')('+JSON.stringify(sound)+')');
     assert(result.points.slice(-2).every(point=>Math.abs(point.gain)<1e-6),'evicted source must stop at target + .25');
     for (const point of result.points) {

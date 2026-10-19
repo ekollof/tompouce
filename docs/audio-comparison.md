@@ -159,10 +159,25 @@ phase, DSP state or shared sends. The callback harness verifies expected sine
 and sample PCM, shared delay output after retirement, surviving duck callbacks,
 bit-identical 1/64/4,096/8,192-frame rendering, and bounded overflow diagnostics.
 Native-state ownership is separately checked through retirement and cleanup.
-Rest/missing-source eviction, cut interactions, short/coincident envelope
-endpoints, per-voice effect tails after source stop and the remaining source
-types need broader independent comparisons;
-this does not establish complete pool or scheduling-overload parity.
+Explicit rest and missing-source attempts now queue an eviction-only operation:
+at capacity they remove the oldest source, retain its fading graph, and leave a
+free current-source slot. They produce no MIDI or note-history entry and do not
+prepare shared effects. A rejected duck timer still aborts before this operation.
+The scheduler harness verifies the rest/silent/missing/silent/stretch sequence.
+
+`cmake --build build --target test-voice-reference-web` also runs
+`scripts/voice-edge-reference-qa.mjs`: 48 web/native short-envelope, coincident
+endpoint and sample-cut cases, plus six selected low-pass ring-out cases.
+An existing automation endpoint at the exact stealing deadline remains audible
+until source stop. Sample cuts schedule their future unity set and 10 ms ramp
+at preparation time, overriding an intervening stealing fade. Filter cases gate
+post-stop PCM only; DC is injected after the sampled instrument's own ADSR, so
+they do not establish full filtered attack/release waveform parity.
+Downstream filters and native effect graphs now process silence after source
+stop until the original cleanup deadline, retaining state and shared sends.
+Offline regressions check filter ring-out across 1/8,192-frame blocks and native
+effect-state lifetime. Broader cut ordering, other effect graphs, remaining
+source types and scheduling-overload parity still need independent checks.
 
 Generated room preparation runs outside the scheduler and callback. The
 `room` CTest holds the worker at a deterministic barrier while checking the

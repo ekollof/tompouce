@@ -39,6 +39,14 @@ add_custom_target(test-csound-reference-web
     DEPENDS test_csound WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(test-voice-reference-web
+    COMMAND node scripts/voice-pool-reference-qa.mjs
+    COMMAND node scripts/voice-eviction-reference-qa.mjs
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_VOICE_BINARY=$<TARGET_FILE:test_audio_performance>"
+        node scripts/voice-edge-reference-qa.mjs
+    DEPENDS test_audio_performance WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_custom_target(test-duck-reference-web
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
         node scripts/duck-timing-reference-qa.mjs

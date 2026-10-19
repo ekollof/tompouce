@@ -373,6 +373,7 @@ static void test_silent_sample_cut(void) {
     audio_trigger_event(&held);
     silent.time=1024/SR; audio_trigger_event(&silent);
     assert(voices[0].sampled_source && voices[1].sampled_source && voices[1].amp==0);
+    assert(voices[0].cut_pending && voices[0].cut_time==silent.time && audio_time==0);
     float output[8192]; pa_callback(NULL,output,2048,NULL,0,NULL);
     for (int i=0;i<2048;i++) {
         double expected=.1*fmin(1,i/(SR*.001))*(i<1024?1:fmax(0,1-(i-1024)/(SR*.01)));
@@ -453,8 +454,9 @@ static void test_duck_control_lifetime(void) {
         "{begin:0,end:.1,value:{s:'~',duckorbit:9,duckdepth:.25}},"
         "{begin:.025,end:.1,value:{s:'__missing_duck_qa__',duckorbit:9,duckdepth:1}}]); note(60)"));
     assert(js_audio_schedule_arc(tracks[0].javascript,.04,2,0,.05,event_queue_generation()));
-    assert(event_queue_depth()==2 && qhead->ev.control_only && qhead->next->ev.control_only);
-    assert(prepare_queued_audio(0) && prepare_queued_audio(0) && !prepare_queued_audio(0));
+    assert(event_queue_depth()==4 && qhead->ev.control_only && qhead->next->ev.eviction_only);
+    for(int i=0;i<4;i++) assert(prepare_queued_audio(0));
+    assert(!prepare_queued_audio(0));
     assert(pending_duck_count==2);
     event_queue_clear(); /* Accepted timer callbacks survive producer invalidation. */
     pa_callback(NULL,output,4096,NULL,0,NULL);
@@ -462,6 +464,31 @@ static void test_duck_control_lifetime(void) {
     for (int i=0;i<MAX_VOICES;i++) assert(!voices[i].active);
     web_duck[9].enabled=0; duck_depth[9]=0;
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
+    audio_toggle_play(0);
+}
+
+static void test_source_eviction_schedule(void) {
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    assert(track_load_from_code("globalThis.__query=()=>JSON.stringify(["
+        "...Array.from({length:128},(_,i)=>({begin:.1,end:1,value:{s:'sine',freq:100+i,gain:0}})),"
+        "{begin:.2,end:1,value:{s:'~'}},"
+        "{begin:.3,end:1,value:{s:'sine',freq:1000,gain:0}},"
+        "{begin:.4,end:1,value:{s:'__missing_eviction_qa__'}},"
+        "{begin:.5,end:1,value:{s:'sine',freq:1001,gain:0}},"
+        "{begin:.6,end:1,value:{s:'sine',freq:1002,gain:0,stretch:1}}]); note(60)"));
+    assert(js_audio_schedule_arc(tracks[0].javascript,1,1,0,1,event_queue_generation()));
+    assert(event_queue_depth()==133);
+    for(QNode *node=qhead;node;node=node->next) if(node->ev.eviction_only) {
+        assert(node->ev.control_only && node->ev.midi_chan==-1 && node->ev.midi_note==-1);
+    }
+    while(prepare_queued_audio(2)) {}
+    assert(audio_active_voices()==128);
+    assert(voices[MAX_VOICES].freq==100 && fabs(voices[MAX_VOICES].retire_end-1.45)<1e-12);
+    assert(voices[MAX_VOICES+1].freq==101 && fabs(voices[MAX_VOICES+1].retire_end-1.65)<1e-12);
+    assert(voices[MAX_VOICES+2].freq==102 && fabs(voices[MAX_VOICES+2].retire_end-1.81)<1e-12);
+    assert(!voices[MAX_VOICES+3].active);
+    event_queue_clear(); memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
     audio_toggle_play(0);
 }
 
@@ -474,15 +501,16 @@ static void test_duck_target_existence(void) {
         "{begin:.2,end:.3,value:{s:'~',orbit:1,duckorbit:9}},"
         "{begin:.3,end:.4,value:{s:'__missing_duck_qa__',orbit:7,duckorbit:7}}]); note(60)"));
     assert(js_audio_schedule_arc(tracks[0].javascript,1,1,0,.5,event_queue_generation()));
-    assert(event_queue_depth()==3 && qhead && !qhead->ev.control_only);
+    assert(event_queue_depth()==6 && qhead && !qhead->ev.control_only);
     assert(qhead->ev.duck_mask==0); /* Later creation cannot revive a skipped duck. */
-    assert(qhead->next->ev.control_only && qhead->next->ev.duck_mask==(1u<<9));
-    assert(qhead->next->next->ev.control_only && qhead->next->next->ev.duck_mask==(1u<<7));
+    assert(qhead->next->ev.eviction_only);
+    assert(qhead->next->next->ev.duck_mask==(1u<<9));
+    assert(qhead->next->next->next->next->ev.duck_mask==(1u<<7));
     assert(atomic_load(&created_orbits)==((1u<<1)|(1u<<7)|(1u<<9)));
     event_queue_clear(); audio_toggle_play(0);
     assert(track_load_from_code("s('~').duckorbit(9)")); audio_toggle_play(1);
     js_audio_schedule(tracks[0].javascript,2,0,event_queue_generation());
-    assert(event_queue_depth()==1 && qhead->ev.control_only && qhead->ev.duck_mask==(1u<<9));
+    assert(event_queue_depth()==2 && qhead->ev.control_only && qhead->ev.duck_mask==(1u<<9));
     event_queue_clear(); atomic_fetch_or(&created_orbits,previous);
 }
 
@@ -525,9 +553,10 @@ static void test_duck_timer_failure(void) {
         "{begin:0,end:.1,value:{s:'sine',orbit:7,duckorbit:[9,9],room:1}},"
         "{begin:.015,end:.1,value:{s:'~',orbit:7,duckorbit:[9,9]}}]); note(60)"));
     assert(js_audio_schedule_arc(tracks[0].javascript,.005,1,0,.1,event_queue_generation()));
-    assert(duck_error_count==1 && duck_errors[0].timer && event_queue_depth()==2);
+    assert(duck_error_count==1 && duck_errors[0].timer && event_queue_depth()==3);
     for(QNode *node=qhead;node;node=node->next) assert(node->ev.control_only && fabs(node->ev.time-.02)<1e-12);
     assert(prepare_queued_audio(0) && prepare_queued_audio(0) && pending_duck_count==3);
+    assert(prepare_queued_audio(0) && !prepare_queued_audio(0));
     audio_report_errors(); audio_time=.2; audio_trigger_event(&rejected);
     assert(duck_error_count==1 && duck_errors[0].timer && duck_errors[0].time==.2 && pending_duck_count==3);
     audio_report_errors(); rejected.orbit=6;
@@ -558,7 +587,7 @@ static void test_ordered_duck_targets(void) {
     audio_register_orbit(2);
     assert(track_load_from_code("s('~').duckorbit([2,1,2]).duckonset([.02,.04,.06]).duckattack([.1,.2,.3]).duckdepth([.25,.5,1])"));
     js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation());
-    assert(event_queue_depth()==3);
+    assert(event_queue_depth()==4);
     const int targets[]={2,1,2}; const double onset[]={.02,.04,.06};
     const double attack[]={.1,.2,.3},depth[]={.25,.5,1};
     QNode *node=qhead;
@@ -853,7 +882,7 @@ static void test_duck_output_routing(void) {
             if (i==0) assert(qhead->ev.osc_only && !qhead->ev.control_only);
         } else {
             assert(atomic_load(&created_orbits)==((1u<<1)|(1u<<7)));
-            assert(event_queue_depth()==1 && qhead->ev.control_only && qhead->ev.duck_mask==(1u<<1));
+            assert(event_queue_depth()==2 && qhead->ev.control_only && qhead->ev.duck_mask==(1u<<1));
         }
         event_queue_clear(); javascript_free(program);
     }
@@ -1227,7 +1256,10 @@ static void duck_timer_reference(void) {
         assert(js_audio_schedule_arc(program,cJSON_GetObjectItemCaseSensitive(test,"time")->valuedouble,
             1,0,.1,event_queue_generation()));
         int notes=0,controls=0;
-        for(QNode *node=qhead;node;node=node->next) {if(node->ev.control_only)controls++;else notes++;}
+        for(QNode *node=qhead;node;node=node->next) {
+            if(node->ev.eviction_only) continue;
+            if(node->ev.control_only)controls++;else notes++;
+        }
         cJSON *result=cJSON_CreateObject(); assert(result);
         cJSON_AddNumberToObject(result,"sources",notes); cJSON_AddNumberToObject(result,"controls",controls);
         cJSON_AddNumberToObject(result,"errors",duck_error_count);
@@ -1395,6 +1427,7 @@ int main(int argc, char **argv) {
     test_silent_sample_cut();
     test_duck_control_lifetime();
     test_duck_timer_failure();
+    test_source_eviction_schedule();
     test_duck_target_existence();
     test_duck_target_coercion();
     test_ordered_duck_targets();

@@ -59,6 +59,7 @@ typedef struct Voice {
     double release_start_level;
     double release_time;
     double gate_end;
+    double graph_end;  /* original cleanup deadline, independent of source stop */
     // wavetable state (valid when inst == INST_WT)
     int wt;
     double wtpos; // table position in [0, WT_SIZE)

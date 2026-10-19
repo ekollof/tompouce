@@ -61,6 +61,11 @@ static void test_retiring_resources(void) {
         assert(voices[MAX_VOICES].retiring && !voices[0].native_state);
         float output[1024];
         for (int i=0;i<32;i++) pa_callback(NULL,output,512,NULL,0,NULL);
+        if(native_synth_effect(event.native_synth)) {
+            assert(voices[MAX_VOICES].active && voices[MAX_VOICES].native_state==left);
+            while(audio_time<voices[MAX_VOICES].gate_end+voices[MAX_VOICES].vrel+.02)
+                pa_callback(NULL,output,512,NULL,0,NULL);
+        }
         assert(!voices[MAX_VOICES].active && voices[MAX_VOICES].native_state==left);
         clear_voices(); /* The owning state references are freed exactly once, off callback. */
     }

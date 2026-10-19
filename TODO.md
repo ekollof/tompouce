@@ -242,6 +242,27 @@ the retained equality guards suppress a repeat request. The full matrix passes
       names. This only reads controls; doing it earlier would churn the
       live-control captures used above.
 
+## Optional: full REPL parity
+
+Not required for the ordered work above and never gate-blocking. If pursued,
+close each gap with an independent web comparison and its own threshold;
+a hosted-player drift is evidence to investigate, never a reason to loosen
+a threshold. Steps 6–11 already scope the required slices; the remainder is:
+
+- Live-change fractional onsets beyond steady playback (step 6 delta).
+- Voice-pool breadth (cut ordering, remaining effect graphs and source
+  types) and backend bursts under combined scheduling and preparation
+  load (step 7 remainder).
+- Duck coercion breadth and live timer-jitter/overload parity (step 8).
+- Csound loader failure side effects, URL promise caching and worker
+  diagnostics (step 9).
+- Dominant MIDI output and combined external-output routing (step 10).
+- Controller input and expression mapping (step 11).
+
+Standing non-goals unless explicitly re-scoped: full-song waveform parity,
+complete decoder/synthesis equivalence, remote-download deadline behavior,
+Hydra/browser input-device APIs and arbitrary npm module resolution.
+
 The maintained audio matrix has 38 passing gates, including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
 fractional sample-onset cases and four shared delay-automation cases. Seeded

@@ -486,6 +486,59 @@ static void test_duck_target_existence(void) {
     event_queue_clear(); atomic_fetch_or(&created_orbits,previous);
 }
 
+static void test_duck_timer_failure(void) {
+    event_queue_clear(); audio_wait_room_preparation(); audio_report_errors();
+    audio_time=0; audio_toggle_play(1); pending_duck_count=0;
+    unsigned previous=atomic_exchange(&created_orbits,(1u<<1)|(1u<<9));
+    for(int i=0;i<VOICE_SLOTS;i++) {
+        native_synth_state_free(voices[i].native_state); native_synth_state_free(voices[i].native_right);
+        stretch_release(voices[i].stretch_buffer);
+    }
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    AudioEvent held={.time=.5,.duration=1,.inst=INST_SINE,.freq=440,.smp=-1,
+        .midi_chan=-1,.midi_note=-1,.orbit=1,.room_prepared=1,.delay_prepared=1};
+    dsp_params_init(&held.dsp); held.dsp.enabled=1;
+    for(int i=0;i<MAX_VOICES;i++) audio_trigger_event(&held);
+    unsigned long long serial=voices[0].onset_serial,revision=atomic_load(&ir_revision[7]);
+    double delay=orbit_dt[7],feedback=orbit_fb[7];
+    int had_room=room_created[7],had_delay=web_delay_created[7];
+    web_duck[9].enabled=web_duck[9].hold=1; web_duck[9].initial=web_duck[9].target=.8;
+    AudioEvent accepted=held; accepted.control_only=1; accepted.time=.04;
+    accepted.duck_mask=1u<<9; accepted.duck_depth=.25; accepted.duck_attack=.1;
+    audio_trigger_event(&accepted); assert(pending_duck_count==1);
+    AudioEvent rejected=accepted; rejected.control_only=0; rejected.time=.005; rejected.orbit=7;
+    rejected.room_prepared=rejected.delay_prepared=0; rejected.delay_send=1;
+    rejected.delay_time=.123; rejected.delay_fb=.5; rejected.dsp.p[DSP_ROOM]=1;
+    rejected.dsp.p[DSP_SIZE]=.05; rejected.room_rebuild=rejected.room_params_valid=1; rejected.room_sample=-1;
+    audio_trigger_event(&rejected);
+    assert(duck_error_count==1 && duck_errors[0].timer && duck_errors[0].orbit==9 && duck_errors[0].time==0);
+    assert(pending_duck_count==1 && orbit_duck_gain(9)==.8 && (atomic_load(&created_orbits)&(1u<<7)));
+    assert(voices[0].onset_serial==serial);
+    for(int i=0;i<MAX_VOICES;i++) assert(voices[i].active && voices[i].start_time==.5);
+    for(int i=MAX_VOICES;i<VOICE_SLOTS;i++) assert(!voices[i].active);
+    assert(atomic_load(&ir_revision[7])==revision && room_created[7]==had_room && web_delay_created[7]==had_delay);
+    assert(orbit_dt[7]==delay && orbit_fb[7]==feedback);
+    audio_report_errors();
+    /* Failure aborts this hap, while later haps and repeated valid targets
+       still commit their independent callbacks. */
+    assert(track_load_from_code("globalThis.__query=()=>JSON.stringify(["
+        "{begin:0,end:.1,value:{s:'sine',orbit:7,duckorbit:[9,9],room:1}},"
+        "{begin:.015,end:.1,value:{s:'~',orbit:7,duckorbit:[9,9]}}]); note(60)"));
+    assert(js_audio_schedule_arc(tracks[0].javascript,.005,1,0,.1,event_queue_generation()));
+    assert(duck_error_count==1 && duck_errors[0].timer && event_queue_depth()==2);
+    for(QNode *node=qhead;node;node=node->next) assert(node->ev.control_only && fabs(node->ev.time-.02)<1e-12);
+    assert(prepare_queued_audio(0) && prepare_queued_audio(0) && pending_duck_count==3);
+    audio_report_errors(); audio_time=.2; audio_trigger_event(&rejected);
+    assert(duck_error_count==1 && duck_errors[0].timer && duck_errors[0].time==.2 && pending_duck_count==3);
+    audio_report_errors(); rejected.orbit=6;
+    rejected.osc_only=1; audio_trigger_event(&rejected);
+    rejected.osc_only=0; rejected.csound_only=1; audio_trigger_event(&rejected);
+    assert(!duck_error_count && !(atomic_load(&created_orbits)&(1u<<6)));
+    event_queue_clear(); pending_duck_count=0; memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    web_duck[9].enabled=0; duck_depth[9]=0; atomic_store(&created_orbits,previous);
+    audio_toggle_play(0); assert(track_load_from_code("note(60).gain(0)"));
+}
+
 static void test_duck_target_coercion(void) {
     const char *targets[]={"1","\"1\"","\"01\"","\"1:2\"","[1,2]",
         "[[1],[2]]","[[1,2]]","[null,1]","[\"2\",\"1\"]"};
@@ -1133,6 +1186,65 @@ static void duck_reference(void) {
     cJSON_Delete(tests); cJSON_Delete(results);
 }
 
+static void duck_timer_reference(void) {
+    char input[65536]; size_t length=fread(input,1,sizeof(input)-1,stdin);
+    assert(!ferror(stdin) && feof(stdin)); input[length]=0;
+    cJSON *tests=cJSON_Parse(input),*results=cJSON_CreateArray(); assert(tests && results);
+    const cJSON *test;
+    cJSON_ArrayForEach(test,tests) {
+        event_queue_clear(); audio_wait_room_preparation(); audio_time=0;
+        atomic_store(&created_orbits,(1u<<1)|(1u<<9));
+        web_delay_created[7]=room_created[7]=0; pending_delay_count=0;
+        duck_error_count=duck_error_overflow=0; pending_duck_count=0;
+        web_duck[9].enabled=web_duck[9].hold=1;
+        web_duck[9].initial=web_duck[9].target=.8;
+        cJSON *hap=cJSON_CreateObject(),*haps=cJSON_CreateArray(),*value=cJSON_CreateObject();
+        assert(hap && haps && value);
+        cJSON_AddNumberToObject(hap,"begin",0); cJSON_AddNumberToObject(hap,"end",.1);
+        cJSON_AddItemToObject(hap,"value",value); cJSON_AddItemToArray(haps,hap);
+        cJSON_AddStringToObject(value,"s",cJSON_GetObjectItemCaseSensitive(test,"sound")->valuestring);
+        cJSON_AddNumberToObject(value,"orbit",7); cJSON_AddNumberToObject(value,"gain",.1);
+        cJSON_AddItemToObject(value,"duckorbit",cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(test,"targets"),1));
+        cJSON_AddNumberToObject(value,"duckdepth",.25); cJSON_AddNumberToObject(value,"delay",1);
+        cJSON_AddNumberToObject(value,"delaytime",.123); cJSON_AddNumberToObject(value,"delayfeedback",.5);
+        cJSON_AddNumberToObject(value,"room",1); cJSON_AddNumberToObject(value,"roomsize",.05);
+        char *json=cJSON_PrintUnformatted(haps); assert(json);
+        char source[4096],error[512]; cJSON *metadata=NULL;
+        /* Keep fixture JSON out of upstream literal-string mini notation. */
+        int n=snprintf(source,sizeof(source),"globalThis.__query=()=>String.fromCharCode(");
+        assert(n>0 && (size_t)n<sizeof(source));
+        for (const unsigned char *p=(const unsigned char *)json;*p;p++) {
+            int written=snprintf(source+n,sizeof(source)-(size_t)n,"%s%u",p==(const unsigned char *)json?"":",",*p);
+            assert(written>0 && (size_t)written<sizeof(source)-(size_t)n); n+=written;
+        }
+        int written=snprintf(source+n,sizeof(source)-(size_t)n,"); note(60)");
+        assert(written>0 && (size_t)written<sizeof(source)-(size_t)n);
+        JsProgram *program=javascript_compile(source,120,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"Duck timer reference: %s\n%s\n",error,source);
+        assert(program);
+        cJSON_Delete(metadata); cJSON_Delete(haps); free(json);
+        audio_toggle_play(1);
+        assert(js_audio_schedule_arc(program,cJSON_GetObjectItemCaseSensitive(test,"time")->valuedouble,
+            1,0,.1,event_queue_generation()));
+        int notes=0,controls=0;
+        for(QNode *node=qhead;node;node=node->next) {if(node->ev.control_only)controls++;else notes++;}
+        cJSON *result=cJSON_CreateObject(); assert(result);
+        cJSON_AddNumberToObject(result,"sources",notes); cJSON_AddNumberToObject(result,"controls",controls);
+        cJSON_AddNumberToObject(result,"errors",duck_error_count);
+        cJSON_AddBoolToObject(result,"timer",duck_error_count && duck_errors[0].timer);
+        cJSON_AddNumberToObject(result,"orbit",duck_error_count?duck_errors[0].orbit:-1);
+        cJSON_AddNumberToObject(result,"created",atomic_load(&created_orbits));
+        cJSON_AddBoolToObject(result,"delay",web_delay_created[7]);
+        cJSON_AddBoolToObject(result,"room",room_created[7]);
+        cJSON_AddNumberToObject(result,"gain",orbit_duck_gain(9));
+        cJSON_AddItemToArray(results,result);
+        event_queue_clear(); javascript_free(program);
+    }
+    audio_wait_room_preparation(); stop_room_worker();
+    char *json=cJSON_PrintUnformatted(results); assert(json); puts(json); free(json);
+    cJSON_Delete(tests); cJSON_Delete(results);
+}
+
 int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
@@ -1145,6 +1257,7 @@ int main(int argc, char **argv) {
 #endif
     }
     log_console_stderr(0);
+    if (argc>1 && !strcmp(argv[1],"--duck-timer-reference")) { duck_timer_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--duck-reference")) { duck_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--clock-reference")) { reference_clock(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--cps-reference")) { reference_cps(1); return 0; }
@@ -1281,6 +1394,7 @@ int main(int argc, char **argv) {
     test_stop_pcm();
     test_silent_sample_cut();
     test_duck_control_lifetime();
+    test_duck_timer_failure();
     test_duck_target_existence();
     test_duck_target_coercion();
     test_ordered_duck_targets();

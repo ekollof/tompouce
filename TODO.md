@@ -59,9 +59,6 @@ a separate measured design; it is not part of the initial preparation pool.
       forms, nested onsets, past endpoints, late callbacks and cancellation of
       rising/falling ramps, including failures after gain reanchoring. Interrupted
       ramps now anchor to the last rendered sample, matching AudioParam.value.
-- [ ] Match duck timer creation failures before gain cancellation, including
-      source times below 10 ms (the web rejects a negative timer stop time).
-      Verify source/output and repeated-target side effects at that stage.
 - [ ] Match Csound loader side effects before a later JavaScript failure, failed
       URL Promise caching and runtime worker diagnostics.
 

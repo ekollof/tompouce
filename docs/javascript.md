@@ -590,6 +590,12 @@ native bridge: invalid ramp endpoints reject, positive infinite depth reaches
 the minimum gain, and negative infinite attack uses the 0.002-second minimum.
 Repeated targets retain their order and per-entry controls; each target entry
 queues its own callback, including repeats of the same orbit.
+Timer creation validates the note time minus 10 ms before accepting controls,
+preparing shared effects or allocating a source. A negative/non-finite stop
+time rejects the event at the first existing target and reports a distinct
+timer diagnostic. The source orbit remains registered, missing targets are
+skipped, and a stop time of exactly zero is accepted. Rejection leaves existing
+gain automation, accepted callbacks and voices intact; later haps still run.
 String and singleton nested-array onsets follow JavaScript concatenation when
 forming ramp times. Invalid depth holds the cancellation gain; an invalid
 return time holds the target of an accepted downward ramp. Rejected ramps

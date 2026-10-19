@@ -185,7 +185,7 @@ static double midi_value(const cJSON *v) {
     return (octave + 1) * 12 + semitone;
 }
 
-int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *ev) {
+static int audio_event_values(const cJSON *hap, double origin, double seconds, AudioEvent *ev, int include_ducks) {
     const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap,"begin");
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(hap,"end");
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(hap,"value");
@@ -220,7 +220,7 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
        is zero. Existing shared tails keep their previous automation. */
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
     ev->orbit = (int)control(v,"orbit",control(v,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
-    duck_controls(v,ev);
+    if (include_ducks) duck_controls(v,ev);
     ev->smp_speed = control(v,"speed",1,-8,8);
     if (cJSON_HasObjectItem(v,"stretch")) {
         double shift = control(v,"stretch",0,-4,16);
@@ -264,6 +264,10 @@ int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *
         ev->midi_note = (int)fmax(0,fmin(127,round(midi)));
     }
     return isfinite(ev->time) && isfinite(ev->freq);
+}
+
+int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *ev) {
+    return audio_event_values(hap,origin,seconds,ev,1);
 }
 
 /* "misc:2" is a name plus a sample index. A non-numeric suffix stays intact. */
@@ -399,27 +403,33 @@ int js_audio_schedule_arc(JsProgram *program, double origin, double seconds,
     return js_audio_schedule_clock(program,&clock,begin,end,origin+end*seconds,generation);
 }
 
-static void schedule_local_ducks(const cJSON *value, double time, unsigned generation) {
+static int schedule_local_ducks(const cJSON *value, double time, unsigned generation) {
     AudioEvent controls={.generation=generation,.time=time,.control_only=1,
         .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
     controls.dsp.enabled=1;
     controls.orbit=(int)control(value,"orbit",control(value,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
-    duck_controls(value,&controls);
     unsigned existing=audio_register_orbit(controls.orbit);
     const cJSON *targets=cJSON_GetObjectItemCaseSensitive(value,"duckorbit");
     if (!targets) targets=cJSON_GetObjectItemCaseSensitive(value,"duck");
     if (cJSON_IsArray(targets)) {
         int index=0; const cJSON *target;
         cJSON_ArrayForEach(target,targets) {
+            int at=index++,orbit=duck_target(target);
+            if (orbit<0 || !(existing&(1u<<orbit))) continue;
+            if (!audio_prepare_duck_timer(orbit,time)) return 0;
             controls.duck_mask=0;
-            duck_assign(value,target,index++,&controls);
-            controls.duck_mask &= existing;
-            if (controls.duck_mask) event_queue_push(&controls);
+            duck_assign(value,target,at,&controls);
+            event_queue_push(&controls);
         }
     } else {
-        controls.duck_mask &= existing;
-        if (controls.duck_mask) event_queue_push(&controls);
+        int orbit=duck_target(targets);
+        if (orbit>=0 && (existing&(1u<<orbit))) {
+            if (!audio_prepare_duck_timer(orbit,time)) return 0;
+            duck_controls(value,&controls);
+            event_queue_push(&controls);
+        }
     }
+    return 1;
 }
 
 static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
@@ -433,7 +443,7 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
         javascript_cache_hap(program,hap,origin,seconds);
         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
             AudioEvent ev;
-            if (js_audio_event(hap,origin,seconds,&ev)) {
+            if (audio_event_values(hap,origin,seconds,&ev,0)) {
                 double cycle=control(hap,"begin",0,-1e12,1e12);
                 if (osc_output_prepare(&ev.osc,value,cycle,1/seconds,ev.duration)) {
                     ev.osc_only=1; ev.generation=generation; event_queue_push(&ev);
@@ -443,7 +453,7 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
         }
         int csound=cJSON_HasObjectItem(value,"csound");
         if (!csound) {
-            schedule_local_ducks(value,time,generation);
+            if (!schedule_local_ducks(value,time,generation)) return;
             if (!strcmp(text_control(value,"s"),"~")) return;
         }
         const cJSON *field;
@@ -462,7 +472,7 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
             if (!implemented) javascript_warn_control(program,name);
         }
         AudioEvent ev;
-        if (!js_audio_event(hap,origin,seconds,&ev)) return;
+        if (!audio_event_values(hap,origin,seconds,&ev,0)) return;
         ev.generation = generation;
         ev.duck_mask=0; /* Independently committed above, including failed sources. */
         if (csound) {

@@ -98,6 +98,8 @@ double audio_cycle_beats(void);
 void audio_trigger_event(AudioEvent *ev);
 /* Drain callback diagnostics from a non-audio thread, including while stopped. */
 void audio_report_errors(void);
+/* Producer-only validation before committing source/effect preparation. */
+int audio_prepare_duck_timer(int orbit,double time);
 int audio_prepare_delay(AudioEvent *ev);
 void audio_prepare_room(AudioEvent *ev);
 /* Offline verification only; never call from the live scheduler or callback. */

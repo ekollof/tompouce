@@ -197,4 +197,15 @@ CTest checks bounded cache exhaustion, deduplication and retained references;
 the scheduler harness checks summary lifetime after JSON/event destruction.
 Both browser scripts run through `test-duck-reference-web`.
 
+`duck-timer-reference-qa.mjs` adds 54 actual Superdough/native preparation cases
+at note times 5, 10 and 11 ms, with sine, rest and missing sources and ordered,
+repeated or unavailable targets. It verifies source-orbit registration,
+first-target rejection before gain cancellation, source/effect preparation and
+voice eviction, and the accepted zero-stop boundary. Its timer callbacks are
+detached before offline rendering; this checks construction, not callback
+latency. The native callback harness separately verifies a rejected event
+against a full voice pool, retained independent timers, late preparation and
+Csound/OSC bypass. Valid rest/missing-source pool eviction remains a separate
+open comparison. The timer gate also runs through `test-duck-reference-web`.
+
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

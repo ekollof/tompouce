@@ -233,14 +233,14 @@ static unsigned retirement_overflow;
 /* Producers already hold voice_lock. Only the scheduler formats/logs errors;
    the callback writes bounded records, including when playback is stopped. */
 enum { DUCK_ERROR_CAPACITY = 64 };
-typedef struct { int orbit, returning; double time; } DuckError;
+typedef struct { int orbit, returning, timer; double time; } DuckError;
 static DuckError duck_errors[DUCK_ERROR_CAPACITY];
 static unsigned duck_error_count;
 static int duck_error_overflow;
 
-static void record_duck_error(int orbit, int returning) {
+static void record_duck_error(int orbit, int stage) {
     if (duck_error_count < DUCK_ERROR_CAPACITY)
-        duck_errors[duck_error_count++]=(DuckError){orbit,returning,audio_time};
+        duck_errors[duck_error_count++]=(DuckError){.orbit=orbit,.returning=stage==1,.timer=stage==2,.time=audio_time};
     else duck_error_overflow=1;
 }
 
@@ -254,12 +254,24 @@ void audio_report_errors(void) {
     memcpy(errors,duck_errors,count*sizeof(*errors));
     duck_error_count=0; duck_error_overflow=0;
     pthread_mutex_unlock(&voice_lock);
-    for (unsigned i=0;i<count;i++)
-        log_console("duck: orbit %d rejected %s ramp at %.6f s",errors[i].orbit,
-                    errors[i].returning?"return":"downward",errors[i].time);
+    for (unsigned i=0;i<count;i++) {
+        if (errors[i].timer)
+            log_console("duck: orbit %d rejected timer creation at %.6f s (negative/non-finite stop time)",errors[i].orbit,errors[i].time);
+        else log_console("duck: orbit %d rejected %s ramp at %.6f s",errors[i].orbit,
+                         errors[i].returning?"return":"downward",errors[i].time);
+    }
     if (overflow) log_console("duck: additional automation errors omitted");
     if (lost_tails) log_console("voices: retirement capacity exceeded; %u fading graphs replaced early",lost_tails);
     if (failed_rooms) log_console("room: %u IR preparations failed or exceeded queue/cache limits; previous room retained",failed_rooms);
+}
+
+int audio_prepare_duck_timer(int orbit,double time) {
+    if (isfinite(time) && time-.01>=0) return 1;
+    pthread_mutex_lock(&voice_lock);
+    if (silent_clock) audio_time=audio_time_now();
+    record_duck_error(orbit,2);
+    pthread_mutex_unlock(&voice_lock);
+    return 0;
 }
 static CsoundProgram *csound_program;
 static double next_voice_onset=HUGE_VAL;
@@ -1094,6 +1106,10 @@ void audio_trigger_event(AudioEvent *ev) {
     if (ev->csound_only || ev->osc_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
     if (!ev->control_only) audio_register_orbit(ev->orbit);
+    if (ev->dsp.enabled && ev->duck_mask) for (int o=0;o<N_ORBITS;o++) if (ev->duck_mask&(1u<<o)) {
+        if (!audio_prepare_duck_timer(o,ev->time)) return;
+        break;
+    }
     AudioEvent prepared_event;
     if (!ev->delay_prepared || !ev->room_prepared) {
         prepared_event=*ev; ev=&prepared_event;

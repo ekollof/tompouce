@@ -128,11 +128,13 @@ static void room_job_run(PrepJob *base) {
     pthread_mutex_unlock(&room_lock);
     const double *p=job->parameters;
     const ConvKernel *kernel=convolution_prepare_reverb(p[0],p[1],p[2],p[3]);
-    int current=!job->generation || job->generation==event_queue_generation();
+    unsigned generation=event_queue_generation_guard_begin();
+    int current=!job->generation || job->generation==generation;
     pthread_mutex_lock(&voice_lock);
     if (kernel && current) publish_room(job->orbit,kernel,1);
     else if (!kernel && current && room_failures<UINT_MAX) room_failures++;
     pthread_mutex_unlock(&voice_lock);
+    event_queue_generation_guard_end();
     pthread_mutex_lock(&room_lock);
     room_worker_busy=0;
     pthread_cond_broadcast(&room_wake);

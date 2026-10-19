@@ -108,10 +108,12 @@ console ring buffer feeds both UI console pane and music_get_console.
 - Scheduler generator/consumer: `tracks_lock` for track list, `qlock` for the
   queue (short critical sections).
 - Preparation pool: general workers run immutable sample, stretch and kernel
-  jobs; one serial lane preserves generated-room order. Workers do not render
-  audio or mutate the event queue; generated-room completion takes the short
-  voice lock only to publish the kernel. The generator waits for jobs and
-  publishes them in scheduling order through the queue transaction.
+  jobs; one serial lane preserves generated-room order. The general count is
+  bounded by process affinity and cgroup quota. Workers do not render audio or
+  mutate the event queue; generated-room completion takes the short voice lock
+  only to publish the kernel, under the generation guard. The generator
+  publishes each completed hap in scheduling order through the queue
+  transaction.
 - AI worker: detached thread, results exchanged via `ai_lock`-guarded pointer.
 - UI: Notcurses planes and rendering stay on the foreground thread; `SIGWINCH`
   sets a `sig_atomic_t` flag consumed in `tui_frame()`, with geometry read via

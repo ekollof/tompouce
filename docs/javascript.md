@@ -332,17 +332,19 @@ timings for this path.
 
 Source preparation for a scheduling window is submitted to a bounded worker
 pool. The generator classifies haps first, submits sample/native/stretch jobs,
-then waits for and publishes them in hap order through an event-queue staging
-transaction. This keeps shared delay and room changes, duck decisions,
-equal-time notes and generation checks in scheduling order. If the program
-changes while jobs are running, completed results are discarded before
-publication; audio that was already committed is not withdrawn. Immediate OSC,
-Csound, rest/eviction and control-only work uses the same transaction. The pool
-defaults to at most four workers, bounded by the online CPU count; set
-`TOMPOUCE_PREP_WORKERS=1..8` to benchmark another count. Its general queue is
-`workers*32`, capped at 512. Failed worker startup falls back to inline
-source/kernel preparation and reports a console message; room requests report a
-room failure instead.
+then waits for and publishes each hap in order through its own event-queue
+staging transaction. An earlier ready note is therefore visible before a later
+slow source finishes; it is not held until the whole window completes. This
+keeps shared delay and room changes, duck decisions, equal-time notes and
+generation checks in scheduling order. If the program changes while jobs are
+running, completed results are discarded before publication; audio that was
+already committed is not withdrawn. Immediate OSC, Csound, rest/eviction and
+control-only work uses the same transaction. The pool budget comes from process
+affinity and cgroup v1/v2 quota, capped at four general workers; the serial room
+lane adds one thread. Set `TOMPOUCE_PREP_WORKERS=1..8` to benchmark another
+count. Its general queue is `workers*32`, capped at 512. Failed worker startup
+falls back to inline source/kernel preparation and reports a console message;
+room requests report a room failure instead.
 
 Maintained browser comparisons pass for half/fractional-speed compensation,
 upward shifting, reverse playback, loops and envelope/filter ordering. Downward
@@ -409,8 +411,11 @@ sounding tail remain active until a completed kernel is published; that
 publication resets the old convolution history on the next audio frame. An
 initial pending room has no wet output.
 Accepted requests survive evaluation and Stop/Play while their scheduling
-generation remains current; a completion from an obsolete generation is
-discarded before publication. As on the web, an older generated completion can
+generation remains current. The completion checks the generation and publishes
+the kernel under the same generation guard, so a program transition cannot
+interleave between the check and publication; an obsolete completion is
+discarded. Kernel publication remains on this serial lane rather than the
+note-queue transaction. As on the web, an older generated completion can
 replace an intervening custom IR. Multiple generated requests complete in FIFO
 order; arbitrary browser worker completion races are not reproduced.
 

@@ -21,6 +21,8 @@ int prep_pool_start(unsigned requested_workers, unsigned capacity);
 void prep_pool_stop(void);
 int prep_pool_workers(void);
 int prep_pool_capacity(void);
+/* CPU budget from process affinity and cgroup quota (>= 1). */
+int prep_pool_cpu_budget(void);
 
 void prep_job_init(PrepJob *job, void (*run)(PrepJob *), void (*destroy)(PrepJob *));
 void prep_job_retain(PrepJob *job);

@@ -350,6 +350,8 @@ typedef struct QNode {
 
 static QNode *qhead = NULL;
 static pthread_mutex_t qlock = PTHREAD_MUTEX_INITIALIZER;
+/* Serializes program-generation transitions with generated-room publication. */
+static pthread_mutex_t generation_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned qgeneration = 1;
 static int qcount;
 static double qnot_before = -HUGE_VAL;
@@ -397,15 +399,18 @@ static int ev_display_midi(const AudioEvent *ev) {
 }
 
 void event_queue_clear(void) {
+    pthread_mutex_lock(&generation_lock);
     pthread_mutex_lock(&qlock);
     while (qhead) { QNode *n = qhead; qhead = qhead->next; native_synth_release(n->ev.native_synth); stretch_release(n->ev.stretch_buffer); free(n); }
     qcount = 0;
     qnot_before = -HUGE_VAL;
     if (++qgeneration == 0) qgeneration = 1;
     pthread_mutex_unlock(&qlock);
+    pthread_mutex_unlock(&generation_lock);
 }
 
 void event_queue_new_program(double boundary) {
+    pthread_mutex_lock(&generation_lock);
     pthread_mutex_lock(&qlock);
     QNode **link=&qhead;
     while (*link) {
@@ -418,6 +423,7 @@ void event_queue_new_program(double boundary) {
     qnot_before=-HUGE_VAL;
     if (++qgeneration==0) qgeneration=1;
     pthread_mutex_unlock(&qlock);
+    pthread_mutex_unlock(&generation_lock);
 }
 
 void event_queue_refresh(double cutoff) {
@@ -452,6 +458,17 @@ static int finish_staging_locked(int success) {
             QNode *node=*link;
             if (node->ev.time>cutoff) {
                 *link=node->next; qcount--;
+                native_synth_release(node->ev.native_synth);
+                stretch_release(node->ev.stretch_buffer); free(node);
+            } else link=&node->next;
+        }
+        /* A replacement whose onset crossed the final cutoff must not be
+           reinserted alongside the original (or after it was consumed). */
+        link=&qstaging.head;
+        while (*link) {
+            QNode *node=*link;
+            if (node->ev.time<=cutoff) {
+                *link=node->next;
                 native_synth_release(node->ev.native_synth);
                 stretch_release(node->ev.stretch_buffer); free(node);
             } else link=&node->next;
@@ -628,6 +645,15 @@ unsigned event_queue_generation(void) {
     unsigned n = qgeneration;
     pthread_mutex_unlock(&qlock);
     return n;
+}
+
+unsigned event_queue_generation_guard_begin(void) {
+    pthread_mutex_lock(&generation_lock);
+    return qgeneration;
+}
+
+void event_queue_generation_guard_end(void) {
+    pthread_mutex_unlock(&generation_lock);
 }
 
 /* consumer thread */

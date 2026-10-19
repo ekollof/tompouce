@@ -493,10 +493,18 @@ typedef struct {
     AudioEvent event;
     const cJSON *value;
     int ok;
+    int inline_pending;
 } AudioPrepJob;
+
+static JsAudioPrepObserver prep_observer;
+
+void js_audio_set_prep_observer(JsAudioPrepObserver observer) {
+    prep_observer=observer;
+}
 
 static void audio_prep_run(PrepJob *base) {
     AudioPrepJob *job=(AudioPrepJob *)base;
+    if (prep_observer) prep_observer(&job->event);
     job->ok=resolve_sample_source(&job->event,job->value);
 }
 
@@ -572,8 +580,16 @@ static AudioPrepJob *prepare_hap_job(const HapPlan *plan, unsigned generation) {
     prep_job_init(&job->base,audio_prep_run,audio_prep_destroy);
     job->event=event;
     job->value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
-    if (!prep_pool_submit(&job->base)) prep_job_run_inline(&job->base);
+    /* If the pool is unavailable, run at this hap's publication turn instead
+       of blocking preparation of an earlier, independent hap. */
+    if (!prep_pool_submit(&job->base)) job->inline_pending=1;
     return job;
+}
+
+static void discard_prep_job(AudioPrepJob *job) {
+    if (!job) return;
+    if (!job->inline_pending) prep_pool_wait(&job->base);
+    prep_job_release(&job->base);
 }
 
 static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsigned generation) {
@@ -618,17 +634,21 @@ static void commit_source_hap(JsProgram *program, const HapPlan *plan,
                               AudioPrepJob *job, unsigned generation) {
     const cJSON *value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
     if (plan->time+1/SR<audio_time_now()) {
-        if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+        discard_prep_job(job);
         return;
     }
     if (!schedule_local_ducks(value,plan->time,generation)) {
-        if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+        discard_prep_job(job);
         return;
     }
     if (!job) {
         schedule_source_eviction(plan->time,0,generation);
         javascript_warn_control(program,"sound (preparation allocation failed)");
         return;
+    }
+    if (job->inline_pending) {
+        prep_job_run_inline(&job->base);
+        job->inline_pending=0;
     }
     prep_pool_wait(&job->base);
     /* Once the program changed, shared state and queue events are obsolete.
@@ -719,10 +739,13 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                 changed=1;
             }
         }
-        int owned=event_queue_publish_begin();
         int ok=1;
-        for (int base=0;base<nplans && ok;base+=PREP_BATCH) {
-            int stop=base+PREP_BATCH; if (stop>nplans) stop=nplans;
+        int group=PREP_BATCH;
+        int pool_capacity=prep_pool_capacity();
+        if (pool_capacity>0 && pool_capacity<group) group=pool_capacity;
+        if (group<1) group=1;
+        for (int base=0;base<nplans && ok;base+=group) {
+            int stop=base+group; if (stop>nplans) stop=nplans;
             if (generation!=event_queue_generation()) { ok=0; break; }
             AudioPrepJob **jobs=calloc((size_t)(stop-base),sizeof(*jobs));
             if (!jobs) { ok=0; break; }
@@ -732,18 +755,24 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                 AudioPrepJob *job=jobs[i-base];
                 if (!ok || generation!=event_queue_generation()) {
                     ok=0;
-                    if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+                    discard_prep_job(job);
                     continue;
                 }
+                int plan_owned=event_queue_publish_begin();
                 if (plans[i].kind==HAP_SOURCE) commit_source_hap(program,&plans[i],job,generation);
                 else commit_immediate_hap(program,&plans[i],generation);
+                int current=generation==event_queue_generation();
+                int committed=event_queue_publish_finish(plan_owned,current);
+                if (plan_owned && !committed) {
+                    ok=0;
+                    log_console("event queue: publication discarded");
+                }
+                if (!current) ok=0;
             }
             free(jobs);
         }
-        int committed=event_queue_publish_finish(owned,ok);
-        if (owned && !committed) log_console("event queue: publication discarded");
         free(plans); free(ordered); cJSON_Delete(haps);
-        if (!ok || !committed) return 0;
+        if (!ok) return 0;
         if (!changed) return 1;
         begin=end;
         end=clock->anchor_cycle+(tick_end-clock->anchor_time)/clock->seconds;

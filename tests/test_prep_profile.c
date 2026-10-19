@@ -431,10 +431,19 @@ int main(void) {
 
     /* The pool bound is benchmarked against this process's available CPUs.
        Timings are observational; the assertions below only prove completion. */
-    for (int workers = 1; workers <= 4; workers *= 2) {
+    int budget=prep_pool_cpu_budget();
+    if (budget>4) budget=4;
+    int tested[3], tested_count=0;
+    for (int workers=1; workers<=4 && tested_count<3; workers*=2)
+        if (workers<=budget) tested[tested_count++]=workers;
+    if (tested_count==0 || tested[tested_count-1]!=budget)
+        tested[tested_count++]=budget;
+    for (int i=0;i<tested_count;i++) {
+        int workers=tested[i];
         double wall = run_pool_stretch(workers, 4, note, 0.27 + 0.004 * workers,
                                        2.6 + 0.03 * workers);
-        printf("prep pool workers=%d wall_s=%.6f\n", workers, wall);
+        printf("prep pool workers=%d total_threads=%d budget=%d wall_s=%.6f\n",
+            workers, workers+1, budget, wall);
         fflush(stdout);
     }
 

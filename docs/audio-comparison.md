@@ -116,9 +116,13 @@ combined wait. Stretch and generated IR use different locks, so overlapped calls
 finished in about 12.4 ms of wall time for about 19.1 ms of compute. Four
 concurrent requests for one stretch, convolution or generated-IR key all
 returned the single published entry; losing duplicates were freed. The live
-room serial lane still completes generated requests one at a time. A separate
-four-key pool benchmark, reported by the same test, took about 29.4 ms with one
-worker, 15.2 ms with two and 9.3 ms with four. The MP3 branch
+room serial lane still completes generated requests one at a time. The same
+profile derives its worker counts from process affinity and cgroup quota, and
+reports the CPU budget and total pool threads (general workers plus the serial
+room lane). A four-key pool benchmark took about 29.4 ms with one worker,
+15.2 ms with two and 9.3 ms with four. A separate scheduler regression advances
+the owned clock across a staged onset before finishing refresh; the original
+onset remains and the replacement is discarded. The MP3 branch
 runs when `assets/banks/dough-samples/piano/C4v8.mp3` is present. These timings
 are one machine's profile, not a parity gate.
 
@@ -213,8 +217,9 @@ buffer and updated parameter guards. Static waveform gates deliberately prepare
 completed IRs before rendering; they do not measure asynchronous completion
 latency or prove source-side failure parity. Multiple generated requests use a
 single FIFO lane in the shared preparation pool; browser completion races remain
-open. A completion whose scheduling generation is no longer current is
-discarded rather than published.
+open. The completion checks the scheduling generation and publishes the kernel
+under the same generation guard, so a transition cannot make the check stale;
+the room CTest holds that guard while a transition thread waits.
 
 `node scripts/duck-timing-reference-qa.mjs /tmp/duck-timing-reference` compares
 129 real web timer-callback/gain-PCM cases with native control conversion and

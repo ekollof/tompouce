@@ -22,6 +22,9 @@ int event_queue_depth(void);
    Returns bytes written, excluding the NUL, or -1. */
 int scheduler_debug_queue(char *out, size_t outlen, int limit);
 unsigned event_queue_generation(void);
+/* Hold across a generated-room generation check and kernel publication. */
+unsigned event_queue_generation_guard_begin(void);
+void event_queue_generation_guard_end(void);
 /* background threads started by init */
 
 void scheduler_start(void);

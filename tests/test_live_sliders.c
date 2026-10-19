@@ -4,6 +4,108 @@
 #include <assert.h>
 #include "sound_store.h"
 #include <sys/stat.h>
+#include <pthread.h>
+#include <time.h>
+
+static pthread_mutex_t prep_gate_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t prep_gate_wake=PTHREAD_COND_INITIALIZER;
+static int prep_gate_entered, prep_gate_released;
+
+static void block_saw_preparation(const AudioEvent *event) {
+    if (strcmp(event->token,"saw")) return;
+    pthread_mutex_lock(&prep_gate_lock);
+    prep_gate_entered=1;
+    pthread_cond_broadcast(&prep_gate_wake);
+    while (!prep_gate_released) pthread_cond_wait(&prep_gate_wake,&prep_gate_lock);
+    pthread_mutex_unlock(&prep_gate_lock);
+}
+
+typedef struct { int visible; } PrefixProbe;
+
+static void *prefix_probe_thread(void *argument) {
+    PrefixProbe *probe=argument;
+    pthread_mutex_lock(&prep_gate_lock);
+    while (!prep_gate_entered) pthread_cond_wait(&prep_gate_wake,&prep_gate_lock);
+    pthread_mutex_unlock(&prep_gate_lock);
+    struct timespec started;
+    clock_gettime(CLOCK_MONOTONIC,&started);
+    for (;;) {
+        if (event_queue_depth()>=1) { probe->visible=1; break; }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC,&now);
+        double elapsed=(double)(now.tv_sec-started.tv_sec)+
+            (double)(now.tv_nsec-started.tv_nsec)/1e9;
+        if (elapsed>=1.0) break;
+        struct timespec pause={.tv_nsec=1000000};
+        nanosleep(&pause,NULL);
+    }
+    pthread_mutex_lock(&prep_gate_lock);
+    prep_gate_released=1;
+    pthread_cond_broadcast(&prep_gate_wake);
+    pthread_mutex_unlock(&prep_gate_lock);
+    return NULL;
+}
+
+/* A later blocked source must not hide an earlier ready note. */
+static void test_ready_prefix_publication(void) {
+    audio_time=0; audio_toggle_play(1); event_queue_clear();
+    assert(prep_pool_start(0,0));
+    assert(track_load_from_code("stack(note('c4').s('triangle'), note('e4').s('saw'))"));
+    unsigned generation=event_queue_generation();
+    prep_gate_entered=0; prep_gate_released=0;
+    PrefixProbe probe={0};
+    js_audio_set_prep_observer(block_saw_preparation);
+    pthread_t probe_thread;
+    assert(pthread_create(&probe_thread,NULL,prefix_probe_thread,&probe)==0);
+    assert(js_audio_schedule(tracks[0].javascript,0,0,generation));
+    assert(pthread_join(probe_thread,NULL)==0);
+    js_audio_set_prep_observer(NULL);
+    assert(probe.visible);
+    assert(event_queue_depth()==2);
+    assert(strcmp(qhead->ev.token,"triangle")==0);
+    event_queue_clear();
+    audio_time=0;
+}
+
+static void test_refresh_cutoff(void) {
+    audio_time=10.0; event_queue_clear();
+    unsigned generation=event_queue_generation();
+    AudioEvent original={.time=10.2,.gain=.8,.generation=generation,
+        .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+    event_queue_push(&original);
+    assert(event_queue_depth()==1);
+    event_queue_refresh(10.0);
+    AudioEvent replacement=original;
+    replacement.gain=.3;
+    event_queue_push(&replacement);
+    assert(qstaging.count==1);
+    audio_time=10.3;
+    assert(event_queue_refresh_finish(1));
+    /* The original is within the final cutoff; its replacement is not
+       reinserted, so a consumed/due onset cannot retrigger. */
+    assert(event_queue_depth()==1 && qhead->ev.gain==.8);
+
+    event_queue_clear(); audio_time=10.0;
+    generation=event_queue_generation();
+    event_queue_refresh(10.0);
+    AudioEvent expired={.time=10.2,.gain=.3,.generation=generation,
+        .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+    event_queue_push(&expired);
+    audio_time=10.3;
+    assert(event_queue_refresh_finish(1));
+    assert(event_queue_depth()==0);
+
+    event_queue_clear(); audio_time=10.0;
+    generation=event_queue_generation();
+    event_queue_refresh(10.0);
+    AudioEvent future={.time=10.5,.gain=.3,.generation=generation,
+        .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+    event_queue_push(&future);
+    audio_time=10.3;
+    assert(event_queue_refresh_finish(1));
+    assert(event_queue_depth()==1 && qhead->ev.time==10.5);
+    event_queue_clear(); audio_time=0;
+}
 
 static void test_custom_room_schedule(void) {
     char root[]="/tmp/tompouce-room-XXXXXX",path[512],names[2][69];
@@ -1299,6 +1401,8 @@ int main(int argc, char **argv) {
     test_csound_callback_continuity();
 #endif
     test_timestamped_onsets();
+    test_refresh_cutoff();
+    test_ready_prefix_publication();
     audio_time=10.25; audio_toggle_play(1);
     const char *source="globalThis.evaluations=(globalThis.evaluations??0)+1; "
         "if(evaluations!==1)throw Error('slider reevaluated music'); "
@@ -1453,5 +1557,6 @@ int main(int argc, char **argv) {
     assert(track_load_from_code("note(60).gain(0)"));
     puts("Live sliders preserve program, cycle phase, due events, voices, transport and song state; future parameters update without duplicate onsets");
     stop_room_worker();
+    prep_pool_stop();
     return 0;
 }

@@ -69,27 +69,40 @@ timings, not a parity gate.
       and memory, make failures observable, and benchmark worker counts against
       the CPUs available to the process.
 
-Normal generator publication now uses an append-mode event-queue transaction.
-Haps are classified first, source jobs are submitted to a bounded pool, and the
-generator waits for and commits them in scheduling order, so ducks, delay and
-room changes, equal-time notes and generation checks still happen in hap order.
-Obsolete generation results are discarded before publication; audio already
-committed is never withdrawn. The existing refresh transaction still replaces
-queued future events for live slider tests.
+Normal generator publication now publishes each completed hap through its own
+append-mode event-queue transaction. Haps are classified first, source jobs are
+submitted to a bounded pool, and commits stay in scheduling order, so ducks,
+delay and room changes, equal-time notes and generation checks still happen in
+hap order. An earlier ready note becomes visible before a later slow source
+finishes; it is not held until the whole query window completes. Obsolete
+generation results are discarded before publication; audio already committed is
+never withdrawn. The refresh transaction still replaces queued future events for
+live slider tests and now also filters replacement onsets against the final
+cutoff after preparation, so an onset that becomes due during preparation is
+not reinserted.
 
-The pool defaults to at most four workers, bounded by the online CPU count
-(`TOMPOUCE_PREP_WORKERS=1..8` overrides it). Its general queue is
-`workers*32`, capped at 512, and the staging queue keeps its existing 8192-event
-bound. Sample/native/stretch preparation and custom-IR kernel FFTs use the
-general workers. Generated rooms use a 32-request serial FIFO lane in the same
-pool so their order does not change; completed rooms carry the scheduling
-generation and a stale completion is not published. Pool startup failure falls
-back to inline source/kernel preparation and is reported on the console; room
-requests report a room failure instead.
+The pool defaults to at most four workers, bounded by the CPU budget derived
+from process affinity and cgroup v1/v2 quota (`TOMPOUCE_PREP_WORKERS=1..8`
+overrides it). Its general queue is `workers*32`, capped at 512, and the staging
+queue keeps its existing 8192-event bound. Sample/native/stretch preparation
+and custom-IR kernel FFTs use the general workers. Generated rooms use a
+32-request serial FIFO lane in the same pool so their order does not change;
+the serial lane adds one thread beyond the general workers. A room completion
+holds the generation guard across its generation check and convolver
+publication, so a program transition cannot make the check stale. Room kernels
+still publish on that serial lane rather than the event-queue transaction;
+ordering against an intervening custom IR and failure side effects remains a
+step 5 comparison. Pool startup failure falls back to inline source/kernel
+preparation and is reported on the console; room requests report a room failure
+instead.
 
 On the step 1 workload, four distinct stretches took about 29.4 ms with one
-worker, 15.2 ms with two and 9.3 ms with four. `test_prep_profile` now records
-that worker-count comparison. Generated-room failures, queue overflow and
+worker, 15.2 ms with two and 9.3 ms with four. `test_prep_profile` reports the
+workers, total pool threads and process CPU budget, and records that
+worker-count comparison. `test_live_sliders` blocks a later source and verifies
+that an earlier ready note reaches the queue, and advances the owned clock
+across a staged refresh onset. `test_room` holds the generation guard while a
+transition thread waits. Generated-room failures, queue overflow and
 startup/enqueue failures remain observable through the console and the room
 failure counter.
 

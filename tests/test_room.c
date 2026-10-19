@@ -3,6 +3,8 @@
 #include "convolution.h"
 #include "prep_pool.h"
 #include <assert.h>
+#include <sched.h>
+#include <time.h>
 static const ConvKernel *controlled_reverb(double,double,double,double);
 #define convolution_prepare_reverb controlled_reverb
 #include "../src/audio.c"
@@ -42,6 +44,32 @@ static AudioEvent room(int orbit,double size) {
     event.dsp.p[DSP_ROOM]=1; event.dsp.p[DSP_SIZE]=size;
     audio_inherit_room(&event,1);
     return event;
+}
+
+typedef struct { _Atomic int started, done; } GenerationTransition;
+
+static void *clear_generation_thread(void *argument) {
+    GenerationTransition *transition=argument;
+    atomic_store(&transition->started,1);
+    event_queue_clear();
+    atomic_store(&transition->done,1);
+    return NULL;
+}
+
+static void test_generation_guard(void) {
+    GenerationTransition transition={0};
+    unsigned generation=event_queue_generation_guard_begin();
+    pthread_t thread;
+    assert(pthread_create(&thread,NULL,clear_generation_thread,&transition)==0);
+    while (!atomic_load(&transition.started)) sched_yield();
+    struct timespec pause={.tv_nsec=20000000};
+    nanosleep(&pause,NULL);
+    assert(!atomic_load(&transition.done));
+    assert(event_queue_generation()==generation);
+    event_queue_generation_guard_end();
+    assert(pthread_join(thread,NULL)==0);
+    assert(atomic_load(&transition.done));
+    assert(event_queue_generation()!=generation);
 }
 int main(void) {
     float pcm[2048]; for (unsigned i=0;i<2048;i++) pcm[i]=.1;
@@ -116,6 +144,7 @@ int main(void) {
     assert(!atomic_load(&requested_ir[5]) && room_failures==failures);
     stop_room_worker();
     prep_pool_stop();
+    test_generation_guard();
     convolution_set(&convolvers[3],NULL);
     convolution_kernel_free(first); convolution_kernel_free(second); free(history);
     puts("Room worker preserves pending/failure tails, publishes completion, bounds requests and shuts down cleanly");

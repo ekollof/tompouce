@@ -1292,6 +1292,71 @@ static void test_generated_room_race(void) {
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
 }
 
+/* Deterministic live-engine driver for the engine-op comparison harness.
+   Virtual time advances in exact 128-frame blocks; scripted transport,
+   source and tempo operations fire on integer sample boundaries, so the
+   web live driver can mirror them sample-exactly. The fixture bank comes
+   from TOMPOUCE_LIVE_BANKS (an XDG layout written by the QA script). */
+static void reference_live_onset(const char *scenario, const char *pcm_path) {
+    const char *banks = getenv("TOMPOUCE_LIVE_BANKS");
+    assert(banks && scenario && pcm_path);
+    assert(!setenv("XDG_CONFIG_HOME", banks, 1));
+    assert(user_sounds_reload() == 1);
+    int transport = !strcmp(scenario, "transport");
+    int source = !strcmp(scenario, "source");
+    int tempo = !strcmp(scenario, "tempo");
+    assert(transport || source || tempo);
+    double end = transport ? 2.0 : 2.5;
+    const char *first = tempo ? "s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))"
+        : "s('livefixture').fast(4).clip(.25).late(.137)";
+    const char *second = "s('livefixture').fast(2).clip(.25).late(.311)";
+    log_console_stderr(0);
+    assert(prep_pool_start(0,0));
+    event_queue_clear();
+    audio_time = 0; audio_toggle_play(1); audio_set_reference_mode(1); audio_set_bpm(120);
+    assert(track_load_from_code(first));
+    enum { MAX_OPS = 1 };
+    double op_times[MAX_OPS]; int op_kinds[MAX_OPS]; int nops = 0;
+    if (transport) { op_times[nops] = 1.0; op_kinds[nops++] = 0; }
+    if (source) { op_times[nops] = 1.0; op_kinds[nops++] = 2; }
+    long total = lround(end*SR);
+    float *pcm = calloc((size_t)total*2, sizeof(*pcm)); assert(pcm);
+    long done = 0;
+    int fired[MAX_OPS] = {0};
+    unsigned long long first_serial = voice_onset_serial;
+    while (done < total) {
+        long boundary = total;
+        for (int i = 0; i < nops; i++) if (!fired[i]) {
+            long at = lround(op_times[i]*SR);
+            if (at < boundary) boundary = at;
+        }
+        long chunk = boundary-done;
+        if (chunk > 128) chunk = 128;
+        if (chunk < 1) chunk = 1;
+        for (int i = 0; i < nops; i++) if (!fired[i] && done >= lround(op_times[i]*SR)) {
+            fired[i] = 1;
+            if (op_kinds[i] == 0) scheduler_transport_set(0);
+            else if (op_kinds[i] == 1) scheduler_transport_set(1);
+            else if (op_kinds[i] == 2) assert(track_load_from_code(second));
+            else if (op_kinds[i] == 3) audio_set_bpm(240);
+        }
+        double now = (double)done/SR;
+        live_tick(now);
+        while (prepare_queued_audio(now)) ;
+        pa_callback(NULL, pcm+(size_t)done*2, (unsigned long)chunk, NULL, 0, NULL);
+        done += chunk;
+    }
+    for (long i = 0; i < total*2; i++) assert(isfinite(pcm[i]));
+    FILE *out = fopen(pcm_path, "wb"); assert(out);
+    assert(fwrite(pcm, sizeof(*pcm), (size_t)total*2, out) == (size_t)total*2 && !fclose(out));
+    printf("{\"scenario\":\"%s\",\"frames\":%ld,\"voices\":%llu,\"queue\":%d}\n",
+        scenario, total, voice_onset_serial-first_serial, event_queue_depth());
+    free(pcm);
+    event_queue_clear(); audio_time = 0; audio_toggle_play(0);
+    for (int i = 0; i < MAX_VOICES; i++) voices[i].active = 0;
+    stop_room_worker(); prep_pool_stop();
+}
+
 static void test_web_delay_pcm(void) {
     const double frames[]={.25,.5,32,128,128.5,2205.25};
     const int onsets[][6]={{0,1,128,129,130,256},{0,1,128,129,130,256},
@@ -1547,6 +1612,10 @@ int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--duck-timer-reference")) { duck_timer_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--duck-reference")) { duck_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--clock-reference")) { reference_clock(1); return 0; }
+    if (argc>1 && !strcmp(argv[1],"--live-onset-reference")) {
+        assert(argc > 3);
+        reference_live_onset(argv[2], argv[3]); return 0;
+    }
     if (argc>1 && !strcmp(argv[1],"--cps-reference")) { reference_cps(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--performance-reference")) { reference_performance(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--query-failure-reference")) { reference_query_failure(1); return 0; }

@@ -26,7 +26,9 @@ state like the live commit path, matching the web's preparation-time parameter
 guards. It opens no PortAudio device. Its output is interleaved stereo float32
 PCM at 44.1 kHz on little-endian machines. Reference mode bypasses the legacy
 DC/drive/soft-limit stage but still clamps output to [-1,1]. The comparison
-cases use levels below clipping.
+cases use levels below clipping. The browser offline render maps hap onsets
+through the requested render rate and ignores event-level cps pivots there;
+tempo timing is covered by the live engine harness below instead.
 
 The browser loads actual strudel.cc and uses its `evaluate` and
 `renderPatternAudio` APIs. Only the source transpiler comes from our pinned
@@ -44,9 +46,9 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Thirty-eight regression gates compare at zero lag (no capture shifts or gain
-normalization). The original piano windows remain 0.6 seconds; the new synth
-and generated-room cases check the full two-second capture:
+Forty regression gates compare at zero lag (no capture shifts or gain
+normalization). The original piano windows remain 0.6 seconds; the new synth,
+generated-room and live-change cases check the full two-second capture:
 
 | Case | Minimum normalized correlation | Native/browser RMS ratio |
 | --- | --- | --- |
@@ -63,6 +65,7 @@ and generated-room cases check the full two-second capture:
 | Downward-stretched MP3 piano: factors, C4/Fs3/Ds4, fractional speed/onset (8 cases) | 0.99 | 0.85–1.15 |
 | Downward-stretched shared PCM: integer/fractional onset (2 cases) | 0.99 | 0.85–1.15 |
 | Shared PCM fractional sample onsets: natural/fractional/double/reverse speed (4 cases) | 0.99 | 0.85–1.15 |
+| Shared PCM fractional onsets under stretch-variant and delay-automation changes (2 cases) | 0.99 | 0.85–1.15 |
 
 The C4 capture lasts two seconds and Arpoon captures four cycles/eight seconds.
 Only the stated window is gated; these checks do not establish full-song
@@ -193,6 +196,25 @@ stream drops, zero render overruns and no rendered-frame shortfall in all five
 cases, with cold/live fully held and the burst shedding only skips (11 in this
 run) without late publication or reservation. Local fixture reads still do not
 establish remote-download deadline behavior.
+
+`cmake --build build --target test-live-reference-web` compares fractional
+sample onsets under live engine operations, using
+`scripts/live-change-reference-qa.mjs` and the `--live-onset-reference` mode
+of `test_live_sliders`. Both engines run deterministically without realtime
+capture: the native live engine advances virtual time in exact 128-frame
+blocks with scripted operations on integer sample boundaries, and the web
+live REPL runs on fake time with the same block rule while scheduling real
+pattern audio into a disposable offline context. The shared fixture sample
+is generated once and read byte-identically by both sides; the mock interval
+is honored so no scheduling pass runs after Stop. Three cases gate at zero
+lag (0.99 correlation, 0.85–1.15 RMS): source re-evaluation, pattern-level
+tempo pivots (which both engines anchor at the pivoting hap, unlike external
+tempo changes) and transport Stop with fractional tails. An isolated run
+observed correlation 1.0 in all three. Transport restart and external tempo
+pivot anchoring diverge by design and stay documented gaps rather than gates:
+the web re-fires early-cycle haps and continues the cycle while native resets
+to cycle zero, and the web anchors external pivots at its scheduling frontier
+while native anchors at its phase frontier.
 
 The CPU-budget fixture test covers nested v1/v2 membership, inherited minimum
 quotas, controller lists, subtree mounts, escaped paths and malformed limits,

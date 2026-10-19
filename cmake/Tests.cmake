@@ -72,6 +72,12 @@ add_custom_target(profile-prep-backend
     DEPENDS test_prep_deadlines probe_audio_output WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(test-live-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_ONSET_BINARY=$<TARGET_FILE:test_live_sliders>"
+        node scripts/live-change-reference-qa.mjs
+    DEPENDS test_live_sliders WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)
 set_target_properties(render_audio PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 target_compile_options(render_audio PRIVATE -UNDEBUG)

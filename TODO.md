@@ -150,10 +150,10 @@ PipeWire backend at 256-frame blocks into an owned null sink (routing verified
 with `pw-dump`, defaults untouched): five cases show zero stream drops, zero
 render overruns and no frame shortfall, with cold/live held and the burst
 shedding only skips. `TOMPOUCE_OUTPUT_TARGET` selects that sink for owned
-tests only. The 34 maintained web/native audio gates and selected duck/event
-comparisons pass without threshold or execution-budget changes (four shared
-delay-automation gates were added under step 5, bringing the matrix to 38).
-Remote-download deadline behavior remains unmeasured.
+tests only. The maintained web/native audio gates and selected duck/event
+comparisons pass without threshold or execution-budget changes (delay-automation
+and live-change onset gates were added under steps 5–6). Remote-download
+deadline behavior remains unmeasured.
 
 ## 5. Shared-effect comparisons
 
@@ -184,11 +184,26 @@ the retained equality guards suppress a repeat request. The full matrix passes
 
 ## 6. Fractional onsets under live changes
 
-- [ ] Extend verified fractional sample onsets to live source, tempo, transport
+- [x] Extend verified fractional sample onsets to live source, tempo, transport
       and shared-effect changes against actual web output. Steady playback is
       already gated; this is the live-change delta, written against ordered
       publication and the shared-effect timing from the previous step.
       Event-value and clock gates alone do not establish performance parity.
+
+Pattern-expressed changes gate through the static matrix: stretch-variant
+switches, shared delay automation and (as a diagnostic) generated-room
+switches with fractional onsets. The room-switch onsets align to the exact
+sample; its wet tails differ because the web regenerates rooms with fresh
+randomness per call while native reseeds per call and caches. Static tempo
+gates proved unexpressible: the browser offline render ignores event-level
+cps pivots for onset mapping, so renderer-side threading was reverted.
+Engine operations gate through the deterministic live harness
+(`test-live-reference-web`): source re-evaluation, pattern-level tempo
+pivots and transport Stop with fractional onsets all observe correlation
+1.0 across repeated runs, with equal voice/hap counts on tempo. Transport
+restart and external tempo anchoring diverge by design and remain documented
+optional gaps. A mock interval that stays dead after Stop was required to
+avoid re-firing scheduled haps, matching production interval cleanup.
 
 ## 7. Voice-pool eviction, then bursts
 
@@ -258,15 +273,25 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
   diagnostics (step 9).
 - Dominant MIDI output and combined external-output routing (step 10).
 - Controller input and expression mapping (step 11).
+- Transport restart after Stop: the web re-fires early-cycle haps and
+  continues the cycle, while native resets to cycle zero without
+  re-firing. Stop itself (held tails finish, no new onsets) is gated.
+- External tempo-change pivot anchoring: the web anchors at its scheduling
+  frontier, native at its phase frontier. Pattern-level tempo pivots are
+  gated live; external pivots are covered at event-value level.
+- Multi-room generated sequences: the web regenerates with fresh randomness
+  per call while native reseeds per call and caches. Single seeded rooms
+  are gated; sequences stay diagnostic.
 
 Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,
 Hydra/browser input-device APIs and arbitrary npm module resolution.
 
-The maintained audio matrix has 38 passing gates, including eight independently
+The maintained audio matrix has 40 passing gates, including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
-fractional sample-onset cases and four shared delay-automation cases. Seeded
-generated rooms are gated; ordinary wet Arpoon remains diagnostic. These checks
+fractional sample-onset cases, four shared delay-automation cases and two
+live-change fractional-onset cases. Seeded generated rooms are gated; ordinary
+wet Arpoon and multi-room generated sequences remain diagnostic. These checks
 do not establish complete decoder, synthesis or full-song waveform parity.
 Use owned test engines/browser profiles and isolated audio resources; leave the
 user's running source, playback and routing untouched.

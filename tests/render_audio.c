@@ -53,9 +53,16 @@ int main(int argc, char **argv) {
     int used = 0; const cJSON *hap;
     cJSON_ArrayForEach(hap,haps) {
         const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap,"value");
+        const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap,"begin");
         if (*sound->valuestring && strcmp(text_control(value,"s"),sound->valuestring)) continue;
         AudioEvent event;
+        /* Fixed-cycle mapping: the browser's offline render ignores
+           event-level cps pivots for onset mapping, so tempo changes are
+           covered by the live engine harness instead of static gates. */
         if (!js_audio_event(hap,0,1/cps->valuedouble,&event)) continue;
+        if (getenv("TOMPOUCE_RENDER_DEBUG") && cJSON_IsNumber(begin))
+            fprintf(stderr,"render hap onset=%.6f target=%.6f duration=%.6f token=%s\n",
+                begin->valuedouble,begin->valuedouble/cps->valuedouble,event.duration,event.token);
         if (!js_audio_resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0 && !event.native_synth)) {
             fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
         }

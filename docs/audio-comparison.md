@@ -99,23 +99,26 @@ have separate gates. Native input lifetime is bounded to 90 seconds, with a
 128 MiB/128-buffer cache. FFT and preparation run outside the callback.
 
 `ctest --test-dir build -R '^prep_profile$' --output-on-failure` measures the
-cold-cache, live-edit and burst workloads used before choosing preparation
-workers. Counters stay off unless that test enables them. It records wall time,
-thread CPU time, and lock wait and hold for sample decode, stretch overlap-add,
-sample-convolution FFTs and generated-IR synthesis. On one run, decoding an
-8-second stereo WAV took about 3.8 ms and held the sample cache lock for a few
-microseconds. Four concurrent decodes waited about 2 µs. A half-second stretch
-miss held the stretch cache lock for the overlap-add, about 12.2 ms held of
-12.1 ms of work; repeating that key did not run the vocoder. Changing pitch
-prepared again and did not decode the sample. A 0.25-second sample impulse and
-a 0.8-second generated room held their own cache locks across synthesis and
-kernel FFTs. Eight stretch misses on one thread did not contend. Four threads
-preparing distinct stretches serialized: about 43 ms of hold produced about
-58 ms of combined wait. Stretch and generated IR use different locks, so
-overlapped calls finished in about 11.5 ms of wall time for about 20.7 ms of
-compute. The live room queue still completes generated requests one at a time.
-No MP3 bank was installed for that run. These timings are one machine's
-profile, not a parity gate.
+cold-cache, live-edit, burst and duplicate-key workloads used before choosing
+preparation workers. Counters stay off unless that test enables them. It records
+wall time, thread CPU time, and lock wait and hold for sample decode, stretch
+overlap-add, sample-convolution FFTs and generated-IR synthesis. On one run,
+decoding an 8-second stereo WAV took about 3.5 ms and held the sample cache lock
+for about 1 µs; four concurrent decodes waited about 2 µs. A half-second stretch
+miss did about 12.6 ms of overlap-add while holding the stretch cache lock for
+about 61 µs; repeating that key did not run the vocoder. Changing pitch prepared
+again and did not decode the sample. The 0.8-second generated room spent about
+2.2 ms in synthesis and 3.0 ms in kernel FFTs while its cache lock was held for
+under a microsecond. Eight stretch misses on one thread took about 31 ms with
+about 32 µs of lock hold. Four threads preparing distinct stretches did about
+38.7 ms of combined work in about 10.0 ms of wall time, with about 12 µs of
+combined wait. Stretch and generated IR use different locks, so overlapped calls
+finished in about 12.4 ms of wall time for about 19.1 ms of compute. Four
+concurrent requests for one stretch, convolution or generated-IR key all
+returned the single published entry; losing duplicates were freed. The live
+room queue still completes generated requests one at a time. The MP3 branch
+runs when `assets/banks/dough-samples/piano/C4v8.mp3` is present. These timings
+are one machine's profile, not a parity gate.
 
 Downward MP3 piano now has eight gates. The native MP3 decoder previously
 rounded its output to PCM16 before storing floats. Removing that quantization

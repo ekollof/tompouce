@@ -316,10 +316,13 @@ limit, a 128 MiB/128-buffer cache and eviction of unreferenced entries. Queued
 events and voices retain their buffers. Preparation-limit failures report a
 console error. New source/pitch variants require preparation; gain and ordinary
 effect changes reuse the same PCM. No FFT, allocation, decoding or JavaScript
-runs in the callback. The stretch cache lock is held across the overlap-add, so
-two new stretch variants cannot prepare at once. A repeated source and pitch
-reuses the cached PCM after a short lookup. A new pitch or stretch variant
-misses and prepares again without decoding the sample a second time. Sample
+runs in the callback. Stretch overlap-add runs outside the cache lock, so
+independent variants can prepare concurrently. Lookup, slot reservation and
+publication keep their locks short; in-flight reservations count toward the byte
+bound. Concurrent jobs for the same key converge on one published buffer and
+discard the losing copy. A repeated source and pitch reuses the cached PCM after
+a short lookup. A new pitch or stretch variant misses and prepares again without
+decoding the sample a second time. Sample
 decoding runs outside the sample cache lock. Reverse playback, slices, looping,
 envelopes and source pitch modulation are included in preparation. Oscillators
 retain their direct pitch-factor implementation rather than passing through a
@@ -350,9 +353,11 @@ This correct signed-rate behavior differs from the current browser's
 `adjustLength` bug for positive rates below one. `roomsize` limits the active
 IR duration; the original buffer length participates in WebAudio-style RMS
 normalization. The IR is prepared by the generator using existing sample
-maps, URL policy and decoders. That preparation holds the sample-impulse cache
-lock across kernel construction and its FFTs. The callback uses an immediate 128-tap head
-plus 128-frame FFT partitions for its tail, preserving zero onset latency.
+maps, URL policy and decoders. Kernel construction and its FFTs run outside the
+sample-impulse cache lock; lookup and publication are short, and concurrent
+requests for the same key share one published kernel. The callback uses an
+immediate 128-tap head plus 128-frame FFT partitions for its tail, preserving
+zero onset latency.
 Stereo channels remain separate. Prepared impulse changes select the shared
 convolver immediately and reset that orbit's tail on the next audio frame;
 an earlier accepted note does not restore its old impulse at onset.
@@ -378,12 +383,14 @@ history even if the prepared PCM is already cached.
 
 `room` without `ir` prepares a stereo convolution impulse on a dedicated worker,
 with a bounded 32-request FIFO queue. Live scheduling does not wait for generation.
-Generation holds the generated-IR cache lock across noise synthesis, the low-pass
-and the kernel FFTs. That lock is separate from the stretch lock. The worker
-still completes one generated request at a time, so several rooms do not overlap
-with each other. The old convolver and its sounding tail remain active until a
-completed kernel is published; that publication resets the old convolution
-history on the next audio frame. An initial pending room has no wet output.
+Noise synthesis, the low-pass and the kernel FFTs run outside the generated-IR
+cache lock. That lock is separate from the stretch lock, so stretch and IR
+preparation can overlap. The worker still completes one generated request at a
+time, so several rooms do not overlap with each other; concurrent requests for
+the same generated IR share one published kernel. The old convolver and its
+sounding tail remain active until a completed kernel is published; that
+publication resets the old convolution history on the next audio frame. An
+initial pending room has no wet output.
 Accepted requests survive evaluation and Stop/Play. As on the web, an older
 generated completion can replace an intervening custom IR. Multiple generated
 requests complete in FIFO order; arbitrary browser worker completion races are

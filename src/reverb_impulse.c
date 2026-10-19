@@ -8,20 +8,29 @@
 
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim) {
     enum { CACHE=16 };
-    static struct { double size,fade,lp,dim; ConvKernel *kernel; } cache[CACHE];
-    static unsigned used;
+    static struct { double size,fade,lp,dim; ConvKernel *kernel; int reserved; } cache[CACHE];
     static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
     if (!isfinite(size) || !isfinite(fade) || !isfinite(lp) || !isfinite(dim) || size<=0 || size>10 ||
         fade<0 || fade>10 || lp<0 || lp>SR/2 || dim<0 || dim>SR/2) return NULL;
     long frames=lround(size*1.5*SR), decay=lround(size*SR), fade_frames=lround(fade*SR);
     if (frames<1 || frames>CONV_PARTS*CONV_BLOCK || decay<1) return NULL;
     prep_lock(&lock, PREP_LOCK_REVERB);
-    for (unsigned i=0;i<used;i++) if (cache[i].size==size && cache[i].fade==fade && cache[i].lp==lp && cache[i].dim==dim) {
+    for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
+        cache[i].lp==lp && cache[i].dim==dim) {
         const ConvKernel *result=cache[i].kernel; prep_unlock(&lock, PREP_LOCK_REVERB); return result;
     }
-    if (used==CACHE) { prep_unlock(&lock, PREP_LOCK_REVERB); return NULL; }
+    int slot=-1;
+    for (unsigned i=0;i<CACHE;i++) if (!cache[i].kernel && !cache[i].reserved) { slot=(int)i; break; }
+    if (slot<0) { prep_unlock(&lock, PREP_LOCK_REVERB); return NULL; }
+    cache[slot].reserved=1;
+    prep_unlock(&lock, PREP_LOCK_REVERB);
     float *impulse=calloc((size_t)frames*2,sizeof(*impulse));
-    if (!impulse) { prep_unlock(&lock, PREP_LOCK_REVERB); return NULL; }
+    if (!impulse) {
+        prep_lock(&lock, PREP_LOCK_REVERB);
+        cache[slot].reserved=0;
+        prep_unlock(&lock, PREP_LOCK_REVERB);
+        return NULL;
+    }
     /* Reproducible random input; comparison pages seed their generator too. */
     uint32_t random=0xc0ffeeu;
     double decay_base=pow(.001,1.0/decay);
@@ -48,8 +57,19 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
     }
     prep_work_end(PREP_REVERB);
     ConvKernel *kernel=convolution_kernel(impulse,(int)frames,2,1); free(impulse);
-    if (kernel) {
-        cache[used].size=size; cache[used].fade=fade; cache[used].lp=lp; cache[used].dim=dim; cache[used++].kernel=kernel;
+    prep_lock(&lock, PREP_LOCK_REVERB);
+    for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
+        cache[i].lp==lp && cache[i].dim==dim) {
+        const ConvKernel *result=cache[i].kernel;
+        cache[slot].reserved=0;
+        prep_unlock(&lock, PREP_LOCK_REVERB);
+        convolution_kernel_free(kernel);
+        return result;
     }
-    prep_unlock(&lock, PREP_LOCK_REVERB); return kernel;
+    if (kernel) {
+        cache[slot].size=size; cache[slot].fade=fade; cache[slot].lp=lp; cache[slot].dim=dim;
+        cache[slot].kernel=kernel; cache[slot].reserved=0;
+    } else cache[slot].reserved=0;
+    prep_unlock(&lock, PREP_LOCK_REVERB);
+    return kernel;
 }

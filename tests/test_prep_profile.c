@@ -1,9 +1,10 @@
-/* Repeatable preparation profile. Step 4 of TODO.md reruns these workloads.
+/* Repeatable preparation profile. Steps 2 and 4 of TODO.md rerun these workloads.
    cold: one long decode, one stretch miss, one sample-convolution miss,
    one generated-IR miss, then the same keys again as cache hits.
    live: nearby parameter changes that miss preparation and reuse the decoded sample.
    burst: parallel decodes, a serial stretch run, contended stretch locks,
-   and stretch overlapped with generated IR. */
+   and stretch overlapped with generated IR.
+   duplicate: four concurrent requests for one stretch, convolution and IR key. */
 #include "prep_profile.h"
 #include "sampler.h"
 #include "stretch.h"
@@ -130,6 +131,9 @@ static void barrier_wait(void) {
 typedef struct { int sample; double freq, duration, factor; } StretchJob;
 typedef struct { double size; } ReverbJob;
 typedef struct { char *path; } DecodeJob;
+typedef struct { int sample; double freq, duration, factor; const StretchBuffer *buffer; } SameStretchJob;
+typedef struct { int sample; const ConvKernel *kernel; } SameConvJob;
+typedef struct { const ConvKernel *kernel; } SameReverbJob;
 
 static void *stretch_thread(void *arg) {
     StretchJob *job = arg;
@@ -149,6 +153,31 @@ static void *decode_thread(void *arg) {
     DecodeJob *job = arg;
     barrier_wait();
     acquire(job->path);
+    return NULL;
+}
+
+static void *same_stretch_thread(void *arg) {
+    SameStretchJob *job = arg;
+    barrier_wait();
+    AudioEvent event = stretch_event(job->sample, job->factor, job->freq, job->duration);
+    job->buffer = stretch_prepare(&event);
+    assert(job->buffer);
+    return NULL;
+}
+
+static void *same_conv_thread(void *arg) {
+    SameConvJob *job = arg;
+    barrier_wait();
+    job->kernel = convolution_prepare(job->sample, .3, 1, 0);
+    assert(job->kernel);
+    return NULL;
+}
+
+static void *same_reverb_thread(void *arg) {
+    SameReverbJob *job = arg;
+    barrier_wait();
+    job->kernel = convolution_prepare_reverb(.37, .01, 6000, 900);
+    assert(job->kernel);
     return NULL;
 }
 
@@ -188,17 +217,16 @@ int main(void) {
     snapshot(locks, works);
     assert(works[PREP_STRETCH].calls == 1);
     assert(works[PREP_STRETCH].wall_ns > 100000);
-    assert(locks[PREP_LOCK_STRETCH].hold_ns + 1000000 >= works[PREP_STRETCH].wall_ns);
-    assert(locks[PREP_LOCK_STRETCH].hold_ns < works[PREP_STRETCH].wall_ns * 2 + 1000000);
-    assert(locks[PREP_LOCK_STRETCH].wait_ns * 20 < locks[PREP_LOCK_STRETCH].hold_ns);
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_STRETCH].wait_ns * 8 < works[PREP_STRETCH].wall_ns);
 
     prep_profile_reset();
     assert(convolution_prepare(note, 0.25, 1, 0));
     print_prep("cold-convolution");
     snapshot(locks, works);
     assert(works[PREP_FFT].calls == 2);
-    assert(locks[PREP_LOCK_CONV].hold_ns + 1000000 >= works[PREP_FFT].wall_ns);
-    assert(locks[PREP_LOCK_CONV].wait_ns * 20 < locks[PREP_LOCK_CONV].hold_ns + 1000000ull);
+    assert(locks[PREP_LOCK_CONV].hold_ns * 8 < works[PREP_FFT].wall_ns);
+    assert(locks[PREP_LOCK_CONV].wait_ns * 8 < works[PREP_FFT].wall_ns);
 
     prep_profile_reset();
     assert(convolution_prepare_reverb(0.8, 0.01, 5000, 800));
@@ -206,9 +234,10 @@ int main(void) {
     snapshot(locks, works);
     assert(works[PREP_REVERB].calls == 1);
     assert(works[PREP_FFT].calls == 2);
-    assert(locks[PREP_LOCK_REVERB].hold_ns + 1000000 >=
+    assert(locks[PREP_LOCK_REVERB].hold_ns * 8 <
         works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
-    assert(locks[PREP_LOCK_REVERB].wait_ns * 20 < locks[PREP_LOCK_REVERB].hold_ns + 1000000ull);
+    assert(locks[PREP_LOCK_REVERB].wait_ns * 8 <
+        works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
 
     prep_profile_reset();
     stretch_once(note, 2, 440, 0.5);
@@ -246,7 +275,7 @@ int main(void) {
     assert(works[PREP_STRETCH].calls == 1);
     assert(works[PREP_FFT].calls == 4); /* changed convolution plus changed reverb, two channels each */
     assert(works[PREP_REVERB].calls == 1);
-    assert(locks[PREP_LOCK_STRETCH].hold_ns + 1000000 >= works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
 
     prep_profile_reset();
     pthread_t decoders[4];
@@ -269,14 +298,20 @@ int main(void) {
     print_prep("burst-serial");
     snapshot(locks, works);
     assert(works[PREP_STRETCH].calls == 8);
-    assert(locks[PREP_LOCK_STRETCH].wait_ns * 20 < locks[PREP_LOCK_STRETCH].hold_ns);
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_STRETCH].wait_ns * 8 < works[PREP_STRETCH].wall_ns);
 
     prep_profile_reset();
+    double burst_started = seconds_now();
     run_stretch_threads(4, note, 0.35, 1.5);
+    double burst_elapsed = seconds_now() - burst_started;
     print_prep("burst-stretch");
     snapshot(locks, works);
     assert(works[PREP_STRETCH].calls == 4);
-    assert(locks[PREP_LOCK_STRETCH].wait_ns * 5 > locks[PREP_LOCK_STRETCH].hold_ns);
+    printf("prep burst-stretch wall_s=%.6f parts_sum_s=%.6f\n", burst_elapsed,
+        works[PREP_STRETCH].wall_ns / 1e9);
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_STRETCH].wait_ns * 8 < works[PREP_STRETCH].wall_ns);
 
     prep_profile_reset();
     pthread_t overlap[2];
@@ -294,8 +329,53 @@ int main(void) {
         (works[PREP_STRETCH].wall_ns + works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns) / 1e9);
     print_prep("burst-overlap");
     assert(works[PREP_STRETCH].calls == 1 && works[PREP_REVERB].calls == 1);
-    assert(locks[PREP_LOCK_STRETCH].wait_ns * 10 < locks[PREP_LOCK_STRETCH].hold_ns + 1000000ull);
-    assert(locks[PREP_LOCK_REVERB].wait_ns * 10 < locks[PREP_LOCK_REVERB].hold_ns + 1000000ull);
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_STRETCH].wait_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_REVERB].hold_ns * 8 < works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
+    assert(locks[PREP_LOCK_REVERB].wait_ns * 8 < works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
+
+    /* Duplicate keys prepared concurrently must converge on one published
+       entry without leaking the losing buffers or exceeding the cache bound. */
+    prep_profile_reset();
+    pthread_t same[4];
+    SameStretchJob same_stretch[4];
+    barrier_ready(4);
+    for (int i = 0; i < 4; i++) {
+        same_stretch[i] = (SameStretchJob){note, 311, .4, 1.7, NULL};
+        assert(pthread_create(&same[i], NULL, same_stretch_thread, &same_stretch[i]) == 0);
+    }
+    for (int i = 0; i < 4; i++) assert(pthread_join(same[i], NULL) == 0);
+    for (int i = 0; i < 4; i++) assert(same_stretch[i].buffer == same_stretch[0].buffer);
+    for (int i = 0; i < 4; i++) stretch_release(same_stretch[i].buffer);
+    AudioEvent same_event = stretch_event(note, 1.7, 311, .4);
+    const StretchBuffer *cached = stretch_prepare(&same_event);
+    assert(cached == same_stretch[0].buffer);
+    stretch_release(cached);
+
+    SameConvJob same_conv[4];
+    barrier_ready(4);
+    for (int i = 0; i < 4; i++) {
+        same_conv[i] = (SameConvJob){note, NULL};
+        assert(pthread_create(&same[i], NULL, same_conv_thread, &same_conv[i]) == 0);
+    }
+    for (int i = 0; i < 4; i++) assert(pthread_join(same[i], NULL) == 0);
+    for (int i = 0; i < 4; i++) assert(same_conv[i].kernel == same_conv[0].kernel);
+    assert(convolution_prepare(note, .3, 1, 0) == same_conv[0].kernel);
+
+    SameReverbJob same_reverb[4];
+    barrier_ready(4);
+    for (int i = 0; i < 4; i++) {
+        same_reverb[i] = (SameReverbJob){NULL};
+        assert(pthread_create(&same[i], NULL, same_reverb_thread, &same_reverb[i]) == 0);
+    }
+    for (int i = 0; i < 4; i++) assert(pthread_join(same[i], NULL) == 0);
+    for (int i = 0; i < 4; i++) assert(same_reverb[i].kernel == same_reverb[0].kernel);
+    assert(convolution_prepare_reverb(.37, .01, 6000, 900) == same_reverb[0].kernel);
+    snapshot(locks, works);
+    print_prep("duplicate-jobs");
+    assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
+    assert(locks[PREP_LOCK_CONV].hold_ns * 8 < works[PREP_FFT].wall_ns);
+    assert(locks[PREP_LOCK_REVERB].hold_ns * 8 < works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
 
     for (int i = 0; i < 4; i++) {
         assert(unlink(long_paths[i]) == 0);

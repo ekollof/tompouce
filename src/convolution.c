@@ -71,23 +71,36 @@ ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, in
 
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin) {
     enum { CACHE = 16 };
-    static struct { int sample; double size, speed, begin; ConvKernel *kernel; } cache[CACHE];
-    static unsigned used;
+    static struct { int sample; double size, speed, begin; ConvKernel *kernel; int reserved; } cache[CACHE];
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
     if (!isfinite(size) || !isfinite(speed) || !isfinite(begin) || size <= 0 || size > 10 ||
         speed == 0 || fabs(speed) > 8 || begin < 0 || begin > 1) return NULL;
     prep_lock(&lock, PREP_LOCK_CONV);
-    for (unsigned i = 0; i < used; i++) if (cache[i].sample == sample && cache[i].size == size &&
+    for (unsigned i = 0; i < CACHE; i++) if (cache[i].kernel && cache[i].sample == sample && cache[i].size == size &&
         cache[i].speed == speed && cache[i].begin == begin) {
         const ConvKernel *result = cache[i].kernel; prep_unlock(&lock, PREP_LOCK_CONV); return result;
     }
-    if (used == CACHE) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
+    int slot = -1;
+    for (unsigned i = 0; i < CACHE; i++) if (!cache[i].kernel && !cache[i].reserved) { slot = (int)i; break; }
+    if (slot < 0) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
+    cache[slot].reserved = 1;
+    prep_unlock(&lock, PREP_LOCK_CONV);
     float *buffer; int length, channels;
     smp_get_stereo(sample,&buffer,&length,&channels);
     int frames = length > 0 ? (int)fmin(length,ceil(size*SR)) : 0;
-    if (!buffer || frames < 1 || frames > CONV_PARTS*CONV_BLOCK) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
+    if (!buffer || frames < 1 || frames > CONV_PARTS*CONV_BLOCK) {
+        prep_lock(&lock, PREP_LOCK_CONV);
+        cache[slot].reserved = 0;
+        prep_unlock(&lock, PREP_LOCK_CONV);
+        return NULL;
+    }
     float *impulse = calloc((size_t)frames*2,sizeof(*impulse));
-    if (!impulse) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
+    if (!impulse) {
+        prep_lock(&lock, PREP_LOCK_CONV);
+        cache[slot].reserved = 0;
+        prep_unlock(&lock, PREP_LOCK_CONV);
+        return NULL;
+    }
     for (int i = 0; i < frames; i++) {
         double position = fmod(floor(begin*length)+(speed < 0 ? -i : i)*fabs(speed),length);
         if (position < 0) position += length;
@@ -97,11 +110,21 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     }
     ConvKernel *kernel = build_kernel(impulse,frames,channels,1,length);
     free(impulse);
-    if (kernel) {
-        cache[used].sample = sample; cache[used].size = size; cache[used].speed = speed;
-        cache[used].begin = begin; cache[used++].kernel = kernel;
+    prep_lock(&lock, PREP_LOCK_CONV);
+    for (unsigned i = 0; i < CACHE; i++) if (cache[i].kernel && cache[i].sample == sample && cache[i].size == size &&
+        cache[i].speed == speed && cache[i].begin == begin) {
+        const ConvKernel *result = cache[i].kernel;
+        cache[slot].reserved = 0;
+        prep_unlock(&lock, PREP_LOCK_CONV);
+        convolution_kernel_free(kernel);
+        return result;
     }
-    prep_unlock(&lock, PREP_LOCK_CONV); return kernel;
+    if (kernel) {
+        cache[slot].sample = sample; cache[slot].size = size; cache[slot].speed = speed;
+        cache[slot].begin = begin; cache[slot].kernel = kernel; cache[slot].reserved = 0;
+    } else cache[slot].reserved = 0;
+    prep_unlock(&lock, PREP_LOCK_CONV);
+    return kernel;
 }
 
 void convolution_set(ConvState *state, const ConvKernel *kernel) {

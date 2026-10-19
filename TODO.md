@@ -37,14 +37,24 @@ reverb computes from those locks before choosing a worker count.
 
 ## 2. Release stretch and convolution cache locks
 
-- [ ] Move expensive stretch and convolution preparation outside cache locks.
+- [x] Move expensive stretch and convolution preparation outside cache locks.
       Keep lookup and publication locks short. Preserve bounded caches,
       queued and voice references, and safe handling of duplicate jobs for the
       same cache key. The existing event and audio gates are the regression
       net; do not add baselines here.
-- [ ] Rerun the step 1 workloads after the locks are released. If scheduling
+- [x] Rerun the step 1 workloads after the locks are released. If scheduling
       deadlines already hold, skip the publication contract and the worker
       pool and continue with shared-effect comparisons.
+
+Stretch overlap-add, sample-impulse construction and generated-IR synthesis/FFTs
+now run outside their cache locks. In-flight reservations count toward the cache
+byte bound; concurrent jobs for one key publish a single entry and free the
+losing copies. On the step 1 workload, a cold stretch held the lock for about
+61 µs around 12.6 ms of work. Four distinct stretches summed about 38.7 ms of
+work but finished in about 10.0 ms of wall time with about 12 µs of wait.
+Convolution and generated-IR lock holds stayed in the low microseconds. The MP3
+profile branch now runs when the bank is installed. These are one machine's
+timings, not a parity gate.
 
 ## 3. Publication contract, then the worker pool
 

@@ -20,8 +20,14 @@ typedef struct {
     DspParams params;
 } StretchKey;
 struct StretchBuffer { atomic_uint refs; int frames; size_t bytes; double age_offset; float pcm[]; };
-static struct { StretchKey key; StretchBuffer *buffer; unsigned long used; } cache[CACHE_SIZE];
-static size_t cache_bytes;
+static struct {
+    StretchKey key;
+    StretchBuffer *buffer;
+    unsigned long used;
+    size_t reserved_bytes;
+    int reserved;
+} cache[CACHE_SIZE];
+static size_t cache_bytes; /* published buffers plus in-flight reservations */
 static unsigned long serial;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static void stretch_lock(void) { prep_lock(&lock, PREP_LOCK_STRETCH); }
@@ -136,6 +142,47 @@ const StretchBuffer *stretch_pcm_lookup(const char *key) {
     stretch_unlock(); return NULL;
 }
 
+/* Caller holds the cache lock. In-flight reservations count toward the byte
+   bound, so parallel preparation cannot exceed the cache budget. */
+static int cache_reserve_locked(size_t bytes) {
+    if (bytes>CACHE_BYTES) return -1;
+    for (;;) {
+        int slot=-1;
+        for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer && !cache[i].reserved) { slot=i; break; }
+        if (slot>=0 && cache_bytes+bytes<=CACHE_BYTES) {
+            cache[slot].reserved=1; cache[slot].reserved_bytes=bytes; cache_bytes+=bytes;
+            return slot;
+        }
+        int oldest=-1;
+        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
+            (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
+        if (oldest<0) return -1;
+        cache_bytes-=cache[oldest].buffer->bytes;
+        free(cache[oldest].buffer); cache[oldest].buffer=NULL;
+    }
+}
+
+static void cache_release_reservation_locked(int slot) {
+    if (slot<0 || slot>=CACHE_SIZE) return;
+    cache_bytes-=cache[slot].reserved_bytes;
+    cache[slot].reserved_bytes=0; cache[slot].reserved=0;
+}
+
+/* The compute runs outside the lock. A duplicate that completed first wins;
+   the discarded buffer was never published or visible to another thread. */
+static const StretchBuffer *cache_publish(int slot, const StretchKey *key, StretchBuffer *buffer) {
+    stretch_lock();
+    for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !memcmp(&cache[i].key,key,sizeof(*key))) {
+        StretchBuffer *existing=cache[i].buffer;
+        cache_release_reservation_locked(slot);
+        cache[i].used=++serial; stretch_retain(existing);
+        stretch_unlock(); free(buffer); return existing;
+    }
+    cache[slot].key=*key; cache[slot].buffer=buffer; cache[slot].used=++serial;
+    cache[slot].reserved=0; cache[slot].reserved_bytes=0;
+    stretch_unlock(); return buffer;
+}
+
 const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) {
     if (!key || !*key || strlen(key)>=sizeof(cache[0].key.source_key) || !pcm || frames<=0 || frames>90*44100) {
         free(pcm); return NULL;
@@ -145,24 +192,19 @@ const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) 
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !strcmp(cache[i].key.source_key,key)) {
         cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); free(pcm); return cache[i].buffer;
     }
-    int slot=-1;
-    for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer) { slot=i; break; }
-    while (slot<0 || cache_bytes+bytes>CACHE_BYTES) {
-        int oldest=-1;
-        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
-            (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
-        if (oldest<0) { stretch_unlock(); free(pcm); return NULL; }
-        cache_bytes-=cache[oldest].buffer->bytes;
-        free(cache[oldest].buffer); cache[oldest].buffer=NULL; if (slot<0) slot=oldest;
-    }
+    int slot=cache_reserve_locked(bytes);
+    stretch_unlock();
+    if (slot<0) { free(pcm); return NULL; }
     StretchBuffer *buffer=malloc(bytes);
-    if (!buffer) { stretch_unlock(); free(pcm); return NULL; }
+    if (!buffer) {
+        stretch_lock(); cache_release_reservation_locked(slot); stretch_unlock();
+        free(pcm); return NULL;
+    }
     atomic_init(&buffer->refs,1); buffer->frames=frames; buffer->bytes=bytes; buffer->age_offset=0;
     memcpy(buffer->pcm,pcm,(size_t)frames*2*sizeof(float)); free(pcm);
-    memset(&cache[slot].key,0,sizeof(cache[slot].key));
-    snprintf(cache[slot].key.source_key,sizeof(cache[slot].key.source_key),"%s",key);
-    cache[slot].buffer=buffer; cache[slot].used=++serial; cache_bytes+=bytes;
-    stretch_unlock(); return buffer;
+    StretchKey keyed={0};
+    snprintf(keyed.source_key,sizeof(keyed.source_key),"%s",key);
+    return cache_publish(slot,&keyed,buffer);
 }
 
 const StretchBuffer *stretch_prepare(const AudioEvent *event) {
@@ -211,20 +253,17 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !memcmp(&cache[i].key,&key,sizeof(key))) {
         cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); return cache[i].buffer;
     }
-    int slot=-1;
-    for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer) { slot=i; break; }
-    while (slot<0 || cache_bytes+bytes>CACHE_BYTES) {
-        int oldest=-1;
-        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
-            (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
-        if (oldest<0) { stretch_unlock(); return NULL; }
-        cache_bytes-=cache[oldest].buffer->bytes;
-        free(cache[oldest].buffer); cache[oldest].buffer=NULL; if (slot<0) slot=oldest;
-    }
+    int slot=cache_reserve_locked(bytes);
+    stretch_unlock();
+    if (slot<0) return NULL;
     StretchBuffer *buffer=calloc(1,bytes);
     typedef struct { float input[2][FFT_SIZE],sum[2][FFT_SIZE]; Complex freq[FFT_SIZE],shifted[FFT_SIZE]; } Work;
     Work *work=calloc(1,sizeof(*work));
-    if (!buffer || !work) { free(buffer); free(work); stretch_unlock(); return NULL; }
+    if (!buffer || !work) {
+        free(buffer); free(work);
+        stretch_lock(); cache_release_reservation_locked(slot); stretch_unlock();
+        return NULL;
+    }
     buffer->frames=key.frames; buffer->bytes=bytes; atomic_init(&buffer->refs,1);
     buffer->age_offset=.04;
     /* Match the reference's 40ms source anticipation and global 128-frame
@@ -281,6 +320,6 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
         }
     }
     prep_work_end(PREP_STRETCH);
-    free(work); cache[slot].key=key; cache[slot].buffer=buffer; cache[slot].used=++serial; cache_bytes+=bytes;
-    stretch_unlock(); return buffer;
+    free(work);
+    return cache_publish(slot,&key,buffer);
 }

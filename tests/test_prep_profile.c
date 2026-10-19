@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <time.h>
 #include <unistd.h>
 #include <math.h>
@@ -224,9 +225,11 @@ int main(void) {
     assert(locks[PREP_LOCK_REVERB].calls >= 1);
 
     const char *mp3 = "assets/banks/dough-samples/piano/C4v8.mp3";
-    if (access(mp3, R_OK) == 0) {
+    char mp3_path[PATH_MAX];
+    /* smp_acquire_abs resolves already-resolved absolute files only. */
+    if (realpath(mp3, mp3_path) && access(mp3_path, R_OK) == 0) {
         prep_profile_reset();
-        assert(acquire(mp3) >= 0);
+        assert(acquire(mp3_path) >= 0);
         print_prep("cold-mp3");
         snapshot(locks, works);
         assert(works[PREP_DECODE].calls == 1);

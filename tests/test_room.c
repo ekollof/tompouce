@@ -1,6 +1,7 @@
 /* Owned offline room worker and callback; no audio device or user state. */
 #include "audio.h"
 #include "convolution.h"
+#include "prep_pool.h"
 #include <assert.h>
 static const ConvKernel *controlled_reverb(double,double,double,double);
 #define convolution_prepare_reverb controlled_reverb
@@ -108,7 +109,13 @@ int main(void) {
     replacement=NULL; fail=0;
     event=room(3,3); audio_prepare_room(&event); audio_wait_room_preparation();
     assert(atomic_load(&requested_ir[3])==second && room_failures==1);
+    /* A completion from an obsolete generation is discarded, not published. */
+    unsigned failures=room_failures;
+    event=room(5,.3); event.generation=event_queue_generation()+1;
+    audio_prepare_room(&event); audio_wait_room_preparation();
+    assert(!atomic_load(&requested_ir[5]) && room_failures==failures);
     stop_room_worker();
+    prep_pool_stop();
     convolution_set(&convolvers[3],NULL);
     convolution_kernel_free(first); convolution_kernel_free(second); free(history);
     puts("Room worker preserves pending/failure tails, publishes completion, bounds requests and shuts down cleanly");

@@ -12,6 +12,9 @@ void event_queue_new_program(double boundary);
    keep playing during preparation; finish atomically replaces future events. */
 void event_queue_refresh(double cutoff);
 int event_queue_refresh_finish(int success);
+/* Normal publication transaction: returns whether this thread owns it. */
+int event_queue_publish_begin(void);
+int event_queue_publish_finish(int owned, int success);
 double event_queue_not_before(void);
 void event_queue_push(AudioEvent *ev);
 int event_queue_depth(void);

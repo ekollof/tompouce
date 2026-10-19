@@ -73,6 +73,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 | `src/slider.c` | live values and source-site bindings; UI synchronizes source | `slider_bind`, `slider_nudge` |
 | `src/track.c` | source → QuickJS program and transport clock + `current_code` | `track_load_from_code` |
 | `src/scheduler.c` | generator + consumer threads, sorted event queue | `scheduler_init/shutdown/start`, `event_queue_push/clear` |
+| `src/prep_pool.c` | bounded general preparation workers plus the serial generated-room lane | `prep_pool_start/stop`, `prep_pool_submit`, `prep_pool_submit_serial` |
 | `src/ai.c` | LLM request worker, offline fallback | `ai_request_async`, `ai_poll_result` |
 | `src/tui.c`, `src/tui_terminal.h` | Notcurses UI, editor state, vi mode, cursor, resize | `tui_init/run/shutdown`, `tui_frame` |
 | `src/mcp.c` | MCP server, frame reader, UI orchestration | `mcp_run`, `handle_request`, `mcp_read_frame` |
@@ -106,6 +107,11 @@ console ring buffer feeds both UI console pane and music_get_console.
 - Audio callback: takes `voice_lock` only, never blocks on I/O.
 - Scheduler generator/consumer: `tracks_lock` for track list, `qlock` for the
   queue (short critical sections).
+- Preparation pool: general workers run immutable sample, stretch and kernel
+  jobs; one serial lane preserves generated-room order. Workers do not render
+  audio or mutate the event queue; generated-room completion takes the short
+  voice lock only to publish the kernel. The generator waits for jobs and
+  publishes them in scheduling order through the queue transaction.
 - AI worker: detached thread, results exchanged via `ai_lock`-guarded pointer.
 - UI: Notcurses planes and rendering stay on the foreground thread; `SIGWINCH`
   sets a `sig_atomic_t` flag consumed in `tui_frame()`, with geometry read via

@@ -20,7 +20,7 @@ static AudioEvent prepare(const char *code) {
     assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)>0);
     AudioEvent event;
     const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
-    assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value) && event.native_synth);
+    assert(js_audio_event(hap,0,2,&event) && js_audio_resolve_sample(&event,value) && event.native_synth);
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
 }
 static void render(AudioEvent *event) {
@@ -38,7 +38,7 @@ static AudioEvent prepare_gm(const char *code) {
     JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error)); assert(program);
     cJSON *haps=javascript_query_cps(program,0,1,.5); assert(cJSON_GetArraySize(haps)==1);
     const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
-    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value));
+    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && js_audio_resolve_sample(&event,value));
     assert(event.stretch_buffer && !event.native_synth && !event.is_drum);
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
 }
@@ -117,7 +117,7 @@ static AudioEvent prepare_wavetable(const char *code) {
     JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error)); assert(program);
     cJSON *haps=javascript_query_cps(program,0,1,.5); assert(cJSON_GetArraySize(haps)==1);
     const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
-    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && resolve_sample(&event,value));
+    AudioEvent event; assert(js_audio_event(hap,0,2,&event) && js_audio_resolve_sample(&event,value));
     assert(event.smp>=0 && event.smp_gate && !event.is_drum && event.dsp.p[DSP_LOOP]==1);
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
 }

@@ -58,18 +58,40 @@ timings, not a parity gate.
 
 ## 3. Publication contract, then the worker pool
 
-Skip this step when step 2 already meets the deadlines.
-
-- [ ] Publish completed preparation in scheduling order, preserving shared-effect
+- [x] Publish completed preparation in scheduling order, preserving shared-effect
       changes, source and generation identity, and accepted notes and controls.
       Discard obsolete unfinished work only when it has not already been
       committed. Generalize the staged event-queue refresh so a late completion
       uses that transaction. Fold the generated-room queue into the same
       completion rules instead of adding a second path.
-- [ ] Add a bounded worker pool for independent sample, stretch and impulse
+- [x] Add a bounded worker pool for independent sample, stretch and impulse
       preparation jobs, committing through that transaction. Bound queued work
       and memory, make failures observable, and benchmark worker counts against
       the CPUs available to the process.
+
+Normal generator publication now uses an append-mode event-queue transaction.
+Haps are classified first, source jobs are submitted to a bounded pool, and the
+generator waits for and commits them in scheduling order, so ducks, delay and
+room changes, equal-time notes and generation checks still happen in hap order.
+Obsolete generation results are discarded before publication; audio already
+committed is never withdrawn. The existing refresh transaction still replaces
+queued future events for live slider tests.
+
+The pool defaults to at most four workers, bounded by the online CPU count
+(`TOMPOUCE_PREP_WORKERS=1..8` overrides it). Its general queue is
+`workers*32`, capped at 512, and the staging queue keeps its existing 8192-event
+bound. Sample/native/stretch preparation and custom-IR kernel FFTs use the
+general workers. Generated rooms use a 32-request serial FIFO lane in the same
+pool so their order does not change; completed rooms carry the scheduling
+generation and a stale completion is not published. Pool startup failure falls
+back to inline source/kernel preparation and is reported on the console; room
+requests report a room failure instead.
+
+On the step 1 workload, four distinct stretches took about 29.4 ms with one
+worker, 15.2 ms with two and 9.3 ms with four. `test_prep_profile` now records
+that worker-count comparison. Generated-room failures, queue overflow and
+startup/enqueue failures remain observable through the console and the room
+failure counter.
 
 ## 4. Measure deadlines under the pool
 

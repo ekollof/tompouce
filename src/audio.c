@@ -12,6 +12,8 @@
 #include "midi.h"
 #include "convolution.h"
 #include "stretch.h"
+#include "scheduler.h"
+#include "prep_pool.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the Notcurses
@@ -88,12 +90,15 @@ static unsigned room_defined[N_ORBITS];
 static int room_created[N_ORBITS];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic unsigned prepared_rooms;
-typedef struct { int orbit; double parameters[4]; } RoomRequest;
 enum { ROOM_REQUESTS=32 };
-static RoomRequest room_requests[ROOM_REQUESTS];
-static unsigned room_head,room_count;
+typedef struct {
+    PrepJob job;
+    int orbit;
+    unsigned generation;
+    double parameters[4];
+} RoomJob;
+static unsigned room_count;
 static int room_worker_started,room_worker_busy,room_worker_stop;
-static pthread_t room_worker;
 static pthread_mutex_t room_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t room_wake=PTHREAD_COND_INITIALIZER;
 static unsigned room_failures;
@@ -114,56 +119,65 @@ static void publish_room(int orbit, const ConvKernel *kernel, int rebuild) {
     atomic_fetch_add(&ir_revision[orbit],1);
 }
 
-static void *prepare_rooms(void *unused) {
-    (void)unused;
+static void room_job_run(PrepJob *base) {
+    RoomJob *job=(RoomJob *)base;
     pthread_mutex_lock(&room_lock);
-    for (;;) {
-        while (!room_count && !room_worker_stop) pthread_cond_wait(&room_wake,&room_lock);
-        if (room_worker_stop) break;
-        RoomRequest request=room_requests[room_head];
-        room_head=(room_head+1)%ROOM_REQUESTS; room_count--; room_worker_busy=1;
-        pthread_mutex_unlock(&room_lock);
-        const double *p=request.parameters;
-        const ConvKernel *kernel=convolution_prepare_reverb(p[0],p[1],p[2],p[3]);
-        pthread_mutex_lock(&voice_lock);
-        if (kernel) publish_room(request.orbit,kernel,1);
-        else if (room_failures<UINT_MAX) room_failures++;
-        pthread_mutex_unlock(&voice_lock);
-        pthread_mutex_lock(&room_lock);
-        room_worker_busy=0; pthread_cond_broadcast(&room_wake);
-    }
-    room_count=0; room_worker_busy=0; pthread_cond_broadcast(&room_wake);
+    if (room_count) room_count--;
+    room_worker_busy=1;
+    pthread_cond_broadcast(&room_wake);
     pthread_mutex_unlock(&room_lock);
-    return NULL;
+    const double *p=job->parameters;
+    const ConvKernel *kernel=convolution_prepare_reverb(p[0],p[1],p[2],p[3]);
+    int current=!job->generation || job->generation==event_queue_generation();
+    pthread_mutex_lock(&voice_lock);
+    if (kernel && current) publish_room(job->orbit,kernel,1);
+    else if (!kernel && current && room_failures<UINT_MAX) room_failures++;
+    pthread_mutex_unlock(&voice_lock);
+    pthread_mutex_lock(&room_lock);
+    room_worker_busy=0;
+    pthread_cond_broadcast(&room_wake);
+    pthread_mutex_unlock(&room_lock);
 }
 
-/* Thread creation must not extend a callback-shared voice_lock window. */
+static void room_job_destroy(PrepJob *base) {
+    free(base);
+}
+
+/* Start the shared pool on demand. The serial lane keeps generated rooms in
+   request order without extending a callback-shared voice_lock window. */
 static int start_room_worker(void) {
+    if (!prep_pool_start(0,0)) return 0;
     pthread_mutex_lock(&room_lock);
-    if (!room_worker_started) {
-        room_worker_stop=0;
-        if (pthread_create(&room_worker,NULL,prepare_rooms,NULL)) {
-            pthread_mutex_unlock(&room_lock); return 0;
-        }
-        room_worker_started=1;
-    }
-    int ready=!room_worker_stop;
+    room_worker_stop=0;
+    room_worker_started=1;
     pthread_mutex_unlock(&room_lock);
-    return ready;
+    return 1;
 }
 
-/* Producer only, with voice_lock held. Worker never holds room_lock while
+/* Producer only, with voice_lock held. The pool never holds room_lock while
    acquiring voice_lock. Requests own scalar parameters and process-lived IRs. */
 static int request_room(const AudioEvent *event) {
     pthread_mutex_lock(&room_lock);
-    if (!room_worker_started || room_count==ROOM_REQUESTS || room_worker_stop) {
+    if (!room_worker_started || room_count>=ROOM_REQUESTS || room_worker_stop) {
         pthread_mutex_unlock(&room_lock); return 0;
     }
-    RoomRequest *request=&room_requests[(room_head+room_count++)%ROOM_REQUESTS];
-    request->orbit=event->orbit;
-    for (int i=0;i<4;i++) request->parameters[i]=event->dsp.p[room_fields[i]];
-    pthread_cond_signal(&room_wake);
+    RoomJob *job=calloc(1,sizeof(*job));
+    if (!job) { pthread_mutex_unlock(&room_lock); return 0; }
+    prep_job_init(&job->job,room_job_run,room_job_destroy);
+    job->orbit=event->orbit;
+    job->generation=event->generation;
+    for (int i=0;i<4;i++) job->parameters[i]=event->dsp.p[room_fields[i]];
+    room_count++;
     pthread_mutex_unlock(&room_lock);
+    if (!prep_pool_submit_serial(&job->job)) {
+        pthread_mutex_lock(&room_lock);
+        if (room_count) room_count--;
+        pthread_cond_broadcast(&room_wake);
+        pthread_mutex_unlock(&room_lock);
+        prep_job_release(&job->job);
+        return 0;
+    }
+    prep_job_release(&job->job);
     return 1;
 }
 
@@ -176,12 +190,12 @@ void audio_wait_room_preparation(void) {
 
 static void stop_room_worker(void) {
     pthread_mutex_lock(&room_lock);
-    int started=room_worker_started;
-    room_worker_stop=1; pthread_cond_broadcast(&room_wake);
+    room_worker_stop=1;
     pthread_mutex_unlock(&room_lock);
-    if (started) pthread_join(room_worker,NULL);
+    audio_wait_room_preparation();
     pthread_mutex_lock(&room_lock);
-    room_worker_started=0; room_head=room_count=0;
+    room_worker_started=0; room_worker_stop=0;
+    room_count=0; room_worker_busy=0;
     pthread_mutex_unlock(&room_lock);
 }
 

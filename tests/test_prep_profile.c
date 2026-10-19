@@ -6,6 +6,7 @@
    and stretch overlapped with generated IR.
    duplicate: four concurrent requests for one stretch, convolution and IR key. */
 #include "prep_profile.h"
+#include "prep_pool.h"
 #include "sampler.h"
 #include "stretch.h"
 #include "convolution.h"
@@ -193,6 +194,57 @@ static void run_stretch_threads(int n, int sample, double duration, double facto
     for (int i = 0; i < n; i++) assert(pthread_join(threads[i], NULL) == 0);
 }
 
+typedef struct {
+    PrepJob job;
+    int sample;
+    double freq, duration, factor;
+    const StretchBuffer *buffer;
+} PoolStretchJob;
+
+static void pool_stretch_run(PrepJob *base) {
+    PoolStretchJob *job = (PoolStretchJob *)base;
+    AudioEvent event = stretch_event(job->sample, job->factor, job->freq, job->duration);
+    job->buffer = stretch_prepare(&event);
+    assert(job->buffer);
+}
+
+static void pool_stretch_destroy(PrepJob *base) {
+    free(base);
+}
+
+/* Worker-count benchmark: the pool itself must not exceed the CPUs available
+   to the process. Distinct keys keep every job in the preparation path. */
+static double run_pool_stretch(int workers, int count, int sample,
+                               double duration, double factor_base) {
+    assert(prep_pool_start((unsigned)workers, 32));
+    prep_profile_reset();
+    PoolStretchJob *jobs[8] = {0};
+    double started = seconds_now();
+    for (int i = 0; i < count; i++) {
+        jobs[i] = calloc(1, sizeof(*jobs[i]));
+        assert(jobs[i]);
+        prep_job_init(&jobs[i]->job, pool_stretch_run, pool_stretch_destroy);
+        jobs[i]->sample = sample;
+        jobs[i]->freq = 180.0 + 40 * i;
+        jobs[i]->duration = duration;
+        jobs[i]->factor = factor_base + 0.05 * i;
+        assert(prep_pool_submit(&jobs[i]->job));
+    }
+    for (int i = 0; i < count; i++) {
+        prep_pool_wait(&jobs[i]->job);
+        assert(jobs[i]->buffer);
+        stretch_release(jobs[i]->buffer);
+        prep_job_release(&jobs[i]->job);
+    }
+    double elapsed = seconds_now() - started;
+    PrepWorkStat works[PREP_WORK_COUNT];
+    PrepLockStat locks[PREP_LOCK_COUNT];
+    prep_profile_snapshot(locks, works);
+    assert(works[PREP_STRETCH].calls == (unsigned long long)count);
+    prep_pool_stop();
+    return elapsed;
+}
+
 int main(void) {
     char *note_path = write_wav(44100);
     char *long_paths[4];
@@ -376,6 +428,15 @@ int main(void) {
     assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
     assert(locks[PREP_LOCK_CONV].hold_ns * 8 < works[PREP_FFT].wall_ns);
     assert(locks[PREP_LOCK_REVERB].hold_ns * 8 < works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);
+
+    /* The pool bound is benchmarked against this process's available CPUs.
+       Timings are observational; the assertions below only prove completion. */
+    for (int workers = 1; workers <= 4; workers *= 2) {
+        double wall = run_pool_stretch(workers, 4, note, 0.27 + 0.004 * workers,
+                                       2.6 + 0.03 * workers);
+        printf("prep pool workers=%d wall_s=%.6f\n", workers, wall);
+        fflush(stdout);
+    }
 
     for (int i = 0; i < 4; i++) {
         assert(unlink(long_paths[i]) == 0);

@@ -3,6 +3,8 @@
 #include "javascript.h"
 #include "event.h"
 int js_audio_event(const cJSON *hap, double origin, double seconds, AudioEvent *event);
+/* Resolve source and publisher-side room state for offline tests. */
+int js_audio_resolve_sample(AudioEvent *event, const cJSON *value);
 int js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation);
 int js_audio_schedule_arc(JsProgram *program, double origin, double seconds,
                           double begin, double end, unsigned generation);

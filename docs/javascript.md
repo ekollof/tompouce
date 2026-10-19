@@ -330,6 +330,20 @@ vocoder. The preparation profile in
 [audio comparison](audio-comparison.md) records cold-cache, live-edit and burst
 timings for this path.
 
+Source preparation for a scheduling window is submitted to a bounded worker
+pool. The generator classifies haps first, submits sample/native/stretch jobs,
+then waits for and publishes them in hap order through an event-queue staging
+transaction. This keeps shared delay and room changes, duck decisions,
+equal-time notes and generation checks in scheduling order. If the program
+changes while jobs are running, completed results are discarded before
+publication; audio that was already committed is not withdrawn. Immediate OSC,
+Csound, rest/eviction and control-only work uses the same transaction. The pool
+defaults to at most four workers, bounded by the online CPU count; set
+`TOMPOUCE_PREP_WORKERS=1..8` to benchmark another count. Its general queue is
+`workers*32`, capped at 512. Failed worker startup falls back to inline
+source/kernel preparation and reports a console message; room requests report a
+room failure instead.
+
 Maintained browser comparisons pass for half/fractional-speed compensation,
 upward shifting, reverse playback, loops and envelope/filter ordering. Downward
 shifting passes for shared PCM and eight independently decoded MP3 piano cases,
@@ -355,7 +369,9 @@ IR duration; the original buffer length participates in WebAudio-style RMS
 normalization. The IR is prepared by the generator using existing sample
 maps, URL policy and decoders. Kernel construction and its FFTs run outside the
 sample-impulse cache lock; lookup and publication are short, and concurrent
-requests for the same key share one published kernel. The callback uses an
+requests for the same key share one published kernel. After inherited room
+controls are resolved in hap order, the kernel FFT is submitted to the same
+preparation pool as other source work. The callback uses an
 immediate 128-tap head plus 128-frame FFT partitions for its tail, preserving
 zero onset latency.
 Stereo channels remain separate. Prepared impulse changes select the shared
@@ -381,20 +397,22 @@ An explicitly supplied IR speed or offset differs from an omitted one even
 when its numeric value equals the default. Such rebuilds reset convolution
 history even if the prepared PCM is already cached.
 
-`room` without `ir` prepares a stereo convolution impulse on a dedicated worker,
-with a bounded 32-request FIFO queue. Live scheduling does not wait for generation.
+`room` without `ir` prepares a stereo convolution impulse on the serial FIFO
+lane of the shared preparation pool, with a bounded 32-request queue. Live
+scheduling does not wait for generation.
 Noise synthesis, the low-pass and the kernel FFTs run outside the generated-IR
 cache lock. That lock is separate from the stretch lock, so stretch and IR
-preparation can overlap. The worker still completes one generated request at a
+preparation can overlap. The lane still completes one generated request at a
 time, so several rooms do not overlap with each other; concurrent requests for
 the same generated IR share one published kernel. The old convolver and its
 sounding tail remain active until a completed kernel is published; that
 publication resets the old convolution history on the next audio frame. An
 initial pending room has no wet output.
-Accepted requests survive evaluation and Stop/Play. As on the web, an older
-generated completion can replace an intervening custom IR. Multiple generated
-requests complete in FIFO order; arbitrary browser worker completion races are
-not reproduced.
+Accepted requests survive evaluation and Stop/Play while their scheduling
+generation remains current; a completion from an obsolete generation is
+discarded before publication. As on the web, an older generated completion can
+replace an intervening custom IR. Multiple generated requests complete in FIFO
+order; arbitrary browser worker completion races are not reproduced.
 
 The generated impulse follows the upstream
 exponential decay, fade-in and gradual low-pass. `roomfade` defaults to .1,

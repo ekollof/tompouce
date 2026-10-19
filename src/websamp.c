@@ -52,6 +52,10 @@ static int web_n = 0;
 static unsigned web_gen = 1;
 static unsigned call_gen = 1;
 static pthread_mutex_t web_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Concurrent preparation must not write the same .part file. Web loadCache
+   shares one fetch promise per URL; one process-wide fetch lock is the native
+   equivalent while decoding remains parallel. */
+static pthread_mutex_t download_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int is_ident_char(int c) {
     return isalnum(c) || c == '_';
@@ -802,7 +806,7 @@ static uint64_t fnv64(const char *s) {
     return h;
 }
 
-static int download_audio(const char *url, char *path_out, int pathlen) {
+static int download_audio_unlocked(const char *url, char *path_out, int pathlen) {
     const char *ext = url_ext(url);
     if (!ext[0]) return 0;
     char dir[512];
@@ -856,6 +860,13 @@ static int download_audio(const char *url, char *path_out, int pathlen) {
         snprintf(cur, sizeof(cur), "%s", next);
     }
     return 0;
+}
+
+static int download_audio(const char *url, char *path_out, int pathlen) {
+    pthread_mutex_lock(&download_lock);
+    int ok = download_audio_unlocked(url, path_out, pathlen);
+    pthread_mutex_unlock(&download_lock);
+    return ok;
 }
 
 static int load_json_text(const char *text, const char *fallback_base) {

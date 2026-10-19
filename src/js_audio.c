@@ -6,6 +6,7 @@
 #include "websamp.h"
 #include "wavetable.h"
 #include "stretch.h"
+#include "prep_pool.h"
 #include <ctype.h>
 #include "js_number.h"
 
@@ -286,7 +287,20 @@ static void sample_bank_name(const char *sound, char *out, size_t n) {
     *colon = 0;
 }
 
-static int resolve_sample(AudioEvent *ev, const cJSON *value) {
+static unsigned room_explicit_fields(const cJSON *value) {
+    const char *room_names[]={"roomsize","roomfade","roomlp","roomdim","irspeed","irbegin"};
+    unsigned room_explicit=0;
+    for (int i=0;i<6;i++) {
+        const cJSON *parameter=cJSON_GetObjectItemCaseSensitive(value,room_names[i]);
+        if (cJSON_IsNumber(parameter) && isfinite(parameter->valuedouble)) room_explicit|=1u<<i;
+    }
+    if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(value,"size"))) room_explicit|=1;
+    return room_explicit;
+}
+
+/* Worker-safe: resolves immutable source data and leaves shared orbit state,
+   including inherited room controls and custom-IR FFTs, to the publisher. */
+static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
     if (ev->inst==INST_NATIVE || cJSON_HasObjectItem(value,"_nativeProgram")) {
         ev->native_synth=native_synth_prepare(value,ev->freq,ev->duration);
         if (!ev->native_synth) { log_console("native synth: unsupported program or preparation limit exceeded"); return 0; }
@@ -303,22 +317,6 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
         if (n<0 || (size_t)n>=sizeof(token)) return 0;
         ev->room_sample=websamp_acquire(token,-1);
         if (ev->room_sample<0) return 0;
-    }
-    const char *room_names[]={"roomsize","roomfade","roomlp","roomdim","irspeed","irbegin"};
-    unsigned room_explicit=0;
-    for (int i=0;i<6;i++) {
-        const cJSON *parameter=cJSON_GetObjectItemCaseSensitive(value,room_names[i]);
-        if (cJSON_IsNumber(parameter) && isfinite(parameter->valuedouble)) room_explicit|=1u<<i;
-    }
-    if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(value,"size"))) room_explicit|=1;
-    audio_inherit_room(ev,room_explicit);
-    if (ir && ev->dsp.p[DSP_ROOM] > 0) {
-        if (ev->dsp.p[DSP_SIZE] == 0) ev->dsp.p[DSP_ROOM] = 0;
-        else {
-            ev->ir_kernel = convolution_prepare(ev->room_sample,ev->dsp.p[DSP_SIZE],
-                ev->room_speed,ev->room_begin);
-            if (!ev->ir_kernel) return 0;
-        }
     }
     const char *sound = text_control(value,"s"), *bank = text_control(value,"bank");
     if (!*sound || oscillator(sound) >= 0 || ev->dsp.n_partials || (ev->native_synth && !native_synth_effect(ev->native_synth))) return 1;
@@ -392,6 +390,56 @@ static int resolve_sample(AudioEvent *ev, const cJSON *value) {
     return ev->smp>=0;
 }
 
+/* Publisher-side shared state: inherit omitted room controls and build the
+   custom-IR kernel in hap order. The kernel FFT itself runs on the shared
+   preparation pool; inherited controls are applied before it is submitted. */
+typedef struct {
+    PrepJob base;
+    int sample;
+    double size, speed, begin;
+    const ConvKernel *kernel;
+} ConvPrepJob;
+
+static void conv_prep_run(PrepJob *base) {
+    ConvPrepJob *job=(ConvPrepJob *)base;
+    job->kernel=convolution_prepare(job->sample,job->size,job->speed,job->begin);
+}
+
+static void conv_prep_destroy(PrepJob *base) {
+    free(base);
+}
+
+static const ConvKernel *prepare_kernel_pooled(int sample, double size,
+                                               double speed, double begin) {
+    ConvPrepJob *job=calloc(1,sizeof(*job));
+    if (!job) return convolution_prepare(sample,size,speed,begin);
+    prep_job_init(&job->base,conv_prep_run,conv_prep_destroy);
+    job->sample=sample; job->size=size; job->speed=speed; job->begin=begin;
+    if (!prep_pool_submit(&job->base)) prep_job_run_inline(&job->base);
+    prep_pool_wait(&job->base);
+    const ConvKernel *kernel=job->kernel;
+    prep_job_release(&job->base);
+    return kernel;
+}
+
+static int finish_sample(AudioEvent *ev, const cJSON *value) {
+    const cJSON *ir = cJSON_GetObjectItemCaseSensitive(value,"ir");
+    audio_inherit_room(ev,room_explicit_fields(value));
+    if (ir && ev->dsp.p[DSP_ROOM] > 0) {
+        if (ev->dsp.p[DSP_SIZE] == 0) ev->dsp.p[DSP_ROOM] = 0;
+        else {
+            ev->ir_kernel = prepare_kernel_pooled(ev->room_sample,ev->dsp.p[DSP_SIZE],
+                ev->room_speed,ev->room_begin);
+            if (!ev->ir_kernel) return 0;
+        }
+    }
+    return 1;
+}
+
+int js_audio_resolve_sample(AudioEvent *event, const cJSON *value) {
+    return resolve_sample_source(event,value) && finish_sample(event,value);
+}
+
 int js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation) {
     double seconds = audio_sec_per_cycle();
     return js_audio_schedule_arc(program,cycle_start-cycle_index*seconds,seconds,cycle_index,cycle_index+1.0,generation);
@@ -440,88 +488,174 @@ static void schedule_source_eviction(double time, double stretch, unsigned gener
     pthread_mutex_unlock(&tracks_lock);
 }
 
-static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
-                          double seconds, unsigned generation) {
-    if (!isfinite(time) || !isfinite(seconds) || seconds<=0) return;
+typedef struct {
+    PrepJob base;
+    AudioEvent event;
+    const cJSON *value;
+    int ok;
+} AudioPrepJob;
+
+static void audio_prep_run(PrepJob *base) {
+    AudioPrepJob *job=(AudioPrepJob *)base;
+    job->ok=resolve_sample_source(&job->event,job->value);
+}
+
+static void audio_prep_destroy(PrepJob *base) {
+    AudioPrepJob *job=(AudioPrepJob *)base;
+    native_synth_release(job->event.native_synth);
+    stretch_release(job->event.stretch_buffer);
+    free(job);
+}
+
+enum { HAP_SKIP=0, HAP_SOURCE, HAP_IMMEDIATE };
+typedef struct {
+    const cJSON *hap;
+    double time, seconds, origin;
+    int kind;
+} HapPlan;
+
+static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
+    const cJSON *field;
+    cJSON_ArrayForEach(field,value) {
+        const char *name = field->string;
+        if (!name || *name == '_' || dsp_supports_control(name)) continue;
+        const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
+            "attack","decay","sustain","release","speed","detune","delay","delaytime",
+            "delayfeedback","midichan","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
+            "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
+            "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
+            "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
+            "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
+        int implemented = 0;
+        for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
+        if (!implemented) javascript_warn_control(program,name);
+    }
+}
+
+/* Classify without touching shared orbit state. Source preparation is
+   submitted to the bounded pool; immediate haps are committed in order. */
+static int plan_hap(JsProgram *program, const cJSON *hap, double time,
+                    double seconds, HapPlan *plan) {
+    memset(plan,0,sizeof(*plan));
+    if (!isfinite(time) || !isfinite(seconds) || seconds<=0) return 0;
     const cJSON *begin=cJSON_GetObjectItemCaseSensitive(hap,"begin");
-    double origin=time-begin->valuedouble*seconds;
+    if (!cJSON_IsNumber(begin) || !isfinite(begin->valuedouble)) return 0;
+    plan->hap=hap; plan->time=time; plan->seconds=seconds;
+    plan->origin=time-begin->valuedouble*seconds;
     double cutoff=event_queue_not_before();
-        if (time<=cutoff || time+1/SR<audio_time_now()) return;
-        const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap,"value");
-        javascript_cache_hap(program,hap,origin,seconds);
-        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
-            AudioEvent ev;
-            if (audio_event_values(hap,origin,seconds,&ev,0)) {
-                double cycle=control(hap,"begin",0,-1e12,1e12);
-                if (osc_output_prepare(&ev.osc,value,cycle,1/seconds,ev.duration)) {
-                    ev.osc_only=1; ev.generation=generation; event_queue_push(&ev);
-                } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
-            }
+    if (time<=cutoff || time+1/SR<audio_time_now()) return 0;
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+    javascript_cache_hap(program,hap,plan->origin,seconds);
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
+        plan->kind=HAP_IMMEDIATE; return 1;
+    }
+    int csound=cJSON_HasObjectItem(value,"csound");
+    if (!csound) {
+        const char *sound=text_control(value,"s");
+        if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) {
+            plan->kind=HAP_IMMEDIATE; return 1;
+        }
+    }
+    warn_unknown_controls(program,value);
+    AudioEvent event;
+    if (!audio_event_values(hap,plan->origin,seconds,&event,0)) return 0;
+    plan->kind=csound?HAP_IMMEDIATE:HAP_SOURCE;
+    return 1;
+}
+
+static AudioPrepJob *prepare_hap_job(const HapPlan *plan, unsigned generation) {
+    AudioEvent event;
+    if (!audio_event_values(plan->hap,plan->origin,plan->seconds,&event,0)) return NULL;
+    event.generation=generation; event.duck_mask=0;
+    AudioPrepJob *job=calloc(1,sizeof(*job));
+    if (!job) return NULL;
+    prep_job_init(&job->base,audio_prep_run,audio_prep_destroy);
+    job->event=event;
+    job->value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
+    if (!prep_pool_submit(&job->base)) prep_job_run_inline(&job->base);
+    return job;
+}
+
+static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsigned generation) {
+    if (plan->time+1/SR<audio_time_now()) return;
+    const cJSON *hap=plan->hap;
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
+        AudioEvent event;
+        if (audio_event_values(hap,plan->origin,plan->seconds,&event,0)) {
+            double cycle=control(hap,"begin",0,-1e12,1e12);
+            if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {
+                event.osc_only=1; event.generation=generation; event_queue_push(&event);
+            } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
+        }
+        return;
+    }
+    int csound=cJSON_HasObjectItem(value,"csound");
+    if (!csound) {
+        if (!schedule_local_ducks(value,plan->time,generation)) return;
+        const char *sound=text_control(value,"s");
+        if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) {
+            schedule_source_eviction(plan->time,cJSON_HasObjectItem(value,"stretch")?1:0,generation);
             return;
         }
-        int csound=cJSON_HasObjectItem(value,"csound");
-        if (!csound) {
-            if (!schedule_local_ducks(value,time,generation)) return;
-            const char *sound=text_control(value,"s");
-            if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) {
-                schedule_source_eviction(time,cJSON_HasObjectItem(value,"stretch")?1:0,generation);
-                return;
-            }
-        }
-        const cJSON *field;
-        cJSON_ArrayForEach(field,value) {
-            const char *name = field->string;
-            if (!name || *name == '_' || dsp_supports_control(name)) continue;
-            const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
-                "attack","decay","sustain","release","speed","detune","delay","delaytime",
-                "delayfeedback","midichan","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
-                "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
-                "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
-                "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
-                "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
-            int implemented = 0;
-            for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
-            if (!implemented) javascript_warn_control(program,name);
-        }
-        AudioEvent ev;
-        if (!audio_event_values(hap,origin,seconds,&ev,0)) return;
-        ev.generation = generation;
-        ev.duck_mask=0; /* Independently committed above, including failed sources. */
-        if (csound) {
-            ev.midi_chan=ev.midi_note=-1; /* Dominant output bypasses ALSA too. */
-            pthread_mutex_lock(&tracks_lock);
-            int current=generation==event_queue_generation();
-            int scheduled=current && csound_program_schedule(javascript_csound(program),value,ev.time,ev.duration,ev.freq);
-            if (current && !scheduled)
-                javascript_warn_control(program,"csound (renderer unavailable or event rejected)");
-            else if (scheduled) { ev.csound_only = 1; event_queue_push(&ev); }
-            pthread_mutex_unlock(&tracks_lock);
-            return;
-        }
-        if (!resolve_sample(&ev,value)) {
-            schedule_source_eviction(ev.time,ev.stretch,generation);
-            native_synth_release(ev.native_synth);
-            stretch_release(ev.stretch_buffer);
-            if (cJSON_HasObjectItem(value,"ir"))
-                javascript_warn_control(program,"ir (sample unavailable or convolution limit exceeded)");
-            else javascript_warn_control(program,"sound (sample unavailable or unknown source)");
-            return;
-        }
-        if (ev.time+1/SR<audio_time_now()) {
-            native_synth_release(ev.native_synth); stretch_release(ev.stretch_buffer);
-            javascript_warn_control(program,"late sound preparation (note skipped)");
-            return;
-        }
+    }
+    AudioEvent event;
+    if (!audio_event_values(hap,plan->origin,plan->seconds,&event,0)) return;
+    event.generation=generation; event.duck_mask=0;
+    if (csound) {
+        event.midi_chan=event.midi_note=-1; /* Dominant output bypasses ALSA too. */
         pthread_mutex_lock(&tracks_lock);
         int current=generation==event_queue_generation();
-        if (current && audio_prepare_delay(&ev)) {
-            audio_prepare_room(&ev);
-            event_queue_push(&ev);
-        }
-        else if (current) javascript_warn_control(program,"delay (pending control capacity exceeded)");
+        int scheduled=current && csound_program_schedule(javascript_csound(program),value,event.time,event.duration,event.freq);
+        if (current && !scheduled)
+            javascript_warn_control(program,"csound (renderer unavailable or event rejected)");
+        else if (scheduled) { event.csound_only=1; event_queue_push(&event); }
         pthread_mutex_unlock(&tracks_lock);
-        native_synth_release(ev.native_synth);
-        stretch_release(ev.stretch_buffer);
+    }
+}
+
+static void commit_source_hap(JsProgram *program, const HapPlan *plan,
+                              AudioPrepJob *job, unsigned generation) {
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
+    if (plan->time+1/SR<audio_time_now()) {
+        if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+        return;
+    }
+    if (!schedule_local_ducks(value,plan->time,generation)) {
+        if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+        return;
+    }
+    if (!job) {
+        schedule_source_eviction(plan->time,0,generation);
+        javascript_warn_control(program,"sound (preparation allocation failed)");
+        return;
+    }
+    prep_pool_wait(&job->base);
+    /* Once the program changed, shared state and queue events are obsolete.
+       The completed job is discarded without withdrawing committed audio. */
+    if (generation!=event_queue_generation()) {
+        prep_job_release(&job->base); return;
+    }
+    if (!job->ok || !finish_sample(&job->event,value)) {
+        schedule_source_eviction(job->event.time,job->event.stretch,generation);
+        if (cJSON_HasObjectItem(value,"ir"))
+            javascript_warn_control(program,"ir (sample unavailable or convolution limit exceeded)");
+        else javascript_warn_control(program,"sound (sample unavailable or unknown source)");
+        prep_job_release(&job->base); return;
+    }
+    if (job->event.time+1/SR<audio_time_now()) {
+        javascript_warn_control(program,"late sound preparation (note skipped)");
+        prep_job_release(&job->base); return;
+    }
+    pthread_mutex_lock(&tracks_lock);
+    int current=generation==event_queue_generation();
+    if (current && audio_prepare_delay(&job->event)) {
+        audio_prepare_room(&job->event);
+        event_queue_push(&job->event);
+    }
+    else if (current) javascript_warn_control(program,"delay (pending control capacity exceeded)");
+    pthread_mutex_unlock(&tracks_lock);
+    prep_job_release(&job->base);
 }
 
 typedef struct { const cJSON *hap; int index; } OrderedHap;
@@ -536,6 +670,7 @@ static int hap_order(const void *left, const void *right) {
     return ca!=cb?cb-ca:a->index-b->index;
 }
 
+#define PREP_BATCH 64
 int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                             double begin, double end, double tick_end, unsigned generation) {
     clock->end=end;
@@ -559,7 +694,9 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
         }
         count=n;
         if (count) qsort(ordered,(size_t)count,sizeof(*ordered),hap_order);
-        int changed=0;
+        HapPlan *plans=count?calloc((size_t)count,sizeof(*plans)):NULL;
+        if (count && !plans) { free(ordered); cJSON_Delete(haps); return 0; }
+        int nplans=0, changed=0;
         for (int i=0;i<count;i++) {
             hap=ordered[i].hap;
             double onset=cJSON_GetObjectItemCaseSensitive(hap,"begin")->valuedouble;
@@ -575,14 +712,38 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                 }
                 event_seconds=cps->valuedouble==0?HUGE_VAL:1/cps->valuedouble;
             }
-            schedule_hap(program,hap,target,event_seconds,generation);
+            if (plan_hap(program,hap,target,event_seconds,&plans[nplans])) nplans++;
             if (cps && event_seconds!=clock->seconds) {
                 clock->seconds=event_seconds;
                 clock->anchor_cycle=onset; clock->anchor_time=target;
                 changed=1;
             }
         }
-        free(ordered); cJSON_Delete(haps);
+        int owned=event_queue_publish_begin();
+        int ok=1;
+        for (int base=0;base<nplans && ok;base+=PREP_BATCH) {
+            int stop=base+PREP_BATCH; if (stop>nplans) stop=nplans;
+            if (generation!=event_queue_generation()) { ok=0; break; }
+            AudioPrepJob **jobs=calloc((size_t)(stop-base),sizeof(*jobs));
+            if (!jobs) { ok=0; break; }
+            for (int i=base;i<stop;i++) if (plans[i].kind==HAP_SOURCE)
+                jobs[i-base]=prepare_hap_job(&plans[i],generation);
+            for (int i=base;i<stop;i++) {
+                AudioPrepJob *job=jobs[i-base];
+                if (!ok || generation!=event_queue_generation()) {
+                    ok=0;
+                    if (job) { prep_pool_wait(&job->base); prep_job_release(&job->base); }
+                    continue;
+                }
+                if (plans[i].kind==HAP_SOURCE) commit_source_hap(program,&plans[i],job,generation);
+                else commit_immediate_hap(program,&plans[i],generation);
+            }
+            free(jobs);
+        }
+        int committed=event_queue_publish_finish(owned,ok);
+        if (owned && !committed) log_console("event queue: publication discarded");
+        free(plans); free(ordered); cJSON_Delete(haps);
+        if (!ok || !committed) return 0;
         if (!changed) return 1;
         begin=end;
         end=clock->anchor_cycle+(tick_end-clock->anchor_time)/clock->seconds;

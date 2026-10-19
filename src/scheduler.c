@@ -6,6 +6,7 @@
 #include "stretch.h"
 #include "common.h"
 #include "midi.h"
+#include "prep_pool.h"
 
 #include <pthread.h>
 #include <ctype.h>
@@ -354,7 +355,7 @@ static int qcount;
 static double qnot_before = -HUGE_VAL;
 static _Thread_local struct {
     QNode *head;
-    int count, active, failed;
+    int count, active, failed, replace;
     unsigned generation;
     double cutoff;
 } qstaging;
@@ -422,34 +423,84 @@ void event_queue_new_program(double boundary) {
 void event_queue_refresh(double cutoff) {
     pthread_mutex_lock(&qlock);
     qstaging.active=1; qstaging.cutoff=cutoff; qstaging.generation=qgeneration;
+    qstaging.replace=1;
     pthread_mutex_unlock(&qlock);
+}
+
+/* Normal generator publication: append completed work without withdrawing
+   already queued future events. Returns 1 when this caller owns the staging
+   transaction; an existing refresh transaction keeps ownership. */
+int event_queue_publish_begin(void) {
+    int owned=0;
+    pthread_mutex_lock(&qlock);
+    if (!qstaging.active) {
+        qstaging.active=1; qstaging.cutoff=-HUGE_VAL; qstaging.generation=qgeneration;
+        qstaging.replace=0; owned=1;
+    }
+    pthread_mutex_unlock(&qlock);
+    return owned;
+}
+
+/* qlock held. Publishes or discards this thread's staged events. */
+static int finish_staging_locked(int success) {
+    int commit=success && !qstaging.failed && qgeneration==qstaging.generation;
+    double cutoff=qstaging.cutoff;
+    if (commit && qstaging.replace) {
+        cutoff=fmax(cutoff,audio_time_now()+.002);
+        QNode **link=&qhead;
+        while (*link) {
+            QNode *node=*link;
+            if (node->ev.time>cutoff) {
+                *link=node->next; qcount--;
+                native_synth_release(node->ev.native_synth);
+                stretch_release(node->ev.stretch_buffer); free(node);
+            } else link=&node->next;
+        }
+    }
+    if (commit) {
+        QNode *left=qhead, *right=qstaging.head;
+        QNode *merged=NULL, **link=&merged;
+        while (left && right) {
+            if (left->ev.time<=right->ev.time) { *link=left; left=left->next; }
+            else if (qcount<8192) { *link=right; right=right->next; qcount++; }
+            else break;
+            link=&(*link)->next;
+        }
+        while (left) { *link=left; left=left->next; link=&(*link)->next; }
+        if (!left) while (right && qcount<8192) {
+            *link=right; right=right->next; qcount++; link=&(*link)->next;
+        }
+        *link=NULL;
+        while (right) {
+            QNode *node=right; right=right->next;
+            native_synth_release(node->ev.native_synth);
+            stretch_release(node->ev.stretch_buffer); free(node);
+        }
+        qhead=merged;
+        if (qstaging.replace) qnot_before=cutoff;
+    } else {
+        while (qstaging.head) {
+            QNode *node=qstaging.head; qstaging.head=node->next;
+            native_synth_release(node->ev.native_synth);
+            stretch_release(node->ev.stretch_buffer); free(node);
+        }
+    }
+    memset(&qstaging,0,sizeof(qstaging));
+    return commit;
 }
 
 int event_queue_refresh_finish(int success) {
     if (!qstaging.active) return 0;
     pthread_mutex_lock(&qlock);
-    int commit=success && !qstaging.failed && qgeneration==qstaging.generation;
-    double cutoff=fmax(qstaging.cutoff,audio_time_now()+.002);
-    QNode **link=&qhead;
-    while (commit && *link) {
-        QNode *node=*link;
-        if (node->ev.time>cutoff) {
-            *link=node->next; qcount--;
-            native_synth_release(node->ev.native_synth);
-            stretch_release(node->ev.stretch_buffer); free(node);
-        } else link=&node->next;
-    }
-    while (qstaging.head) {
-        QNode *node=qstaging.head; qstaging.head=node->next;
-        if (commit && node->ev.time>cutoff && qcount<8192) {
-            *link=node; link=&node->next; node->next=NULL; qcount++;
-        } else {
-            native_synth_release(node->ev.native_synth);
-            stretch_release(node->ev.stretch_buffer); free(node);
-        }
-    }
-    if (commit) qnot_before=cutoff;
-    memset(&qstaging,0,sizeof(qstaging));
+    int commit=finish_staging_locked(success);
+    pthread_mutex_unlock(&qlock);
+    return commit;
+}
+
+int event_queue_publish_finish(int owned, int success) {
+    if (!owned) return 1;
+    pthread_mutex_lock(&qlock);
+    int commit=finish_staging_locked(success);
     pthread_mutex_unlock(&qlock);
     return commit;
 }
@@ -771,6 +822,7 @@ static void *generator_thread(void *arg) {
 }
 
 void scheduler_init(void) {
+    prep_pool_start(0,0);
     scheduler_running = 1;
     pthread_create(&consumer_tid, NULL, consumer_thread, NULL);
     pthread_create(&generator_tid, NULL, generator_thread, NULL);
@@ -779,6 +831,7 @@ void scheduler_shutdown(void) {
     scheduler_running = 0;
     pthread_join(consumer_tid, NULL);
     pthread_join(generator_tid, NULL);
+    prep_pool_stop();
     osc_output_shutdown();
     pthread_mutex_lock(&tracks_lock);
     song_clear_all();

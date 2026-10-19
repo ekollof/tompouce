@@ -39,6 +39,12 @@ add_custom_target(test-csound-reference-web
     DEPENDS test_csound WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(test-duck-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
+        node scripts/duck-timing-reference-qa.mjs
+    DEPENDS test_live_sliders WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)
 set_target_properties(render_audio PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 target_compile_options(render_audio PRIVATE -UNDEBUG)

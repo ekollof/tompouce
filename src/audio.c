@@ -194,23 +194,25 @@ static void orbits_ensure(void) {
     orbits_ready = 1;
 }
 
-static double orbit_duck_gain(int orbit) {
+static double orbit_duck_gain_at(int orbit, double time) {
     if (orbit < 0 || orbit >= N_ORBITS) return 1;
     if (web_duck[orbit].enabled) {
         double begin=web_duck[orbit].begin,minimum=web_duck[orbit].minimum,end=web_duck[orbit].end;
         double initial=web_duck[orbit].initial,target=web_duck[orbit].target;
-        if (audio_time<begin) return initial;
-        if (audio_time<minimum && minimum>begin)
-            return initial*pow(target/initial,(audio_time-begin)/(minimum-begin));
+        if (time<begin) return initial;
+        if (time<minimum && minimum>begin)
+            return initial*pow(target/initial,(time-begin)/(minimum-begin));
         if (web_duck[orbit].hold) return target;
-        if (audio_time<end && end>minimum)
-            return target*pow(1/target,(audio_time-minimum)/(end-minimum));
+        if (time<end && end>minimum)
+            return target*pow(1/target,(time-minimum)/(end-minimum));
         return 1;
     }
     if (duck_depth[orbit] <= 0 || duck_atk[orbit] <= 0 || duck_t[orbit] >= duck_atk[orbit])
         return 1;
     return 1 - duck_depth[orbit] * (1 - duck_t[orbit] / duck_atk[orbit]);
 }
+
+static double orbit_duck_gain(int orbit) { return orbit_duck_gain_at(orbit,audio_time); }
 
 void audio_fx_set(const char *name, double v) {
     if (!name || !isfinite(v)) return;
@@ -412,7 +414,10 @@ static double duck_endpoint_number(const char *text) {
 static void apply_duck(const PendingDuck *pending) {
     for (int o=0;o<N_ORBITS;o++) if (pending->mask&(1u<<o)) {
         DuckControl control=pending->controls[o];
-        double initial=fmax(.01,(float)orbit_duck_gain(o));
+        /* AudioParam.value is the last rendered sample when the timer fires,
+           not the next frame's value. This also anchors failed replacement
+           ramps after cancellation at the gain the artist actually heard. */
+        double initial=fmax(.01,(float)orbit_duck_gain_at(o,fmax(0,audio_time-1/SR)));
         double minimum=fmax(pending->source_time,audio_time)+control.onset;
         double return_time=minimum+fmax(.002,control.attack);
         if (control.string_onset) {

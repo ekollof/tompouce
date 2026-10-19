@@ -50,6 +50,7 @@ Useful focused checks:
 - `cmake --build build --target test-sanitize`
 - `cmake --build build --target test-terminal-sanitize`
 - `cmake --build build --target test-controls-reference-web`
+- `cmake --build build --target test-duck-reference-web`
 - `cmake --build build --target test-csound-reference-web`
 - `cmake --build build --target test-audio-backends`
 - `node scripts/effects-reference-qa.mjs`

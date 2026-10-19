@@ -175,4 +175,16 @@ completed IRs before rendering; they do not measure asynchronous completion
 latency or prove source-side failure parity. Multiple generated requests use a
 single FIFO worker; browser completion races remain open.
 
+`node scripts/duck-timing-reference-qa.mjs /tmp/duck-timing-reference` compares
+88 real web timer-callback/gain-PCM cases with native control conversion and
+automation. It covers selected unusual numeric strings, nested onset values,
+past endpoints, late callbacks, interruption during downward/return ramps and
+failed first/return ramps after cancellation. Timers are dispatched explicitly
+at suspended offline render boundaries, then detached to prevent duplicate
+natural callbacks. Native reanchoring uses the last rendered sample, matching
+the web's AudioParam.value read. `test-duck-reference-web` builds and runs this
+gate; `TOMPOUCE_LIVE_CONTROLS_BINARY` selects another native test executable.
+This does not establish live timer-jitter/overload parity or remove the
+127-byte normalized onset-string bound.
+
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

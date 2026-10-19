@@ -402,7 +402,12 @@ static void test_silent_sample_cut(void) {
             double time=i/SR,gain=1;
             if (time>=.02 && time<minimum) gain=pow(target,(time-.02)/(minimum-.02));
             else if (time>=minimum && time<minimum+.02) gain=pow(target,1-(time-minimum)/.02);
-            if (trial==3 && time>=.04) gain=time<.05?.1:time<.07?pow(.1,1-(time-.05)/.02):1;
+            if (trial==3 && time>=.04) {
+                /* Depth-zero cancellation reads the previous rendered frame,
+                   including when that frame lies on the old return ramp. */
+                double anchor=(float)pow(.01,(.05-(.04-1/SR))/.02);
+                gain=time<.05?anchor:time<.07?pow(anchor,1-(time-.05)/.02):1;
+            }
             double expected=.1*fmin(1,time/.001)*gain;
             assert(fabs(output[i*2]-expected)<2e-6 && fabs(output[i*2+1]-expected)<2e-6);
         }
@@ -660,6 +665,35 @@ static void test_string_duck_onset(void) {
         assert(fabs(orbit_duck_gain(1)-expected[i])<2e-8);
         if (i==4) assert(web_duck[1].minimum==.31 && web_duck[1].end==.311);
     }
+}
+
+static void test_interrupted_duck_anchor(void) {
+    for (int falling=0;falling<2;falling++) for (int failure=0;failure<3;failure++) {
+        audio_report_errors();
+        memset(&web_duck[1],0,sizeof(web_duck[1]));
+        web_duck[1].enabled=web_duck[1].hold=1;
+        web_duck[1].initial=web_duck[1].target=.8;
+        double begin=falling?.28:.09,minimum=falling?.3:.1;
+        PendingDuck prior={.source_time=minimum,.mask=2};
+        prior.controls[1]=(DuckControl){.attack=.6,.depth=.75};
+        audio_time=begin; apply_duck(&prior);
+        /* Independent exponential automation at the last completed frame. */
+        double last=.29-1/SR,target=1-sqrt(.75);
+        double expected=falling?(float).8*pow(target/(float).8,(last-begin)/(minimum-begin)):
+            target*pow(1/target,(last-minimum)/.6);
+        PendingDuck next={.source_time=.3,.mask=2};
+        next.controls[1]=(DuckControl){.attack=failure==2?NAN:.2,.depth=failure==1?-1:.25};
+        audio_time=.29; apply_duck(&next);
+        assert(web_duck[1].initial==(double)(float)expected);
+        assert(duck_error_count==(unsigned)(failure!=0));
+        if(failure) {
+            assert(duck_errors[0].returning==(failure==2));
+            assert(web_duck[1].hold);
+            audio_time=.9;
+            assert(orbit_duck_gain(1)==fmin((double)(float)expected,.5));
+        }
+    }
+    audio_report_errors();
 }
 
 static void test_nested_duck_controls(void) {
@@ -1003,6 +1037,50 @@ static void test_csound_callback_continuity(void) {
 }
 #endif
 
+static void duck_reference_apply(const cJSON *test) {
+    cJSON *hap=cJSON_CreateObject(),*value=cJSON_CreateObject();
+    assert(hap && value);
+    cJSON_AddNumberToObject(hap,"begin",0); cJSON_AddNumberToObject(hap,"end",1);
+    cJSON_AddItemToObject(hap,"value",value);
+    cJSON_AddStringToObject(value,"s","~"); cJSON_AddNumberToObject(value,"duckorbit",1);
+    const cJSON *controls=cJSON_GetObjectItemCaseSensitive(test,"controls"),*item;
+    cJSON_ArrayForEach(item,controls) {
+        char name[64]; snprintf(name,sizeof(name),"duck%s",item->string);
+        assert(cJSON_AddItemToObject(value,name,cJSON_Duplicate(item,1)));
+    }
+    AudioEvent event;
+    assert(js_audio_event(hap,cJSON_GetObjectItemCaseSensitive(test,"sourceTime")->valuedouble,1,&event));
+    PendingDuck pending={.source_time=event.time,.mask=1u<<1};
+    pending.controls[1]=event.ducks[1];
+    audio_time=cJSON_GetObjectItemCaseSensitive(test,"callbackAt")->valuedouble;
+    apply_duck(&pending); cJSON_Delete(hap);
+}
+
+static void duck_reference(void) {
+    char input[65536]; size_t length=fread(input,1,sizeof(input)-1,stdin);
+    assert(!ferror(stdin) && feof(stdin)); input[length]=0;
+    cJSON *tests=cJSON_Parse(input),*results=cJSON_CreateArray(); assert(tests && results);
+    const cJSON *test;
+    cJSON_ArrayForEach(test,tests) {
+        memset(&web_duck[1],0,sizeof(web_duck[1]));
+        web_duck[1].enabled=web_duck[1].hold=1;
+        web_duck[1].initial=web_duck[1].target=.8;
+        const cJSON *prior=cJSON_GetObjectItemCaseSensitive(test,"prior");
+        if(cJSON_IsObject(prior)) duck_reference_apply(prior);
+        duck_error_count=0; duck_reference_apply(test);
+        cJSON *result=cJSON_CreateObject(),*gains=cJSON_CreateArray(); assert(result && gains);
+        cJSON_AddNumberToObject(result,"rejected",duck_error_count?(duck_errors[0].returning?2:1):0);
+        const cJSON *point;
+        cJSON_ArrayForEach(point,cJSON_GetObjectItemCaseSensitive(test,"points")) {
+            audio_time=cJSON_GetObjectItemCaseSensitive(point,"time")->valuedouble;
+            cJSON_AddItemToArray(gains,cJSON_CreateNumber(orbit_duck_gain(1)));
+        }
+        cJSON_AddItemToObject(result,"gains",gains); cJSON_AddItemToArray(results,result);
+    }
+    char *json=cJSON_PrintUnformatted(results); assert(json); puts(json); free(json);
+    cJSON_Delete(tests); cJSON_Delete(results);
+}
+
 int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
@@ -1015,6 +1093,7 @@ int main(int argc, char **argv) {
 #endif
     }
     log_console_stderr(0);
+    if (argc>1 && !strcmp(argv[1],"--duck-reference")) { duck_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--clock-reference")) { reference_clock(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--cps-reference")) { reference_cps(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--performance-reference")) { reference_performance(1); return 0; }
@@ -1158,6 +1237,7 @@ int main(int argc, char **argv) {
     test_boolean_duck_onset();
     test_nonfinite_duck_numbers();
     test_string_duck_onset();
+    test_interrupted_duck_anchor();
     test_nested_duck_controls();
     test_duck_output_routing();
     test_javascript_numeric_strings();

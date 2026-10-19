@@ -577,6 +577,10 @@ that do not yet exist are skipped at preparation time. `duckattack` is the retur
 reach their minimum at the note plus `duckonset`, then return to unity.
 Arrays of onset, attack and depth values map to the target array, reusing the
 first value for omitted entries. Depth zero still cancels the previous ramp.
+Replacement callbacks anchor to the last rendered sample's gain, as returned
+by WebAudio's AudioParam.value, before cancelling and replacing automation.
+That anchor is retained if the first replacement ramp fails; failure of the
+return ramp retains the accepted downward ramp and its target.
 Empty arrays and arrays whose first entry is undefined use onset zero and
 depth one, but their attack becomes NaN before the orbit defaults apply: the
 downward ramp is retained and the return ramp is rejected. Nested arrays retain

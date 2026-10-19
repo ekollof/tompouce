@@ -4,6 +4,7 @@
    All transforms run during generator preparation, never in the callback. */
 #include "stretch.h"
 #include "sampler.h"
+#include "prep_profile.h"
 #include <stdatomic.h>
 #include <float.h>
 
@@ -23,6 +24,8 @@ static struct { StretchKey key; StretchBuffer *buffer; unsigned long used; } cac
 static size_t cache_bytes;
 static unsigned long serial;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+static void stretch_lock(void) { prep_lock(&lock, PREP_LOCK_STRETCH); }
+static void stretch_unlock(void) { prep_unlock(&lock, PREP_LOCK_STRETCH); }
 static pthread_once_t tables_once=PTHREAD_ONCE_INIT;
 static float hann[FFT_SIZE];
 static Complex twiddle[FFT_SIZE/2];
@@ -126,11 +129,11 @@ double stretch_age_offset(const StretchBuffer *buffer) { return buffer?buffer->a
 
 const StretchBuffer *stretch_pcm_lookup(const char *key) {
     if (!key || !*key || strlen(key)>=sizeof(cache[0].key.source_key)) return NULL;
-    pthread_mutex_lock(&lock);
+    stretch_lock();
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !strcmp(cache[i].key.source_key,key)) {
-        cache[i].used=++serial; stretch_retain(cache[i].buffer); pthread_mutex_unlock(&lock); return cache[i].buffer;
+        cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); return cache[i].buffer;
     }
-    pthread_mutex_unlock(&lock); return NULL;
+    stretch_unlock(); return NULL;
 }
 
 const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) {
@@ -138,9 +141,9 @@ const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) 
         free(pcm); return NULL;
     }
     size_t bytes=sizeof(StretchBuffer)+(size_t)frames*2*sizeof(float);
-    pthread_mutex_lock(&lock);
+    stretch_lock();
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !strcmp(cache[i].key.source_key,key)) {
-        cache[i].used=++serial; stretch_retain(cache[i].buffer); pthread_mutex_unlock(&lock); free(pcm); return cache[i].buffer;
+        cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); free(pcm); return cache[i].buffer;
     }
     int slot=-1;
     for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer) { slot=i; break; }
@@ -148,18 +151,18 @@ const StretchBuffer *stretch_pcm_store(const char *key, float *pcm, int frames) 
         int oldest=-1;
         for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
             (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
-        if (oldest<0) { pthread_mutex_unlock(&lock); free(pcm); return NULL; }
+        if (oldest<0) { stretch_unlock(); free(pcm); return NULL; }
         cache_bytes-=cache[oldest].buffer->bytes;
         free(cache[oldest].buffer); cache[oldest].buffer=NULL; if (slot<0) slot=oldest;
     }
     StretchBuffer *buffer=malloc(bytes);
-    if (!buffer) { pthread_mutex_unlock(&lock); free(pcm); return NULL; }
+    if (!buffer) { stretch_unlock(); free(pcm); return NULL; }
     atomic_init(&buffer->refs,1); buffer->frames=frames; buffer->bytes=bytes; buffer->age_offset=0;
     memcpy(buffer->pcm,pcm,(size_t)frames*2*sizeof(float)); free(pcm);
     memset(&cache[slot].key,0,sizeof(cache[slot].key));
     snprintf(cache[slot].key.source_key,sizeof(cache[slot].key.source_key),"%s",key);
     cache[slot].buffer=buffer; cache[slot].used=++serial; cache_bytes+=bytes;
-    pthread_mutex_unlock(&lock); return buffer;
+    stretch_unlock(); return buffer;
 }
 
 const StretchBuffer *stretch_prepare(const AudioEvent *event) {
@@ -204,9 +207,9 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     if (key.frames<0) key.frames=0;
     size_t bytes=sizeof(StretchBuffer)+(size_t)key.frames*2*sizeof(float);
     pthread_once(&tables_once,init_tables);
-    pthread_mutex_lock(&lock);
+    stretch_lock();
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !memcmp(&cache[i].key,&key,sizeof(key))) {
-        cache[i].used=++serial; stretch_retain(cache[i].buffer); pthread_mutex_unlock(&lock); return cache[i].buffer;
+        cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); return cache[i].buffer;
     }
     int slot=-1;
     for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer) { slot=i; break; }
@@ -214,14 +217,14 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
         int oldest=-1;
         for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
             (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
-        if (oldest<0) { pthread_mutex_unlock(&lock); return NULL; }
+        if (oldest<0) { stretch_unlock(); return NULL; }
         cache_bytes-=cache[oldest].buffer->bytes;
         free(cache[oldest].buffer); cache[oldest].buffer=NULL; if (slot<0) slot=oldest;
     }
     StretchBuffer *buffer=calloc(1,bytes);
     typedef struct { float input[2][FFT_SIZE],sum[2][FFT_SIZE]; Complex freq[FFT_SIZE],shifted[FFT_SIZE]; } Work;
     Work *work=calloc(1,sizeof(*work));
-    if (!buffer || !work) { free(buffer); free(work); pthread_mutex_unlock(&lock); return NULL; }
+    if (!buffer || !work) { free(buffer); free(work); stretch_unlock(); return NULL; }
     buffer->frames=key.frames; buffer->bytes=bytes; atomic_init(&buffer->refs,1);
     buffer->age_offset=.04;
     /* Match the reference's 40ms source anticipation and global 128-frame
@@ -232,6 +235,7 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     double loop_lo=length*key.params.p[DSP_LOOPBEGIN],loop_hi=length*key.params.p[DSP_LOOPEND];
     if (key.step<0) { double swap=loop_lo; loop_lo=length-loop_hi; loop_hi=length-swap; }
     int started=0;
+    prep_work_begin(PREP_STRETCH);
     for (long block=first;block<key.phase+buffer->frames;block+=HOP) {
         for (int channel=0;channel<2;channel++) {
             memmove(work->input[channel],work->input[channel]+HOP,(FFT_SIZE-HOP)*sizeof(float));
@@ -276,6 +280,7 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
             memset(work->sum[channel]+FFT_SIZE-HOP,0,HOP*sizeof(float));
         }
     }
+    prep_work_end(PREP_STRETCH);
     free(work); cache[slot].key=key; cache[slot].buffer=buffer; cache[slot].used=++serial; cache_bytes+=bytes;
-    pthread_mutex_unlock(&lock); return buffer;
+    stretch_unlock(); return buffer;
 }

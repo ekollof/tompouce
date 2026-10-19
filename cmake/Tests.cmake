@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound
-        audio audio_performance room duck_onset terminal_graphics audio_output native_synth live_sliders)
+        audio audio_performance prep_profile room duck_onset terminal_graphics audio_output native_synth live_sliders)
     tompouce_test(${name})
 endforeach()
 

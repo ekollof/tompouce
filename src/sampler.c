@@ -2,6 +2,7 @@
 #include "banks.h"
 #include "websamp.h"
 #include "common.h"
+#include "prep_profile.h"
 #define MINIMP3_IMPLEMENTATION
 /* Preserve sub-16-bit decoder detail. Quantization perturbs the reference
    vocoder's peak regions, especially during downward pitch compensation. */
@@ -55,6 +56,8 @@ static size_t sample_bytes;
 static BankCache banks[SMP_MAX_BANKS];
 static int n_banks = 0;
 static pthread_mutex_t smp_lock = PTHREAD_MUTEX_INITIALIZER;
+static void sample_lock(void) { prep_lock(&smp_lock, PREP_LOCK_SAMPLE); }
+static void sample_unlock(void) { prep_unlock(&smp_lock, PREP_LOCK_SAMPLE); }
 
 int bank_find_dir(const char *frag, char *out, int outlen) {
     char rel[512];
@@ -137,14 +140,14 @@ static BankCache *bank_cache(const char *bankdir) {
 
 /* drop cached dir listings (decoded samples stay valid in memory) */
 void smp_invalidate(void) {
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     for (int i = 0; i < n_banks; i++) {
         for (int k = 0; k < banks[i].nfiles; k++) free(banks[i].files[k]);
         banks[i].nfiles = 0;
         banks[i].dir[0] = 0;
     }
     n_banks = 0;
-    pthread_mutex_unlock(&smp_lock);
+    sample_unlock();
 }
 
 static const char *const *aliases(const char *token, int *n) {
@@ -448,12 +451,14 @@ static float *read_audio(const char *path, int *len_out, int *channels_out) {
     float *tmp = NULL;
     uint32_t have = 0;
     int rate = 0;
+    prep_work_begin(PREP_DECODE);
     if (dot && strcasecmp(dot, ".mp3") == 0) tmp = decode_mp3(path, &have, &rate,channels_out);
     else if (dot && (strcasecmp(dot, ".flac") == 0 || strcasecmp(dot, ".fla") == 0))
         tmp = decode_flac(path, &have, &rate,channels_out);
     else tmp = decode_wav(path, &have, &rate,channels_out);
-    if (!tmp) return NULL;
-    return finish_audio(tmp, have, rate, len_out);
+    float *out = tmp ? finish_audio(tmp, have, rate, len_out) : NULL;
+    prep_work_end(PREP_DECODE);
+    return out;
 }
 
 /* insert decoded buffer into cache (double-checked); consumes buf */
@@ -463,16 +468,16 @@ static int sample_cache_put(const char *full, float *buf, int len, int base, int
     float *mono = malloc((size_t)len*sizeof(float));
     if (!mono) { free(buf); return -1; }
     for (int i = 0; i < len; i++) mono[i] = (buf[(size_t)i*2]+buf[(size_t)i*2+1])*.5f;
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0 && samples[i].base_midi == base) {
             free(buf); free(mono);
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return i;
         }
     }
     if (n_samples >= SMP_MAX_SAMPLES || bytes > SMP_CACHE_BYTES-sample_bytes) {
-        free(buf); free(mono); pthread_mutex_unlock(&smp_lock);
+        free(buf); free(mono); sample_unlock();
         log_console("sampler: decoded sample cache is full (256 samples / 256 MiB)");
         return -1;
     }
@@ -484,7 +489,7 @@ static int sample_cache_put(const char *full, float *buf, int len, int base, int
     samples[id].len = len;
     samples[id].base_midi = base;
     snprintf(samples[id].path, sizeof(samples[id].path), "%.1023s", full);
-    pthread_mutex_unlock(&smp_lock);
+    sample_unlock();
     return id;
 }
 
@@ -508,9 +513,9 @@ int smp_acquire(const char *bankdir, const char *token) {
     char name[64];
     int sample_n = -1;
     split_sample_n(token, name, sizeof(name), &sample_n);
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     BankCache *bc = bank_cache(bankdir);
-    if (!bc || bc->nfiles == 0) { pthread_mutex_unlock(&smp_lock); return -1; }
+    if (!bc || bc->nfiles == 0) { sample_unlock(); return -1; }
     int na = 0;
     const char *const *al = aliases(name, &na);
     const char *pick = NULL;
@@ -578,18 +583,18 @@ int smp_acquire(const char *bankdir, const char *token) {
         if (name[0] && end != name && end && *end == 0 && v >= 0 && v <= 1000000)
             pick = bc->files[(int)(v % bc->nfiles)];
     }
-    if (!pick) { pthread_mutex_unlock(&smp_lock); return -1; }
+    if (!pick) { sample_unlock(); return -1; }
     char full[2048];
     snprintf(full, sizeof(full), "%.1023s/%.1023s", bankdir, pick);
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0) {
             int id = i;
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return id;
         }
     }
-    if (n_samples >= SMP_MAX_SAMPLES) { pthread_mutex_unlock(&smp_lock); return -1; }
-    pthread_mutex_unlock(&smp_lock);
+    if (n_samples >= SMP_MAX_SAMPLES) { sample_unlock(); return -1; }
+    sample_unlock();
     int len = 0;
     int channels = 1;
     float *buf = read_audio(full, &len,&channels); /* file I/O outside lock */
@@ -610,15 +615,15 @@ int smp_acquire_path(const char *relpath) {
     const char *dot = strrchr(full, '.');
     if (!dot || (strcasecmp(dot, ".wav") != 0 && strcasecmp(dot, ".mp3") != 0 &&
                  strcasecmp(dot, ".flac") != 0 && strcasecmp(dot, ".fla") != 0)) return -1;
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0) {
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return i;
         }
     }
-    if (n_samples >= SMP_MAX_SAMPLES) { pthread_mutex_unlock(&smp_lock); return -1; }
-    pthread_mutex_unlock(&smp_lock);
+    if (n_samples >= SMP_MAX_SAMPLES) { sample_unlock(); return -1; }
+    sample_unlock();
     int len = 0;
     int channels = 1;
     float *buf = read_audio(full, &len,&channels);
@@ -660,15 +665,15 @@ int smp_acquire_abs(const char *fullpath, int base_midi) {
     if (!abs_audio_path(fullpath)) return -1;
     if (base_midi < 0 || base_midi > 127) base_midi = 60;
     snprintf(full, sizeof(full), "%s", fullpath);
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0 && samples[i].base_midi == base_midi) {
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return i;
         }
     }
-    if (n_samples >= SMP_MAX_SAMPLES) { pthread_mutex_unlock(&smp_lock); return -1; }
-    pthread_mutex_unlock(&smp_lock);
+    if (n_samples >= SMP_MAX_SAMPLES) { sample_unlock(); return -1; }
+    sample_unlock();
     buf = read_audio(full, &len, &channels);
     if (!buf) return -1;
     return sample_cache_put(full, buf, len, base_midi, channels);
@@ -682,15 +687,15 @@ int smp_acquire_file(const char *fullpath, int base_midi) {
                  strcasecmp(dot, ".flac") != 0 && strcasecmp(dot, ".fla") != 0)) return -1;
     char full[2048];
     snprintf(full, sizeof(full), "%s", fullpath);
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0 && samples[i].base_midi == base_midi) {
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return i;
         }
     }
-    if (n_samples >= SMP_MAX_SAMPLES) { pthread_mutex_unlock(&smp_lock); return -1; }
-    pthread_mutex_unlock(&smp_lock);
+    if (n_samples >= SMP_MAX_SAMPLES) { sample_unlock(); return -1; }
+    sample_unlock();
     int len = 0;
     int channels = 1;
     float *buf = read_audio(full, &len,&channels);
@@ -737,9 +742,9 @@ int smp_acquire_note(const char *bankdir, int midi) {
     if (!bankdir || !bankdir[0]) return -1;
     if (midi < 0) midi = 60;
     if (midi > 127) midi = 127;
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     BankCache *bc = bank_cache(bankdir);
-    if (!bc || bc->nfiles == 0) { pthread_mutex_unlock(&smp_lock); return -1; }
+    if (!bc || bc->nfiles == 0) { sample_unlock(); return -1; }
     /* best filename-note match (nearest pitch), else first file */
     int best = -1, bestdist = 1 << 30;
     for (int i = 0; i < bc->nfiles; i++) {
@@ -759,12 +764,12 @@ int smp_acquire_note(const char *bankdir, int midi) {
     snprintf(full, sizeof(full), "%.1023s/%.1023s", bankdir, pick);
     for (int i = 0; i < n_samples; i++) {
         if (strcmp(samples[i].path, full) == 0) {
-            pthread_mutex_unlock(&smp_lock);
+            sample_unlock();
             return i;
         }
     }
-    if (n_samples >= SMP_MAX_SAMPLES) { pthread_mutex_unlock(&smp_lock); return -1; }
-    pthread_mutex_unlock(&smp_lock);
+    if (n_samples >= SMP_MAX_SAMPLES) { sample_unlock(); return -1; }
+    sample_unlock();
     int len = 0;
     int channels = 1;
     float *buf = read_audio(full, &len,&channels);
@@ -774,14 +779,14 @@ int smp_acquire_note(const char *bankdir, int midi) {
 
 int smp_base_midi(int id) {
     int b = 60;
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     if (id >= 0 && id < n_samples) b = samples[id].base_midi;
-    pthread_mutex_unlock(&smp_lock);
+    sample_unlock();
     return b;
 }
 
 void smp_get(int id, float **buf, int *len) {
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     if (id >= 0 && id < n_samples) {
         if (buf) *buf = samples[id].buf;
         if (len) *len = samples[id].len;
@@ -789,13 +794,13 @@ void smp_get(int id, float **buf, int *len) {
         if (buf) *buf = NULL;
         if (len) *len = 0;
     }
-    pthread_mutex_unlock(&smp_lock);
+    sample_unlock();
 }
 
 void smp_get_stereo(int id, float **buf, int *len, int *channels) {
-    pthread_mutex_lock(&smp_lock);
+    sample_lock();
     if (buf) *buf = id >= 0 && id < n_samples ? samples[id].stereo : NULL;
     if (len) *len = id >= 0 && id < n_samples ? samples[id].len : 0;
     if (channels) *channels = id >= 0 && id < n_samples ? samples[id].channels : 0;
-    pthread_mutex_unlock(&smp_lock);
+    sample_unlock();
 }

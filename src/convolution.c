@@ -1,6 +1,7 @@
 #include "convolution.h"
 #include "sampler.h"
 #include "common.h"
+#include "prep_profile.h"
 
 static void transform(ConvComplex *data, int inverse) {
     for (unsigned i = 1, j = 0; i < CONV_FFT; i++) {
@@ -50,6 +51,7 @@ static ConvKernel *build_kernel(const float *stereo, int frames, int channels, i
     for (int ch = 0; ch < 2; ch++) {
         int source = channels == 1 ? 0 : ch;
         for (int i = 0; i < frames && i < CONV_BLOCK; i++) kernel->head[ch][i] = (float)(stereo[(size_t)i*2+source]*scale);
+        prep_work_begin(PREP_FFT);
         for (unsigned part = 0; part < kernel->parts; part++) {
             ConvComplex *block = kernel->tail+((size_t)ch*kernel->parts+part)*CONV_FFT;
             for (unsigned i = 0; i < CONV_BLOCK; i++) {
@@ -58,6 +60,7 @@ static ConvKernel *build_kernel(const float *stereo, int frames, int channels, i
             }
             transform(block,0);
         }
+        prep_work_end(PREP_FFT);
     }
     return kernel;
 }
@@ -73,18 +76,18 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
     if (!isfinite(size) || !isfinite(speed) || !isfinite(begin) || size <= 0 || size > 10 ||
         speed == 0 || fabs(speed) > 8 || begin < 0 || begin > 1) return NULL;
-    pthread_mutex_lock(&lock);
+    prep_lock(&lock, PREP_LOCK_CONV);
     for (unsigned i = 0; i < used; i++) if (cache[i].sample == sample && cache[i].size == size &&
         cache[i].speed == speed && cache[i].begin == begin) {
-        const ConvKernel *result = cache[i].kernel; pthread_mutex_unlock(&lock); return result;
+        const ConvKernel *result = cache[i].kernel; prep_unlock(&lock, PREP_LOCK_CONV); return result;
     }
-    if (used == CACHE) { pthread_mutex_unlock(&lock); return NULL; }
+    if (used == CACHE) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
     float *buffer; int length, channels;
     smp_get_stereo(sample,&buffer,&length,&channels);
     int frames = length > 0 ? (int)fmin(length,ceil(size*SR)) : 0;
-    if (!buffer || frames < 1 || frames > CONV_PARTS*CONV_BLOCK) { pthread_mutex_unlock(&lock); return NULL; }
+    if (!buffer || frames < 1 || frames > CONV_PARTS*CONV_BLOCK) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
     float *impulse = calloc((size_t)frames*2,sizeof(*impulse));
-    if (!impulse) { pthread_mutex_unlock(&lock); return NULL; }
+    if (!impulse) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
     for (int i = 0; i < frames; i++) {
         double position = fmod(floor(begin*length)+(speed < 0 ? -i : i)*fabs(speed),length);
         if (position < 0) position += length;
@@ -98,7 +101,7 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
         cache[used].sample = sample; cache[used].size = size; cache[used].speed = speed;
         cache[used].begin = begin; cache[used++].kernel = kernel;
     }
-    pthread_mutex_unlock(&lock); return kernel;
+    prep_unlock(&lock, PREP_LOCK_CONV); return kernel;
 }
 
 void convolution_set(ConvState *state, const ConvKernel *kernel) {

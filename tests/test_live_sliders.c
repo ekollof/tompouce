@@ -67,6 +67,57 @@ static void test_ready_prefix_publication(void) {
     audio_time=0;
 }
 
+typedef struct { int replace,visible; } DuckPrepProbe;
+
+static void *duck_prep_probe(void *argument) {
+    DuckPrepProbe *probe=argument;
+    pthread_mutex_lock(&prep_gate_lock);
+    while (!prep_gate_entered) pthread_cond_wait(&prep_gate_wake,&prep_gate_lock);
+    pthread_mutex_unlock(&prep_gate_lock);
+    /* Wait for publication, not source completion. A broken implementation
+       times out and releases the source so the test fails without hanging. */
+    for (int i=0;i<1000 && !event_queue_depth();i++) {
+        struct timespec pause={.tv_nsec=1000000}; nanosleep(&pause,NULL);
+    }
+    if (event_queue_depth()) {
+        assert(prepare_queued_audio(0));
+        assert(pending_duck_count==1 && !audio_active_voices());
+        probe->visible=1;
+        if (probe->replace) event_queue_new_program(HUGE_VAL);
+        /* Advance an owned callback while the source remains blocked. The
+           accepted duck survives a generation change and reaches its target. */
+        float output[256];
+        while (audio_time_now()<.15) pa_callback(NULL,output,128,NULL,0,NULL);
+        assert(!pending_duck_count && orbit_duck_gain(2)<1);
+    }
+    pthread_mutex_lock(&prep_gate_lock);
+    prep_gate_released=1; pthread_cond_broadcast(&prep_gate_wake);
+    pthread_mutex_unlock(&prep_gate_lock);
+    return NULL;
+}
+
+static void test_duck_before_source_preparation(void) {
+    assert(prep_pool_start(0,0));
+    for (int replace=0;replace<=1;replace++) {
+        event_queue_clear(); audio_time=0; audio_toggle_play(1);
+        audio_register_orbit(2);
+        assert(track_load_from_code("note('c4').s('saw').duckorbit(2).duckdepth(.5).duckattack(.2)"));
+        prep_gate_entered=0; prep_gate_released=0;
+        DuckPrepProbe probe={.replace=replace};
+        js_audio_set_prep_observer(block_saw_preparation);
+        pthread_t thread;
+        assert(!pthread_create(&thread,NULL,duck_prep_probe,&probe));
+        (void)js_audio_schedule(tracks[0].javascript,.1,0,event_queue_generation());
+        assert(!pthread_join(thread,NULL));
+        js_audio_set_prep_observer(NULL);
+        assert(probe.visible);
+        for (QNode *node=qhead;node;node=node->next)
+            assert(node->ev.control_only && node->ev.audio_prepared);
+        memset(web_duck,0,sizeof(web_duck));
+    }
+    event_queue_clear(); audio_time=0;
+}
+
 static void test_refresh_cutoff(void) {
     audio_time=10.0; event_queue_clear();
     unsigned generation=event_queue_generation();
@@ -1145,6 +1196,102 @@ static void test_delay_automation(void) {
     audio_toggle_play(0);
 }
 
+static void test_generated_room_race(void) {
+    /* Ordered publication with the pool: an older generated completion
+       replaces an intervening custom IR, matching the web handoff. The decoy
+       request serializes the lane first, so the custom commit structurally
+       precedes the racing completion; the intermediate custom publication is
+       observable before the replacement. Sizes avoid every cached IR in this
+       process so the serial jobs perform real synthesis. */
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    assert(!room_created[2] && !room_created[0] && !atomic_load(&requested_ir[0]));
+    assert(prep_pool_start(0,0));
+    /* Own sample store: the custom-room fixture is removed by its test. */
+    char root[]="/tmp/tompouce-room-race-XXXXXX",path[512],names[2][69];
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL; assert(!previous || saved);
+    assert(mkdtemp(root) && !setenv("XDG_CONFIG_HOME",root,1));
+    const char *directories[]={"tompouce","tompouce/sounds","tompouce/sounds/assets"};
+    for (int i=0;i<3;i++) {
+        snprintf(path,sizeof(path),"%s/%s",root,directories[i]); assert(!mkdir(path,0700));
+    }
+    for (int i=0;i<2;i++) {
+        memset(names[i],'a'+i,64); memcpy(names[i]+64,".wav",5);
+        snprintf(path,sizeof(path),"%s/tompouce/sounds/assets/%s",root,names[i]);
+        unsigned char wav[]={'R','I','F','F',44,0,0,0,'W','A','V','E','f','m','t',' ',
+            16,0,0,0,1,0,1,0,68,172,0,0,136,88,1,0,2,0,16,0,
+            'd','a','t','a',8,0,0,0,0,32,0,192,0,16,0,48};
+        FILE *file=fopen(path,"wb"); assert(file);
+        assert(fwrite(wav,1,sizeof(wav),file)==sizeof(wav) && !fclose(file));
+    }
+    snprintf(path,sizeof(path),"%s/tompouce/sounds/index.json",root);
+    FILE *index=fopen(path,"w"); assert(index);
+    assert(fprintf(index,"{\"version\":1,\"sounds\":{\"racefixture\":["
+        "{\"label\":\"a.wav\",\"file\":\"%s\"},{\"label\":\"b.wav\",\"file\":\"%s\"}]}}",names[0],names[1])>0);
+    assert(!fclose(index) && user_sounds_reload()==1);
+    assert(track_load_from_code("stack(s('sine').gain(0).room(.2).roomsize(1.5).orbit(2),"
+        "s('sine').gain(0).room(.2).roomsize(.8).roomfade(.05).roomlp(6000).roomdim(200).orbit(0).late(.25),"
+        "s('sine').gain(0).room(.2).roomsize(.3).orbit(0).ir('racefixture').set({i:0}).late(.5))"));
+    assert(js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation()));
+    assert(event_queue_depth()==3);
+    const AudioEvent *decoy=&qhead->ev,*first=&qhead->next->ev,*second=&qhead->next->next->ev;
+    assert(decoy->time<first->time && first->time<second->time);
+    assert(decoy->orbit==2 && decoy->room_rebuild && !decoy->ir_kernel);
+    assert(first->orbit==0 && first->room_rebuild && !first->ir_kernel);
+    assert(second->orbit==0 && second->ir_kernel && second->room_params_valid);
+    const ConvKernel *custom=second->ir_kernel;
+    /* The custom commit is synchronous while the racing completion waits
+       behind the decoy on the serial lane. A different first value means
+       the race inverted and must be investigated, not ignored. */
+    int waited=0;
+    while (!atomic_load(&requested_ir[0]) && waited<5000) {
+        struct timespec pause={.tv_nsec=1000000}; nanosleep(&pause,NULL); waited++;
+    }
+    assert(atomic_load(&requested_ir[0])==custom);
+    audio_wait_room_preparation();
+    const ConvKernel *generated=atomic_load(&requested_ir[0]);
+    assert(generated && generated!=custom);
+    VoiceMix adopted={0}; native_reverb(0,&adopted);
+    assert(convolvers[0].kernel==generated && !convolvers[0].remaining);
+    assert(atomic_load(&requested_ir[2]) && atomic_load(&requested_ir[2])!=generated);
+    /* Failed generation keeps the voice on the previous room and retains
+       its equality guards, matching the web failure handoff. Size 3 exceeds
+       the kernel frame bound, so the failure is deterministic. */
+    event_queue_clear();
+    assert(!room_created[1] && !atomic_load(&requested_ir[1]));
+    unsigned failures=room_failures;
+    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(3).orbit(1)"));
+    assert(js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation()));
+    assert(qhead && qhead->ev.room_prepared);
+    audio_wait_room_preparation();
+    assert(room_failures==failures+1 && !atomic_load(&requested_ir[1]));
+    AudioEvent failed=qhead->ev;
+    audio_trigger_event(&failed);
+    float output[256];
+    pa_callback(NULL,output,128,NULL,0,NULL);
+    pa_callback(NULL,output,128,NULL,0,NULL);
+    for (int i=0;i<256;i++) assert(isfinite(output[i]));
+    assert(!atomic_load(&requested_ir[1]));
+    event_queue_clear();
+    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(3).orbit(1)"));
+    assert(js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation()));
+    assert(qhead && !qhead->ev.room_rebuild);
+    audio_wait_room_preparation();
+    assert(room_failures==failures+1);
+    event_queue_clear(); assert(!unlink(path));
+    for (int i=0;i<2;i++) {
+        snprintf(path,sizeof(path),"%s/tompouce/sounds/assets/%s",root,names[i]); assert(!unlink(path));
+    }
+    for (int i=2;i>=0;i--) {
+        snprintf(path,sizeof(path),"%s/%s",root,directories[i]); assert(!rmdir(path));
+    }
+    assert(!rmdir(root));
+    assert(saved?!setenv("XDG_CONFIG_HOME",saved,1):!unsetenv("XDG_CONFIG_HOME"));
+    free(saved); user_sounds_reload();
+    event_queue_clear(); audio_time=0;
+    for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
+}
+
 static void test_web_delay_pcm(void) {
     const double frames[]={.25,.5,32,128,128.5,2205.25};
     const int onsets[][6]={{0,1,128,129,130,256},{0,1,128,129,130,256},
@@ -1391,6 +1538,12 @@ int main(int argc, char **argv) {
 #endif
     }
     log_console_stderr(0);
+    if (argc>1 && !strcmp(argv[1],"--duck-preparation-reference")) {
+        test_duck_before_source_preparation();
+        stop_room_worker(); prep_pool_stop();
+        puts("{\"duckBeforeSource\":true,\"survivesReplacement\":true}");
+        return 0;
+    }
     if (argc>1 && !strcmp(argv[1],"--duck-timer-reference")) { duck_timer_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--duck-reference")) { duck_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--clock-reference")) { reference_clock(1); return 0; }
@@ -1403,6 +1556,7 @@ int main(int argc, char **argv) {
     test_timestamped_onsets();
     test_refresh_cutoff();
     test_ready_prefix_publication();
+    test_duck_before_source_preparation();
     audio_time=10.25; audio_toggle_play(1);
     const char *source="globalThis.evaluations=(globalThis.evaluations??0)+1; "
         "if(evaluations!==1)throw Error('slider reevaluated music'); "
@@ -1549,6 +1703,7 @@ int main(int argc, char **argv) {
     test_delay_automation();
     test_room_preparation();
     test_custom_room_schedule();
+    test_generated_room_race();
     test_web_delay_pcm();
     test_stopped_evaluation_commits();
     assert(track_load_from_code("globalThis.__query=()=>JSON.stringify([{value:{note:60}},null]); note(60)"));

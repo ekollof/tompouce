@@ -7,6 +7,7 @@
 #include "wavetable.h"
 #include "stretch.h"
 #include "prep_pool.h"
+#include "prep_profile.h"
 #include <ctype.h>
 #include "js_number.h"
 
@@ -494,6 +495,7 @@ typedef struct {
     const cJSON *value;
     int ok;
     int inline_pending;
+    uint64_t submitted;
 } AudioPrepJob;
 
 static JsAudioPrepObserver prep_observer;
@@ -506,6 +508,7 @@ static void audio_prep_run(PrepJob *base) {
     AudioPrepJob *job=(AudioPrepJob *)base;
     if (prep_observer) prep_observer(&job->event);
     job->ok=resolve_sample_source(&job->event,job->value);
+    prep_profile_job_completed(job->submitted);
 }
 
 static void audio_prep_destroy(PrepJob *base) {
@@ -579,6 +582,8 @@ static AudioPrepJob *prepare_hap_job(const HapPlan *plan, unsigned generation) {
     if (!job) return NULL;
     prep_job_init(&job->base,audio_prep_run,audio_prep_destroy);
     job->event=event;
+    job->submitted=prep_profile_now_ns();
+    prep_profile_job_submitted();
     job->value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
     /* If the pool is unavailable, run at this hap's publication turn instead
        of blocking preparation of an earlier, independent hap. */
@@ -634,10 +639,7 @@ static void commit_source_hap(JsProgram *program, const HapPlan *plan,
                               AudioPrepJob *job, unsigned generation) {
     const cJSON *value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
     if (plan->time+1/SR<audio_time_now()) {
-        discard_prep_job(job);
-        return;
-    }
-    if (!schedule_local_ducks(value,plan->time,generation)) {
+        prep_profile_event(PREP_LATE_SOURCE,plan->time,audio_time_now());
         discard_prep_job(job);
         return;
     }
@@ -664,6 +666,7 @@ static void commit_source_hap(JsProgram *program, const HapPlan *plan,
         prep_job_release(&job->base); return;
     }
     if (job->event.time+1/SR<audio_time_now()) {
+        prep_profile_event(PREP_LATE_SOURCE,job->event.time,audio_time_now());
         javascript_warn_control(program,"late sound preparation (note skipped)");
         prep_job_release(&job->base); return;
     }
@@ -759,6 +762,21 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                     continue;
                 }
                 int plan_owned=event_queue_publish_begin();
+                if (plans[i].kind==HAP_SOURCE) {
+                    /* Superdough creates duck timers before awaiting its
+                       source. Commit that accepted prefix independently of
+                       source completion, including partial timer failures. */
+                    const cJSON *value=cJSON_GetObjectItemCaseSensitive(plans[i].hap,"value");
+                    int due=plans[i].time+1/SR>=audio_time_now();
+                    if (!due) prep_profile_event(PREP_LATE_SOURCE,plans[i].time,audio_time_now());
+                    int accepted=due &&
+                        schedule_local_ducks(value,plans[i].time,generation);
+                    int current=generation==event_queue_generation();
+                    int committed=event_queue_publish_finish(plan_owned,current);
+                    if (!current || !committed) ok=0;
+                    if (!accepted || !ok) { discard_prep_job(job); continue; }
+                    plan_owned=event_queue_publish_begin();
+                }
                 if (plans[i].kind==HAP_SOURCE) commit_source_hap(program,&plans[i],job,generation);
                 else commit_immediate_hap(program,&plans[i],generation);
                 int current=generation==event_queue_generation();

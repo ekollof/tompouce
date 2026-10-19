@@ -2,6 +2,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 static _Atomic int enabled;
 static _Atomic uint64_t lock_calls[PREP_LOCK_COUNT];
@@ -11,6 +12,9 @@ static _Atomic uint64_t lock_max_wait_ns[PREP_LOCK_COUNT];
 static _Atomic uint64_t work_calls[PREP_WORK_COUNT];
 static _Atomic uint64_t work_wall_ns[PREP_WORK_COUNT];
 static _Atomic uint64_t work_cpu_ns[PREP_WORK_COUNT];
+enum { D_SUBMITTED, D_JOBS, D_JOB_NS, D_MAX_JOB_NS, D_SOURCES, D_CONTROLS, D_LATE_PREP,
+       D_LATE_PUBLISH, D_MAX_PUBLISH_NS, D_RESERVED, D_LATE_RESERVE, D_MAX_RESERVE_NS, D_COUNT };
+static _Atomic uint64_t deadlines[D_COUNT];
 
 static __thread struct timespec hold_started[PREP_LOCK_COUNT];
 static __thread unsigned hold_active;
@@ -57,7 +61,59 @@ void prep_profile_reset(void) {
         atomic_store(&work_wall_ns[i], 0);
         atomic_store(&work_cpu_ns[i], 0);
     }
+    for (int i=0;i<D_COUNT;i++) atomic_store(&deadlines[i],0);
     atomic_store_explicit(&enabled, 1, memory_order_relaxed);
+}
+
+uint64_t prep_profile_now_ns(void) {
+    if (!atomic_load_explicit(&enabled,memory_order_relaxed)) return 0;
+    struct timespec now;
+    return clock_gettime(CLOCK_MONOTONIC,&now)?0:timespec_ns(&now);
+}
+
+void prep_profile_job_completed(uint64_t started) {
+    uint64_t now=started?prep_profile_now_ns():0;
+    if (!now || now<started) return;
+    atomic_fetch_add(&deadlines[D_JOBS],1);
+    atomic_fetch_add(&deadlines[D_JOB_NS],now-started);
+    add_max(&deadlines[D_MAX_JOB_NS],now-started);
+}
+
+void prep_profile_job_submitted(void) {
+    if (atomic_load_explicit(&enabled,memory_order_relaxed))
+        atomic_fetch_add(&deadlines[D_SUBMITTED],1);
+}
+
+void prep_profile_event(int stage, double target, double now) {
+    if (!atomic_load_explicit(&enabled,memory_order_relaxed)) return;
+    if (stage==PREP_LATE_SOURCE) { atomic_fetch_add(&deadlines[D_LATE_PREP],1); return; }
+    if (stage==PREP_PUBLISHED_CONTROL) { atomic_fetch_add(&deadlines[D_CONTROLS],1); return; }
+    if (stage!=PREP_PUBLISHED_SOURCE && stage!=PREP_RESERVED_SOURCE) return;
+    int reservation=stage==PREP_RESERVED_SOURCE;
+    atomic_fetch_add(&deadlines[reservation?D_RESERVED:D_SOURCES],1);
+    double late=now-target;
+    /* One sample is the scheduler's existing late-preparation tolerance. */
+    if (!isfinite(late) || late<=1.0/44100) return;
+    uint64_t ns=late>=UINT64_MAX/1e9?UINT64_MAX:(uint64_t)(late*1e9);
+    atomic_fetch_add(&deadlines[reservation?D_LATE_RESERVE:D_LATE_PUBLISH],1);
+    add_max(&deadlines[reservation?D_MAX_RESERVE_NS:D_MAX_PUBLISH_NS],ns);
+}
+
+void prep_profile_deadlines(PrepDeadlineStat *out) {
+    if (!out) return;
+    *out=(PrepDeadlineStat){
+        .submitted=atomic_load(&deadlines[D_SUBMITTED]),
+        .jobs=atomic_load(&deadlines[D_JOBS]),
+        .job_latency_ns=atomic_load(&deadlines[D_JOB_NS]),
+        .max_job_latency_ns=atomic_load(&deadlines[D_MAX_JOB_NS]),
+        .sources_published=atomic_load(&deadlines[D_SOURCES]),
+        .controls_published=atomic_load(&deadlines[D_CONTROLS]),
+        .late_preparation=atomic_load(&deadlines[D_LATE_PREP]),
+        .late_publication=atomic_load(&deadlines[D_LATE_PUBLISH]),
+        .max_publication_late_ns=atomic_load(&deadlines[D_MAX_PUBLISH_NS]),
+        .sources_reserved=atomic_load(&deadlines[D_RESERVED]),
+        .late_reservation=atomic_load(&deadlines[D_LATE_RESERVE]),
+        .max_reservation_late_ns=atomic_load(&deadlines[D_MAX_RESERVE_NS])};
 }
 
 void prep_profile_snapshot(PrepLockStat locks[PREP_LOCK_COUNT], PrepWorkStat works[PREP_WORK_COUNT]) {

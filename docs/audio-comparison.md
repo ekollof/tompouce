@@ -20,8 +20,10 @@ catalogs. Set `TOMPOUCE_BANKS` for another installation root.
 
 `build/tests/render_audio` builds the real native callback and event/sample resolver
 into a separate executable. It queries the pinned QuickJS runtime one cycle at
-a time, resolves samples before rendering, and triggers each event at its due
-frame. It opens no PortAudio device. Its output is interleaved stereo float32
+a time, resolves samples and shared delay automation before rendering, and
+triggers each event at its due frame. Delay decisions use preparation-time
+state like the live commit path, matching the web's preparation-time parameter
+guards. It opens no PortAudio device. Its output is interleaved stereo float32
 PCM at 44.1 kHz on little-endian machines. Reference mode bypasses the legacy
 DC/drive/soft-limit stage but still clamps output to [-1,1]. The comparison
 cases use levels below clipping.
@@ -42,7 +44,7 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Thirty-four regression gates compare at zero lag (no capture shifts or gain
+Thirty-eight regression gates compare at zero lag (no capture shifts or gain
 normalization). The original piano windows remain 0.6 seconds; the new synth
 and generated-room cases check the full two-second capture:
 
@@ -53,6 +55,7 @@ and generated-room cases check the full two-second capture:
 | Piano with custom TR909 snare convolution IR | 0.99 | 0.85–1.15 |
 | Sine: default, ADSR, low-pass and explicit center pan (4 cases) | 0.99 | 0.85–1.15 |
 | Sine with fractional shared delay | 0.99 | 0.85–1.15 |
+| Sine with shared delay automation: feedback/time/zero-gain changes and return to baseline (4 cases) | 0.99 | 0.85–1.15 |
 | Saw, square and triangle at 440 Hz (3 cases) | 0.99 | 0.85–1.15 |
 | ZzFX sine and bytebeat (2 cases) | 0.99 | 0.85–1.15 |
 | Piano with seeded generated convolution room | 0.99 | 0.85–1.15 |
@@ -125,6 +128,76 @@ the owned clock across a staged onset before finishing refresh; the original
 onset remains and the replacement is discarded. The MP3 branch
 runs when `assets/banks/dough-samples/piano/C4v8.mp3` is present. These timings
 are one machine's profile, not a parity gate.
+
+`cmake --build build --target profile-prep-deadlines` runs the next preparation
+measurement, using `scripts/prep-deadline-qa.mjs` and `test_prep_deadlines`.
+Override `TOMPOUCE_PREP_DEADLINE_BINARY` to use an isolated build. Each case gets
+a fresh process, owned temporary sample store and real generator/consumer
+threads. A paced, device-free callback renders into memory for two seconds.
+Cold and live cases combine four 8-second stereo WAV decodes, a half-second
+stretch source, a 0.25-second custom IR and a 0.8-second generated room. The live
+case changes speed, custom-IR speed and room size through direct sliders without
+reevaluation. The burst case adds sixteen distinct long-sample stretches.
+Worker counts 1/2/4 (bounded by the process budget) are measured serially with
+128- and 4,096-frame callbacks; no other verification should run during a timing
+capture. 4,096 frames is the output adapter's render-call cap, so both block
+sizes are realizable configurations. The ordinary CTest runs one worker with
+128-frame callbacks as a structural smoke test, not a zero-miss timing assertion.
+Its burst case asserts job-level decode/stretch work; room commit counters are
+reported by the QA matrix instead, since overload may shed the room sine
+before commit.
+
+The JSON report separates submitted/completed preparation jobs, queue-to-source
+completion latency, published sources, actual voice reservations, preparation
+skips, late publication/reservation, callback overruns and host wake delays.
+Counters are disabled by default and run outside the callback; callback timing
+is measured by the harness around the real render function. Snapshots are taken
+at the end of the paced interval, before shutdown drains outstanding jobs.
+Queued future events and unfinished jobs explain why published/reserved counts
+can differ; these counts are not full waveform-onset observations. The script
+returns failure unless cold/live cases hold fully (no skips, late
+publication/reservation, overruns, wake misses or unfinished jobs) and every
+case sheds cleanly (no late publication/reservation, overrun or wake miss).
+Local cold reads do not measure remote download latency. An offline callback
+overrun is not a backend underrun.
+
+An isolated 18-case run on a process budget of 16 CPUs observed:
+
+| Workers | Cold/live source latency maximum, 128 frames | Long-stretch burst late source skips, 128 frames |
+| --- | --- | --- |
+| 1 | 18.7 / 17.1 ms | 44 |
+| 2 | 11.4 / 11.5 ms | 27 |
+| 4 | 8.5 / 8.2 ms | 11 |
+
+Cold/live cases at both block sizes had no observed preparation skips, late
+publications or late voice reservations. All cases had zero late publications,
+zero late voice reservations, zero callback overruns and zero host wake misses.
+Burst job latency maxima were 490.3/246.7/128.6 ms; the sixteen-long-stretch
+burst sheds that overload as specified skips rather than late bursts, so the
+matrix passes its gate with cold/live 12/12 holding and 18/18 shed-clean.
+These machine-specific timings establish the overload-shedding behavior, not a
+new baseline or a full live-performance parity claim. The initial
+exploratory harness also included ambient catalog discovery; the maintained
+fixture now fixes the bank root and working directory to its own store so those
+startup costs do not contaminate source-work comparisons.
+
+`cmake --build build --target profile-prep-backend` measures real backend
+underruns under the same preparation load, using `scripts/prep-backend-qa.mjs`
+and the `backend` mode of `test_prep_deadlines`. It creates an owned null sink,
+targets an inspected silence stream at it, verifies with `pw-dump` that the
+stream has exactly two active links and both reach only that sink, then runs
+cold/live workloads at 1/4 workers and the long-stretch burst at 4 workers
+through the real PipeWire backend at 256-frame blocks. Default routing is never
+changed and the module is unloaded afterwards. An isolated run observed zero
+stream drops, zero render overruns and no rendered-frame shortfall in all five
+cases, with cold/live fully held and the burst shedding only skips (11 in this
+run) without late publication or reservation. Local fixture reads still do not
+establish remote-download deadline behavior.
+
+The CPU-budget fixture test covers nested v1/v2 membership, inherited minimum
+quotas, controller lists, subtree mounts, escaped paths and malformed limits,
+without changing the host's cgroups. Kernel membership and hierarchy semantics
+are described in the [cgroup v2 documentation](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html).
 
 Downward MP3 piano now has eight gates. The native MP3 decoder previously
 rounded its output to PCM16 before storing floats. Removing that quantization
@@ -220,6 +293,14 @@ single FIFO lane in the shared preparation pool; browser completion races remain
 open. The completion checks the scheduling generation and publishes the kernel
 under the same generation guard, so a transition cannot make the check stale;
 the room CTest holds that guard while a transition thread waits.
+
+`scripts/duck-preparation-reference-qa.mjs` blocks an actual Superdough source
+trigger and verifies that its target orbit's duck method has already run. Its
+native counterpart blocks the preparation worker, consumes the independently
+published control, advances the owned callback and verifies that accepted
+ducking survives a generation transition while the source remains blocked.
+It is included in `test-duck-reference-web`; it verifies this ordering rather
+than claiming full live-source waveform parity.
 
 `node scripts/duck-timing-reference-qa.mjs /tmp/duck-timing-reference` compares
 129 real web timer-callback/gain-PCM cases with native control conversion and

@@ -86,6 +86,10 @@ static int pipewire_open(void) {
         PW_KEY_MEDIA_ROLE,"Music",PW_KEY_APP_NAME,"Tompouce",PW_KEY_NODE_NAME,"tompouce",
         PW_KEY_NODE_LATENCY,latency,NULL);
     if (!props) return 0;
+    /* Owned-test routing only. When set, the stream links to the named target
+       sink instead of the default sink; default routing is never changed. */
+    const char *target=getenv("TOMPOUCE_OUTPUT_TARGET");
+    if (target && *target) pw_properties_set(props,PW_KEY_TARGET_OBJECT,target);
     native_pw.stream=pw_stream_new_simple(pw_thread_loop_get_loop(native_pw.loop),"Tompouce",props,&pw_events,NULL);
     if (!native_pw.stream) return 0;
     uint8_t storage[1024]; struct spa_pod_builder builder=SPA_POD_BUILDER_INIT(storage,sizeof(storage));

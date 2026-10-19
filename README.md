@@ -491,6 +491,20 @@ The interactive UI uses Notcurses (`notcurses-core`) for Unicode cells, screen
 diffs and terminal input, including Kitty. The editor's existing inline Kitty
 graphics transport and braille fallback share the same native renderers.
 
+Bracketed paste commits as one edit when its closing marker arrives. A pause
+between chunks does not cancel it; shutdown or input EOF cancels an unfinished
+paste without applying a partial edit. The maintained PTY tests cover delayed
+chunks and a delayed closing marker. Larger ASCII/Unicode and split-codepoint
+stress cases remain unresolved in the current terminal integration; reproduce
+them with `python tests/test_paste_stress.py ascii`, `unicode`, or `fragmented`.
+These are explicit failing diagnostics, not passing acceptance coverage.
+
+If a checkout is moved and CMake reports that its cached source directory no
+longer matches, preserve the old `build/` under another name and configure a
+fresh `build/` with `cmake --preset default`. Reusing those old executables does
+not verify the current source. PTY checks can select an existing executable with
+`TOMPOUCE_TEST_BINARY`; render checks use `TOMPOUCE_RENDER_TEST_BINARY`.
+
 ## Sample banks (`assets/banks`)
 
 Now live: `| bank NAME` (drums + pitched), `s <bank-path>` one-shots, F6

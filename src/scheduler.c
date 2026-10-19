@@ -7,6 +7,7 @@
 #include "common.h"
 #include "midi.h"
 #include "prep_pool.h"
+#include "prep_profile.h"
 
 #include <pthread.h>
 #include <ctype.h>
@@ -475,6 +476,12 @@ static int finish_staging_locked(int success) {
         }
     }
     if (commit) {
+        double now=audio_time_now();
+        int available=8192-qcount;
+        for (QNode *node=qstaging.head;node && available>0;node=node->next,available--)
+            if (!node->ev.eviction_only && !node->ev.csound_only && !node->ev.osc_only)
+                prep_profile_event(node->ev.control_only?PREP_PUBLISHED_CONTROL:PREP_PUBLISHED_SOURCE,
+                    node->ev.time,now);
         QNode *left=qhead, *right=qstaging.head;
         QNode *merged=NULL, **link=&merged;
         while (left && right) {

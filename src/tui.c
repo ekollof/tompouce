@@ -4498,23 +4498,29 @@ static int paste_push(char **text, size_t *n, size_t *cap, char ch) {
 static void read_paste(void) {
     size_t cap = 4096, n = 0;
     char *text = malloc(cap);
-    if (!text) return;
-    int overflow = 0, c, matched = 0;
+    /* A readiness timeout is a gap in a streamed paste, not its end. Keep
+       draining even after allocation failure so payload cannot become editor
+       commands. EOF and shutdown still cancel the uncommitted edit. */
+    int overflow = !text, c, matched = 0;
     const char *end = "\033[201~";
-    while ((c = report_byte()) >= 0) {
+    while (!quit_requested && !terminal_input_closed) {
+        c=report_byte();
+        if (c<0) continue;
         if (c == (unsigned char)end[matched]) {
             if (++matched == 6) break;
             continue;
         }
         if (matched) {
             for (int i = 0; i < matched; i++)
-                if (!paste_push(&text, &n, &cap, end[i])) overflow = 1;
+                if ((unsigned char)end[i]>=32 && !overflow &&
+                    !paste_push(&text, &n, &cap, end[i])) overflow = 1;
             matched = 0;
         }
+        if (c==(unsigned char)end[0]) { matched=1; continue; }
         if (c == '\r') continue;
         if (c == '\t') c = ' ';
         if (c != '\n' && (c < 32 || c == 127)) continue;
-        if (!paste_push(&text, &n, &cap, (char)c)) overflow = 1;
+        if (!overflow && !paste_push(&text, &n, &cap, (char)c)) overflow = 1;
     }
     if (!overflow) text[n] = 0;
     if (!overflow && matched == 6 && search_mode && !strchr(text,'\n') && n <= 240) {

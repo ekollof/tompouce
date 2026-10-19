@@ -336,11 +336,19 @@ then waits for and publishes each hap in order through its own event-queue
 staging transaction. An earlier ready note is therefore visible before a later
 slow source finishes; it is not held until the whole window completes. This
 keeps shared delay and room changes, duck decisions, equal-time notes and
-generation checks in scheduling order. If the program changes while jobs are
+generation checks in scheduling order. For normal publication, accepted duck
+controls commit before waiting for their source, matching Superdough's timer
+creation before its asynchronous source trigger. A slow or rejected source
+does not hold those callbacks, and already accepted callbacks survive program
+replacement. Refresh still stages future replacements until its final cutoff.
+If the program changes while jobs are
 running, completed results are discarded before publication; audio that was
 already committed is not withdrawn. Immediate OSC, Csound, rest/eviction and
 control-only work uses the same transaction. The pool budget comes from process
-affinity and cgroup v1/v2 quota, capped at four general workers; the serial room
+affinity and visible ancestor cgroup v1/v2 quotas, capped at four general workers;
+membership and mount roots are resolved from `/proc/self/cgroup` and
+`/proc/self/mountinfo`. Limits above an inaccessible cgroup namespace root
+cannot be inspected. The serial room
 lane adds one thread. Set `TOMPOUCE_PREP_WORKERS=1..8` to benchmark another
 count. Its general queue is `workers*32`, capped at 512. Failed worker startup
 falls back to inline source/kernel preparation and reports a console message;

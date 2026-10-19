@@ -21,7 +21,8 @@ int prep_pool_start(unsigned requested_workers, unsigned capacity);
 void prep_pool_stop(void);
 int prep_pool_workers(void);
 int prep_pool_capacity(void);
-/* CPU budget from process affinity and cgroup quota (>= 1). */
+/* CPU budget from affinity and visible ancestor cgroup quotas (>= 1).
+   Quotas above an inaccessible cgroup namespace root cannot be inspected. */
 int prep_pool_cpu_budget(void);
 
 void prep_job_init(PrepJob *job, void (*run)(PrepJob *), void (*destroy)(PrepJob *));

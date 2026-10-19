@@ -60,6 +60,11 @@ int main(int argc, char **argv) {
             fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
         }
         events[used++] = event;
+        /* Decide shared delay automation at preparation time, matching the
+           live commit path and the web's preparation-time parameter guards.
+           A future return that already matches the current setting is skipped
+           here; deciding at trigger time would see advanced state instead. */
+        audio_prepare_delay(&events[used-1]);
         /* Static waveform gates intentionally use completed IRs. Live pending
            and failure behavior is exercised separately by the room harness. */
         if (event.dsp.p[DSP_ROOM]>0 && event.room_sample<0)

@@ -6,11 +6,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <unistd.h>
-#ifdef __linux__
-#include <sched.h>
-#endif
 
 #define PREP_MAX_WORKERS 8
 #define PREP_MAX_QUEUE 512
@@ -29,54 +25,6 @@ static PrepJob *serial_head, *serial_tail;
 static unsigned worker_count, queue_capacity, queued, active, serial_queued;
 static int serial_active;
 static int started, stopping;
-
-static unsigned affinity_cpus(void) {
-#ifdef __linux__
-    cpu_set_t set;
-    if (sched_getaffinity(0,sizeof(set),&set)==0) {
-        int count=CPU_COUNT(&set);
-        if (count>0) return (unsigned)count;
-    }
-#endif
-    long cpus=sysconf(_SC_NPROCESSORS_ONLN);
-    return cpus>0?(unsigned)cpus:1;
-}
-
-static unsigned cgroup_quota_cpus(void) {
-    unsigned quota=0;
-    FILE *file=fopen("/sys/fs/cgroup/cpu.max","r");
-    if (file) {
-        char limit[32]={0};
-        unsigned long period=0;
-        if (fscanf(file,"%31s %lu",limit,&period)==2 && strcmp(limit,"max") &&
-            period>0) {
-            char *end=NULL;
-            unsigned long value=strtoul(limit,&end,10);
-            if (end && !*end && value>0) quota=(unsigned)((value+period-1)/period);
-        }
-        fclose(file);
-        if (quota) return quota;
-    }
-    FILE *quota_file=fopen("/sys/fs/cgroup/cpu/cpu.cfs_quota_us","r");
-    FILE *period_file=fopen("/sys/fs/cgroup/cpu/cpu.cfs_period_us","r");
-    if (quota_file && period_file) {
-        long long limit=0, period=0;
-        if (fscanf(quota_file,"%lld",&limit)==1 &&
-            fscanf(period_file,"%lld",&period)==1 && limit>0 && period>0)
-            quota=(unsigned)((limit+period-1)/period);
-    }
-    if (quota_file) fclose(quota_file);
-    if (period_file) fclose(period_file);
-    return quota;
-}
-
-int prep_pool_cpu_budget(void) {
-    unsigned budget=affinity_cpus();
-    unsigned quota=cgroup_quota_cpus();
-    if (quota && quota<budget) budget=quota;
-    if (budget<1) budget=1;
-    return (int)budget;
-}
 
 static unsigned default_workers(void) {
     unsigned cpus=(unsigned)prep_pool_cpu_budget();

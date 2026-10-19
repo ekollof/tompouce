@@ -14,6 +14,7 @@
 #include "stretch.h"
 #include "scheduler.h"
 #include "prep_pool.h"
+#include "prep_profile.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the Notcurses
@@ -1204,6 +1205,8 @@ void audio_trigger_event(AudioEvent *ev) {
     double source_time=ev->time-(ev->stretch>0?.04:0);
     VoiceResources previous=voices[chosen].active?retire_voice_locked(chosen,source_time):voice_resources(&voices[chosen]);
     trigger_voice(&voices[chosen], ev);
+    if (voices[chosen].active)
+        prep_profile_event(PREP_RESERVED_SOURCE,ev->time,audio_time_now());
     prepare_source_cut(&voices[chosen]);
     voices[chosen].native_state=prepared;
     voices[chosen].native_right=prepared_right;

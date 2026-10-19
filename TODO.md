@@ -9,6 +9,13 @@ Follow [AGENTS.md](AGENTS.md) for implementation, verification and installation.
 Keep the source buffer plain text, with live widgets beside the code. The
 supported language direction is upstream JavaScript Strudel.
 
+Terminal follow-up: resolve large ASCII/Unicode paste loss/hangs and UTF-8
+codepoints split between reads in the Notcurses integration, retaining the
+system library and its protocol ownership. `tests/test_paste_stress.py` keeps
+these failing reproductions separate from the maintained acceptance cases.
+The 100 ms inter-chunk cancellation bug is fixed; delayed bodies, delayed
+closing markers and shutdown of an unfinished paste have owned PTY checks.
+
 Work proceeds in the order below. Later items reuse the workloads, publication
 rules and comparison gates from earlier ones. Do not add new audio baselines
 until the preparation path they measure has settled.
@@ -75,15 +82,19 @@ submitted to a bounded pool, and commits stay in scheduling order, so ducks,
 delay and room changes, equal-time notes and generation checks still happen in
 hap order. An earlier ready note becomes visible before a later slow source
 finishes; it is not held until the whole query window completes. Obsolete
-generation results are discarded before publication; audio already committed is
+generation results are discarded before publication. Accepted duck controls
+publish before the source wait, including when the source later fails or the
+program changes; an owned blocked-source callback regression and actual web
+Superdough ordering check cover this prefix. Audio already committed is
 never withdrawn. The refresh transaction still replaces queued future events for
 live slider tests and now also filters replacement onsets against the final
 cutoff after preparation, so an onset that becomes due during preparation is
 not reinserted.
 
 The pool defaults to at most four workers, bounded by the CPU budget derived
-from process affinity and cgroup v1/v2 quota (`TOMPOUCE_PREP_WORKERS=1..8`
-overrides it). Its general queue is `workers*32`, capped at 512, and the staging
+from process affinity and visible ancestor cgroup v1/v2 quotas
+(`TOMPOUCE_PREP_WORKERS=1..8` overrides it). Its general queue is
+`workers*32`, capped at 512, and the staging
 queue keeps its existing 8192-event bound. Sample/native/stretch preparation
 and custom-IR kernel FFTs use the general workers. Generated rooms use a
 32-request serial FIFO lane in the same pool so their order does not change;
@@ -106,19 +117,47 @@ transition thread waits. Generated-room failures, queue overflow and
 startup/enqueue failures remain observable through the console and the room
 failure counter.
 
+Cgroup membership and mount roots are resolved from procfs, including nested
+systemd scopes, alternate v1 CPU mounts and visible inherited limits. Namespace
+ancestors that are not exposed by a mount cannot be inspected. Read-only fixture
+tests cover these paths without changing host quotas.
+
 ## 4. Measure deadlines under the pool
 
 Skip this step when the pool was not built.
 
-- [ ] Measure preparation latency, scheduling deadlines, missed onsets and
-      underruns on the step 1 workloads, across worker counts and heavy
-      workloads. Require the existing event and audio parity gates to pass
+- [x] Add producer/consumer preparation latency, publication, late-preparation
+      and late-reservation counters, disabled by default and outside the audio
+      callback. Measure paced cold, live-edit and long-source burst workloads
+      with fresh caches and owned sample stores across CPU-bounded worker counts
+      and 128/4,096-frame callbacks. `test_prep_deadlines` and
+      `scripts/prep-deadline-qa.mjs` preserve timing violations in their reports;
+      a structural CTest pass is not a timing gate pass.
+- [x] Settle observed deadline misses and measure real backend underruns under
+      preparation load. Local fixture reads do not establish remote-download
+      deadline behavior. Require existing event and audio parity gates to pass
       without relaxing execution budgets. Voice-pool burst checks reuse these
-      counters.
+      counters. See [measurement details](docs/audio-comparison.md).
+
+The isolated offline matrix completed 18 cases. Cold/live cases at both block
+sizes hold fully with 1/2/4 workers; the sixteen-long-stretch burst sheds its
+overload as specified skips (68/26/11 late sources at 128 frames on this
+machine) with zero late publications, zero late reservations, zero callback
+overruns and zero host wake misses in all 18 cases. The 4,096-frame block is
+the output adapter's render-call cap, so both measured block sizes are
+realizable. `profile-prep-backend` runs the same workloads through the real
+PipeWire backend at 256-frame blocks into an owned null sink (routing verified
+with `pw-dump`, defaults untouched): five cases show zero stream drops, zero
+render overruns and no frame shortfall, with cold/live held and the burst
+shedding only skips. `TOMPOUCE_OUTPUT_TARGET` selects that sink for owned
+tests only. The 34 maintained web/native audio gates and selected duck/event
+comparisons pass without threshold or execution-budget changes (four shared
+delay-automation gates were added under step 5, bringing the matrix to 38).
+Remote-download deadline behavior remains unmeasured.
 
 ## 5. Shared-effect comparisons
 
-- [ ] Broaden live shared-effect comparisons: delay automation PCM, overlapping
+- [x] Broaden live shared-effect comparisons: delay automation PCM, overlapping
       generated-IR completion races and source-side effects of failed generation.
       Generated rooms now use a bounded worker queue, retain the old convolver
       until completion and preserve it on preparation failure. Deterministic
@@ -127,6 +166,21 @@ Skip this step when the pool was not built.
       generated requests FIFO. Prove the same handoff under ordered publication
       when the pool exists. Voice retirement and live onset checks retain these
       tails, so settle them before those gates grow.
+
+Four web/native PCM gates cover shared delay automation (feedback change, time
+change, zero-time suspension and return to baseline) at 0.9999998+ correlation.
+The return case exposed an offline-renderer skew: `render_audio` decided delay
+automation at trigger time while the web guards on preparation-time values, so
+a return matching the initial settings was scheduled natively but skipped by
+the browser. The renderer now prepares delays upfront like the live commit
+path; the scheduler path already decided at preparation time
+(`test_delay_automation`). `test_generated_room_race` proves the handoff
+through the pool and event-queue transaction: a decoy request serializes the
+lane, the intervening custom IR publication is observed first, and the older
+generated completion replaces it; an oversized room fails deterministically
+while its note still commits, the voice renders on the previous convolver, and
+the retained equality guards suppress a repeat request. The full matrix passes
+38/38 with the diagnostic wet Arpoon unchanged.
 
 ## 6. Fractional onsets under live changes
 
@@ -188,10 +242,10 @@ Skip this step when the pool was not built.
       names. This only reads controls; doing it earlier would churn the
       live-control captures used above.
 
-The maintained audio matrix has 34 passing gates, including eight independently
-decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases and four
-fractional sample-onset cases. Seeded generated rooms are gated; ordinary wet
-Arpoon remains diagnostic. These checks
+The maintained audio matrix has 38 passing gates, including eight independently
+decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
+fractional sample-onset cases and four shared delay-automation cases. Seeded
+generated rooms are gated; ordinary wet Arpoon remains diagnostic. These checks
 do not establish complete decoder, synthesis or full-song waveform parity.
 Use owned test engines/browser profiles and isolated audio resources; leave the
 user's running source, playback and routing untouched.

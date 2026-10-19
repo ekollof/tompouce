@@ -239,7 +239,14 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 slider_generation=match[1]
                 os.write(master,b'\x1bOS'); drain(.1)
             if keys:
-                terminal_keys(keys)
+                if isinstance(keys, (list, tuple)):
+                    for chunk in keys:
+                        if isinstance(chunk, (float, int)):
+                            drain(chunk)
+                        else:
+                            terminal_keys(chunk)
+                else:
+                    terminal_keys(keys)
             drain(.3)
             if transport is not None:
                 text=screen_text(output)
@@ -579,6 +586,12 @@ check("Notcurses key release ignored", "", b'\x1b[88;1:3u\x1b[120;1:1u', expecte
 large_paste = '// ' + 'café ' * 2048
 check("Notcurses bounded input pipe preserves large paste", "",
       b'\x1b[200~' + large_paste.encode() + b'\x1b[201~', expected=large_paste)
+check("Notcurses fragmented paste preserves text", "",
+      [b'\x1b[200~one', .25, b'\ntwo', .25, b'\x1b[201~'], expected='one\ntwo')
+check("Notcurses fragmented paste closing marker", "",
+      [b'\x1b[200~one\x1b[20', .25, b'1~'], expected='one')
+check("Notcurses unfinished paste shutdown", "original",
+      [b'X', .5, b'\x1b[200~unfinished', .25], stop_signal=signal.SIGTERM)
 check("Selected block unindent", "one\ntwo", b'\x01\t\x1b[Z', expected='one\ntwo')
 check("Live theme file watching", "note('c4').gain(0)", expected="note('c4').gain(0)", theme=True)
 check("categorized sound search and insertion", "", b'\x1b[17~supersaw\r',

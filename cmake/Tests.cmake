@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound
-        audio audio_performance prep_profile room duck_onset terminal_graphics audio_output native_synth live_sliders)
+        audio audio_performance prep_profile prep_deadlines prep_cpu room duck_onset terminal_graphics audio_output native_synth live_sliders)
     tompouce_test(${name})
 endforeach()
 
@@ -49,12 +49,27 @@ add_custom_target(test-voice-reference-web
 
 add_custom_target(test-duck-reference-web
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
+        node scripts/duck-preparation-reference-qa.mjs
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
         node scripts/duck-timing-reference-qa.mjs
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
         node scripts/duck-timer-reference-qa.mjs
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_DUCK_ONSET_BINARY=$<TARGET_FILE:test_duck_onset>"
         node scripts/duck-onset-reference-qa.mjs
     DEPENDS test_live_sliders test_duck_onset WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
+add_custom_target(profile-prep-deadlines
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_PREP_DEADLINE_BINARY=$<TARGET_FILE:test_prep_deadlines>"
+        node scripts/prep-deadline-qa.mjs
+    DEPENDS test_prep_deadlines WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
+add_custom_target(profile-prep-backend
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_PREP_DEADLINE_BINARY=$<TARGET_FILE:test_prep_deadlines>"
+        "TOMPOUCE_AUDIO_PROBE=$<TARGET_FILE:probe_audio_output>"
+        node scripts/prep-backend-qa.mjs
+    DEPENDS test_prep_deadlines probe_audio_output WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)

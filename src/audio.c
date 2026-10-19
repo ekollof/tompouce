@@ -420,7 +420,10 @@ static void apply_duck(const PendingDuck *pending) {
         double initial=fmax(.01,(float)orbit_duck_gain_at(o,fmax(0,audio_time-1/SR)));
         double minimum=fmax(pending->source_time,audio_time)+control.onset;
         double return_time=minimum+fmax(.002,control.attack);
-        if (control.string_onset) {
+        if (control.string_onset==DUCK_ONSET_SUMMARY) {
+            duck_onset_times(control.long_onset,fmax(pending->source_time,audio_time),
+                fmax(.002,control.attack),&minimum,&return_time);
+        } else if (control.string_onset) {
             char text[224],attack[32]; JSDTOATempMem temporary;
             int length=js_dtoa(text,fmax(pending->source_time,audio_time),10,0,JS_DTOA_FORMAT_FREE,&temporary);
             size_t suffix=strlen(control.onset_text);

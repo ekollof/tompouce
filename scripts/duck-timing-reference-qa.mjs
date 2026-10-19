@@ -75,6 +75,22 @@ for(const onset of ['e-324','e309','e'+'0'.repeat(100),'1'+' '.repeat(100),'0'.r
   [[null]],[[false]],[[[]]],[[[1]]]])
   cases.push({name:`onset ${JSON.stringify(onset)}`,sourceTime:.3,callbackAt:.29,
     controls:{onset,attack:.1,depth:.25}});
+for(const [index,onset] of ['0'.repeat(128),'0'.repeat(10000),'1'+' '.repeat(10000),
+  'e'+'0'.repeat(10000),'e-'+'0'.repeat(10000)+'1','0'.repeat(10000)+'1',
+  '0'.repeat(1000)+'e-1','\u00a0'.repeat(1000),'0'.repeat(1000)+'bad'].entries())
+  for(const callbackAt of [.29,.4]) for(const attack of [.1,1])
+    cases.push({name:`long onset ${index}, ${callbackAt}, ${attack}`,sourceTime:.3,callbackAt,
+      controls:{onset,attack,depth:.25}});
+for(const [field,text] of [['onset','1\0tail'],['onset','0'.repeat(128)+'\0'],
+  ['onset',[['1\0']]],['attack','0.1\0tail'],['depth','0.25\0tail']]) {
+  const controls={onset:0,attack:.1,depth:.25,[field]:text};
+  const values=Object.fromEntries(Object.entries(controls).map(([key,value])=>['duck'+key,value]));
+  values.duckorbit=1;
+  values.s='~';
+  const characters=Array.from(JSON.stringify(values),text=>text.charCodeAt(0));
+  cases.push({name:`NUL ${field} ${typeof text}`,sourceTime:.3,callbackAt:.29,controls,
+    code:`s('~').fmap(()=>JSON.parse(String.fromCharCode(${characters.join(',')})))`});
+}
 const browser=await BrowserClient.create();
 let results;
 try {
@@ -85,10 +101,14 @@ try {
 const artifacts=process.argv[2]??'/tmp/tompouce-duck-timing-reference';
 await fs.mkdir(artifacts,{recursive:true});
 await fs.writeFile(path.join(artifacts,'web.json'),JSON.stringify(results,null,2)+'\n');
-const native=spawnSync(process.env.TOMPOUCE_LIVE_CONTROLS_BINARY??'./build/tests/test_live_sliders',
-  ['--duck-reference'],{input:JSON.stringify(results),encoding:'utf8',maxBuffer:2*1024*1024});
-assert.equal(native.status,0,native.stderr);
-const actual=JSON.parse(native.stdout);
+// Keep each test invocation below the native harness's bounded input size.
+const actual=[];
+for(const result of results) {
+  const native=spawnSync(process.env.TOMPOUCE_LIVE_CONTROLS_BINARY??'./build/tests/test_live_sliders',
+    ['--duck-reference'],{input:JSON.stringify([result]),encoding:'utf8',maxBuffer:2*1024*1024});
+  assert.equal(native.status,0,native.stderr);
+  actual.push(...JSON.parse(native.stdout));
+}
 assert.equal(actual.length,results.length);
 await fs.writeFile(path.join(artifacts,'native.json'),JSON.stringify(actual,null,2)+'\n');
 const failures=[];

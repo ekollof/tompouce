@@ -176,7 +176,7 @@ latency or prove source-side failure parity. Multiple generated requests use a
 single FIFO worker; browser completion races remain open.
 
 `node scripts/duck-timing-reference-qa.mjs /tmp/duck-timing-reference` compares
-88 real web timer-callback/gain-PCM cases with native control conversion and
+129 real web timer-callback/gain-PCM cases with native control conversion and
 automation. It covers selected unusual numeric strings, nested onset values,
 past endpoints, late callbacks, interruption during downward/return ramps and
 failed first/return ramps after cancellation. Timers are dispatched explicitly
@@ -184,7 +184,17 @@ at suspended offline render boundaries, then detached to prevent duplicate
 natural callbacks. Native reanchoring uses the last rendered sample, matching
 the web's AudioParam.value read. `test-duck-reference-web` builds and runs this
 gate; `TOMPOUCE_LIVE_CONTROLS_BINARY` selects another native test executable.
-This does not establish live timer-jitter/overload parity or remove the
-127-byte normalized onset-string bound.
+Long zero/exponent/whitespace strings and embedded NUL controls are included.
+This does not establish live timer-jitter/overload parity or timer-creation
+failure side effects.
+
+`duck-onset-reference-qa.mjs` adds 1,264 exact browser/native numeric
+concatenations, comparing binary64 bits at decimal halfway, subnormal and
+overflow boundaries, with long tails, radix forms and scientific time prefixes.
+The native summary uses fixed-size integer arithmetic rather than the pinned
+QuickJS decimal reader's deliberately limited precision. The `duck_onset`
+CTest checks bounded cache exhaustion, deduplication and retained references;
+the scheduler harness checks summary lifetime after JSON/event destruction.
+Both browser scripts run through `test-duck-reference-web`.
 
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

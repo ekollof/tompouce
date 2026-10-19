@@ -49,9 +49,17 @@ static void duck_onset(const cJSON *value, int index, DuckControl *control) {
             js_dtoa(number,item->valuedouble,10,0,JS_DTOA_FORMAT_FREE,&temporary);
             text=number;
         } else if (item && !cJSON_IsNull(item)) {control->onset=NAN;return;}
-        if (strlen(text)>=sizeof(control->onset_text)) {control->onset=NAN;return;}
-        snprintf(control->onset_text,sizeof(control->onset_text),"%s",text);
-        control->string_onset=1;
+        if (strlen(text)>=sizeof(control->onset_text)) {
+            control->long_onset=duck_onset_prepare(text);
+            if (!control->long_onset) {
+                log_console("duck: long onset summary cache capacity exceeded");
+                control->onset=NAN; return;
+            }
+            control->string_onset=DUCK_ONSET_SUMMARY;
+        } else {
+            snprintf(control->onset_text,sizeof(control->onset_text),"%s",text);
+            control->string_onset=DUCK_ONSET_STRING;
+        }
     } else if (cJSON_IsBool(item)) control->onset=cJSON_IsTrue(item)?1:0;
     else if (cJSON_IsNumber(item)) control->onset=item->valuedouble;
     else if (item && !cJSON_IsNull(item)) control->onset=NAN;

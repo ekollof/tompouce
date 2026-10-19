@@ -596,8 +596,14 @@ return time holds the target of an accepted downward ramp. Rejected ramps
 record their orbit, failing ramp and callback execution time. The scheduler
 reports these to the console outside the audio callback, including while
 stopped. Bursts retain the first 64 errors between drains and report overflow.
-Normalized onset strings currently have a 127-byte limit; longer strings
-remain under investigation.
+Long normalized onset strings use immutable numeric summaries prepared outside
+the callback, without increasing the size of queued controls. The callback
+combines bounded significant digits with the actual (possibly late) callback
+time and attack, preserving concatenation and binary64 rounding. A separate
+256-entry process-lived summary cache bounds memory; exhaustion rejects the
+new control with a console diagnostic and retains existing references. Malformed
+syntax uses a shared invalid summary. Embedded NULs in duck numeric strings are
+encoded as NaN before JSON serialization, avoiding native string truncation.
 Accepted duck callbacks use an independent bounded timeline, so voice stealing,
 source preparation failure, Stop and program replacement retain them. Rest and
 missing-source events can still duck another bus. Missing sounds stay silent

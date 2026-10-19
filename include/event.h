@@ -5,11 +5,16 @@
 #include "convolution.h"
 #include "native_synth.h"
 #include "osc_output.h"
+#include "duck_onset.h"
 
+enum { DUCK_ONSET_STRING=1,DUCK_ONSET_SUMMARY=2 };
 typedef struct {
     double onset, attack, depth;
     int string_onset;
-    char onset_text[128];
+    union {
+        char onset_text[128];
+        const DuckOnsetText *long_onset;
+    };
 } DuckControl;
 
 #define INST_SINE 0

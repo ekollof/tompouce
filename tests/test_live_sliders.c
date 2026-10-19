@@ -696,6 +696,48 @@ static void test_interrupted_duck_anchor(void) {
     audio_report_errors();
 }
 
+static void test_long_duck_onset(void) {
+    typedef struct { double onset,attack,depth; int string_onset; char text[128]; } InlineControl;
+    _Static_assert(sizeof(DuckControl)==sizeof(InlineControl),"Long onsets must not enlarge queued controls");
+    char text[10001]; memset(text,'0',sizeof(text)-1); text[sizeof(text)-1]=0;
+    cJSON *hap=cJSON_CreateObject(),*value=cJSON_CreateObject(); assert(hap && value);
+    cJSON_AddNumberToObject(hap,"begin",0); cJSON_AddNumberToObject(hap,"end",1);
+    cJSON_AddItemToObject(hap,"value",value); cJSON_AddStringToObject(value,"s","~");
+    cJSON_AddNumberToObject(value,"duckorbit",1); cJSON_AddNumberToObject(value,"duckdepth",.25);
+    cJSON_AddStringToObject(value,"duckonset",text);
+    AudioEvent event; assert(js_audio_event(hap,.3,1,&event));
+    assert(event.ducks[1].string_onset==DUCK_ONSET_SUMMARY);
+    cJSON_Delete(hap); /* No borrowed JSON/string pointers may reach the callback. */
+    audio_report_errors(); pending_duck_count=0; audio_time=0;
+    memset(&web_duck[1],0,sizeof(web_duck[1]));
+    web_duck[1].enabled=web_duck[1].hold=1;
+    web_duck[1].initial=web_duck[1].target=.8;
+    assert(schedule_duck_locked(&event)); assert(pending_duck_count==1);
+    memset(&event,0,sizeof(event)); audio_time=.29; dispatch_ducks_locked();
+    assert(!pending_duck_count && web_duck[1].minimum==.3);
+    assert(duck_error_count==1 && duck_errors[0].returning);
+    audio_time=.45; assert(orbit_duck_gain(1)==.5); audio_report_errors();
+}
+
+static void test_nul_duck_controls(void) {
+    /* Construct strings at query time; literal strings belong to upstream
+       mini-notation, whose grammar correctly rejects embedded NULs. */
+    const char *values[]={"String.fromCharCode(49,0,116)","[String.fromCharCode(49,0,116)]",
+        "[[String.fromCharCode(49,0,116)]]"};
+    for (unsigned i=0;i<sizeof(values)/sizeof(values[0]);i++) {
+        char source[512],error[512]; cJSON *metadata=NULL;
+        snprintf(source,sizeof(source),"const v=%s; s('~').fmap(()=>({s:'~',duckorbit:1,duckonset:v,duckattack:v,duckdepth:v}))",values[i]);
+        JsProgram *program=javascript_compile(source,120,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"NUL fixture: %s\n",error);
+        assert(program);
+        cJSON_Delete(metadata); cJSON *haps=javascript_query(program,0,1); assert(haps);
+        AudioEvent event; assert(js_audio_event(cJSON_GetArrayItem(haps,0),.3,1,&event));
+        assert(isnan(event.ducks[1].depth) && isnan(event.ducks[1].attack));
+        assert(event.ducks[1].string_onset==DUCK_ONSET_STRING && !strcmp(event.ducks[1].onset_text,"NaN"));
+        cJSON_Delete(haps); javascript_free(program);
+    }
+}
+
 static void test_nested_duck_controls(void) {
     const char *inputs[]={"undefined","[]","[undefined]","[null]","[.25,null]","[null,.25]",
         "[[null]]","[[]]","[[[]]]","[[false]]","[[.25]]","[[[.25]]]","[[1,2]]","{}","[[{}]]",
@@ -1049,11 +1091,21 @@ static void duck_reference_apply(const cJSON *test) {
         assert(cJSON_AddItemToObject(value,name,cJSON_Duplicate(item,1)));
     }
     AudioEvent event;
-    assert(js_audio_event(hap,cJSON_GetObjectItemCaseSensitive(test,"sourceTime")->valuedouble,1,&event));
+    const cJSON *code=cJSON_GetObjectItemCaseSensitive(test,"code");
+    JsProgram *program=NULL; cJSON *haps=NULL;
+    if (cJSON_IsString(code)) {
+        cJSON *metadata=NULL; char error[512];
+        program=javascript_compile(code->valuestring,120,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"Duck reference: %s\n",error);
+        assert(program);
+        cJSON_Delete(metadata); haps=javascript_query(program,0,1); assert(haps);
+    }
+    assert(js_audio_event(haps?cJSON_GetArrayItem(haps,0):hap,
+        cJSON_GetObjectItemCaseSensitive(test,"sourceTime")->valuedouble,1,&event));
     PendingDuck pending={.source_time=event.time,.mask=1u<<1};
     pending.controls[1]=event.ducks[1];
     audio_time=cJSON_GetObjectItemCaseSensitive(test,"callbackAt")->valuedouble;
-    apply_duck(&pending); cJSON_Delete(hap);
+    apply_duck(&pending); cJSON_Delete(hap); cJSON_Delete(haps); javascript_free(program);
 }
 
 static void duck_reference(void) {
@@ -1238,6 +1290,8 @@ int main(int argc, char **argv) {
     test_nonfinite_duck_numbers();
     test_string_duck_onset();
     test_interrupted_duck_anchor();
+    test_long_duck_onset();
+    test_nul_duck_controls();
     test_nested_duck_controls();
     test_duck_output_routing();
     test_javascript_numeric_strings();

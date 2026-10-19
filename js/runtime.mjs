@@ -466,6 +466,9 @@ function prepareDuckNumbers(value) {
   if (value._osc) return value;
   const encode = (item, depth = 0) => {
     if (typeof item === 'number' && !Number.isFinite(item)) return String(item);
+    // Native JSON strings are NUL-terminated. NUL is invalid in every duck
+    // numeric conversion, including concatenated onset times and arrays.
+    if (typeof item === 'string' && item.includes('\0')) return 'NaN';
     if (Array.isArray(item) && depth < 128) return item.map(entry => encode(entry, depth + 1));
     return item;
   };

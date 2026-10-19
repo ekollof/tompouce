@@ -55,13 +55,13 @@ a separate measured design; it is not part of the initial preparation pool.
       pending/failure/tail/overflow checks and web buffer/parameter-guard checks
       cover this handoff; the single worker completes generated requests FIFO.
 - [ ] Broaden duck coercion and live callback-load coverage beyond the selected
-      web comparisons. An 88-case web/native gate now covers numeric string
+      web comparisons. A 129-case web/native gate now covers numeric string
       forms, nested onsets, past endpoints, late callbacks and cancellation of
       rising/falling ramps, including failures after gain reanchoring. Interrupted
       ramps now anchor to the last rendered sample, matching AudioParam.value.
-- [ ] Remove or align the 127-byte normalized duck onset-string limit and verify
-      remaining exotic string forms. Preserve bounded callback work and pending
-      timeline memory rather than expanding every event's inline string buffer.
+- [ ] Match duck timer creation failures before gain cancellation, including
+      source times below 10 ms (the web rejects a negative timer stop time).
+      Verify source/output and repeated-target side effects at that stage.
 - [ ] Match Csound loader side effects before a later JavaScript failure, failed
       URL Promise caching and runtime worker diagnostics.
 

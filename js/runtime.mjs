@@ -46,6 +46,8 @@ const visualAliases = new Set();
 const liveSliderReaders = new Map();
 const visualKinds = {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7};
 const visualKind = name => visualKinds[name?.replace(/^_/, '')] ?? 0;
+const visualDefaults = (kind, inline) => kind===7 ? {vertical:1,labels:1} :
+  kind===1 && inline ? {pos:.5,scale:1} : {};
 const nativeVisualOptions = new Set(('cycles playhead overscan minMidi maxMidi thickness scale pos trigger stretch steady inset size padding '+
   'playheadLength playheadThickness hapRadius margin root min max speed vertical flipTime flipValues labels fold autorange '+
   'hideNegative hideInactive colorizeInactive fill fillActive stroke strokeActive smear align edo circle hapcircles mode fade logSpiral '+
@@ -56,7 +58,7 @@ function attachVisual(site, pattern, options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('Visual options must be an object');
   const entries = Object.entries(options);
   if (entries.length > 48) throw new Error('Too many visual options');
-  const clean = site.kind === 7 ? {vertical:1, labels:1} : {};
+  const clean = visualDefaults(site.kind,site.inline);
   for (const [key,value] of entries) {
     if (key.length > 48 || (typeof value === 'number' && !Number.isFinite(value))) throw new Error('Invalid visual option');
     if (!nativeVisualOptions.has(key)) {
@@ -227,7 +229,7 @@ globalThis.__configureVisuals = code => {
     const probe=candidates.length===1 ? candidates[0] : undefined;
     const mask=original ? (1 << original.id) >>> 0 : probe?.mask;
     if (!mask) return;
-    let options=kind===7 ? {vertical:1,labels:1} : {};
+    let options=visualDefaults(kind,property.name.startsWith('_'));
     if (!whole && node.arguments.length && (node.callee.type==='MemberExpression' || node.arguments[0].type==='ObjectExpression')) {
       const object=node.arguments[0];
       if (object.type !== 'ObjectExpression') {
@@ -377,7 +379,7 @@ function prepare(code) {
     const id = visualSites.length;
     const alias = ('v' + String(id).padStart(property.end-property.start-1, '0'));
     visualAliases.add(alias);
-    const site = {id, offset:property.start, kind, options:{}};
+    const site = {id, offset:property.start, kind, inline:property.name.startsWith('_'), options:{}};
     visualSites.push(site); edits.push([property.start,property.end,alias]);
     core.Pattern.prototype[alias] = function (options = {}) { return attachVisual(site,this,options); };
     globalThis[alias] = function (options = {}) {
@@ -456,6 +458,34 @@ globalThis.__compile = async (code, bpm = 120) => {
   return JSON.stringify({ bpm: tempo, samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, collecting.size), csound: csoundUsed ? orchestraCalls : null });
 };
 
+/* JSON turns non-finite numbers into null. Duck numeric conversion accepts
+   their JS spellings, including inside arrays; non-finite onset spellings
+   reject the same downward endpoint as numeric addition would. Keep OSC's
+   original event values on its separate output path. */
+function prepareDuckNumbers(value) {
+  if (value._osc) return value;
+  const encode = (item, depth = 0) => {
+    if (typeof item === 'number' && !Number.isFinite(item)) return String(item);
+    if (Array.isArray(item) && depth < 128) return item.map(entry => encode(entry, depth + 1));
+    return item;
+  };
+  let result = value;
+  for (const key of ['duckonset', 'duckattack', 'duckatt', 'datt', 'duckdepth']) {
+    if (!Object.hasOwn(value, key)) continue;
+    if (result === value) result = { ...value };
+    let item = value[key];
+    // The controller reuses entry zero for nullish/missing array entries.
+    // An undefined first entry reaches the orbit's parameter defaults, except
+    // attack has already passed through Math.max(undefined, .002).
+    if (Array.isArray(item) && item[0] === undefined) {
+      item = item.slice();
+      item[0] = key === 'duckonset' ? 0 : key === 'duckdepth' ? 1 : 'NaN';
+    }
+    result[key] = encode(item);
+  }
+  return result;
+}
+
 globalThis.__query = (begin, end, cps, probes = false) => {
   // The upstream query converts boundaries to rational time. Compare using
   // those same boundaries: raw accumulated doubles can drop exact onsets.
@@ -480,7 +510,7 @@ globalThis.__query = (begin, end, cps, probes = false) => {
       const mask=(hap.context?.scopeMask ?? 0) | (probes ? hap.context?.probeMask ?? 0 : 0);
       const frequency=item.workletSrc===undefined?440:Number.isFinite(item.freq)?item.freq:
         440*Math.pow(2,(core.valueToMidi({note:36,...item})-69)/12);
-      events.push({ begin: at, end: finish, value: prepareNative(item,frequency), locations: locs, scopeMask:mask >>> 0 });
+      events.push({ begin: at, end: finish, value: prepareNative(prepareDuckNumbers(item),frequency), locations: locs, scopeMask:mask >>> 0 });
     }
   }
   return JSON.stringify(events);

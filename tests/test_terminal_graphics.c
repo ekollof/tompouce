@@ -6,6 +6,44 @@
 
 static TerminalImage image;
 
+static void test_scope_web_geometry(void) {
+    const float samples[]={.5,.25,0,-.25,-.5,.5,0,-.5};
+    const float late[]={-.5,-.25,0,.5,.25,0,-.25,-.5};
+    const float inline_samples[]={.25,.125,0,-.125,-.25,.25,0,-.25};
+    /* Coordinates independently gated against deployed drawing by
+       scripts/scope-reference-qa.mjs (80 x 80 canvas). */
+    const int expected_y[][8]={{60,65,70,50,60,70},
+        {50,55,60,65,70,50,60,70},{65,70,50,60,70},
+        {60,60,60,60,60,60,60,60},{50,45,40,35,30,50,40,30},
+        {60,65,70},{40,50,60,20,40,60}};
+    const int counts[]={6,8,5,8,8,3,6};
+    for (int test=0;test<7;test++) {
+        VisualOptions options; visual_options(&options,VISUAL_SCOPE,NULL);
+        assert(options.scale==.25 && options.pos==.75 && options.thickness==3 && options.align);
+        options.thickness=1; options.has_color=1; options.color=0xff0000ffu;
+        if (test==1 || test==3 || test==4) options.align=0;
+        if (test==2) options.trigger=.25;
+        if (test==3) options.scale=0;
+        if (test==4) { options.scale=-.25; options.pos=.5; }
+        if (test==6) { options.scale=1; options.pos=.5; }
+        image.width=80; image.height=80; image.compact=1;
+        terminal_graphics_feedback(&image,NULL,VISUAL_SCOPE,&options,NULL,0,
+            test==5?late:test==6?inline_samples:samples,8,0,0,1);
+        for (int i=0;i<counts[test];i++) {
+            const unsigned char *pixel=image.rgba+((size_t)expected_y[test][i]*80+i*10)*4;
+            assert(pixel[0]==255 && pixel[3]==255);
+        }
+        /* Alignment must leave a blank suffix rather than zooming the trace. */
+        for (int x=(counts[test]-1)*10+2;x<80;x++)
+            for (int y=0;y<80;y++) assert(!image.rgba[((size_t)y*80+x)*4+3]);
+        if (test==1) assert(!image.rgba[((size_t)60*80)*4+3]);
+    }
+    cJSON *config=cJSON_Parse("{\"scale\":-0.25,\"pos\":0.5,\"align\":false}");
+    assert(config);
+    VisualOptions options; visual_options(&options,VISUAL_SCOPE,config); cJSON_Delete(config);
+    assert(options.scale==-.25 && options.pos==.5 && !options.align);
+}
+
 static void test_note_guides(void) {
     char name[8];
     assert(terminal_graphics_note_label(60,name,sizeof(name)) && !strcmp(name,"C4"));
@@ -157,7 +195,7 @@ static void test_feedback(void) {
     unsigned char quiet[200*12*4]; memcpy(quiet,image.rgba,sizeof(quiet));
     for (int i=0;i<4096;i++) samples[i]*=50;
     terminal_graphics_feedback(&image,NULL,VISUAL_SCOPE,&scope_options,NULL,0,samples,4096,10,0,2);
-    assert(!memcmp(quiet,image.rgba,sizeof(quiet)));
+    assert(memcmp(quiet,image.rgba,sizeof(quiet)));
     cJSON *root_options=cJSON_Parse("{\"root\":\"C2\"}"); assert(root_options);
     visual_options(&scope_options,VISUAL_PITCHWHEEL,root_options); cJSON_Delete(root_options);
     assert(fabs(scope_options.root-65.406391325)<1e-6);
@@ -314,7 +352,7 @@ static void test_palette(void) {
     VisualOptions options; visual_options(&options,VISUAL_SCOPE,NULL);
     float samples[16]={0}; image.width=200; image.height=48; image.compact=0;
     terminal_graphics_feedback(&image,NULL,VISUAL_SCOPE,&options,NULL,0,samples,16,0,0,1);
-    const unsigned char *trace=image.rgba+((size_t)24*image.width+90)*4;
+    const unsigned char *trace=image.rgba+((size_t)36*image.width+90)*4;
     assert(trace[0]==0xab && trace[1]==0xcd && trace[2]==0xef);
     cJSON *explicit=cJSON_Parse("{\"active\":\"red\",\"inactive\":\"blue\",\"playheadColor\":\"pink\"}"); assert(explicit);
     visual_options(&options,VISUAL_SCOPE,explicit); cJSON_Delete(explicit);
@@ -372,7 +410,7 @@ int main(int argc, char **argv) {
         terminal_graphics_delete(stdout,77); terminal_graphics_delete(stdout,78);
         return 0;
     }
-    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_spectrum(); test_orientations(); test_palette();
+    test_note_guides(); test_rasters(); test_overlapping_notes(); test_transport(); test_feedback(); test_spectrum(); test_orientations(); test_palette(); test_scope_web_geometry();
     puts("Kitty waveform, piano roll, clipped chunked transport and capability checks ok");
     return 0;
 }

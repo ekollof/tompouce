@@ -182,6 +182,11 @@ MP3 decoding honors Xing/Info encoder delay and end padding before
 resampling, keeping note attacks aligned when samples are repitched.
 Files without gapless metadata retain their decoded duration.
 
+Sample starts preserve fractional source position and envelope time at the
+first render frame, including fractional playback rates. Reverse stereo follows
+the deployed web REPL's buffer-copy behavior: the right channel has a leading
+zero and is displaced by one source frame. This applies before stretching too.
+
 Native oscillators now use direct ADSR automation without the legacy
 envelope smoothing stage. Explicit panning follows equal-power mono and stereo
 folding conventions; omitted panning preserves unity upmix. Stock saw/square
@@ -316,10 +321,13 @@ pitch-factor implementation rather than passing through a vocoder.
 
 Maintained browser comparisons pass for half/fractional-speed compensation,
 upward shifting, reverse playback, loops and envelope/filter ordering. Downward
-shifting shared PCM also passes. Independently decoded MP3s can differ more:
-the reference reads intermediate real-FFT bins in its last downward peak region,
-amplifying small decoder differences. The original piano-down capture remains a
-diagnostic, alongside broader unverified sound parity. See
+shifting passes for shared PCM and eight independently decoded MP3 piano cases,
+including three downward factors, C4/Fs3/Ds4 recordings, fractional speed and
+fractional onsets. MP3 decoding retains float precision rather than rounding to
+PCM16 before stretching. Prepared output begins on the first playback frame,
+avoiding a one-frame delay at fractional onsets. The downward peak regions still
+amplify small decoder differences; these selected gates establish neither full
+decoder equivalence nor full-song waveform parity. See
 [audio comparison](audio-comparison.md) for evidence and limits.
 
 `ir` selects a registered sample as the orbit's convolution impulse:
@@ -474,8 +482,20 @@ of leaving empty stripes. Its default intensity gradient runs from the terminal'
 blue through cyan, green and yellow to foreground, with quiet energy translucent
 and silence transparent. Explicit `color`, `active`/`activeColor` or patterned
 note colors retain a single hue. `thickness` sets a minimum history column width.
-Scope supports trigger alignment, scale, position, color
-and thickness, with automatic amplitude scaling when scale is omitted.
+Scope uses the web renderer's fixed amplitude scale and thickness (`3`).
+Inline `._scope()` defaults to `scale: 1` and `pos: 0.5`; `.scope()` defaults
+to `scale: 0.25` and `pos: 0.75`, matching the web's distinct entry points.
+Samples map to `(pos - sample * scale) * height`;
+there is no automatic normalization. `scale: 0` draws a flat line and negative
+scale inverts the trace. Alignment starts at the first falling crossing of
+`-trigger`, preserving sample spacing rather than stretching the remaining
+waveform. The default window is 4,096 samples (about 93 ms at 44.1 kHz).
+Color and explicit scale, position, trigger and thickness options are supported.
+The separate master/F12 and bottom status scopes retain their terminal layouts.
+`node scripts/scope-reference-qa.mjs` checks coordinates captured from the
+deployed web renderer in a disposable browser without opening audio devices.
+Native raster checks cover the same trigger, scaling and spacing cases in
+`test_terminal_graphics`; terminal rasterization remains an adaptation.
 
 Browser page-background placement, custom canvas contexts, font families,
 spiral cap styles and pitchwheel degree/int-label options are unavailable;
@@ -543,17 +563,31 @@ that do not yet exist are skipped at preparation time. `duckattack` is the retur
 reach their minimum at the note plus `duckonset`, then return to unity.
 Arrays of onset, attack and depth values map to the target array, reusing the
 first value for omitted entries. Depth zero still cancels the previous ramp.
+Empty arrays and arrays whose first entry is undefined use onset zero and
+depth one, but their attack becomes NaN before the orbit defaults apply: the
+downward ramp is retained and the return ramp is rejected. Nested arrays retain
+JavaScript string/number conversion, including null, booleans and empty arrays.
+Numeric NaN and infinities retain their duck conversion behavior across the
+native bridge: invalid ramp endpoints reject, positive infinite depth reaches
+the minimum gain, and negative infinite attack uses the 0.002-second minimum.
 Repeated targets retain their order and per-entry controls; each target entry
 queues its own callback, including repeats of the same orbit.
 String and singleton nested-array onsets follow JavaScript concatenation when
 forming ramp times. Invalid depth holds the cancellation gain; an invalid
-return time holds the target of an accepted downward ramp. Normalized onset
-strings currently have a 127-byte limit; longer strings and full error-report
-parity remain under investigation.
+return time holds the target of an accepted downward ramp. Rejected ramps
+record their orbit, failing ramp and callback execution time. The scheduler
+reports these to the console outside the audio callback, including while
+stopped. Bursts retain the first 64 errors between drains and report overflow.
+Normalized onset strings currently have a 127-byte limit; longer strings
+remain under investigation.
 Accepted duck callbacks use an independent bounded timeline, so voice stealing,
 source preparation failure, Stop and program replacement retain them. Rest and
 missing-source events can still duck another bus. Missing sounds stay silent
 and report an error. As in Superdough, `clip(0)` falls back to full duration.
+Csound and OSC output bypass local orbit creation and ducking. Csound also
+bypasses ALSA note output even when `midichan` is present. Native `midichan`
+without either output keeps its existing local-audio-plus-ALSA behavior;
+the web's dominant `.midi()` output and combined output callbacks remain open.
 
 ## Building and testing
 

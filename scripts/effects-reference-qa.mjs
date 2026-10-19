@@ -95,7 +95,11 @@ async function invalidDuckControls() {
     {onset:'0.02'},{attack:'bad'},{attack:'Infinity'},
     {onset:true},{onset:false},{onset:null},
     {onset:'1'},{onset:''},{onset:[.02]},{onset:[null]},
-    {onset:'1',attack:1}]) {
+    {onset:'1',attack:1},
+    {depth:NaN},{depth:Infinity},{depth:-Infinity},
+    {attack:NaN},{attack:Infinity},{attack:-Infinity},
+    {onset:NaN},{onset:Infinity},{onset:-Infinity},
+    {depth:[[NaN]]},{depth:[[Infinity]]}]) {
     const context=new OfflineAudioContext(2,22050,44100);
     setAudioContext(context); setSuperdoughAudioController(null); resetGlobalEffects();
     await initAudio({maxPolyphony:128,multiChannelOrbits:false});
@@ -106,17 +110,28 @@ async function invalidDuckControls() {
     const suspended=context.suspend(.29),rendered=context.startRendering(); await suspended;
     const callbackAt=context.currentTime;
     const stop=AudioScheduledSourceNode.prototype.stop;
-    let timer,error;
+    let timer,error,errorAt,rejectedRamp;
+    const ramp=orbit.output.gain.exponentialRampToValueAtTime.bind(orbit.output.gain);
+    let ramps=0;
+    orbit.output.gain.exponentialRampToValueAtTime=(...args)=>{
+      const stage=++ramps;
+      try {return ramp(...args);}
+      catch(caught) {
+        if(errorAt===undefined) {errorAt=context.currentTime;rejectedRamp=stage;}
+        throw caught;
+      }
+    };
     AudioScheduledSourceNode.prototype.stop=function(...args){
       if(this instanceof ConstantSourceNode && this.onended) timer=this;
       return stop.apply(this,args);
     };
     try {orbit.duck(.3,controls.onset??0,controls.attack??.1,controls.depth??.25);}
     finally {AudioScheduledSourceNode.prototype.stop=stop;}
+    if(errorAt!==undefined) throw Error('duck automation rejected before its timer callback');
     if(!timer?.onended) throw Error('missing invalid-control duck timer');
     try {timer.onended.call(timer,new Event('ended'));} catch(caught) {error=String(caught);}
     await context.resume(); const pcm=(await rendered).getChannelData(0);
-    results.push({controls,error,callbackAt,
+    results.push({controls,error,errorAt,rejectedRamp,callbackAt,
       gain:pcm[Math.round(.45*44100)]/.1});
   }
   return results;
@@ -179,17 +194,89 @@ function numericStringCoercion() {
     '0b10','0o10','0x10','+0x10','-0b1','0x1.8','0x1p2',
     'Infinity','-Infinity','1_0','',' \t.25\r\n'].map(text=>String(Number(text)));
 }
+async function nestedDuckControls() {
+  const results=[];
+  const inputs=[undefined,[],[undefined],[null],[.25,null],[null,.25],
+    [[null]],[[]],[[[]]],[[false]],[[.25]],[[[.25]]],[[1,2]],{},[[{}]],
+    Array(2),[undefined,.25]];
+  for (let index=0;index<inputs.length;index++) {
+    const context=new OfflineAudioContext(2,4410,44100);
+    setAudioContext(context); setSuperdoughAudioController(null); resetGlobalEffects();
+    await initAudio({maxPolyphony:128,multiChannelOrbits:false});
+    const controller=getSuperdoughAudioController(),timers=[],records=[];
+    for (const id of [1,2]) {
+      const orbit=controller.getOrbit(id,[1,2]),ramps=[];
+      orbit.output.gain.value=.8;
+      const ramp=orbit.output.gain.exponentialRampToValueAtTime.bind(orbit.output.gain);
+      orbit.output.gain.exponentialRampToValueAtTime=(...args)=>{
+        ramps.push(args.map(String)); return ramp(...args);
+      };
+      const duck=orbit.duck;
+      orbit.duck=(...args)=>{records.push({id,attack:String(args[2]),ramps});return duck.apply(orbit,args);};
+    }
+    const stop=AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.stop=function(...args){
+      if(this instanceof ConstantSourceNode && this.onended) timers.push(this);
+      return stop.apply(this,args);
+    };
+    try {controller.duck([1,2],.3,inputs[index],inputs[index],inputs[index]);}
+    finally {AudioScheduledSourceNode.prototype.stop=stop;}
+    if(timers.length!==2) throw Error('missing nested-control duck timers');
+    for (let i=0;i<timers.length;i++) {
+      try {timers[i].onended.call(timers[i],new Event('ended'));records[i].rejected=0;}
+      catch {records[i].rejected=records[i].ramps.length;}
+    }
+    results.push({index,records});
+    // Finish the owned context before the next setAudioContext call. Prevent
+    // natural ended events from invoking the manually dispatched timers again.
+    for (const timer of timers) timer.onended=null;
+    await context.startRendering();
+  }
+  return results;
+}
+async function duckOutputRouting() {
+  const context=new OfflineAudioContext(2,4410,44100);
+  setAudioContext(context); setSuperdoughAudioController(null); resetGlobalEffects();
+  await initAudio({maxPolyphony:128,multiChannelOrbits:false});
+  const controller=getSuperdoughAudioController(),ducked=[];
+  controller.getOrbit(1,[1,2]).duck=()=>ducked.push(1);
+  // Building the MIDI pattern must never request access to physical devices.
+  // Its scheduling callback is replaced below before any event dispatch.
+  navigator.requestMIDIAccess=async()=>{throw Error('QA refuses physical MIDI access');};
+  const patterns=[s('~'),s('~').midichan(1),note(60).csound('Fixture'),
+    note(60).osc(),note(60).midi('QA fixture')];
+  const results=[];
+  for (let index=0;index<patterns.length;index++) {
+    let tick,time=0,external=0,local=0;
+    const pattern=patterns[index].duckorbit(1).withHap(hap=>hap.setContext({
+      ...hap.context,...(hap.context.onSchedule?{onSchedule:()=>external++}:{})}));
+    const host=repl({getTime:()=>time,setInterval:fn=>(tick=fn,1),clearInterval:()=>{},
+      onSchedule:async(hap,at,cps)=>{local++;await webaudioOutput(hap,at,cps);}});
+    const before=ducked.length;
+    await host.setPattern(pattern,true); time=.1; tick();
+    await Promise.resolve(); await Promise.resolve();
+    host.stop();
+    results.push({index,local,external,ducked:ducked.length-before});
+  }
+  await context.startRendering();
+  return results;
+}
 async function effectMethods() {
   const context=new OfflineAudioContext(2,44100,44100);
   setAudioContext(context); setSuperdoughAudioController(null);
   await initAudio({maxPolyphony:128,multiChannelOrbits:false});
   const controller=getSuperdoughAudioController(),orbit=controller.getOrbit(1,[1,2]);
+  const reverseInput=context.createBuffer(2,4,44100);
+  reverseInput.copyToChannel(new Float32Array([1,2,3,4]),0);
+  reverseInput.copyToChannel(new Float32Array([5,6,7,8]),1);
+  const reversed=reverseBuffer(reverseInput);
   const delay=orbit.getDelay(.1,.5,0),reverb=orbit.getReverb(.1,.05,18000,8000);
   const methods={delay:String(orbit.getDelay),delayMax:delay.delayTime.maxValue,
     feedbackGraph:String(context.createFeedbackDelay),
     feedbackClass:String(delay.constructor),
     reverb:String(orbit.getReverb),generate:String(reverb.generate),
-    duck:String(orbit.duck),controllerDuck:String(controller.duck)};
+    duck:String(orbit.duck),controllerDuck:String(controller.duck),
+    reverseCopy:[Array.from(reversed.getChannelData(0)),Array.from(reversed.getChannelData(1))]};
   methods.irSyntax=s('sine').ir('roomfixture:0').queryArc(0,1).map(hap=>hap.value);
   methods.irIndexSyntax=s('sine').ir('roomfixture').set({i:0}).queryArc(0,1).map(hap=>hap.value);
   try {
@@ -357,6 +444,8 @@ try {
   await browser.until('typeof superdough==="function" && !!getSound("piano")',20000);
   const silent=await browser.evaluate('('+silentControls.toString()+')()');
   const methods=await browser.evaluate('('+effectMethods.toString()+')()');
+  assert.deepEqual(methods.reverseCopy,[[4,3,2,1],[0,8,7,6]],
+    'deployed reverseBuffer channel copy offsets changed');
   assert.deepEqual(methods.irSyntax,[{s:'sine',ir:'roomfixture:0'}]);
   assert.deepEqual(methods.irIndexSyntax,[{s:'sine',ir:'roomfixture',i:0}]);
   assert.equal(methods.irColonRejected,true,
@@ -418,10 +507,42 @@ try {
     'source orbit creation precedes duck dispatch, including rests and missing sources');
   const targetCoercion=await browser.evaluate('('+duckTargetCoercion.toString()+')()');
   const numericStrings=await browser.evaluate('('+numericStringCoercion.toString()+')()');
+  const nestedDuck=await browser.evaluate('('+nestedDuckControls.toString()+')()');
+  const outputRouting=await browser.evaluate('('+duckOutputRouting.toString()+')()');
+  assert.deepEqual(outputRouting,[
+    {index:0,local:1,external:0,ducked:1},
+    {index:1,local:1,external:0,ducked:1},
+    {index:2,local:0,external:1,ducked:0},
+    {index:3,local:0,external:1,ducked:0},
+    {index:4,local:0,external:1,ducked:0},
+  ],'dominant external outputs must bypass local orbit preparation and ducking');
+  assert.deepEqual(nestedDuck.map(test=>test.records.map(record=>record.rejected)),
+    [[0,0],[2,2],[2,2],[0,0],[0,0],[0,0],[2,2],[2,2],[2,2],
+      [1,1],[1,1],[1,1],[1,1],[1,1],[1,1],[2,2],[2,0]],
+    'nested/empty/sparse duck controls changed ramp rejection stages');
+  assert.deepEqual(nestedDuck.map(test=>test.records.map(record=>record.attack)),
+    [['0.1','0.1'],['NaN','NaN'],['NaN','NaN'],['0.002','0.002'],
+      ['0.25','0.25'],['0.002','0.25'],['0.002','0.002'],['0.002','0.002'],
+      ['0.002','0.002'],['NaN','NaN'],['0.25','0.25'],['0.25','0.25'],
+      ['NaN','NaN'],['NaN','NaN'],['NaN','NaN'],['NaN','NaN'],['NaN','0.25']],
+    'controller defaults must precede orbit defaults for missing array values');
   assert.deepEqual(numericStrings,['0.25','0.25','0','NaN','2','8','16',
     'NaN','NaN','NaN','NaN','Infinity','-Infinity','NaN','0','0.25']);
   const invalidDuck=await browser.evaluate('('+invalidDuckControls.toString()+')()');
   invalidDuck.forEach((test,index)=>{
+    if(test.error) {
+      assert.equal(test.errorAt,test.callbackAt,'duck rejection must be reported at callback execution');
+      assert.equal(test.rejectedRamp,[1,1,1,1,2,2,0,0,0,2,2,1,2,0,
+        1,0,1,2,2,0,1,1,1,1,0][index],
+        'duck rejection must identify the first failing ramp');
+    }
+    if(index>=14) {
+      const expected=[.8,1,.8,.5,.5,1,.8,.8,.8,.8,1][index-14];
+      assert.equal(!!test.error,![15,19,24].includes(index),
+        'non-finite duck controls changed ramp acceptance');
+      assert(Math.abs(test.gain-expected)<2e-6,'non-finite duck controls changed held gain');
+      return;
+    }
     if(index>=9) {
       assert.equal(!!test.error,index!==13,'string onset rejection stage differs');
       assert(Math.abs(test.gain-[.5,.5,.8,.5,1][index-9])<2e-6,
@@ -483,6 +604,6 @@ try {
   assert(Math.abs(methods.delayAfterReturn.feedback-.75)<1e-7,
     'web delay automation equality behavior changed');
   await fs.mkdir(artifacts,{recursive:true});
-  await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({url:'https://strudel.cc/',capturedAt:new Date().toISOString(),silent,methods,roomReplacement:roomReplacementResult,handoff,delay,automation,short,duck,orbitCreation,targetCoercion,numericStrings,invalidDuck,mapping,clip},null,2)+'\n');
+  await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({url:'https://strudel.cc/',capturedAt:new Date().toISOString(),silent,methods,roomReplacement:roomReplacementResult,handoff,delay,automation,short,duck,orbitCreation,targetCoercion,numericStrings,nestedDuck,outputRouting,invalidDuck,mapping,clip},null,2)+'\n');
   console.log(JSON.stringify({silent,delay,duck}));
 } finally {await browser.close();}

@@ -11,7 +11,7 @@ const renderer = process.env.TOMPOUCE_RENDER_AUDIO ?? './build/tests/render_audi
 const out = path.resolve(process.argv[2] ?? '/tmp/tompouce-comparison');
 await fs.mkdir(out, { recursive: true });
 // Exact shared PCM isolates the vocoder from independently decoded MP3s.
-// The reference's downward peak regions amplify tiny decoder differences.
+// The independently decoded MP3 matrix separately guards decoder precision.
 const fixture=Buffer.alloc(44+44100*4);
 fixture.write('RIFF');fixture.writeUInt32LE(fixture.length-8,4);fixture.write('WAVEfmt ',8);
 fixture.writeUInt32LE(16,16);fixture.writeUInt16LE(1,20);fixture.writeUInt16LE(2,22);
@@ -110,8 +110,20 @@ try {
     { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-fractional', code: `note(60).s('piano').speed(.75).stretch(1/3).clip(.25).late(.137)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-up', code: `note(60).s('piano').stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
-    { name: 'piano-stretch-down', code: `note(60).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: null },
+    { name: 'piano-stretch-down', code: `note(60).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-shallow', code: `note(60).s('piano').stretch(-1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-deep', code: `note(60).s('piano').stretch(-3).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-fractional', code: `note(60).s('piano').speed(.75).stretch(-2).clip(.25).late(.137)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-speed', code: `note(60).s('piano').speed(.75).stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-onset', code: `note(60).s('piano').stretch(-2).clip(.25).late(.137)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-fs3', code: `note(54).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'piano-stretch-down-ds4', code: `note(63).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-stretch-down', code: `s('stretch_fixture').stretch(-2).clip(.25).late(.125)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'pcm-stretch-down-fractional', code: `s('stretch_fixture').speed(.75).stretch(-2).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'pcm-onset-fractional', code: `s('stretch_fixture').clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'pcm-onset-fractional-speed', code: `s('stretch_fixture').speed(.75).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'pcm-onset-fractional-fast', code: `s('stretch_fixture').speed(2).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'pcm-onset-fractional-reverse', code: `s('stretch_fixture').speed(-2).begin(.25).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-reverse', code: `note(60).s('piano').speed(-.5).stretch(1).begin(.98).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-loop', code: `note(60).s('piano').speed(.5).stretch(1).loop(1).loopBegin(.005).loopEnd(.01).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-envelope-filter', code: `note(60).s('piano').speed(.5).stretch(1).attack(.03).decay(.08).sustain(.4).release(.12).lpf(1600).lpq(.7).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },

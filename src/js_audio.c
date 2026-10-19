@@ -75,6 +75,17 @@ static double duck_numeric(const cJSON *value, const char *name, int index, doub
     return NAN;
 }
 
+static double duck_attack(const cJSON *value, int index) {
+    const char *names[]={"duckattack","duckatt","datt"};
+    for (unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++) {
+        const cJSON *item=cJSON_GetObjectItemCaseSensitive(value,names[i]);
+        if (!item) continue;
+        double number=duck_numeric(value,names[i],index,cJSON_IsArray(item)?NAN:.1);
+        return isnan(number)?NAN:fmax(.002,number);
+    }
+    return .1;
+}
+
 static int oscillator(const char *s) {
     if (native_synth_sound(s)) return INST_NATIVE;
     if (!strcmp(s,"sine")) return INST_SINE;
@@ -111,9 +122,7 @@ static void duck_assign(const cJSON *v, const cJSON *target, int index, AudioEve
     if (orbit<0) return;
     ev->duck_mask|=1u<<orbit; ev->duck_values=1;
     duck_onset(v,index,&ev->ducks[orbit]);
-    double attack=duck_numeric(v,"duckattack",index,
-        duck_numeric(v,"duckatt",index,duck_numeric(v,"datt",index,.1)));
-    ev->ducks[orbit].attack=isnan(attack)?NAN:fmax(.002,attack);
+    ev->ducks[orbit].attack=duck_attack(v,index);
     ev->ducks[orbit].depth=duck_numeric(v,"duckdepth",index,1);
 }
 
@@ -138,9 +147,7 @@ static void duck_controls(const cJSON *v, AudioEvent *ev) {
         ev->duck_values=1;
         for (int o=0;o<N_ORBITS;o++) if (ev->duck_mask&(1u<<o)) {
             duck_onset(v,0,&ev->ducks[o]);
-            double attack=duck_numeric(v,"duckattack",0,
-                duck_numeric(v,"duckatt",0,duck_numeric(v,"datt",0,.1)));
-            ev->ducks[o].attack=isnan(attack)?NAN:fmax(.002,attack);
+            ev->ducks[o].attack=duck_attack(v,0);
             ev->ducks[o].depth=duck_numeric(v,"duckdepth",0,1);
         }
     }
@@ -386,6 +393,29 @@ int js_audio_schedule_arc(JsProgram *program, double origin, double seconds,
     return js_audio_schedule_clock(program,&clock,begin,end,origin+end*seconds,generation);
 }
 
+static void schedule_local_ducks(const cJSON *value, double time, unsigned generation) {
+    AudioEvent controls={.generation=generation,.time=time,.control_only=1,
+        .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
+    controls.dsp.enabled=1;
+    controls.orbit=(int)control(value,"orbit",control(value,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
+    duck_controls(value,&controls);
+    unsigned existing=audio_register_orbit(controls.orbit);
+    const cJSON *targets=cJSON_GetObjectItemCaseSensitive(value,"duckorbit");
+    if (!targets) targets=cJSON_GetObjectItemCaseSensitive(value,"duck");
+    if (cJSON_IsArray(targets)) {
+        int index=0; const cJSON *target;
+        cJSON_ArrayForEach(target,targets) {
+            controls.duck_mask=0;
+            duck_assign(value,target,index++,&controls);
+            controls.duck_mask &= existing;
+            if (controls.duck_mask) event_queue_push(&controls);
+        }
+    } else {
+        controls.duck_mask &= existing;
+        if (controls.duck_mask) event_queue_push(&controls);
+    }
+}
+
 static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
                           double seconds, unsigned generation) {
     if (!isfinite(time) || !isfinite(seconds) || seconds<=0) return;
@@ -405,27 +435,11 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
             }
             return;
         }
-        AudioEvent controls={.generation=generation,.time=time,.control_only=1,
-            .smp=-1,.wt=-1,.midi_chan=-1,.midi_note=-1};
-        controls.dsp.enabled=1;
-        controls.orbit=(int)control(value,"orbit",control(value,"o",1,0,N_ORBITS-1),0,N_ORBITS-1);
-        duck_controls(value,&controls);
-        unsigned existing=audio_register_orbit(controls.orbit);
-        const cJSON *targets=cJSON_GetObjectItemCaseSensitive(value,"duckorbit");
-        if (!targets) targets=cJSON_GetObjectItemCaseSensitive(value,"duck");
-        if (cJSON_IsArray(targets)) {
-            int index=0; const cJSON *target;
-            cJSON_ArrayForEach(target,targets) {
-                controls.duck_mask=0;
-                duck_assign(value,target,index++,&controls);
-                controls.duck_mask &= existing;
-                if (controls.duck_mask) event_queue_push(&controls);
-            }
-        } else {
-            controls.duck_mask &= existing;
-            if (controls.duck_mask) event_queue_push(&controls);
+        int csound=cJSON_HasObjectItem(value,"csound");
+        if (!csound) {
+            schedule_local_ducks(value,time,generation);
+            if (!strcmp(text_control(value,"s"),"~")) return;
         }
-        if (!strcmp(text_control(value,"s"),"~")) return;
         const cJSON *field;
         cJSON_ArrayForEach(field,value) {
             const char *name = field->string;
@@ -445,7 +459,8 @@ static void schedule_hap(JsProgram *program, const cJSON *hap, double time,
         if (!js_audio_event(hap,origin,seconds,&ev)) return;
         ev.generation = generation;
         ev.duck_mask=0; /* Independently committed above, including failed sources. */
-        if (cJSON_HasObjectItem(value,"csound")) {
+        if (csound) {
+            ev.midi_chan=ev.midi_note=-1; /* Dominant output bypasses ALSA too. */
             pthread_mutex_lock(&tracks_lock);
             int current=generation==event_queue_generation();
             int scheduled=current && csound_program_schedule(javascript_csound(program),value,ev.time,ev.duration,ev.freq);

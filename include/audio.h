@@ -94,6 +94,8 @@ double audio_cycle_beats(void);
 
 /* trigger a voice from an event; time is event time (may be <=now, trigger immediately) */
 void audio_trigger_event(AudioEvent *ev);
+/* Drain callback diagnostics from a non-audio thread, including while stopped. */
+void audio_report_errors(void);
 int audio_prepare_delay(AudioEvent *ev);
 void audio_prepare_room(AudioEvent *ev);
 unsigned audio_register_orbit(int orbit);

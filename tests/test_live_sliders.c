@@ -544,6 +544,7 @@ static void test_duck_numeric_controls(void) {
 }
 
 static void test_invalid_duck_controls(void) {
+    audio_report_errors();
     const char *controls[]={"\"duckdepth\":-1","\"duckdepth\":\"bad\"",
         "\"duckdepth\":[[true]]","\"duckdepth\":0.25,\"duckattack\":\"bad\"",
         "\"duckdepth\":0.25,\"duckattack\":\"Infinity\""};
@@ -555,13 +556,37 @@ static void test_invalid_duck_controls(void) {
         memset(&web_duck[1],0,sizeof(web_duck[1]));
         web_duck[1].enabled=1; web_duck[1].hold=1;
         web_duck[1].initial=web_duck[1].target=.8;
-        pending_duck_count=0; audio_time=.29;
+        pending_duck_count=0; audio_time=.28;
+        int before=console_head_get();
         assert(schedule_duck_locked(&event)); dispatch_ducks_locked();
+        assert(!duck_error_count && pending_duck_count==1);
+        audio_report_errors(); assert(console_head_get()==before);
+        audio_time=.29; dispatch_ducks_locked();
+        assert(console_head_get()==before); /* No callback-side logging. */
+        assert(duck_error_count==1 && duck_errors[0].orbit==1);
+        assert(duck_errors[0].returning==(i>=3));
+        assert(fabs(duck_errors[0].time-.29)<1e-12);
+        audio_report_errors();
+        assert(duck_error_count==0 && console_head_get()!=before);
+        assert(strstr(console_line(console_count_get()-1),i>=3?"return ramp":"downward ramp"));
+        before=console_head_get(); audio_report_errors();
+        assert(console_head_get()==before); /* Each report is consumed once. */
         audio_time=.45;
         double gain=orbit_duck_gain(1);
         assert(isfinite(gain) && fabs(gain-(i<3?(double)(float).8:.5))<1e-8);
         assert(web_duck[1].hold);
     }
+    /* A burst cannot allocate or overwrite the fixed callback mailbox. */
+    for (int i=0;i<DUCK_ERROR_CAPACITY+2;i++) record_duck_error(1,0);
+    assert(duck_error_count==DUCK_ERROR_CAPACITY && duck_error_overflow);
+    audio_report_errors();
+    assert(!duck_error_count && !duck_error_overflow);
+    assert(strstr(console_line(console_count_get()-1),"additional automation errors"));
+    PendingDuck late={.time=.1,.source_time=.11,.mask=1u<<1};
+    late.controls[1]=(DuckControl){.depth=-1,.attack=.1};
+    audio_time=2; apply_duck(&late);
+    assert(duck_error_count==1 && duck_errors[0].time==2);
+    audio_report_errors();
 }
 
 static void test_boolean_duck_onset(void) {
@@ -577,6 +602,49 @@ static void test_boolean_duck_onset(void) {
         assert(schedule_duck_locked(&event)); dispatch_ducks_locked();
         assert(fabs(web_duck[1].minimum-(.3+onset[i]))<1e-10);
         assert(fabs(web_duck[1].end-(.4+onset[i]))<1e-10);
+    }
+}
+
+static void test_nonfinite_duck_numbers(void) {
+    audio_report_errors();
+    const char *values[]={"NaN","Infinity","-Infinity","[NaN]","[[Infinity]]"};
+    const double expected[]={NAN,INFINITY,-INFINITY,NAN,INFINITY};
+    for (unsigned i=0;i<sizeof(expected)/sizeof(expected[0]);i++) {
+        char source[256]; snprintf(source,sizeof(source),
+            "s('~').duckorbit(1).duckdepth(%s).duckattack(%s).duckonset(%s)",
+            values[i],values[i],values[i]);
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile(source,120,&metadata,error,sizeof(error));
+        assert(program); cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1); assert(haps);
+        AudioEvent event; assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+        DuckControl control=event.ducks[1];
+        assert(isnan(expected[i])?isnan(control.depth):control.depth==expected[i]);
+        double attack=isnan(expected[i])?NAN:fmax(.002,expected[i]);
+        assert(isnan(attack)?isnan(control.attack):control.attack==attack);
+        web_duck[1].enabled=0; duck_depth[1]=0;
+        PendingDuck pending={.time=0,.source_time=.1,.mask=1u<<1};
+        pending.controls[1]=control; audio_time=.09; apply_duck(&pending);
+        assert(web_duck[1].hold && orbit_duck_gain(1)==1);
+        assert(duck_error_count==1 && !duck_errors[0].returning);
+        audio_report_errors();
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    const char *sources[]={"s('~').duckorbit(1).duckdepth(Infinity)",
+        "s('~').duckorbit(1).duckattack(-Infinity)"};
+    for (unsigned i=0;i<2;i++) {
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile(sources[i],120,&metadata,error,sizeof(error));
+        assert(program); cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1); assert(haps);
+        AudioEvent event; assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+        web_duck[1].enabled=0; duck_depth[1]=0;
+        PendingDuck pending={.time=0,.source_time=.1,.mask=1u<<1};
+        pending.controls[1]=event.ducks[1]; audio_time=.09; apply_duck(&pending);
+        assert(!web_duck[1].hold && !duck_error_count);
+        assert(web_duck[1].target==.01);
+        assert(fabs(web_duck[1].end-(i?.102:.2))<1e-12);
+        cJSON_Delete(haps); javascript_free(program);
     }
 }
 
@@ -598,6 +666,90 @@ static void test_string_duck_onset(void) {
         assert(fabs(orbit_duck_gain(1)-expected[i])<2e-8);
         if (i==4) assert(web_duck[1].minimum==.31 && web_duck[1].end==.311);
     }
+}
+
+static void test_nested_duck_controls(void) {
+    const char *inputs[]={"undefined","[]","[undefined]","[null]","[.25,null]","[null,.25]",
+        "[[null]]","[[]]","[[[]]]","[[false]]","[[.25]]","[[[.25]]]","[[1,2]]","{}","[[{}]]",
+        "Array(2)","[undefined,.25]"};
+    const int stages[][2]={{0,0},{2,2},{2,2},{0,0},{0,0},{0,0},{2,2},{2,2},{2,2},
+        {1,1},{1,1},{1,1},{1,1},{1,1},{1,1},{2,2},{2,0}};
+    const double attacks[]={.1,NAN,NAN,.002,.25,.002,.002,.002,.002,NAN,.25,.25,NAN,NAN,NAN,NAN,NAN};
+    audio_report_errors();
+    for (unsigned i=0;i<sizeof(inputs)/sizeof(inputs[0]);i++) {
+        char source[512]; snprintf(source,sizeof(source),
+            "const v=%s; s('~').set({duckorbit:[1,2],duckonset:v,duckattack:v,duckdepth:v})",inputs[i]);
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile(source,120,&metadata,error,sizeof(error));
+        assert(program); cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1); assert(haps);
+        AudioEvent event; assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+        assert(event.duck_mask==6);
+        for (int o=1;o<=2;o++) {
+            double attack=o==2 && (i==5 || i==16)?.25:attacks[i];
+            assert(isnan(attack)?isnan(event.ducks[o].attack):event.ducks[o].attack==attack);
+            web_duck[o].enabled=1; web_duck[o].hold=1;
+            web_duck[o].initial=web_duck[o].target=.8;
+            PendingDuck pending={.source_time=.3,.mask=1u<<o};
+            pending.controls[o]=event.ducks[o]; audio_time=0; apply_duck(&pending);
+            int stage=stages[i][o-1];
+            assert(duck_error_count==(unsigned)(stage!=0));
+            if (stage) {
+                assert(duck_errors[0].returning==(stage==2));
+                assert(web_duck[o].hold);
+            } else assert(!web_duck[o].hold);
+            audio_report_errors();
+        }
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Raw serialized empty arrays must also retain the controller's NaN
+       attack, independently of the embedded runtime's undefined encoding. */
+    cJSON *hap=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"~\",\"duckorbit\":1,\"duckattack\":[],\"duckdepth\":[]}}");
+    AudioEvent event; assert(hap && js_audio_event(hap,0,1,&event));
+    assert(isnan(event.ducks[1].attack) && event.ducks[1].depth==1);
+    cJSON_Delete(hap);
+}
+
+static void test_duck_output_routing(void) {
+    const char *sources[]={
+        "note(60).osc().orbit(7).duckorbit(1)",
+        "note(60).csound('Fixture').orbit(7).duckorbit(1)",
+        "s('~').orbit(7).duckorbit(1)",
+        "s('~').midichan(1).orbit(7).duckorbit(1)"};
+    unsigned previous=atomic_load(&created_orbits);
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    for (unsigned i=0;i<sizeof(sources)/sizeof(sources[0]);i++) {
+        atomic_store(&created_orbits,1u<<1);
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile(sources[i],120,&metadata,error,sizeof(error));
+        assert(program); cJSON_Delete(metadata);
+        assert(js_audio_schedule(program,1,0,event_queue_generation()));
+        if (i<2) {
+            assert(atomic_load(&created_orbits)==(1u<<1));
+            assert(event_queue_depth()==(i==0?1:0));
+            if (i==0) assert(qhead->ev.osc_only && !qhead->ev.control_only);
+        } else {
+            assert(atomic_load(&created_orbits)==((1u<<1)|(1u<<7)));
+            assert(event_queue_depth()==1 && qhead->ev.control_only && qhead->ev.duck_mask==(1u<<1));
+        }
+        event_queue_clear(); javascript_free(program);
+    }
+#ifdef HAVE_CSOUND
+    /* A valid Csound event with a literal local rest still reaches its own
+       renderer. Neither renderer failure nor success creates local orbits. */
+    const char *source="await loadCsound('instr Fixture\\na1 init 0\\nouts a1,a1\\nendin');"
+        "note(60).s('~').csound('Fixture').midichan(1).orbit(7).duckorbit(1)";
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile(source,120,&metadata,error,sizeof(error));
+    assert(program && javascript_prepare_csound(program,metadata,error,sizeof(error)));
+    cJSON_Delete(metadata); atomic_store(&created_orbits,1u<<1);
+    assert(js_audio_schedule(program,1,0,event_queue_generation()));
+    assert(atomic_load(&created_orbits)==(1u<<1));
+    assert(event_queue_depth()==1 && qhead->ev.csound_only && !qhead->ev.duck_mask);
+    assert(qhead->ev.midi_chan==-1 && qhead->ev.midi_note==-1);
+    event_queue_clear(); javascript_free(program);
+#endif
+    atomic_store(&created_orbits,previous); audio_toggle_play(0);
 }
 
 static void test_javascript_numeric_strings(void) {
@@ -1026,7 +1178,10 @@ int main(int argc, char **argv) {
     test_duck_numeric_controls();
     test_invalid_duck_controls();
     test_boolean_duck_onset();
+    test_nonfinite_duck_numbers();
     test_string_duck_onset();
+    test_nested_duck_controls();
+    test_duck_output_routing();
     test_javascript_numeric_strings();
     test_delay_automation();
     test_room_preparation();

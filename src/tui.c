@@ -2692,7 +2692,7 @@ static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed
         count=javascript_live_visual_copy(program,feed,kind,notes,GRAPHICS_NOTES,&origin,&seconds);
         javascript_free(program);
     }
-    if (visual_audio_kind(kind)) n=audio_pattern_scope_copy(feed,generation,samples,kind==VISUAL_SCOPE?1024:4096);
+    if (visual_audio_kind(kind)) n=audio_pattern_scope_copy(feed,generation,samples,4096);
     int slot=0, found=0;
     for (int i=0;i<32;i++) {
         if (feedback_keys[i].used && feedback_keys[i].feed==feed && feedback_keys[i].kind==kind) { slot=i; found=1; break; }
@@ -2759,7 +2759,7 @@ static void draw_inline_row(int line, int sub, int row, int col, int width) {
             char title[128];
             const char *name=kind==VISUAL_PIANOROLL?"piano roll":visual_name(kind);
             snprintf(title,sizeof(title),"%s | %s",name,!feed?"waiting for playing pattern":
-                kind==VISUAL_SCOPE?"pattern output, auto scale":kind==VISUAL_SPECTRUM?"pattern spectrum, 20Hz-20kHz": "pattern notes");
+                kind==VISUAL_SCOPE?"pattern output":kind==VISUAL_SPECTRUM?"pattern spectrum, 20Hz-20kHz": "pattern notes");
             draw_text(row,col,title,width,8); return;
         }
         if (queue_inline_graphic(line,kind,sub,row,col,width,feed,generation)) return;

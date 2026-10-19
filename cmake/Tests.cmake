@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name pattern harmony strudel websamp editor terminal_render javascript dsp examples csound
-        audio terminal_graphics audio_output native_synth live_sliders)
+        audio audio_performance terminal_graphics audio_output native_synth live_sliders)
     tompouce_test(${name})
 endforeach()
 
@@ -73,7 +73,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio native_synth editor terminal_render live_sliders csound)
+foreach(name audio audio_performance native_synth editor terminal_render live_sliders csound)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound")
         list(APPEND sources src/stretch.c)
@@ -102,11 +102,12 @@ foreach(name audio native_synth editor terminal_render live_sliders csound)
 endforeach()
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_audio_sanitize>
+    COMMAND $<TARGET_FILE:test_audio_performance_sanitize>
     COMMAND $<TARGET_FILE:test_native_synth_sanitize>
     COMMAND $<TARGET_FILE:test_editor_sanitize>
     COMMAND $<TARGET_FILE:test_live_sliders_sanitize>
     COMMAND $<TARGET_FILE:test_csound_sanitize>
-    DEPENDS test_audio_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize
+    DEPENDS test_audio_sanitize test_audio_performance_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

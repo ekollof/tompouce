@@ -95,7 +95,9 @@ console ring buffer feeds both UI console pane and music_get_console.
    `time`/`duration` (cycle = 4 beats) → `event_queue_push()` (sorted insert).
    `slow N` skips generation on non-multiple cycles.
 4. The consumer thread pops events due within 2 ms and calls
-   `audio_trigger_event()`, which steals the oldest voice if all 128 are busy.
+   `audio_trigger_event()`, which replaces the earliest inserted voice if all
+   128 are busy, independently of its target time or gain. Eviction currently
+   cuts immediately; web-compatible retiring fades remain outstanding.
 5. The PortAudio callback renders synth (sine/saw/square/tri/noise + ADSR) or
    drum voices (kick/snare/hat/clap/tom) and advances `audio_time`.
 6. Status and errors go to the console ring buffer, visible in the UI pane

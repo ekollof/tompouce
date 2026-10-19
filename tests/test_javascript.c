@@ -12,6 +12,26 @@
 
 static cJSON *query(const char *code, JsProgram **program);
 
+static void test_scope_defaults(void) {
+    const char *code="note(60)._scope()";
+    JsProgram *program; cJSON *haps=query(code,&program); cJSON_Delete(haps);
+    unsigned mask=javascript_live_scope_mask(program,code,(int)(strstr(code,"_scope")-code),VISUAL_SCOPE);
+    VisualOptions options;
+    assert(mask && javascript_live_visual_options(program,mask,VISUAL_SCOPE,&options));
+    assert(options.scale==1 && options.pos==.5 && options.thickness==3);
+    const char *editors[]={"note(60).scope()","note(60)._scope({scale:0,pos:.25})",
+        "note(60)._scope({scale:-.25})","note(60)._scope()"};
+    const double scales[]={.25,0,-.25,1},positions[]={.75,.25,.5,.5};
+    for (int i=0;i<4;i++) {
+        javascript_request_visuals(program,editors[i]); javascript_update_visuals(program,.1,0,2);
+        const char *name=strstr(editors[i],i==0?"scope":"_scope");
+        mask=javascript_live_scope_mask(program,editors[i],(int)(name-editors[i]),VISUAL_SCOPE);
+        assert(mask && javascript_live_visual_options(program,mask,VISUAL_SCOPE,&options));
+        assert(options.scale==scales[i] && options.pos==positions[i]);
+    }
+    javascript_free(program);
+}
+
 static void test_slider_highlights(void) {
     const char *source="const level=slider(.5); note(\"c4 e4\").gain(level)._scope()";
     JsProgram *program; cJSON *haps=query(source,&program);
@@ -347,7 +367,7 @@ static void test_tutorial(void) {
 int main(void) {
     test_control_aliases();
     test_tutorial();
-    test_live_visuals();
+    test_live_visuals(); test_scope_defaults();
     test_slider_highlights();
     test_visual_highlight_mapping();
     test_local_modules();

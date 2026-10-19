@@ -615,6 +615,7 @@ static int prepare_queued_audio(double now) {
 static void *consumer_thread(void *arg) {
     (void)arg;
     while (scheduler_running) {
+        audio_report_errors();
         double now = audio_time_now();
         for (;;) {
             now=audio_time_now();
@@ -631,7 +632,7 @@ static void *consumer_thread(void *arg) {
                 if (!ev.audio_prepared) audio_trigger_event(&ev);
                 native_synth_release(ev.native_synth);
                 stretch_release(ev.stretch_buffer);
-                if (!ev.control_only && !ev.osc_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
+                if (!ev.control_only && !ev.osc_only && !ev.csound_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
                     int vel = (int)(ev.gain * 127.0);
                     int dur = (int)(ev.duration * 1000.0);
                     midi_note(ev.midi_chan, ev.midi_note, vel, dur);

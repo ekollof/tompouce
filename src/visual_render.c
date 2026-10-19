@@ -131,30 +131,28 @@ static void spectrum(TerminalImage *im, TerminalFeedbackState *state, const Visu
 
 static void waveform(TerminalImage *im, const VisualOptions *o, const float *s, int n) {
     if (!s || n<2) return;
-    double peak=0;
-    for (int i=0;i<n;i++) if (isfinite(s[i])) peak=fmax(peak,fabs(s[i]));
-    double scale=o->scale>0?o->scale:(peak>1e-5?.9/peak:1);
+    double scale=o->scale;
     int left=terminal_graphics_plot_left(im), width=im->width-left, begin=0;
-    if (o->align) for (int i=1;i<n/2;i++)
-        if (s[i-1]<=o->trigger && s[i]>o->trigger) { begin=i; break; }
+    if (o->align) for (int i=1;i<n;i++)
+        if (s[i-1]>-o->trigger && s[i]<=-o->trigger) { begin=i; break; }
     uint32_t color=o->has_color?o->color:o->active;
-    double last=im->height*o->pos;
-    for (int x=0;x<width;x++) {
-        int a=begin+x*(n-begin)/width, b=begin+(x+1)*(n-begin)/width;
-        if (b<=a) b=a+1;
-        double lo=last,hi=last;
-        for (int j=a;j<b && j<n;j++) {
-            double y=(o->pos-(isfinite(s[j])?s[j]*scale:0)*.5)*(im->height-1);
-            last=clamp(y,0,im->height-1); lo=fmin(lo,last); hi=fmax(hi,last);
-        }
-        line(im,left+x,lo,left+x,hi,color,(int)(o->thickness-1)/2);
+    /* Web scope uses canvas-height units and keeps width/n spacing after a
+       falling crossing of -trigger. Do not normalize or stretch the suffix. */
+    double last_x=left,last_y=0;
+    for (int j=begin;j<n;j++) {
+        double x=left+(double)(j-begin)*width/n;
+        double y=(o->pos-(isfinite(s[j])?s[j]:0)*scale)*im->height;
+        if (j>begin) line(im,last_x,last_y,x,y,color,(int)(o->thickness-1)/2);
+        last_x=x; last_y=y;
     }
     if (left) {
         int text_scale=im->height>=30?2:1;
-        char text[16]; snprintf(text,sizeof(text),"+%.2f",2*o->pos/scale);
+        char text[16];
+        if (scale==0) { terminal_graphics_text(im,2,(int)(o->pos*(im->height-5*text_scale)),"0",text_scale); return; }
+        snprintf(text,sizeof(text),"%+.2f",o->pos/scale);
         terminal_graphics_text(im,2,0,text,text_scale);
         terminal_graphics_text(im,2,(int)(o->pos*(im->height-5*text_scale)),"0",text_scale);
-        snprintf(text,sizeof(text),"-%.2f",2*(1-o->pos)/scale);
+        snprintf(text,sizeof(text),"%+.2f",-(1-o->pos)/scale);
         terminal_graphics_text(im,2,im->height-5*text_scale,text,text_scale);
     }
 }

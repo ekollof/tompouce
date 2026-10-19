@@ -5,6 +5,7 @@
 #include "stretch.h"
 #include "sampler.h"
 #include <stdatomic.h>
+#include <float.h>
 
 #define FFT_SIZE 2048
 #define HOP 128
@@ -188,8 +189,15 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     if (key.gate<=0 || key.gate+key.release>90) return NULL;
     double onset=event->time*SR;
     if (!isfinite(onset)) return NULL;
-    key.phase=(int)fmod(floor(onset),FFT_SIZE); if (key.phase<0) key.phase+=FFT_SIZE;
-    key.fraction=onset-floor(onset);
+    /* Playback starts on the first frame at/after the musical onset. Anchor
+       the prepared PCM there too; using floor delayed fractional onsets by a
+       frame when the callback waited until ceil(onset). Snap arithmetic noise
+       around integer frames without removing intentional sub-frame timing. */
+    double nearest=round(onset);
+    if (fabs(onset-nearest)<=10*DBL_EPSILON*fmax(1,fabs(onset))) onset=nearest;
+    double first_frame=ceil(onset);
+    key.phase=(int)fmod(first_frame,FFT_SIZE); if (key.phase<0) key.phase+=FFT_SIZE;
+    key.fraction=onset-first_frame;
     /* Source onended disconnects the entire browser graph on the next quantum;
        retaining the vocoder's trailing window would extend its release. */
     key.frames=(int)(ceil((key.phase+key.fraction-.04*SR+(key.gate+key.release+.01)*SR)/HOP)*HOP-key.phase);
@@ -241,8 +249,12 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
             if (age<key.gate+key.release+.01 && position>=0 && position<length) {
                 int index=(int)position; double fraction=position-index;
                 for (int channel=0;channel<2;channel++) {
-                    double a=source[(size_t)index*2+channel];
-                    double b=index+1<length?source[(size_t)(index+1)*2+channel]:a;
+                    /* Match reverseBuffer's per-channel copy offset before
+                       the source enters the vocoder, including its zero pad. */
+                    int offset=key.step<0 && channels==2?channel:0;
+                    int read_index=index+offset;
+                    double a=read_index<length?source[(size_t)read_index*2+channel]:0;
+                    double b=read_index+1<length?source[(size_t)(read_index+1)*2+channel]:offset?0:a;
                     work->input[channel][FFT_SIZE-HOP+i]=(float)((a+(b-a)*fraction)*(float)env);
                 }
             }

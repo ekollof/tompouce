@@ -113,6 +113,16 @@ static void test_gapless_mp3(void) {
         int first = 0;
         while (first < frames && fabs(buffer[first*2]) < .0001) first++;
         expect(first < 100, "gapless MP3 attack starts without decoder latency");
+        if (!i) {
+            /* This fixture is already 44.1 kHz, so resampling cannot create
+               fractional PCM16 steps and hide an integer decoder regression. */
+            int precise=0;
+            for (int frame=0;frame<frames;frame++) for (int ch=0;ch<2;ch++) {
+                double scaled=(double)buffer[frame*2+ch]*32768;
+                if (fabs(scaled-round(scaled))>.01) precise++;
+            }
+            expect(precise>frames, "MP3 decoding preserves floating-point detail without PCM16 quantization");
+        }
     }
     unsigned char *without_tag = malloc(gapless_stereo_mp3_len);
     assert(without_tag);

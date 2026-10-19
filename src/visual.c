@@ -99,8 +99,9 @@ void visual_options(VisualOptions *o, int kind, const cJSON *j) {
     o->cycles = number(j,"cycles",4,.125,16); o->playhead = number(j,"playhead",.5,0,1);
     o->overscan = number(j,"overscan",1,0,4); o->min_midi = number(j,"minMidi",10,0,127);
     o->max_midi = number(j,"maxMidi",90,o->min_midi,127);
-    o->thickness = number(j,"thickness",kind==VISUAL_SPECTRUM?3:2,1,12); o->scale = number(j,"scale",0,0,100);
-    o->pos = number(j,"pos",.5,0,1); o->trigger = number(j,"trigger",0,-16,16);
+    o->thickness = number(j,"thickness",kind==VISUAL_SPECTRUM || kind==VISUAL_SCOPE?3:2,1,12);
+    o->scale = number(j,"scale",kind==VISUAL_SCOPE?.25:0,kind==VISUAL_SCOPE?-100:0,100);
+    o->pos = number(j,"pos",kind==VISUAL_SCOPE?.75:.5,0,1); o->trigger = number(j,"trigger",0,-16,16);
     o->stretch = number(j,"stretch",1,.125,16); o->steady = number(j,"steady",1,0,1);
     o->inset = number(j,"inset",3,.1,16); o->size = number(j,"size",0,0,2048);
     o->padding = number(j,"padding",0,0,128);

@@ -168,6 +168,23 @@ static void test_stretch(void) {
         assert(write(fd,sample,sizeof(sample))==(ssize_t)sizeof(sample));
     }
     assert(close(fd)==0); int sample=smp_acquire_abs(path,60); assert(sample>=0); assert(unlink(path)==0);
+    /* Explicit PCM oracle for the web's reverseBuffer result. Its right
+       channel starts with zero, followed by the reversed channel at offset 1. */
+    char reverse_path[]="/tmp/tompouce-stretch-reverse-XXXXXX.wav";
+    fd=mkstemps(reverse_path,4); assert(fd>=0);
+    assert(write(fd,header,sizeof(header))==(ssize_t)sizeof(header));
+    float *original=NULL; int original_frames=0,original_channels=0;
+    smp_get_stereo(sample,&original,&original_frames,&original_channels);
+    assert(original && original_frames==frames && original_channels==2);
+    for (int i=0;i<frames;i++) {
+        int left=(int)lrint(original[(frames-1-i)*2]*32768);
+        int right=i?(int)lrint(original[(frames-i)*2+1]*32768):0;
+        unsigned char pcm[4]={(unsigned char)left,(unsigned char)((unsigned)left>>8),
+            (unsigned char)right,(unsigned char)((unsigned)right>>8)};
+        assert(write(fd,pcm,sizeof(pcm))==(ssize_t)sizeof(pcm));
+    }
+    assert(!close(fd)); int reverse_sample=smp_acquire_abs(reverse_path,60);
+    assert(reverse_sample>=0 && !unlink(reverse_path));
     for (int reverse = 0; reverse < 2; reverse++) {
         memset(&event,0,sizeof(event));
         event.smp=sample; event.smp_speed=reverse?-.5:.5; event.stretch=2;
@@ -177,18 +194,29 @@ static void test_stretch(void) {
         const StretchBuffer *again=stretch_prepare(&event); assert(again==event.stretch_buffer); stretch_release(again);
         AudioEvent filtered=event; filtered.gain=.2; filtered.dsp.p[DSP_LPF]=800;
         again=stretch_prepare(&filtered); assert(again==event.stretch_buffer); stretch_release(again);
+        const StretchBuffer *reference=NULL;
+        if (reverse) {
+            AudioEvent oracle=event; oracle.smp=reverse_sample; oracle.smp_speed=.5;
+            reference=stretch_prepare(&oracle); assert(reference);
+            assert(stretch_frames(reference)==stretch_frames(event.stretch_buffer));
+        }
         Voice *v=start_sample(&event); stretch_release(event.stretch_buffer);
         assert(v->stretch_buffer && stretch_frames(v->stretch_buffer)>40000 && stretch_frames(v->stretch_buffer)<44100);
         double previous = 0; int crossings = 0;
         for (int i = 0; i < frames*2; i++) {
             float output[2]; pa_callback(NULL,output,1,NULL,0,NULL);
-            assert(isfinite(output[0]) && fabs(output[1]+2*output[0]) < 1e-6);
+            assert(isfinite(output[0]) && isfinite(output[1]));
+            if (reference) for (int ch=0;ch<2;ch++) {
+                double expected=i<stretch_frames(reference)?stretch_pcm(reference)[i*2+ch]*.1:0;
+                assert(fabs(output[ch]-expected)<1e-6);
+            } else assert(fabs(output[1]+2*output[0]) < 1e-6);
             if (i > 4410 && i < 39690 && previous <= 0 && output[0] > 0) crossings++;
             previous = output[0];
         }
         assert(!v->active); /* .5 transport doubles duration, not pitch */
         double frequency = crossings/.8;
         assert(frequency > 430 && frequency < 450);
+        stretch_release(reference);
     }
     stretch_release(voices[0].stretch_buffer); voices[0].stretch_buffer=NULL;
     event.stretch=18; assert(!stretch_prepare(&event));

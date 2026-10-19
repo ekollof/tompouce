@@ -142,6 +142,33 @@ static double silent_clock_origin;
 static int silent_clock;
 static Voice voices[MAX_VOICES];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Producers already hold voice_lock. Only the scheduler formats/logs errors;
+   the callback writes bounded records, including when playback is stopped. */
+enum { DUCK_ERROR_CAPACITY = 64 };
+typedef struct { int orbit, returning; double time; } DuckError;
+static DuckError duck_errors[DUCK_ERROR_CAPACITY];
+static unsigned duck_error_count;
+static int duck_error_overflow;
+
+static void record_duck_error(int orbit, int returning) {
+    if (duck_error_count < DUCK_ERROR_CAPACITY)
+        duck_errors[duck_error_count++]=(DuckError){orbit,returning,audio_time};
+    else duck_error_overflow=1;
+}
+
+void audio_report_errors(void) {
+    DuckError errors[DUCK_ERROR_CAPACITY];
+    pthread_mutex_lock(&voice_lock);
+    unsigned count=duck_error_count;
+    int overflow=duck_error_overflow;
+    memcpy(errors,duck_errors,count*sizeof(*errors));
+    duck_error_count=0; duck_error_overflow=0;
+    pthread_mutex_unlock(&voice_lock);
+    for (unsigned i=0;i<count;i++)
+        log_console("duck: orbit %d rejected %s ramp at %.6f s",errors[i].orbit,
+                    errors[i].returning?"return":"downward",errors[i].time);
+    if (overflow) log_console("duck: additional automation errors omitted");
+}
 static CsoundProgram *csound_program;
 static double next_voice_onset=HUGE_VAL;
 static unsigned long long voice_onset_serial;
@@ -319,11 +346,13 @@ static void apply_duck(const PendingDuck *pending) {
            first ramp holds the anchor; a failed return retains the first
            ramp and holds its target. Never propagate NaN into audio PCM. */
         if (isnan(control.depth) || control.depth<0 || !isfinite(minimum) || minimum<0) {
+            record_duck_error(o,0);
             web_duck[o].target=initial;
             web_duck[o].minimum=audio_time;
             web_duck[o].end=audio_time;
             web_duck[o].hold=1;
         } else if (!isfinite(control.attack) || !isfinite(return_time) || return_time<0) {
+            record_duck_error(o,1);
             web_duck[o].end=web_duck[o].minimum;
             web_duck[o].hold=1;
         }
@@ -477,6 +506,15 @@ void audio_prepare_room(AudioEvent *event) {
 
 static void voice_onset(Voice *v) {
     v->onset_pending=0;
+    /* BufferSource starts on the next render frame but retains the fractional
+       source position and envelope time. Apply this once, after preparation;
+       stretched PCM already includes its own alignment to the playback grid. */
+    if (v->dsp.control.enabled && v->smpbuf && !v->stretch_buffer) {
+        double elapsed=fmax(0,audio_time-v->start_time);
+        v->age=elapsed;
+        v->smppos+=elapsed*SR*v->smpstep*
+            dsp_pitch_multiplier(&v->dsp.control,0,v->gate_end-v->start_time);
+    }
     for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
         pattern_scope_generation[i]=v->scope_generation;
     if (v->onset_room) publish_room(v->orbit,v->onset_ir,0);
@@ -593,8 +631,6 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->onset_ir=ev->ir_kernel;
     v->onset_delay_time=ev->delay_time; v->onset_delay_feedback=ev->delay_fb;
     v->onset_duck_mask=ev->duck_mask; v->onset_duck_depth=ev->duck_depth; v->onset_duck_attack=ev->duck_attack;
-    if (v->start_time<=audio_time+1e-10) voice_onset(v);
-    else next_voice_onset=fmin(next_voice_onset,v->start_time);
     v->lfo_tgt = ev->lfo_tgt;
     v->lfo_wave = ev->lfo_wave;
     v->lfo_hz = ev->lfo_hz;
@@ -647,6 +683,8 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
             v->note_off_time = v->gate_end;
         }
     }
+    if (v->start_time<=audio_time+1e-10) voice_onset(v);
+    else next_voice_onset=fmin(next_voice_onset,v->start_time);
 }
 
 /* WebAudio exponentialRampToValueAtTime: equal ratio per unit time. */
@@ -926,15 +964,11 @@ void audio_trigger_event(AudioEvent *ev) {
         if (!voices[i].active) { chosen = i; break; }
     }
     if (chosen < 0) {
-        /* steal quietest (level*amp), tie-break oldest */
+        /* Superdough's source Map evicts in insertion order, independently of
+           gain and target time. Future notes can arrive out of time order. */
         chosen = 0;
-        double worst = voices[0].env * voices[0].amp;
-        double oldest = voices[0].start_time;
         for (int i = 1; i < MAX_VOICES; i++) {
-            double lvl = voices[i].env * voices[i].amp;
-            if (lvl < worst || (lvl == worst && voices[i].start_time < oldest)) {
-                worst = lvl;
-                oldest = voices[i].start_time;
+            if (voices[i].onset_serial < voices[chosen].onset_serial) {
                 chosen = i;
             }
         }
@@ -1103,11 +1137,16 @@ static double source_value(const Voice *v, double position, int channel) {
             if (position < lo) position += hi-lo;
         }
     }
+    /* Deployed reverseBuffer copies each reversed channel at an offset equal
+       to its channel index. Preserve the right channel's leading zero and
+       one-source-frame displacement for web sample playback. */
+    int reverse_offset=v->dsp.control.enabled && v->smpstep<0 && v->smp_channels==2 && channel==1;
+    if (reverse_offset) position+=1;
     if (position < 0 || position >= v->smplen || !isfinite(position)) return 0;
     int index = (int)position;
     double fraction = position-index;
     double a = v->smpbuf[(size_t)index*2+channel];
-    double b = index+1 < v->smplen ? v->smpbuf[(size_t)(index+1)*2+channel] : a;
+    double b = index+1 < v->smplen ? v->smpbuf[(size_t)(index+1)*2+channel] : reverse_offset?0:a;
     return a+(b-a)*fraction;
 }
 
@@ -1552,6 +1591,7 @@ void audio_init(void) {
     midi_init();
     memset(voices, 0, sizeof(voices));
     pending_duck_count=0; pending_duck_serial=0;
+    duck_error_count=0; duck_error_overflow=0;
     pending_delay_count=0; pending_delay_serial=0;
     memset(web_delay_created,0,sizeof(web_delay_created));
     memset(room_created,0,sizeof(room_created));

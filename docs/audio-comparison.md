@@ -42,7 +42,7 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Twenty regression gates compare at zero lag (no capture shifts or gain
+Thirty-four regression gates compare at zero lag (no capture shifts or gain
 normalization). The original piano windows remain 0.6 seconds; the new synth
 and generated-room cases check the full two-second capture:
 
@@ -52,11 +52,14 @@ and generated-room cases check the full two-second capture:
 | Arpoon piano with room disabled | 0.99 | 0.85–1.15 |
 | Piano with custom TR909 snare convolution IR | 0.99 | 0.85–1.15 |
 | Sine: default, ADSR, low-pass and explicit center pan (4 cases) | 0.99 | 0.85–1.15 |
+| Sine with fractional shared delay | 0.99 | 0.85–1.15 |
 | Saw, square and triangle at 440 Hz (3 cases) | 0.99 | 0.85–1.15 |
 | ZzFX sine and bytebeat (2 cases) | 0.99 | 0.85–1.15 |
 | Piano with seeded generated convolution room | 0.99 | 0.85–1.15 |
 | Stretched piano: half/fractional speed, upward shift, reverse, loop, envelope/filter (6 cases) | 0.99 | 0.85–1.15 |
-| Downward-stretched shared PCM fixture | 0.99 | 0.85–1.15 |
+| Downward-stretched MP3 piano: factors, C4/Fs3/Ds4, fractional speed/onset (8 cases) | 0.99 | 0.85–1.15 |
+| Downward-stretched shared PCM: integer/fractional onset (2 cases) | 0.99 | 0.85–1.15 |
+| Shared PCM fractional sample onsets: natural/fractional/double/reverse speed (4 cases) | 0.99 | 0.85–1.15 |
 
 The C4 capture lasts two seconds and Arpoon captures four cycles/eight seconds.
 Only the stated window is gated; these checks do not establish full-song
@@ -76,9 +79,9 @@ gradual low-pass algorithm. The generated-room gate uses an explicit LCG seed
 ordinary browser randomness. Native rooms use this deterministic seed; ordinary
 browser rooms remain randomized. Custom IR correlation remains 0.99999997.
 
-Original wet Arpoon and downward-stretched MP3 piano are also captured as diagnostics with
-no pass threshold. Ordinary wet Arpoon has independent random impulses and
-observed opening correlation around 0.95. The stretched-piano capture compared
+Original wet Arpoon is captured as a diagnostic with no pass threshold. It has
+independent random impulses and observed opening correlation around 0.94–0.95.
+The original stretched-piano capture compared
 native overlap-add grains against the browser phase vocoder and observed
 correlation about 0.08 before the native phase-vocoder replacement. It now
 correlates above 0.9999 with RMS ratio 0.9999. It uses the matrix's existing
@@ -95,18 +98,54 @@ speed, upward pitch, reverse, actual loop wraps and envelope/filter ordering
 have separate gates. Native input lifetime is bounded to 90 seconds, with a
 128 MiB/128-buffer cache. FFT and preparation run outside the callback.
 
-Downward MP3 piano remains diagnostic (correlation about 0.97). Feeding the
-browser-decoded piano to the native renderer gave 0.9999, isolating the remaining
-difference to decoded input: the reference's final downward peak region reads
-intermediate upper-half real-FFT bins and amplifies small decoding differences.
-The maintained downward DSP gate therefore uses identical generated PCM16 WAV
-bytes in both players. Its source hash is recorded in the report, and the WAV
-and confined native catalog are retained under the artifact directory's
-`fixture-banks`. The browser uses that exact WAV in a disposable Blob sample.
-The original independently decoded MP3 capture remains visible; this controlled
-gate does not establish MP3 decoder or full-song parity.
+Downward MP3 piano now has eight gates. The native MP3 decoder previously
+rounded its output to PCM16 before storing floats. Removing that quantization
+raised the original case's correlation from 0.9722 to 0.9998. The reference's
+last downward peak region reads upper-half real-FFT intermediate bins, making
+this path unusually sensitive to small input differences. Synthetic stereo MP3
+tests preserve sub-PCM16 decoder precision alongside the existing gapless checks.
+
+Fractional onsets exposed a separate one-frame delay: the prepared PCM began at
+floor(onset), while playback began at ceil(onset). Anchoring preparation to the
+first playback frame fixed both independently decoded MP3 and shared-WAV cases.
+No capture shift or gain adjustment is applied. The eight piano cases cover
+`.stretch(-1/-2/-3)`, C4/Fs3/Ds4, fractional playback speed and fractional onsets;
+their measured correlations range from 0.9982 to 0.9999, with RMS ratios
+0.9992–1.0016 across the full two-second capture.
+
+Two independent DSP gates also use identical generated PCM16 WAV bytes in both
+players, with integer/fractional onsets. Their source hash is recorded in the
+report, and the WAV and confined catalog remain under `fixture-banks`; the
+browser uses those bytes through a disposable Blob sample. These selected
+MP3/WAV gates do not establish complete decoder or full-song waveform parity.
 
 Use `TOMPOUCE_COMPARE_FILTER=stretch` to select the stretch cases while iterating;
 omit it to run the full matrix.
+
+Fractional sample-onset cases use the shared WAV without stretching. Samples
+retain their fractional source position and envelope age when the callback
+starts on the next whole frame. The double-speed case improved from 0.9747 to
+above 0.999999 correlation without capture shifts or changed thresholds.
+Reverse playback also preserves the deployed `reverseBuffer` channel copy
+offsets: its right channel has a leading zero and one-source-frame displacement.
+
+`ctest --test-dir build -R '^audio_performance$' --output-on-failure` runs a
+device-free scheduler/callback regression with 64 prepared notes and 64 duck
+callbacks. It checks expected forward/reverse sample PCM at fractional onsets
+for six playback rates, then requires bit-identical output across callback
+sizes 1, 64, 128, 256, 4,096 and 8,192. The harness also runs through the
+`test_audio_performance_sanitize` executable built by `test-sanitize`.
+This verifies prepared-event rendering independently of callback size; real
+backend scheduling under load, underruns and voice-pool saturation remain open.
+
+`node scripts/voice-pool-reference-qa.mjs /tmp/voice-pool-reference` checks the
+deployed web pool in a disposable browser with offline rendering. It fills the
+128-source pool with reverse-ordered target times and differing gains, verifies
+insertion FIFO, and captures eviction gain ramps and stops at the incoming
+target time plus 250 ms. Rests and missing sounds also evict before source
+selection; zero gain still creates a source. Native saturated allocation uses
+insertion FIFO, with regression coverage for out-of-order targets and reused slots. Native
+eviction still cuts immediately: retiring graphs, envelope automation and
+rest-triggered eviction remain open, so this is not full pool parity.
 
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

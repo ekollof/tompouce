@@ -3,6 +3,9 @@
 #include "websamp.h"
 #include "common.h"
 #define MINIMP3_IMPLEMENTATION
+/* Preserve sub-16-bit decoder detail. Quantization perturbs the reference
+   vocoder's peak regions, especially during downward pitch compensation. */
+#define MINIMP3_FLOAT_OUTPUT
 #define DR_FLAC_IMPLEMENTATION
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -336,7 +339,7 @@ static float *decode_mp3(const char *path, uint32_t *have_out, int *rate_out, in
     mp3dec_init(&dec);
     mp3dec_frame_info_t info;
     memset(&info, 0, sizeof(info));
-    int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
+    mp3d_sample_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
     size_t cap = 65536, n = 0;
     float *mono = malloc(cap * sizeof(float) * 2);
     if (!mono) { free(data); return NULL; }
@@ -380,8 +383,8 @@ static float *decode_mp3(const char *path, uint32_t *have_out, int *rate_out, in
             cap = nc;
         }
         for (int i = first; i < first+samples; i++) {
-            mono[n*2] = pcm[i*info.channels]/32768.0f;
-            mono[n*2+1] = pcm[i*info.channels+(info.channels == 2 ? 1 : 0)]/32768.0f;
+            mono[n*2] = pcm[i*info.channels];
+            mono[n*2+1] = pcm[i*info.channels+(info.channels == 2 ? 1 : 0)];
             n++;
         }
         if (left == 0 || (length && n == length)) break;

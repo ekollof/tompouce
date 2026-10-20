@@ -211,11 +211,14 @@ gates proved unexpressible: the browser offline render ignores event-level
 cps pivots for onset mapping, so renderer-side threading was reverted.
 Engine operations gate through the deterministic live harness
 (`test-live-reference-web`): source re-evaluation, pattern-level tempo
-pivots and transport Stop with fractional onsets all observe correlation
-1.0 across repeated runs, with equal voice/hap counts on tempo. Transport
-restart and external tempo anchoring diverge by design and remain documented
-optional gaps. A mock interval that stays dead after Stop was required to
-avoid re-firing scheduled haps, matching production interval cleanup.
+pivots and transport Stop/restart with fractional onsets all observe
+correlation
+1.0 across repeated runs, with equal voice/hap counts on tempo. External
+tempo anchoring diverges by design and remains a documented
+optional gap. A mock interval that stays dead after Stop was required to
+avoid re-firing scheduled haps, matching production interval cleanup; mock
+time still advances through stops, matching the production audio clock, so
+post-restart catch-up windows are not skipped as too late.
 
 ## 7. Voice-pool eviction, then bursts
 
@@ -237,10 +240,11 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       counters, offline and through the real-backend null-sink run. The 128
       retiring-graph bound reports overflow and replaces the graph with the
       earliest stop deadline. Remaining gaps are documented diagnostics, not
-      gates: vowel tails carry a -70 dB formant residual the native parallel
-      formants do not reproduce, chorus has no deployed web control to compare
-      against, and drum timbre parity falls under the synthesis-equivalence
-      non-goal below.
+      gates: chorus has no deployed web control to compare against (a
+      native-only impulse regression locks its delay line instead), and drum
+      timbre parity falls under the synthesis-equivalence non-goal below.
+      Vowel tails gate through a 15-vowel web impulse-response comparison
+      against the deployed five-formant filter.
 
 ## 8. Duck coverage
 
@@ -315,8 +319,8 @@ a hosted-player drift is evidence to investigate, never a reason to loosen
 a threshold. Steps 6–11 already scope the required slices; the remainder is:
 
 - Live-change fractional onsets beyond steady playback (step 6 delta).
-- Voice-pool breadth beyond the gated 62 cases and drum A/B (vowel -70 dB
-  residual, chorus without a web control, drum timbre) and backend bursts
+- Voice-pool breadth beyond the gated 62 cases, drum A/B and 15-vowel filter
+  gate (chorus without a web control, drum timbre) and backend bursts
   beyond the voice-burst matrices (step 7 remainder).
 - Duck wall-clock timer-fire parity under host contention (step 8 remainder;
   native dispatch is sample-accurate by construction; the web fires from a
@@ -332,9 +336,9 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Controller input beyond live CC reads and fixed-duration keyboard notes
   (pitch bend, touch, CC restore, reconnect, persisted state; step 11
   remainder).
-- Transport restart after Stop: the web re-fires early-cycle haps and
-  continues the cycle, while native resets to cycle zero without
-  re-firing. Stop itself (held tails finish, no new onsets) is gated.
+- Transport restart after Stop is gated: both sides reset to cycle zero and
+  re-fire early-cycle haps, with sample-exact onset agreement (correlation
+  1.0). Stop itself (held tails finish, no new onsets) was already gated.
 - External tempo-change pivot anchoring: the web anchors at its scheduling
   frontier, native at its phase frontier. Pattern-level tempo pivots are
   gated live; external pivots are covered at event-value level.
@@ -346,7 +350,7 @@ Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,
 Hydra/browser input-device APIs and arbitrary npm module resolution.
 
-The maintained audio matrix has 41 passing gates, including eight independently
+The maintained audio matrix has 42 passing gates, including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
 fractional sample-onset cases, four shared delay-automation cases and two
 live-change fractional-onset cases. Seeded generated rooms are gated; ordinary

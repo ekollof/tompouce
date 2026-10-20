@@ -17,6 +17,8 @@ const SR=44100, BLOCK=128;
 const scenarios={
   transport:{end:2.0,first:"s('livefixture').fast(4).clip(.25).late(.137)",
     ops:[{sample:Math.round(1.0*SR),kind:'stop'}]},
+  restart:{end:3.0,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'stop'},{sample:Math.round(1.5*SR),kind:'start'}]},
   source:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
     ops:[{sample:Math.round(1.0*SR),kind:'eval'}]},
   tempo:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))",
@@ -110,17 +112,29 @@ async function main() {
         await new Promise(resolve=>setTimeout(resolve,500));
         const ops=spec.ops.map(op=>({...op,done:false}));
         const total=Math.round(spec.end*${SR});
-        for (let done=0;done<total;done+=${BLOCK}) {
+        /* Mirror the native driver's boundary chunks so ops take effect at
+           exact samples, and keep mock time advancing through stops: the
+           production audio clock never freezes, and frozen time would make
+           post-restart catch-up windows look older than they are. */
+        for (let done=0;done<total;) {
+          let boundary=total;
+          for (const op of ops) if (!op.done && op.sample<boundary) boundary=op.sample;
+          let chunk=boundary-done;
+          if (chunk>128) chunk=128;
+          if (chunk<1) chunk=1;
           for (const op of ops) if (!op.done && done>=op.sample) {
             op.done=true;
             if (op.kind==='stop') host.stop();
+            else if (op.kind==='start') host.start();
             else if (op.kind==='eval') await host.evaluate(spec.second,false);
             if (host.state.evalError) throw host.state.evalError;
           }
           /* A cleared interval stays dead, exactly as in production: after
-             Stop no further scheduling passes run. */
+             Stop no further scheduling passes run. Time still advances. */
           if (tick!==null) { time=done/${SR}; tick(); }
+          time=(done+chunk)/${SR};
           await new Promise(resolve=>setTimeout(resolve,0));
+          done+=chunk;
         }
         await new Promise(resolve=>setTimeout(resolve,500));
         const rendered=await context.startRendering();

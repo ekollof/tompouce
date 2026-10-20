@@ -1305,8 +1305,9 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
     int transport = !strcmp(scenario, "transport");
     int source = !strcmp(scenario, "source");
     int tempo = !strcmp(scenario, "tempo");
-    assert(transport || source || tempo);
-    double end = transport ? 2.0 : 2.5;
+    int restart = !strcmp(scenario, "restart");
+    assert(transport || source || tempo || restart);
+    double end = transport ? 2.0 : restart ? 3.0 : 2.5;
     const char *first = tempo ? "s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))"
         : "s('livefixture').fast(4).clip(.25).late(.137)";
     const char *second = "s('livefixture').fast(2).clip(.25).late(.311)";
@@ -1315,10 +1316,14 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
     event_queue_clear();
     audio_time = 0; audio_toggle_play(1); audio_set_reference_mode(1); audio_set_bpm(120);
     assert(track_load_from_code(first));
-    enum { MAX_OPS = 1 };
+    enum { MAX_OPS = 2 };
     double op_times[MAX_OPS]; int op_kinds[MAX_OPS]; int nops = 0;
     if (transport) { op_times[nops] = 1.0; op_kinds[nops++] = 0; }
     if (source) { op_times[nops] = 1.0; op_kinds[nops++] = 2; }
+    if (restart) {
+        op_times[nops] = 1.0; op_kinds[nops++] = 0;
+        op_times[nops] = 1.5; op_kinds[nops++] = 1;
+    }
     long total = lround(end*SR);
     float *pcm = calloc((size_t)total*2, sizeof(*pcm)); assert(pcm);
     long done = 0;

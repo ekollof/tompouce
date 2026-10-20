@@ -223,15 +223,21 @@ blocks with scripted operations on integer sample boundaries, and the web
 live REPL runs on fake time with the same block rule while scheduling real
 pattern audio into a disposable offline context. The shared fixture sample
 is generated once and read byte-identically by both sides; the mock interval
-is honored so no scheduling pass runs after Stop. Three cases gate at zero
-lag (0.99 correlation, 0.85–1.15 RMS): source re-evaluation, pattern-level
-tempo pivots (which both engines anchor at the pivoting hap, unlike external
-tempo changes) and transport Stop with fractional tails. An isolated run
-observed correlation 1.0 in all three. Transport restart and external tempo
-pivot anchoring diverge by design and stay documented gaps rather than gates:
-the web re-fires early-cycle haps and continues the cycle while native resets
-to cycle zero, and the web anchors external pivots at its scheduling frontier
-while native anchors at its phase frontier.
+is honored so no scheduling pass runs after Stop, while mock time keeps
+advancing through stops exactly as the production audio clock does. Four cases
+gate at zero lag (0.99 correlation, 0.85–1.15 RMS): source re-evaluation,
+pattern-level tempo pivots (which both engines anchor at the pivoting hap,
+unlike external tempo changes), transport Stop with fractional tails, and
+transport restart. Restart re-fires early-cycle haps from cycle zero on both
+sides: the web resets its query cursor and re-anchors at the restart tick,
+matching the native cursor reset and restart-plus-latency anchor, so the
+re-fired onsets agree sample-exactly. An earlier harness froze mock time
+during stops, which made post-restart catch-up windows look older than they
+were and skipped the re-fired hap as too late; advancing time fixed it with
+no native change. An isolated run observed correlation 1.0 in all four.
+External tempo pivot anchoring diverges by design and stays a documented gap
+rather than a gate: the web anchors external pivots at its scheduling
+frontier while native anchors at its phase frontier.
 
 The CPU-budget fixture test covers nested v1/v2 membership, inherited minimum
 quotas, controller lists, subtree mounts, escaped paths and malformed limits,
@@ -328,13 +334,18 @@ stop until the original cleanup deadline, retaining state and shared sends.
 The retired phaser is bypassed there: the deployed player holds a retired
 phaser at exactly zero post-stop while its low-pass rings, so the eviction
 gain sits downstream of the phaser graph. The deployed player exposes no
-chorus control, and its vowel tail carries a -70 dB wandering residual the
-native parallel formants do not reproduce; both stay native-only.
+chorus control, so chorus stays native-only: an impulse regression locks the
+dry mix, the 20 ms LFO-centered wet tap and the tail silence. Vowel topology
+is gated instead: `voice-vowel-reference-qa.mjs` compares one-second impulse
+responses for all fifteen vowels against the deployed five-formant parallel
+filter (per-formant gains, makeup gain 8, Q up to 140), worst case 1.2e-7,
+through the real letter-to-params path. The old three-formant approximation
+fails that gate.
 Offline regressions check ring-out across 1/8,192-frame blocks for low-pass,
 high-pass, band-pass, vowel, phaser, chorus and coarse graphs, plus native
 effect-state lifetime; a cut-ordering regression checks same-group cuts with
 first-cutter-wins, group isolation, equal-time onset-serial tiebreak and
-oscillator exclusion. Vowel topology, remaining
+oscillator exclusion. Remaining
 source types and scheduling-overload parity still need independent checks.
 
 Generated room preparation runs outside the scheduler and callback. The

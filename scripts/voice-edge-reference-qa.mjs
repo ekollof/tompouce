@@ -17,8 +17,9 @@ async function capture() {
     {attack:.02,decay:.03,sustain:.6,release:.1,phaserrate:2,tailOnly:1},
     {attack:.02,decay:.03,sustain:.6,release:.1,coarse:8,tailOnly:1},
     // No web oracle for chorus (the deployed player exposes no chorus
-    // control) or vowel tails (a -70 dB formant residual the native parallel
-    // formants do not reproduce); both stay native-only regressions below.
+    // control); it stays a native-only regression. Vowel tails gate through
+    // voice-vowel-reference-qa.mjs instead: DC substitution cannot feed a
+    // bandpass, so that script compares full impulse responses.
   ];
   const sampleEnvelopes=[envelopes[3],{...envelopes[3],cutoff:100,resonance:10}];
   const tailOnly=value=>value.cutoff||value.tailOnly;

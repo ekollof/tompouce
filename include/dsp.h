@@ -39,7 +39,8 @@ typedef struct {
 
 typedef struct {
     DspParams control;
-    DspBiquad filter[6], formant[3];
+    DspBiquad filter[6], formant[5];
+    double formant_gain[5];
     double ladder[4], ladder_g, ladder_k;
     double fm_phase[8], fm_last[8];
     double phaser_z[6], phaser_feedback;

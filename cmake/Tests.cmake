@@ -44,6 +44,8 @@ add_custom_target(test-voice-reference-web
     COMMAND node scripts/voice-eviction-reference-qa.mjs
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_VOICE_BINARY=$<TARGET_FILE:test_audio_performance>"
         node scripts/voice-edge-reference-qa.mjs
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_VOICE_BINARY=$<TARGET_FILE:test_audio_performance>"
+        node scripts/voice-vowel-reference-qa.mjs
     DEPENDS test_audio_performance WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 

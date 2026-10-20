@@ -627,9 +627,60 @@ static void voice_reference(void) {
     cJSON_Delete(tests); cJSON_Delete(results); free(input);
 }
 
+/* Web vowel parity: impulse response of the five-formant parallel filter
+   through the real letter-to-params path, one second per vowel. */
+static void vowel_reference(void) {
+    char *input=malloc(65536); assert(input);
+    size_t length=fread(input,1,65535,stdin); assert(!ferror(stdin) && feof(stdin));
+    input[length]=0; cJSON *tests=cJSON_Parse(input),*results=cJSON_CreateArray();
+    assert(tests && results);
+    const cJSON *test;
+    cJSON_ArrayForEach(test,tests) {
+        const char *letter=cJSON_GetObjectItemCaseSensitive(test,"letter")->valuestring;
+        cJSON *value=cJSON_CreateObject(); assert(value);
+        assert(cJSON_AddStringToObject(value,"vowel",letter));
+        DspParams params; dsp_params_read(&params,value); cJSON_Delete(value);
+        assert(params.p[DSP_VOWEL]>=0 && params.p[DSP_VOWEL]<15);
+        DspState state; dsp_init(&state,&params);
+        cJSON *points=cJSON_CreateArray(); assert(points);
+        for(int frame=0;frame<44100;frame++) {
+            double out=dsp_process(&state,frame==0?1:0,0,1);
+            assert(isfinite(out));
+            if(frame%7==0) cJSON_AddItemToArray(points,cJSON_CreateNumber(out));
+        }
+        cJSON_AddItemToArray(results,points);
+    }
+    char *json=cJSON_PrintUnformatted(results); assert(json); puts(json); free(json);
+    cJSON_Delete(tests); cJSON_Delete(results); free(input);
+}
+
+/* Native-only chorus regression: no deployed web control exists, so lock the
+   delay-line behavior instead. At chorus depth .5 the dry path carries .75
+   and the LFO centers the wet tap at 20 ms. */
+static void test_chorus_impulse(void) {
+    DspParams params; dsp_params_init(&params); params.enabled = 1;
+    params.p[DSP_CHORUS] = .5;
+    DspState state; dsp_init(&state, &params);
+    static double out[4410];
+    for (int frame = 0; frame < 4410; frame++) {
+        out[frame] = dsp_process(&state, frame == 0 ? 1 : 0, frame / (double)SR, 1);
+        assert(isfinite(out[frame]));
+    }
+    assert(fabs(out[0] - .75) < 1e-12);
+    int peak = 700;
+    for (int frame = 701; frame < 1100; frame++)
+        if (fabs(out[frame]) > fabs(out[peak])) peak = frame;
+    /* The fractional 20 ms tap straddles the impulse across two taps, so the
+       echo peaks near 0.7 dry instead of the full wet mix. */
+    assert(peak >= 900 && peak <= 910);
+    assert(fabs(out[peak]) > .12 && fabs(out[peak]) < .22);
+    for (int frame = 2000; frame < 4410; frame++) assert(fabs(out[frame]) < 1e-6);
+}
+
 int main(int argc, char **argv) {
     log_console_stderr(0);
     if(argc>1 && !strcmp(argv[1],"--voice-reference")) {voice_reference();return 0;}
+    if(argc>1 && !strcmp(argv[1],"--vowel-reference")) {vowel_reference();return 0;}
     const double rates[]={.75,1,2,-.75,-1,-2};
     const unsigned long blocks[]={1,64,128,256,4096,8192};
     static float reference[PERFORMANCE_FRAMES*2],actual[PERFORMANCE_FRAMES*2];
@@ -658,6 +709,7 @@ int main(int argc, char **argv) {
     test_empty_source_eviction();
     test_coincident_retirement_endpoint();
     test_retiring_filter_tail();
+    test_chorus_impulse();
     test_duck_flood();
     puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, drum fades, mixed-type saturation, per-voice effect tails and a 150-note duck flood with pool saturation survive 1..8192-frame bursts; retirement capacity is bounded and observable");
     return 0;

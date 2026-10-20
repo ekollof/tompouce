@@ -224,7 +224,7 @@ static int vi_handle_normal(int ch) {
             } else vi_reset();
             return 1;
         }
-        if (ch==8 || ch==127 || ch==SL_KEY_BACKSPACE) vi.draft[vi_prev(vi.draft,(int)length)]=0;
+        if (ch==8 || ch==127 || ch==(int)NCKEY_BACKSPACE) vi.draft[vi_prev(vi.draft,(int)length)]=0;
         else if (ch>=32 && ch<=255 && length<sizeof(vi.draft)-1) { vi.draft[length]=(char)ch; vi.draft[length+1]=0; }
         else if (ch>255) { vi_reset(); return 0; }
         snprintf(status_msg,sizeof(status_msg),"%c%s",vi.search_edit>0?'/':'?',vi.draft);

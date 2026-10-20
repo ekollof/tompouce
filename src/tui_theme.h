@@ -76,9 +76,9 @@ static int theme_read(int wal, uint32_t colors[18]) {
 
 static void theme_roles(void) {
     const char *names[]={"yellow","brightcyan","brightmagenta","brightblue","gray","brown","brightgreen","red"};
-    for (int i=0;i<8;i++) SLtt_set_color(i+2,NULL,names[i],"black");
-    SLtt_set_color(10,NULL,"black","yellow");
-    SLtt_set_color(11,NULL,"black","brightcyan");
+    for (int i=0;i<8;i++) terminal_define_role(i+2,NULL,names[i],"black");
+    terminal_define_role(10,NULL,"black","yellow");
+    terminal_define_role(11,NULL,"black","brightcyan");
 }
 
 static void theme_apply(const uint32_t colors[18]) {

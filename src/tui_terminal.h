@@ -37,7 +37,7 @@ static void *terminal_input_pump(void *unused) {
     return NULL;
 }
 static int terminal_input_fd(void) { return terminal_event_pipe[0]; }
-static int SLtt_Screen_Rows = 24, SLtt_Screen_Cols = 80;
+static int terminal_rows = 24, terminal_cols = 80;
 static int terminal_y, terminal_x;
 static int terminal_last_y=-1, terminal_last_x=-1;
 static uint64_t terminal_colors[256];
@@ -48,33 +48,15 @@ static uint32_t terminal_ansi[16]={0x000000,0x800000,0x008000,0x808000,
     0xffff00,0x0000ff,0xff00ff,0x00ffff,0xffffff};
 static int terminal_color;
 static int terminal_reverse;
-typedef uint32_t SLwchar_Type;
-typedef unsigned SLtt_Char_Type;
-typedef struct { uint32_t wchars[2]; int color, nchars; } SLsmg_Char_Type;
-#define SLTT_BOLD_MASK NCSTYLE_BOLD
-#define SLTT_ULINE_MASK NCSTYLE_UNDERLINE
-#define SLTT_ITALIC_MASK NCSTYLE_ITALIC
-#define SL_KEY_ERR (-1)
-#define SL_KEY_UP ((int)NCKEY_UP)
-#define SL_KEY_DOWN ((int)NCKEY_DOWN)
-#define SL_KEY_LEFT ((int)NCKEY_LEFT)
-#define SL_KEY_RIGHT ((int)NCKEY_RIGHT)
-#define SL_KEY_HOME ((int)NCKEY_HOME)
-#define SL_KEY_END ((int)NCKEY_END)
-#define SL_KEY_BACKSPACE ((int)NCKEY_BACKSPACE)
-#define SL_KEY_DELETE ((int)NCKEY_DEL)
-#define SL_KEY_ENTER ((int)NCKEY_ENTER)
-#define SL_KEY_NPAGE ((int)NCKEY_PGDOWN)
-#define SL_KEY_PPAGE ((int)NCKEY_PGUP)
-#define SL_KEY_F(n) ((int)NCKEY_F00+(n))
+typedef struct { uint32_t wchars[2]; int color, nchars; } terminal_cell;
 
 static void terminal_dimensions(void) {
     if (!terminal_nc) return;
     unsigned y,x;
     ncplane_dim_yx(notcurses_stdplane(terminal_nc),&y,&x);
-    SLtt_Screen_Rows=(int)y; SLtt_Screen_Cols=(int)x;
+    terminal_rows=(int)y; terminal_cols=(int)x;
 }
-static int SLsmg_init_smg(void) {
+static int terminal_startup(void) {
     notcurses_options opts={.loglevel=NCLOGLEVEL_SILENT,
         .flags=NCOPTION_SUPPRESS_BANNERS|NCOPTION_NO_QUIT_SIGHANDLERS|
                NCOPTION_NO_WINCH_SIGHANDLER|NCOPTION_NO_CLEAR_BITMAPS};
@@ -119,7 +101,7 @@ static int SLsmg_init_smg(void) {
     terminal_dimensions();
     return 0;
 }
-static void SLsmg_reset_smg(void) {
+static void terminal_shutdown(void) {
     if (terminal_input_thread_active) {
         pthread_cancel(terminal_input_thread); pthread_join(terminal_input_thread,NULL);
         terminal_input_thread_active=0;
@@ -132,7 +114,7 @@ static void SLsmg_reset_smg(void) {
     terminal_output=stdout;
     terminal_nc=NULL; terminal_plane=NULL;
 }
-static void SLsmg_gotorc(int y,int x) {
+static void terminal_move(int y,int x) {
     terminal_y=y; terminal_x=x; terminal_last_y=terminal_last_x=-1;
 }
 static void terminal_apply_style(void) {
@@ -141,12 +123,12 @@ static void terminal_apply_style(void) {
     ncplane_set_channels(terminal_plane,ch);
     ncplane_set_styles(terminal_plane,terminal_styles[terminal_color]);
 }
-static void SLsmg_set_color(int color) {
+static void terminal_use_role(int color) {
     terminal_color=color >= 0 && color < 256 ? color : 0;
     terminal_reverse=0;
 }
-static void SLsmg_normal_video(void) { terminal_color=terminal_reverse=0; }
-static void SLsmg_reverse_video(void) { terminal_color=0; terminal_reverse=1; }
+static void terminal_style_reset(void) { terminal_color=terminal_reverse=0; }
+static void terminal_style_reverse(void) { terminal_color=0; terminal_reverse=1; }
 static void terminal_channel(uint64_t *ch,const char *name,int fg) {
     static const char *names[]={"black","red","green","brown","blue","magenta","cyan","gray",
         "brightblack","brightred","brightgreen","yellow","brightblue","brightmagenta","brightcyan","white"};
@@ -164,17 +146,17 @@ static void terminal_channel(uint64_t *ch,const char *name,int fg) {
         }
     }
 }
-static void SLtt_set_color(int role,const char *unused,const char *fg,const char *bg) {
+static void terminal_define_role(int role,const char *unused,const char *fg,const char *bg) {
     (void)unused;
     if (role<0 || role>=256) return;
     uint64_t ch=0;
     terminal_channel(&ch,fg,1); terminal_channel(&ch,bg,0);
     terminal_colors[role]=ch; terminal_styles[role]=0;
 }
-static void SLtt_add_color_attribute(int role,unsigned attributes) {
+static void terminal_role_attr(int role,unsigned attributes) {
     if (role>=0 && role<256) terminal_styles[role]|=attributes;
 }
-static void SLsmg_write_nchars(const char *s,unsigned n) {
+static void terminal_write_n(const char *s,unsigned n) {
     if (!terminal_plane) return;
     terminal_apply_style();
     unsigned height,width; ncplane_dim_yx(terminal_plane,&height,&width);
@@ -208,45 +190,43 @@ static void SLsmg_write_nchars(const char *s,unsigned n) {
         terminal_x+=span; s+=take;
     }
 }
-static void SLsmg_write_nstring(const char *s,unsigned n) {
-    size_t len=strnlen(s,n); SLsmg_write_nchars(s,(unsigned)len);
-    while (len++<n) SLsmg_write_nchars(" ",1);
+static void terminal_write_padded(const char *s,unsigned n) {
+    size_t len=strnlen(s,n); terminal_write_n(s,(unsigned)len);
+    while (len++<n) terminal_write_n(" ",1);
 }
-static void SLsmg_write_string(const char *s) { SLsmg_write_nchars(s,(unsigned)strlen(s)); }
-static void SLsmg_write_char(uint32_t cp) {
+static void terminal_write(const char *s) { terminal_write_n(s,(unsigned)strlen(s)); }
+static void terminal_putc(uint32_t cp) {
     char glyph[5]={0}; mbstate_t state={0};
     size_t n=wcrtomb(glyph,(wchar_t)cp,&state);
-    if (n!=(size_t)-1) SLsmg_write_nchars(glyph,(unsigned)n);
+    if (n!=(size_t)-1) terminal_write_n(glyph,(unsigned)n);
 }
-static void SLsmg_cls(void) { if (terminal_plane) ncplane_erase(terminal_plane); }
-static void SLsmg_draw_box(int y,int x,int h,int w) {
+static void terminal_clear(void) { if (terminal_plane) ncplane_erase(terminal_plane); }
+static void terminal_box(int y,int x,int h,int w) {
     if (h<2 || w<2) return;
-    SLsmg_gotorc(y,x); SLsmg_write_string("┌");
-    for (int c=1;c<w-1;c++) SLsmg_write_string("─");
-    SLsmg_write_string("┐");
+    terminal_move(y,x); terminal_write("┌");
+    for (int c=1;c<w-1;c++) terminal_write("─");
+    terminal_write("┐");
     for (int r=1;r<h-1;r++) {
-        SLsmg_gotorc(y+r,x); SLsmg_write_string("│");
-        SLsmg_gotorc(y+r,x+w-1); SLsmg_write_string("│");
+        terminal_move(y+r,x); terminal_write("│");
+        terminal_move(y+r,x+w-1); terminal_write("│");
     }
-    SLsmg_gotorc(y+h-1,x); SLsmg_write_string("└");
-    for (int c=1;c<w-1;c++) SLsmg_write_string("─");
-    SLsmg_write_string("┘");
+    terminal_move(y+h-1,x); terminal_write("└");
+    for (int c=1;c<w-1;c++) terminal_write("─");
+    terminal_write("┘");
 }
-static void SLsmg_refresh(void) { if (terminal_nc) notcurses_render(terminal_nc); }
-static void SLtt_goto_rc(int y,int x) { if (terminal_nc) notcurses_cursor_enable(terminal_nc,y,x); }
-static void SLtt_get_terminfo(void) { setlocale(LC_ALL,""); }
-static void SLtt_get_screen_size(void) { terminal_dimensions(); }
-static void SLutf8_enable(int on) { (void)on; setlocale(LC_ALL,""); }
-static void SLsmg_utf8_enable(int on) { (void)on; }
-static int SLsmg_is_utf8_mode(void) { return MB_CUR_MAX>1; }
+static void terminal_present(void) { if (terminal_nc) notcurses_render(terminal_nc); }
+static void terminal_cursor(int y,int x) { if (terminal_nc) notcurses_cursor_enable(terminal_nc,y,x); }
+static void terminal_init_locale(void) { setlocale(LC_ALL,""); }
+static void terminal_resync_size(void) { terminal_dimensions(); }
+static int terminal_utf8(void) { return MB_CUR_MAX>1; }
 static int terminal_input[256], terminal_input_count;
 static int terminal_input_closed;
 static int terminal_mouse_down;
-static void SLang_ungetkey(unsigned int key) {
+static void terminal_unget(unsigned int key) {
     if (terminal_input_count<256) terminal_input[terminal_input_count++]=(int)key;
 }
 static void terminal_push_bytes(const char *s) {
-    for (size_t i=strlen(s);i>0;i--) SLang_ungetkey((unsigned char)s[i-1]);
+    for (size_t i=strlen(s);i>0;i--) terminal_unget((unsigned char)s[i-1]);
 }
 static int terminal_event(void) {
     ncinput ni={0};
@@ -307,14 +287,14 @@ static int terminal_event(void) {
     if (terminal_input_count) return terminal_input[--terminal_input_count];
     return (int)key;
 }
-static int SLang_input_pending(int tenth) {
+static int terminal_poll(int tenth) {
     if (terminal_input_count) return 1;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC,&now);
     long long deadline=(long long)now.tv_sec*1000000000+now.tv_nsec+(long long)tenth*100000000;
     for (;;) {
         int key=terminal_event();
-        if (key>=0) { SLang_ungetkey((unsigned)key); return 1; }
+        if (key>=0) { terminal_unget((unsigned)key); return 1; }
         if (terminal_input_closed) return 0;
         /* Resize, signal and key-release events carry no editor key. Drain
            them without reporting a gap in text already queued behind them. */
@@ -331,19 +311,18 @@ static int SLang_input_pending(int tenth) {
         if (ready<=0) return 0;
     }
 }
-static unsigned int SLang_getkey(void) {
-    if (!terminal_input_count && !SLang_input_pending(1)) return 0xffff;
+static unsigned int terminal_get(void) {
+    if (!terminal_input_count && !terminal_poll(1)) return 0xffff;
     return (unsigned)terminal_input[--terminal_input_count];
 }
 typedef struct { const char *sequence; int key; } TerminalKey;
 static TerminalKey terminal_keys[64];
 static int terminal_key_count;
-static int SLkp_init(void) { return 0; }
-static void SLkp_define_keysym(const char *sequence,int key) {
+static void terminal_bind_key(const char *sequence,int key) {
     if (terminal_key_count<64) terminal_keys[terminal_key_count++]=(TerminalKey){sequence,key};
 }
-static int SLkp_getkey(void) {
-    int first=(int)SLang_getkey();
+static int terminal_get_key(void) {
+    int first=(int)terminal_get();
     if (first!=27) return first;
     char sequence[32]={27,0}; int n=1;
     while (n<(int)sizeof(sequence)-1) {
@@ -354,15 +333,15 @@ static int SLkp_getkey(void) {
                 prefix=1;
             }
         }
-        if (!prefix || !SLang_input_pending(1)) break;
-        int key=(int)SLang_getkey();
-        if (key>255) { SLang_ungetkey((unsigned)key); break; }
+        if (!prefix || !terminal_poll(1)) break;
+        int key=(int)terminal_get();
+        if (key>255) { terminal_unget((unsigned)key); break; }
         sequence[n++]=(char)key; sequence[n]=0;
     }
-    for (int i=n-1;i>0;i--) SLang_ungetkey((unsigned char)sequence[i]);
+    for (int i=n-1;i>0;i--) terminal_unget((unsigned char)sequence[i]);
     return 27;
 }
-static int __attribute__((unused)) SLsmg_char_at(SLsmg_Char_Type *cell) {
+static int __attribute__((unused)) terminal_cell_at(terminal_cell *cell) {
     uint16_t style; uint64_t channels;
     char *egc=ncplane_at_yx(terminal_plane,terminal_y,terminal_x,&style,&channels);
     if (!egc) return -1;

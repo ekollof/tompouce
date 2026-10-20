@@ -926,10 +926,9 @@ void tui_init(void) {
     signal(SIGTERM, handle_quit);
     signal(SIGHUP, handle_quit);
     signal(SIGQUIT, handle_quit);
-    SLutf8_enable(-1); /* unicode when the locale supports it */
+    terminal_init_locale(); /* unicode when the locale supports it */
     log_console_stderr(0); /* stderr shares the terminal: keep it quiet */
-    SLtt_get_terminfo();
-    if (SLsmg_init_smg() == -1) {
+    if (terminal_startup() == -1) {
         fprintf(stderr, "Notcurses terminal initialization failed\n");
         exit(1);
     }
@@ -948,63 +947,58 @@ void tui_init(void) {
             fprintf(stderr, "cannot configure editor terminal\n"); exit(1);
         }
     }
-    if (SLkp_init() == -1) {
-        fprintf(stderr, "SLkp_init failed\n");
-        exit(1);
-    }
-    SLkp_define_keysym("\033OP", SL_KEY_F(1));
-    SLkp_define_keysym("\033OQ", SL_KEY_F(2));
-    SLkp_define_keysym("\033OR", SL_KEY_F(3));
-    SLkp_define_keysym("\033OS", SL_KEY_F(4));
-    SLkp_define_keysym("\033[11~", SL_KEY_F(1));
-    SLkp_define_keysym("\033[12~", SL_KEY_F(2));
-    SLkp_define_keysym("\033[13~", SL_KEY_F(3));
-    SLkp_define_keysym("\033[14~", SL_KEY_F(4));
-    SLkp_define_keysym("\033[15~", SL_KEY_F(5));
-    SLkp_define_keysym("\033[17~", SL_KEY_F(6));
-    SLkp_define_keysym("\033[18~", SL_KEY_F(7));
-    SLkp_define_keysym("\033[19~", SL_KEY_F(8));
-    SLkp_define_keysym("\033[20~", SL_KEY_F(9));
-    SLkp_define_keysym("\033[21~", SL_KEY_F(10));
-    SLkp_define_keysym("\033[23~", SL_KEY_F(11));
-    SLkp_define_keysym("\033[24~", SL_KEY_F(12));
-    SLkp_define_keysym("\033[1;5D", 2001); /* Ctrl+Left  nudge slider */
-    SLkp_define_keysym("\033[1;5C", 2002); /* Ctrl+Right */
-    SLkp_define_keysym("\033[5D", 2001);
-    SLkp_define_keysym("\033[5C", 2002);
-    SLkp_define_keysym("\033[<", 2100); /* SGR mouse report prefix */
-    SLkp_define_keysym("\033[200~", 2101); /* bracketed paste */
-    SLkp_define_keysym("\033[Z", 2102); /* Shift+Tab */
-    SLkp_define_keysym("\033[1;2A", 2110);
-    SLkp_define_keysym("\033[1;2B", 2111);
-    SLkp_define_keysym("\033[1;2D", 2112);
-    SLkp_define_keysym("\033[1;2C", 2113);
-    SLkp_define_keysym("\033[1;2H", 2114);
-    SLkp_define_keysym("\033[1;2F", 2115);
+    terminal_bind_key("\033OP", ((int)NCKEY_F00+(1)));
+    terminal_bind_key("\033OQ", ((int)NCKEY_F00+(2)));
+    terminal_bind_key("\033OR", ((int)NCKEY_F00+(3)));
+    terminal_bind_key("\033OS", ((int)NCKEY_F00+(4)));
+    terminal_bind_key("\033[11~", ((int)NCKEY_F00+(1)));
+    terminal_bind_key("\033[12~", ((int)NCKEY_F00+(2)));
+    terminal_bind_key("\033[13~", ((int)NCKEY_F00+(3)));
+    terminal_bind_key("\033[14~", ((int)NCKEY_F00+(4)));
+    terminal_bind_key("\033[15~", ((int)NCKEY_F00+(5)));
+    terminal_bind_key("\033[17~", ((int)NCKEY_F00+(6)));
+    terminal_bind_key("\033[18~", ((int)NCKEY_F00+(7)));
+    terminal_bind_key("\033[19~", ((int)NCKEY_F00+(8)));
+    terminal_bind_key("\033[20~", ((int)NCKEY_F00+(9)));
+    terminal_bind_key("\033[21~", ((int)NCKEY_F00+(10)));
+    terminal_bind_key("\033[23~", ((int)NCKEY_F00+(11)));
+    terminal_bind_key("\033[24~", ((int)NCKEY_F00+(12)));
+    terminal_bind_key("\033[1;5D", 2001); /* Ctrl+Left  nudge slider */
+    terminal_bind_key("\033[1;5C", 2002); /* Ctrl+Right */
+    terminal_bind_key("\033[5D", 2001);
+    terminal_bind_key("\033[5C", 2002);
+    terminal_bind_key("\033[<", 2100); /* SGR mouse report prefix */
+    terminal_bind_key("\033[200~", 2101); /* bracketed paste */
+    terminal_bind_key("\033[Z", 2102); /* Shift+Tab */
+    terminal_bind_key("\033[1;2A", 2110);
+    terminal_bind_key("\033[1;2B", 2111);
+    terminal_bind_key("\033[1;2D", 2112);
+    terminal_bind_key("\033[1;2C", 2113);
+    terminal_bind_key("\033[1;2H", 2114);
+    terminal_bind_key("\033[1;2F", 2115);
     fputs("\033[?2004h", terminal_output);
     /* Notcurses must select the wire protocol to match its coordinate decoder
        (cell SGR or pixel SGR on terminals advertising DEC mode 1016). */
     if (mouse_enabled && notcurses_mice_enable(terminal_nc,NCMICE_BUTTON_EVENT|NCMICE_DRAG_EVENT)<0)
         log_console("cannot enable terminal mouse tracking");
     fflush(terminal_output);
-    SLsmg_utf8_enable(1);
-    viz_utf8 = SLsmg_is_utf8_mode();
+    viz_utf8 = terminal_utf8();
     graphics_read_palette();
     graphics_probe();
     /* editor colors (degrade to inverse video on mono terminals) */
-    SLtt_set_color(2, NULL, "yellow", "black");        /* keyword */
-    SLtt_set_color(3, NULL, "brightcyan", "black");   /* note */
-    SLtt_set_color(4, NULL, "brightmagenta", "black");/* drum */
-    SLtt_set_color(5, NULL, "brightblue", "black");   /* transform */
-    SLtt_set_color(6, NULL, "gray", "black");          /* comment */
-    SLtt_set_color(7, NULL, "brown", "black");        /* rest */
-    SLtt_set_color(8, NULL, "brightgreen", "black");  /* number */
-    SLtt_set_color(9, NULL, "red", "black");          /* error marker */
-    SLtt_set_color(10, NULL, "black", "yellow");      /* sounding now */
-    SLtt_set_color(11, NULL, "black", "brightcyan"); /* selection */
+    terminal_define_role(2, NULL, "yellow", "black");        /* keyword */
+    terminal_define_role(3, NULL, "brightcyan", "black");   /* note */
+    terminal_define_role(4, NULL, "brightmagenta", "black");/* drum */
+    terminal_define_role(5, NULL, "brightblue", "black");   /* transform */
+    terminal_define_role(6, NULL, "gray", "black");          /* comment */
+    terminal_define_role(7, NULL, "brown", "black");        /* rest */
+    terminal_define_role(8, NULL, "brightgreen", "black");  /* number */
+    terminal_define_role(9, NULL, "red", "black");          /* error marker */
+    terminal_define_role(10, NULL, "black", "yellow");      /* sounding now */
+    terminal_define_role(11, NULL, "black", "brightcyan"); /* selection */
     theme_init();
-    rows = SLtt_Screen_Rows;
-    cols = SLtt_Screen_Cols;
+    rows = terminal_rows;
+    cols = terminal_cols;
     if (!lines_ready()) {
         fprintf(stderr, "out of memory\n");
         exit(1);
@@ -1018,7 +1012,7 @@ void tui_shutdown(void) {
     if (smg_active && notcurses_mice_disable(terminal_nc)<0)
         log_console("cannot disable terminal mouse tracking");
     fflush(terminal_output);
-    if (smg_active) { SLsmg_reset_smg(); smg_active = 0; }
+    if (smg_active) { terminal_shutdown(); smg_active = 0; }
     tty_active = 0;
     fputs("\033[?2004l\033[0m\033[?25h", stdout);
     fflush(stdout);
@@ -1032,10 +1026,10 @@ static void blank_inner(int r, int c, int w) {
     static int init = 0;
     if (!init) { memset(sp, ' ', sizeof(sp)-1); sp[512] = 0; init = 1; }
     if (w <= 0) return;
-    SLsmg_gotorc(r, c);
+    terminal_move(r, c);
     while (w > 0) {
         int n = w > 512 ? 512 : w;
-        SLsmg_write_nstring(sp, (unsigned)n);
+        terminal_write_padded(sp, (unsigned)n);
         w -= n;
     }
 }
@@ -1783,8 +1777,8 @@ static int editor_byte_at_col(const char *line, int cells) {
    color 0 = keep current. Returns cells written. */
 static int draw_text(int r, int c, const char *text, int maxcells, int color) {
     if (maxcells <= 0 || !text) return 0;
-    SLsmg_gotorc(r, c);
-    if (color) SLsmg_set_color(color);
+    terminal_move(r, c);
+    if (color) terminal_use_role(color);
     int cells = 0;
     const char *p = text;
     while (*p && cells < maxcells) {
@@ -1792,30 +1786,30 @@ static int draw_text(int r, int c, const char *text, int maxcells, int color) {
         unsigned cp = utf8_decode(p, &len);
         if (cp == '\t') {
             if (cells + 2 > maxcells) break;
-            SLsmg_write_nstring((char *)"  ", 2);
+            terminal_write_padded((char *)"  ", 2);
             cells += 2;
             p += len;
         } else if (cp < 0x20 || cp == 0x7f) {
-            SLsmg_write_nstring((char *)" ", 1);
+            terminal_write_padded((char *)" ", 1);
             cells += 1;
             p += len;
         } else {
             int w = cell_width(cp);
             if (w == 0) { p += len; continue; }
             if (cells + w > maxcells) break;
-            SLsmg_write_nchars((char *)p, (unsigned)len);
+            terminal_write_n((char *)p, (unsigned)len);
             p += len;
             cells += w;
         }
     }
-    if (color) SLsmg_normal_video();
+    if (color) terminal_style_reset();
     return cells;
 }
 
 static void draw_status(void) {
-    rows = SLtt_Screen_Rows; cols = SLtt_Screen_Cols;
-    SLsmg_gotorc(0, 0);
-    SLsmg_reverse_video();
+    rows = terminal_rows; cols = terminal_cols;
+    terminal_move(0, 0);
+    terminal_style_reverse();
     const char *mode_str = input_mode==2 ? "COMMAND" : input_mode==1 ? "PROMPT" : (vi_mode ? (vi_normal ? "VI:NORMAL" : "VI:INSERT") : "INSERT");
     if (!input_mode && vi_mode && vi_normal && sel_active)
         mode_str = sel_linewise ? "VI:VISUAL LINE" : "VI:VISUAL";
@@ -1841,15 +1835,15 @@ static void draw_status(void) {
         snprintf(buf, sizeof(buf), "Tompouce [%s] BPM:%.0f %s trk:%d%s | %s | F1:help F2:AI F3:vi F4:state F5:eval F6:find F7:song F8:hold F9:tracks ^P:play ^Q:quit F12:viz",
             mode_str, audio_get_bpm(), audio_is_playing()?"PLAY":"STOP", track_count, songstr,
             status_msg[0] ? status_msg : "Ready");
-    SLsmg_gotorc(0, 0);
-    SLsmg_reverse_video();
+    terminal_move(0, 0);
+    terminal_style_reverse();
     int used = draw_text(0, 0, buf, cols, 0);
     /* draw_text already positioned; reverse was set before it */
-    SLsmg_normal_video();
+    terminal_style_reset();
     if (used < cols) blank_inner(0, used, cols - used);
 }
 
-/* ---- syntax highlight: token classes, SLsmg color objects ----
+/* ---- syntax highlight: token classes, terminal color roles ----
    0 normal 2 keyword 3 note 4 drum 5 transform 6 comment 7 rest 8 number */
 
 static int is_transform_tok(const char *t) {
@@ -1968,12 +1962,12 @@ static void fill_play_mask(double now) {
                 unsigned r=colors[s]>>24,g=(colors[s]>>16)&255,b=(colors[s]>>8)&255;
                 if (r*299+g*587+b*114<128000) foreground="white";
             } else snprintf(background,sizeof(background),"yellow");
-            SLtt_set_color(16+s,NULL,foreground,background);
-            SLtt_Char_Type attributes=0;
-            if (flags[s]&VISUAL_BOLD) attributes|=SLTT_BOLD_MASK;
-            if (flags[s]&VISUAL_UNDERLINE) attributes|=SLTT_ULINE_MASK;
-            if (flags[s]&VISUAL_ITALIC) attributes|=SLTT_ITALIC_MASK;
-            SLtt_add_color_attribute(16+s,attributes);
+            terminal_define_role(16+s,NULL,foreground,background);
+            unsigned attributes=0;
+            if (flags[s]&VISUAL_BOLD) attributes|=NCSTYLE_BOLD;
+            if (flags[s]&VISUAL_UNDERLINE) attributes|=NCSTYLE_UNDERLINE;
+            if (flags[s]&VISUAL_ITALIC) attributes|=NCSTYLE_ITALIC;
+            terminal_role_attr(16+s,attributes);
             play_color[s]=colors[s]; play_flags[s]=flags[s];
         }
         play_ink[s]=16+s;
@@ -2022,22 +2016,22 @@ static void hl_put(const char *seg, int n, int obj, int *col, int maxw) {
         int ink = chosen ? 11 : (sounding ? (sounding<=192 && play_ink[sounding-1]?play_ink[sounding-1]:10) : obj);
         if (cp == '\t') {
             if (*col + 2 > maxw) break;
-            if (ink) SLsmg_set_color(ink);
-            SLsmg_write_nstring((char *)"  ", 2);
+            if (ink) terminal_use_role(ink);
+            terminal_write_padded((char *)"  ", 2);
             *col += 2;
         } else if (cp < 0x20 || cp == 0x7f) {
-            if (ink) SLsmg_set_color(ink);
-            SLsmg_write_nstring((char *)" ", 1);
+            if (ink) terminal_use_role(ink);
+            terminal_write_padded((char *)" ", 1);
             *col += 1;
         } else {
             int w = cell_width(cp);
             if (w == 0) { i += len; continue; }
             if (*col + w > maxw) break;
-            if (ink) SLsmg_set_color(ink);
-            SLsmg_write_nchars((char *)(seg + i), (unsigned)len);
+            if (ink) terminal_use_role(ink);
+            terminal_write_n((char *)(seg + i), (unsigned)len);
             *col += w;
         }
-        if (ink) SLsmg_normal_video();
+        if (ink) terminal_style_reset();
         i += len;
     }
 }
@@ -2435,7 +2429,7 @@ static void draw_line_roll(int row, int c0, int w) {
         if (last>rw) last=rw;
         for (int x=first;x<last && x<rw;x++) strip[x]='#';
     }
-    SLsmg_gotorc(row,c0); SLsmg_write_nstring(strip,(unsigned)rw);
+    terminal_move(row,c0); terminal_write_padded(strip,(unsigned)rw);
     if (rw<w) blank_inner(row,c0+rw,w-rw);
 }
 
@@ -2449,7 +2443,7 @@ static void draw_mini_scope(int row, int c0, int w) {
     if (sn < 2) sn = 2;
     audio_scope_copy(sbuf, sn);
     static const char lvch[] = " .:-=+*#";
-    SLsmg_gotorc(row, c0);
+    terminal_move(row, c0);
     for (int x = 0; x < rw; x++) {
         int i0 = x * sn / rw;
         int i1 = (x + 1) * sn / rw;
@@ -2462,7 +2456,7 @@ static void draw_mini_scope(int row, int c0, int w) {
         }
         if (hi > 7) hi = 7;
         char c[2] = { lvch[hi], 0 };
-        SLsmg_write_string(c);
+        terminal_write(c);
     }
     if (rw < w) blank_inner(row, c0 + rw, w - rw);
 }
@@ -2603,7 +2597,7 @@ static void draw_inline_row(int line, int sub, int row, int col, int width) {
             saved_width=image.width; saved_height=image.height; saved_time=stamp;
         }
         unsigned char grid[8][240]={{0}};
-        SLsmg_gotorc(row,col); SLsmg_set_color(8);
+        terminal_move(row,col); terminal_use_role(8);
         for (int x=0;x<image.width/2;x++) {
             for (int a=0;a<2;a++) for (int b=0;b<4;b++) {
                 size_t p=((size_t)((sub-1)*4+b)*image.width+x*2+a)*4;
@@ -2612,9 +2606,9 @@ static void draw_inline_row(int line, int sub, int row, int col, int width) {
                     inline_dot(grid,x*2+a,(sub-1)*4+b,image.width/2,image.height);
             }
             unsigned bits=grid[sub-1][x];
-            SLsmg_write_char(viz_utf8?(SLwchar_Type)(0x2800+bits):(SLwchar_Type)(bits?'*':' '));
+            terminal_putc(viz_utf8?(uint32_t)(0x2800+bits):(uint32_t)(bits?'*':' '));
         }
-        SLsmg_normal_video(); return;
+        terminal_style_reset(); return;
     }
 }
 
@@ -2771,9 +2765,9 @@ static void draw_code(void) {
     (void)rw; (void)sh; (void)th;
     int w = mid;
     if (w < 2 || h < 2) return;
-    SLsmg_draw_box(1, 0, h, w);
-    SLsmg_gotorc(1, 2);
-    SLsmg_write_string(pane_focus
+    terminal_box(1, 0, h, w);
+    terminal_move(1, 2);
+    terminal_write(pane_focus
         ? (editor_wrap ? " code wrap " : " code scroll ")
         : (editor_wrap ? " code wrap [active] " : " code scroll [active] "));
     int foot = editor_footer(h);
@@ -2814,11 +2808,11 @@ static void draw_code(void) {
             char num[16];
             if (sub == 0) snprintf(num, sizeof(num), "%4d ", ln + 1);
             else snprintf(num, sizeof(num), "     ");
-            SLsmg_gotorc(r + 2, 1);
-            if (selected_line) SLsmg_set_color(11);
-            else if (err) SLsmg_set_color(9);
-            SLsmg_write_string(num);
-            if (selected_line || err) SLsmg_normal_video();
+            terminal_move(r + 2, 1);
+            if (selected_line) terminal_use_role(11);
+            else if (err) terminal_use_role(9);
+            terminal_write(num);
+            if (selected_line || err) terminal_style_reset();
             int b0 = 0, b1 = 0;
             if (editor_wrap) editor_row_span(code_lines[ln], textw, sub, &b0, &b1);
             else editor_scroll_span(code_lines[ln], view_col, textw, &b0, &b1);
@@ -2840,7 +2834,7 @@ static void draw_code(void) {
                 hl_eol_comment = 0;
                 if (b0 > 0) highlight_scan(code_lines[ln], b0);
                 hl_force_comment = hl_eol_comment;
-                SLsmg_gotorc(r + 2, 6);
+                terminal_move(r + 2, 6);
                 used = 5 + draw_hl_line(tmp, textw);
                 hl_force_comment = 0;
                 hl_eol_comment = 0;
@@ -2894,11 +2888,11 @@ static void draw_code(void) {
                 }
             }
             (void)glen;
-            SLsmg_gotorc(cy, cx);
-            SLsmg_reverse_video();
-            SLsmg_write_string(glyph);
-            SLsmg_normal_video();
-            SLsmg_gotorc(cy, cx);
+            terminal_move(cy, cx);
+            terminal_style_reverse();
+            terminal_write(glyph);
+            terminal_style_reset();
+            terminal_move(cy, cx);
             editor_cur_r = cy;
             editor_cur_c = cx;
             editor_cur_on = 1;
@@ -3152,8 +3146,8 @@ static void file_confirm(void) {
 static void draw_search_at(int r0, int c0, int h, int w) {
     search_list_visible = 0;
     if (h < 7 || w < 12) return;
-    SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
+    terminal_box(r0, c0, h, w);
+    terminal_move(r0, c0+2);
     if (search_path[0]) {
         char title[120]; snprintf(title,sizeof(title)," bank: %.95s ",search_path);
         draw_text(r0,c0+2,title,w-4,0);
@@ -3163,9 +3157,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     } else if (search_path[0]) {
         char t[128];
         snprintf(t, sizeof(t), " banks: %.100s/ ", search_path);
-        SLsmg_write_string(t);
+        terminal_write(t);
     } else {
-        SLsmg_write_string(" banks (F6:close) ");
+        terminal_write(" banks (F6:close) ");
     }
     char q[256];
     snprintf(q, sizeof(q), search_category == SOUND_IMPORT ? "folder> %.200s" : "find> %.200s", search_buf);
@@ -3186,9 +3180,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
             category_row++; category_col = 0;
             blank_inner(category_row,c0+1,w-2);
         }
-        if (i == search_category) SLsmg_reverse_video();
+        if (i == search_category) terminal_style_reverse();
         draw_text(category_row,c0+1+category_col,label,w-2-category_col,0);
-        if (i == search_category) SLsmg_normal_video();
+        if (i == search_category) terminal_style_reset();
         category_col += len;
     }
     int info_row = category_row+1;
@@ -3223,10 +3217,10 @@ static void draw_search_at(int r0, int c0, int h, int w) {
                 search_rows[di].kind==SOUND_ROW_BANK?"/":"",search_dircounts[di],
                 search_rows[di].kind==SOUND_ROW_FILE?" [file]":"");
         }
-        SLsmg_gotorc(list_row+r, c0+1);
-        if (idx == search_sel) SLsmg_reverse_video();
+        terminal_move(list_row+r, c0+1);
+        if (idx == search_sel) terminal_style_reverse();
         int used = draw_text(list_row+r, c0+1, b, w-2, 0);
-        if (idx == search_sel) SLsmg_normal_video();
+        if (idx == search_sel) terminal_style_reset();
         if (used < w - 2) blank_inner(list_row+r, c0+1+used, w-2-used);
     }
     const char *foot = search_category == SOUND_IMPORT ? "Enter:import  Left/Right:category" : search_ndirs_total > search_ndirs
@@ -3238,9 +3232,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
 
 static void draw_file_at(int r0, int c0, int h, int w) {
     if (h < 4 || w < 12) return;
-    SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
-    SLsmg_write_string(file_mode == 1 ? " save song (Esc:cancel) " : " load song (Esc:cancel) ");
+    terminal_box(r0, c0, h, w);
+    terminal_move(r0, c0+2);
+    terminal_write(file_mode == 1 ? " save song (Esc:cancel) " : " load song (Esc:cancel) ");
     char q[256];
     snprintf(q, sizeof(q), "file> %.200s", file_buf);
     int qu = draw_text(r0+1, c0+1, q, w-2, 0);
@@ -3258,9 +3252,9 @@ static void draw_file_at(int r0, int c0, int h, int w) {
         char b[256];
         const char *mark = (file_buf[0] && strcmp(file_names[idx], file_buf) == 0) ? "*" : ">";
         snprintf(b, sizeof(b), "%s %.200s", mark, file_names[idx]);
-        if (idx == file_sel) SLsmg_reverse_video();
+        if (idx == file_sel) terminal_style_reverse();
         int used = draw_text(r0+3+r, c0+1, b, w-2, 0);
-        if (idx == file_sel) SLsmg_normal_video();
+        if (idx == file_sel) terminal_style_reset();
         if (used < w - 2) blank_inner(r0+3+r, c0+1+used, w-2-used);
     }
     const char *ffoot = file_mode == 1
@@ -3298,7 +3292,7 @@ static void search_use_bank(const char *dirfrag) {
 
 /* ---- right-pane geometry: main area rows 1..rows-3, right side at col mid ---- */
 static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, int *track_h_out) {
-    rows = SLtt_Screen_Rows; cols = SLtt_Screen_Cols;
+    rows = terminal_rows; cols = terminal_cols;
     int mid = (int)(cols * split_ratio);
     if (mid < 24) mid = 24;
     if (mid > cols - 20) mid = cols - 20;
@@ -3334,7 +3328,7 @@ static void toggle_console(void) {
 
 static void draw_console_at(int r0, int c0, int h, int w) {
     if (h < 3 || w < 4) return;
-    SLsmg_draw_box(r0, c0, h, w);
+    terminal_box(r0, c0, h, w);
     (void)draw_text(r0,c0+2," console (Ctrl+L:hide) ",w-4,0);
     int visible = h - 2;
     int cnt = console_count_get();
@@ -3486,7 +3480,7 @@ static const int cheat_n = (int)(sizeof(cheat) / sizeof(cheat[0]));
 /* docs content is static ASCII: byte count == cell count. Returns cells. */
 static int write_styled(const char *text, int style) {
     int cells = 0;
-    if (style == 1) SLsmg_reverse_video();
+    if (style == 1) terminal_style_reverse();
     const char *p = text;
     int in_code = 0;
     char seg[256];
@@ -3495,8 +3489,8 @@ static int write_styled(const char *text, int style) {
         if (*p == '`') {
             seg[si] = 0;
             if (si) {
-                if (style == 2 || in_code) { SLsmg_reverse_video(); SLsmg_write_string(seg); SLsmg_normal_video(); if (style == 1) SLsmg_reverse_video(); }
-                else SLsmg_write_string(seg);
+                if (style == 2 || in_code) { terminal_style_reverse(); terminal_write(seg); terminal_style_reset(); if (style == 1) terminal_style_reverse(); }
+                else terminal_write(seg);
                 cells += si;
             }
             si = 0;
@@ -3509,18 +3503,18 @@ static int write_styled(const char *text, int style) {
     }
     seg[si] = 0;
     if (si) {
-        if (style == 2 || in_code) { SLsmg_reverse_video(); SLsmg_write_string(seg); SLsmg_normal_video(); if (style == 1) SLsmg_reverse_video(); }
-        else SLsmg_write_string(seg);
+        if (style == 2 || in_code) { terminal_style_reverse(); terminal_write(seg); terminal_style_reset(); if (style == 1) terminal_style_reverse(); }
+        else terminal_write(seg);
         cells += si;
     }
-    if (style == 1 || style == 2) SLsmg_normal_video();
+    if (style == 1 || style == 2) terminal_style_reset();
     return cells;
 }
 
 /* word-wrap logical doc lines into visual rows for width w */
 static void draw_docs_at(int r0, int c0, int h, int w) {
     if (h < 3 || w < 8) return;
-    SLsmg_draw_box(r0, c0, h, w);
+    terminal_box(r0, c0, h, w);
     (void)draw_text(r0,c0+2," keybindings (F1:back PgUp/PgDn:scroll) ",w-4,0);
     int visible = h - 2;
     /* Blank logical lines and the area beyond the text wrap limit must also
@@ -3546,7 +3540,7 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
         int len = (int)strlen(t);
         if (len == 0) {
             if (skip > 0) skip--;
-            else { SLsmg_gotorc(r0+1+row, c0+1); row++; }
+            else { terminal_move(r0+1+row, c0+1); row++; }
             continue;
         }
         int off = 0;
@@ -3564,7 +3558,7 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
                 if (cl > 255) cl = 255;
                 memcpy(vb, t + off, cl);
                 vb[cl] = 0;
-                SLsmg_gotorc(r0+1+row, c0+1);
+                terminal_move(r0+1+row, c0+1);
                 int used = write_styled(vb, style);
                 int edge = c0 + 1 + vw;
                 if (c0 + 1 + used < edge) blank_inner(r0+1+row, c0+1+used, edge - (c0+1+used));
@@ -3580,7 +3574,7 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
         char hint[64];
         snprintf(hint, sizeof(hint), "%d/%d", docs_scroll + 1, total - visible + 1);
         int hl = (int)strlen(hint);
-        if (hl < w - 2) { SLsmg_gotorc(r0, c0 + w - 1 - hl); SLsmg_write_string(hint); }
+        if (hl < w - 2) { terminal_move(r0, c0 + w - 1 - hl); terminal_write(hint); }
     }
 }
 
@@ -3595,9 +3589,9 @@ static void state_line(int *row, int maxrow, int col, int width, const char *for
 
 static void draw_state_at(int r0, int c0, int h, int w) {
     if (h < 5 || w < 20) return;
-    SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
-    SLsmg_write_string(" state (F4:hide) ");
+    terminal_box(r0, c0, h, w);
+    terminal_move(r0, c0+2);
+    terminal_write(" state (F4:hide) ");
     char b[256];
     int row = r0 + 1;
     int maxrow = r0 + h - 1;
@@ -3697,13 +3691,13 @@ static void draw_state_at(int r0, int c0, int h, int w) {
 
 static void draw_tracks_at(int r0, int c0, int h, int w) {
     if (h < 4 || w < 12) return;
-    SLsmg_draw_box(r0, c0, h, w);
-    SLsmg_gotorc(r0, c0+2);
+    terminal_box(r0, c0, h, w);
+    terminal_move(r0, c0+2);
     char title[64];
     snprintf(title, sizeof(title), " tracks%s%s (F9:hide) ",
         scheduler_song_on() ? " SONG" : "",
         scheduler_song_hold() ? " HOLD" : "");
-    SLsmg_write_string(title);
+    terminal_write(title);
     int n = scheduler_song_count();
     int pos = scheduler_song_pos();
     int visible = h - 2;
@@ -3717,10 +3711,10 @@ static void draw_tracks_at(int r0, int c0, int h, int w) {
         scheduler_track_preview(idx, prev, sizeof(prev));
         char b[256];
         snprintf(b, sizeof(b), "%c%-3d %.200s", idx == pos ? '>' : ' ', idx, prev);
-        SLsmg_gotorc(r0+1+r, c0+1);
-        if (idx == pos) SLsmg_reverse_video();
+        terminal_move(r0+1+r, c0+1);
+        if (idx == pos) terminal_style_reverse();
         int used = draw_text(r0+1+r, c0+1, b, w-2, 0);
-        if (idx == pos) SLsmg_normal_video();
+        if (idx == pos) terminal_style_reset();
         if (used < w - 2) blank_inner(r0+1+r, c0+1+used, w-2-used);
     }
 }
@@ -3758,9 +3752,9 @@ static int scope_level(double v) {
 static void draw_viz_at(int r0, int w) {
     int h = VIZ_H;
     if (w < 20) return;
-    SLsmg_draw_box(r0, 0, h, w);
-    SLsmg_gotorc(r0, 2);
-    SLsmg_write_string(" piano roll + scope (F12:hide) ");
+    terminal_box(r0, 0, h, w);
+    terminal_move(r0, 2);
+    terminal_write(" piano roll + scope (F12:hide) ");
     NoteHist hist[NOTE_HIST_N];
     int nh = note_hist_copy(hist, NOTE_HIST_N);
     double now = audio_time_now();
@@ -3785,8 +3779,8 @@ static void draw_viz_at(int r0, int w) {
     for (int r = 0; r < roll_rows; r++)
         for (int x = 0; x < rw; x++) grid[r][x] = ' ';
     if (!any) {
-        SLsmg_gotorc(r0 + 2, gutter + 1);
-        SLsmg_write_string("(no notes yet)");
+        terminal_move(r0 + 2, gutter + 1);
+        terminal_write("(no notes yet)");
         for (int r = 0; r < roll_rows; r++)
             if (r != 1) blank_inner(r0 + 1 + r, gutter + 1, rw);
     } else {
@@ -3825,9 +3819,9 @@ static void draw_viz_at(int r0, int w) {
                     break;
                 }
             }
-            SLsmg_gotorc(r0 + 1 + r, 1);
-            SLsmg_write_string(lab);
-            SLsmg_write_nchars(grid[r], (unsigned)rw);
+            terminal_move(r0 + 1 + r, 1);
+            terminal_write(lab);
+            terminal_write_n(grid[r], (unsigned)rw);
         }
     }
 
@@ -3849,23 +3843,23 @@ static void draw_viz_at(int r0, int w) {
                 if (l < lo2) lo2 = l;
                 if (l > hi2) hi2 = l;
             }
-            SLsmg_gotorc(sc_base, gutter + 1 + x);
+            terminal_move(sc_base, gutter + 1 + x);
             if (viz_utf8) {
                 unsigned bits = 0;
                 for (int lv = lo2; lv <= hi2; lv++) {
                     bits |= braille_bit(0, lv) | braille_bit(1, lv);
                 }
-                SLsmg_write_char((SLwchar_Type)(0x2800 + bits));
+                terminal_putc((uint32_t)(0x2800 + bits));
             } else {
                 static const char *lvch = " .:-=+*#@";
                 char c[2] = { lvch[hi2], 0 };
-                SLsmg_write_string(c);
+                terminal_write(c);
             }
         }
         if (!viz_utf8) {
             /* second scope row: center line */
-            SLsmg_gotorc(sc_base + 1, gutter + 1);
-            for (int x = 0; x < rw; x++) SLsmg_write_string("-");
+            terminal_move(sc_base + 1, gutter + 1);
+            for (int x = 0; x < rw; x++) terminal_write("-");
         } else {
             blank_inner(sc_base + 1, gutter + 1, rw);
         }
@@ -4238,7 +4232,7 @@ static void do_command_or_ai(const char *text) {
     }
     char *ctx = editor_flatten();
     status_msg[0]=0; snprintf(status_msg,256,"AI thinking...");
-    SLsmg_refresh();
+    terminal_present();
     ai_request_async(text, ctx);
     free(ctx);
 }
@@ -4265,24 +4259,24 @@ void tui_frame(void) {
     int wsh = 0;
     if (ioctl(fileno(stdin), TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
         wsh = 1;
-        if (SLtt_Screen_Rows != ws.ws_row || SLtt_Screen_Cols != ws.ws_col) {
+        if (terminal_rows != ws.ws_row || terminal_cols != ws.ws_col) {
             resize_flag = 1;
         }
     } else {
-        SLtt_get_screen_size();
+        terminal_resync_size();
     }
     if (resize_flag) {
         resize_flag = 0;
         graphics_redraw = 1;
         notcurses_refresh(terminal_nc,NULL,NULL);
-        SLtt_get_screen_size();
+        terminal_resync_size();
     }
     if (wsh) {
-        SLtt_Screen_Rows = ws.ws_row;
-        SLtt_Screen_Cols = ws.ws_col;
+        terminal_rows = ws.ws_row;
+        terminal_cols = ws.ws_col;
     }
-    rows = SLtt_Screen_Rows;
-    cols = SLtt_Screen_Cols;
+    rows = terminal_rows;
+    cols = terminal_cols;
     graphics_cell_width = wsh && ws.ws_xpixel && ws.ws_col ? ws.ws_xpixel/ws.ws_col : 8;
     graphics_cell_height = wsh && ws.ws_ypixel && ws.ws_row ? ws.ws_ypixel/ws.ws_row : 16;
     if (graphics_cell_width < 1) graphics_cell_width = 8;
@@ -4295,7 +4289,7 @@ void tui_frame(void) {
     {
         static int first = 1, lr = 0, lc = 0;
         if (first || rows != lr || cols != lc) {
-            SLsmg_cls();
+            terminal_clear();
             first = 0;
             lr = rows;
             lc = cols;
@@ -4321,24 +4315,24 @@ void tui_frame(void) {
         int cell = editor_visual_col(search_buf,search_len);
         if (cell > cols-mid-prefix-2) cell = cols-mid-prefix-2;
         if (cell < 0) cell = 0;
-        SLsmg_gotorc(2, mid + prefix + cell);
+        terminal_move(2, mid + prefix + cell);
         cursor_r = 2; cursor_c = mid + prefix + cell;
     } else if (file_mode) {
         int mid = (cols * split_ratio < 24) ? 24 : (int)(cols * split_ratio);
-        SLsmg_gotorc(2, mid + 7 + file_len);
+        terminal_move(2, mid + 7 + file_len);
         cursor_r = 2; cursor_c = mid + 7 + file_len;
     } else if (input_mode == 0 && !pane_focus && editor_cur_on) {
-        SLsmg_gotorc(editor_cur_r, editor_cur_c);
+        terminal_move(editor_cur_r, editor_cur_c);
         cursor_r = editor_cur_r;
         cursor_c = editor_cur_c;
     } else if (input_mode) {
         int start=prompt_view_start();
         cursor_r=rows-2; cursor_c=(input_mode==2?1:4)+editor_visual_col(input_buf+start,input_len-start);
         if (cursor_c>=cols) cursor_c=cols-1;
-        SLsmg_gotorc(cursor_r,cursor_c);
+        terminal_move(cursor_r,cursor_c);
     }
-    if (cursor_r || cursor_c) SLtt_goto_rc(cursor_r,cursor_c);
-    SLsmg_refresh();
+    if (cursor_r || cursor_c) terminal_cursor(cursor_r,cursor_c);
+    terminal_present();
     if (graphic_layout_changed) notcurses_refresh(terminal_nc,NULL,NULL);
     inline_graphics_flush();
     /* DECSC/DECRC also restore rendition and collide with the library's
@@ -4349,8 +4343,8 @@ void tui_frame(void) {
 }
 
 static int report_byte(void) {
-    if (quit_requested || !SLang_input_pending(1)) return -1;
-    unsigned int c = SLang_getkey();
+    if (quit_requested || !terminal_poll(1)) return -1;
+    unsigned int c = terminal_get();
     if (c == NCKEY_ENTER) return '\n';
     if (c == NCKEY_BACKSPACE) return 127;
     if (c > 255 && c != 0xffff) return -1;
@@ -4500,12 +4494,22 @@ static void read_paste(void) {
     char *text = malloc(cap);
     /* A readiness timeout is a gap in a streamed paste, not its end. Keep
        draining even after allocation failure so payload cannot become editor
-       commands. EOF and shutdown still cancel the uncommitted edit. */
+       commands. EOF and shutdown still cancel the uncommitted edit. A lost
+       closing marker must not wedge the editor either: two seconds without
+       progress abandons the paste, and Ctrl-Q quits instead of being
+       swallowed mid-paste. */
     int overflow = !text, c, matched = 0;
     const char *end = "\033[201~";
+    double idle_since = now_seconds();
+    int quit_key = 0;
     while (!quit_requested && !terminal_input_closed) {
         c=report_byte();
-        if (c<0) continue;
+        if (c<0) {
+            if (now_seconds()-idle_since > 2.0) break;
+            continue;
+        }
+        idle_since = now_seconds();
+        if (c == 17) { quit_key = 1; break; }
         if (c == (unsigned char)end[matched]) {
             if (++matched == 6) break;
             continue;
@@ -4521,6 +4525,12 @@ static void read_paste(void) {
         if (c == '\t') c = ' ';
         if (c != '\n' && (c < 32 || c == 127)) continue;
         if (!overflow && !paste_push(&text, &n, &cap, (char)c)) overflow = 1;
+    }
+    if (quit_key) {
+        state_save();
+        quit_requested = 1;
+        free(text);
+        return;
     }
     if (!overflow) text[n] = 0;
     if (!overflow && matched == 6 && search_mode && !strchr(text,'\n') && n <= 240) {
@@ -4539,24 +4549,24 @@ static void read_paste(void) {
 }
 
 static int read_key(void) {
-    unsigned int c = SLang_getkey();
-    if (c == 0xFFFF) return SL_KEY_ERR;
+    unsigned int c = terminal_get();
+    if (c == 0xFFFF) return -1;
     if (c == NCKEY_ENTER) return '\r';
     if (c > 255) return (int)c;
     if (c == 27) {
-        if (SLang_input_pending(1) == 0) {
+        if (terminal_poll(1) == 0) {
             return 27;
         }
         /* Escape followed quickly by a normal-mode command is two keys,
            not an unknown terminal sequence that should swallow the command. */
-        unsigned int next=SLang_getkey();
-        if (next!=0xffff) SLang_ungetkey(next);
+        unsigned int next=terminal_get();
+        if (next!=0xffff) terminal_unget(next);
         if (next!='[' && next!='O' && next!='_' && next!=']') return 27;
-        SLang_ungetkey(27);
-        return SLkp_getkey();
+        terminal_unget(27);
+        return terminal_get_key();
     }
-    SLang_ungetkey((unsigned char)c);
-    return SLkp_getkey();
+    terminal_unget((unsigned char)c);
+    return terminal_get_key();
 }
 
 void tui_run(void) {
@@ -4620,7 +4630,7 @@ void tui_run(void) {
         if (file_mode) file_refresh();
         tui_frame();
 
-        if (SLang_input_pending(0)) ch = read_key();
+        if (terminal_poll(0)) ch = read_key();
         else {
             if (terminal_input_closed) { quit_requested=SIGHUP; continue; }
             int idle_ms = 50;
@@ -4634,7 +4644,7 @@ void tui_run(void) {
             mcp_wait_input(terminal_input_fd(),idle_ms);
             continue;
         }
-        if (ch == SL_KEY_ERR) continue;
+        if (ch == -1) continue;
         if (ch!=9 && ch!=2102 && ch!=0) completion_reset();
         undo_tick++;
         if (ch == 2100) { vi_reset(); read_mouse(); continue; }
@@ -4642,9 +4652,9 @@ void tui_run(void) {
 
         if (search_mode) {
             int nrows = search_ndirs + (search_path[0] ? 1 : 0);
-            if (ch == 27 || ch == SL_KEY_F(6)) { search_mode = 0; continue; }
-            else if (ch == SL_KEY_LEFT || ch == SL_KEY_RIGHT) {
-                int direction = ch == SL_KEY_RIGHT ? 1 : -1;
+            if (ch == 27 || ch == ((int)NCKEY_F00+(6))) { search_mode = 0; continue; }
+            else if (ch == (int)NCKEY_LEFT || ch == (int)NCKEY_RIGHT) {
+                int direction = ch == (int)NCKEY_RIGHT ? 1 : -1;
                 int previous = search_category;
                 search_category = (search_category+1+direction+SOUND_CATEGORIES+2)%(SOUND_CATEGORIES+2)-1;
                 if (previous == SOUND_IMPORT || search_category == SOUND_IMPORT) {
@@ -4652,7 +4662,7 @@ void tui_run(void) {
                 }
                 search_path[0] = 0; search_sel = 0; search_dirty = 1; continue;
             }
-            else if (ch == SL_KEY_ENTER || ch == '\n' || ch == '\r') {
+            else if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
                 search_descend_or_use();
                 continue;
             } else if (ch == 9) {
@@ -4662,20 +4672,20 @@ void tui_run(void) {
                     search_mode = 0;
                 } else search_descend_or_use();
                 continue;
-            } else if (ch == SL_KEY_UP) { if (search_sel > 0) search_sel--; continue; }
-            else if (ch == SL_KEY_DOWN) {
+            } else if (ch == (int)NCKEY_UP) { if (search_sel > 0) search_sel--; continue; }
+            else if (ch == (int)NCKEY_DOWN) {
                 if (search_sel < nrows - 1) search_sel++;
                 continue;
-            } else if (ch == SL_KEY_NPAGE) { search_sel += 10; if (search_sel > nrows - 1) search_sel = nrows - 1; continue; }
-            else if (ch == SL_KEY_PPAGE) { search_sel -= 10; if (search_sel < 0) search_sel = 0; continue; }
-            else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && search_len > 0) {
+            } else if (ch == (int)NCKEY_PGDOWN) { search_sel += 10; if (search_sel > nrows - 1) search_sel = nrows - 1; continue; }
+            else if (ch == (int)NCKEY_PGUP) { search_sel -= 10; if (search_sel < 0) search_sel = 0; continue; }
+            else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_len > 0) {
                 search_len--;
                 while (search_len > 0 && ((unsigned char)search_buf[search_len]&0xc0) == 0x80) search_len--;
                 search_buf[search_len] = 0; search_sel = 0; search_dirty = 1; continue;
-            } else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && search_path[0]) {
+            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_path[0]) {
                 search_ascend();
                 continue;
-            } else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && search_category >= 0) {
+            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_category >= 0) {
                 search_category = -1; search_sel = 0; search_dirty = 1; continue;
             } else if (ch >= 32 && ch < 127 && search_len < 240) {
                 search_buf[search_len++] = (char)ch; search_buf[search_len] = 0;
@@ -4685,16 +4695,16 @@ void tui_run(void) {
         }
         if (file_mode) {
             if (ch == 27) { file_mode = 0; continue; }
-            else if (ch == SL_KEY_ENTER || ch == '\n' || ch == '\r') {
+            else if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
                 file_confirm();
                 continue;
-            } else if (ch == SL_KEY_UP) { if (file_sel > 0) file_sel--; continue; }
-            else if (ch == SL_KEY_DOWN) {
+            } else if (ch == (int)NCKEY_UP) { if (file_sel > 0) file_sel--; continue; }
+            else if (ch == (int)NCKEY_DOWN) {
                 if (file_sel < file_n - 1) file_sel++;
                 continue;
-            } else if (ch == SL_KEY_NPAGE) { if (file_n > 0) { file_sel += 10; if (file_sel > file_n - 1) file_sel = file_n - 1; } continue; }
-            else if (ch == SL_KEY_PPAGE) { if (file_n > 0) { file_sel -= 10; if (file_sel < 0) file_sel = 0; } continue; }
-            else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && file_len > 0) {
+            } else if (ch == (int)NCKEY_PGDOWN) { if (file_n > 0) { file_sel += 10; if (file_sel > file_n - 1) file_sel = file_n - 1; } continue; }
+            else if (ch == (int)NCKEY_PGUP) { if (file_n > 0) { file_sel -= 10; if (file_sel < 0) file_sel = 0; } continue; }
+            else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && file_len > 0) {
                 file_len--; file_buf[file_len] = 0; file_sel = 0; file_dirty = 1; continue;
             } else if (ch >= 32 && ch < 127 && file_len < 240) {
                 char c = (char)ch;
@@ -4707,7 +4717,7 @@ void tui_run(void) {
             continue;
         }
         if (input_mode) {
-            if (ch == SL_KEY_ENTER || ch == '\n' || ch == '\r') {
+            if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
                 input_buf[input_len] = 0;
                 if (input_len > 0) {
                     if (input_mode==2) command_execute(input_buf);
@@ -4721,7 +4731,7 @@ void tui_run(void) {
                 input_mode = 0;
                 input_len = 0;
                 input_buf[0] = 0;
-            } else if ((ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) && input_len > 0) {
+            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && input_len > 0) {
                 input_len=vi_prev(input_buf,input_len);
                 input_buf[input_len] = 0;
             } else if (ch==9 || ch==2102 || ch==0) {
@@ -4740,8 +4750,8 @@ void tui_run(void) {
         if (ch == 27 && pane_focus) { pane_focus = 0; continue; }
         if (ch == 12) { toggle_console(); continue; } /* Ctrl+L, including vi and console focus. */
         if (pane_focus && vi_mode && vi_normal && ch==':' && vi_handle_normal(ch)) continue;
-        if (pane_focus && ch != 17 && ch != 16 && ch != SL_KEY_NPAGE && ch != SL_KEY_PPAGE &&
-            !(ch >= SL_KEY_F(1) && ch <= SL_KEY_F(12))) continue;
+        if (pane_focus && ch != 17 && ch != 16 && ch != (int)NCKEY_PGDOWN && ch != (int)NCKEY_PGUP &&
+            !(ch >= ((int)NCKEY_F00+(1)) && ch <= ((int)NCKEY_F00+(12)))) continue;
         if (ch >= 2110 && ch <= 2115) {
             vi_reset();
             if (!sel_active) selection_start(0);
@@ -4781,7 +4791,7 @@ void tui_run(void) {
             editor_paste(ch == 'P'); vi_pending = 0; continue;
         }
         if (sel_active && (!vi_mode || !vi_normal) &&
-            (ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8 || ch == SL_KEY_DELETE ||
+            (ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8 || ch == (int)NCKEY_DEL ||
              ch == '\r' || ch == '\n' || (ch >= 32 && ch <= 255 && ch != 127))) {
             int a, b;
             selection_bounds(&a, &b);
@@ -4792,8 +4802,8 @@ void tui_run(void) {
             continue;
         }
         if (ch == 27 || (!(vi_mode && vi_normal) &&
-            (ch == SL_KEY_UP || ch == SL_KEY_DOWN || ch == SL_KEY_LEFT ||
-             ch == SL_KEY_RIGHT || ch == SL_KEY_HOME || ch == SL_KEY_END))) sel_active = 0;
+            (ch == (int)NCKEY_UP || ch == (int)NCKEY_DOWN || ch == (int)NCKEY_LEFT ||
+             ch == (int)NCKEY_RIGHT || ch == (int)NCKEY_HOME || ch == (int)NCKEY_END))) sel_active = 0;
         if (ch == 17) {
             state_save(); /* persist session for next launch */
             break;
@@ -4819,24 +4829,24 @@ void tui_run(void) {
                 snprintf(status_msg, sizeof(status_msg), "slider %d = %.3g", i + 1, v);
             }
             continue;
-        } else if (ch == SL_KEY_F(5) || ch == 18) {
+        } else if (ch == ((int)NCKEY_F00+(5)) || ch == 18) {
             do_perform();
             continue;
-        } else if (ch == SL_KEY_F(2)) {
+        } else if (ch == ((int)NCKEY_F00+(2))) {
             input_mode = 1;
             input_len = 0;
             input_buf[0] = 0;
             continue;
-        } else if (ch == SL_KEY_F(1)) {
+        } else if (ch == ((int)NCKEY_F00+(1))) {
             show_docs = !show_docs;
             docs_scroll = 0;
             snprintf(status_msg, 256, show_docs ? "cheatsheet on" : "cheatsheet off");
             continue;
-        } else if (ch == SL_KEY_F(4)) {
+        } else if (ch == ((int)NCKEY_F00+(4))) {
             show_state = !show_state;
             snprintf(status_msg, 256, show_state ? "state on" : "state off");
             continue;
-        } else if (ch == SL_KEY_F(6)) {
+        } else if (ch == ((int)NCKEY_F00+(6))) {
             if (!search_mode) {
                 banks_ensure_default();
                 search_mode = 1;
@@ -4847,7 +4857,7 @@ void tui_run(void) {
                 snprintf(status_msg, 256, "bank search");
             } else search_mode = 0;
             continue;
-        } else if (ch == SL_KEY_F(7)) {
+        } else if (ch == ((int)NCKEY_F00+(7))) {
             if (scheduler_song_on()) {
                 scheduler_song_set(0);
                 snprintf(status_msg, 256, "song off");
@@ -4861,25 +4871,25 @@ void tui_run(void) {
                 }
             }
             continue;
-        } else if (ch == SL_KEY_F(8)) {
+        } else if (ch == ((int)NCKEY_F00+(8))) {
             scheduler_song_hold_toggle();
             snprintf(status_msg, 256, scheduler_song_hold() ? "hold on" : "hold off");
             continue;
-        } else if (ch == SL_KEY_F(9)) {
+        } else if (ch == ((int)NCKEY_F00+(9))) {
             show_tracks = !show_tracks;
             snprintf(status_msg, 256, show_tracks ? "tracks on" : "tracks off");
             continue;
-        } else if (ch == SL_KEY_F(10)) {
+        } else if (ch == ((int)NCKEY_F00+(10))) {
             split_ratio -= 0.05;
             if (split_ratio < 0.3) split_ratio = 0.3;
             snprintf(status_msg, 256, "split %.0f%%", split_ratio * 100);
             continue;
-        } else if (ch == SL_KEY_F(11)) {
+        } else if (ch == ((int)NCKEY_F00+(11))) {
             split_ratio += 0.05;
             if (split_ratio > 0.85) split_ratio = 0.85;
             snprintf(status_msg, 256, "split %.0f%%", split_ratio * 100);
             continue;
-        } else if (ch == SL_KEY_F(12)) {
+        } else if (ch == ((int)NCKEY_F00+(12))) {
             show_viz = !show_viz;
             snprintf(status_msg, 256, show_viz ? "viz on" : "viz off");
             continue;
@@ -4930,7 +4940,7 @@ void tui_run(void) {
         } else if (ch == 0) {
             (void)editor_complete(0,1);
             continue;
-        } else if (ch == SL_KEY_F(3)) {
+        } else if (ch == ((int)NCKEY_F00+(3))) {
             editor_toggle_mode();
             save_editor_config();
             snprintf(status_msg, 256, vi_mode ? (vi_normal ? "vi normal" : "vi insert") : "insert mode");
@@ -4942,45 +4952,45 @@ void tui_run(void) {
             vi_reset();
             snprintf(status_msg, 256, "%s", vi_mode ? "vi normal" : "insert mode");
             continue;
-        } else if (ch == SL_KEY_UP) {
+        } else if (ch == (int)NCKEY_UP) {
             editor_move_rows(-1);
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_DOWN) {
+        } else if (ch == (int)NCKEY_DOWN) {
             editor_move_rows(1);
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_LEFT) {
+        } else if (ch == (int)NCKEY_LEFT) {
             if (cur_col > 0) cur_col=vi_prev(code_lines[cur_line],cur_col);
             else if (cur_line > 0) { cur_line--; cur_col = strlen(code_lines[cur_line]); }
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_RIGHT) {
+        } else if (ch == (int)NCKEY_RIGHT) {
             if (cur_col < (int)strlen(code_lines[cur_line])) cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line]));
             else if (cur_line < code_line_count-1) { cur_line++; cur_col = 0; }
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_HOME) {
+        } else if (ch == (int)NCKEY_HOME) {
             cur_col = 0;
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_END) {
+        } else if (ch == (int)NCKEY_END) {
             cur_col = strlen(code_lines[cur_line]);
             vi_pending = 0;
             continue;
-        } else if (ch == SL_KEY_NPAGE || ch == SL_KEY_PPAGE) {
+        } else if (ch == (int)NCKEY_PGDOWN || ch == (int)NCKEY_PGUP) {
             if (show_docs) {
                 int mid, h, w, sh, th;
                 right_geom(&mid, &h, &w, &sh, &th);
                 int page = h - sh - th - 3;
                 if (page < 1) page = 1;
-                if (ch == SL_KEY_NPAGE) docs_scroll += page;
+                if (ch == (int)NCKEY_PGDOWN) docs_scroll += page;
                 else docs_scroll -= page;
                 if (docs_scroll < 0) docs_scroll = 0;
                 continue;
             }
             if (pane_focus) {
-                console_scroll += ch == SL_KEY_PPAGE ? 10 : -10;
+                console_scroll += ch == (int)NCKEY_PGUP ? 10 : -10;
                 if (console_scroll < 0) console_scroll = 0;
                 continue;
             }
@@ -4991,7 +5001,7 @@ void tui_run(void) {
                 foot = editor_footer(h);
                 page = h - 2 - foot;
                 if (page < 1) page = 1;
-                editor_move_rows(ch == SL_KEY_NPAGE ? page : -page);
+                editor_move_rows(ch == (int)NCKEY_PGDOWN ? page : -page);
             }
             vi_pending = 0;
             continue;
@@ -5032,7 +5042,7 @@ void tui_run(void) {
             vi_pending = 0;
             continue;
         }
-        if (ch == SL_KEY_BACKSPACE || ch == 127 || ch == 8) {
+        if (ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) {
             if (cur_col > 0) {
                 char *l = code_lines[cur_line];
                 int L = strlen(l);
@@ -5053,7 +5063,7 @@ void tui_run(void) {
                     snprintf(status_msg, 256, "out of memory");
                 }
             }
-        } else if (ch == SL_KEY_DELETE) {
+        } else if (ch == (int)NCKEY_DEL) {
             char *l = code_lines[cur_line];
             int L = (int)strlen(l);
             if (cur_col < L) {
@@ -5068,7 +5078,7 @@ void tui_run(void) {
                     snprintf(status_msg, 256, "out of memory");
                 }
             }
-        } else if (ch == SL_KEY_ENTER || ch == '\r' || ch == '\n') {
+        } else if (ch == (int)NCKEY_ENTER || ch == '\r' || ch == '\n') {
             undo_begin(UNDO_TYPE);
             if (line_split(cur_line, cur_col)) {
                 cur_line++;

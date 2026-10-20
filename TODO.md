@@ -15,6 +15,10 @@ system library and its protocol ownership. `tests/test_paste_stress.py` keeps
 these failing reproductions separate from the maintained acceptance cases.
 The 100 ms inter-chunk cancellation bug is fixed; delayed bodies, delayed
 closing markers and shutdown of an unfinished paste have owned PTY checks.
+Upstream: flood drops are dankamongmen/notcurses#2548 (still reproducing on
+3.0.17, filed as #2948); a split multibyte wedging the input thread is filed
+as #2947. A lost closing marker abandons the paste after two seconds without
+progress instead of hanging, and Ctrl-Q quits even mid-paste.
 
 Work proceeds in the order below. Later items reuse the workloads, publication
 rules and comparison gates from earlier ones. Do not add new audio baselines

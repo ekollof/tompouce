@@ -3,13 +3,13 @@
 #include <assert.h>
 
 static void check_input_readiness(void) {
-    while (SLang_input_pending(0)) (void)SLang_getkey();
+    while (terminal_poll(0)) (void)terminal_get();
     ncinput events[3]={{.id=NCKEY_RESIZE},{.id='z',.evtype=NCTYPE_RELEASE},
                       {.id='x',.evtype=NCTYPE_PRESS}};
     assert(write(terminal_event_pipe[1],events,sizeof(events))==(ssize_t)sizeof(events));
     /* Non-text events preceding queued text must not cancel a paste. */
-    assert(SLang_input_pending(0));
-    assert(SLang_getkey()=='x');
+    assert(terminal_poll(0));
+    assert(terminal_get()=='x');
 }
 
 static void check_console_toggle(void) {
@@ -47,13 +47,13 @@ static void check_help_clears_slider(void) {
         /* At the harness's 80-column split, the introductory help text wraps
            onto two rows, followed by an empty row at screen row 5. */
         draw_slider_chip(5,cols-17,16,0);
-        SLsmg_Char_Type cell;
-        SLsmg_gotorc(5,cols-17); assert(!SLsmg_char_at(&cell) && cell.color==8);
+        terminal_cell cell;
+        terminal_move(5,cols-17); assert(!terminal_cell_at(&cell) && cell.color==8);
         show_docs=1; docs_scroll=0;
         draw_code(); draw_right_pane();
         int mid,h,w,sh,th; right_geom(&mid,&h,&w,&sh,&th);
         for (int x=mid+1;x<cols-1;x++) {
-            SLsmg_gotorc(5,x); assert(!SLsmg_char_at(&cell));
+            terminal_move(5,x); assert(!terminal_cell_at(&cell));
             assert(cell.nchars==1 && cell.wchars[0]==' ' && cell.color!=8);
         }
         show_docs=0;
@@ -129,7 +129,7 @@ static void state_text(char *out, size_t size) {
     size_t at=0;
     for (int r=1;r<19;r++) {
         for (int c=0;c<78 && at+1<size;c++) {
-            SLsmg_Char_Type cell; SLsmg_gotorc(r,c); assert(SLsmg_char_at(&cell)==0);
+            terminal_cell cell; terminal_move(r,c); assert(terminal_cell_at(&cell)==0);
             out[at++]=cell.nchars && cell.wchars[0]<128?(char)cell.wchars[0]:' ';
         }
         if (at+1<size) out[at++]='\n';
@@ -143,7 +143,7 @@ static void check_state_modes(void) {
     mark_editor_clean();
     free(editor_written); editor_written=editor_flatten(); assert(editor_written);
     vi_mode=vi_normal=1; input_mode=0; graphics_disabled=1;
-    SLsmg_cls(); draw_state_at(1,0,18,78);
+    terminal_clear(); draw_state_at(1,0,18,78);
     char text[1600]; state_text(text,sizeof(text));
     assert(strstr(text,"mode=VI:N") && strstr(text,"source=evaluated") && strstr(text,"file=saved"));
     assert(strstr(text,"graphics=braille (forced)") && strstr(text,"history undo=") && strstr(text,"song="));
@@ -154,27 +154,27 @@ static void check_state_modes(void) {
     input_mode=2; draw_state_at(1,0,18,78); state_text(text,sizeof(text));
     assert(strstr(text,"mode=COMMAND"));
     input_buf[0]=0; input_len=0; draw_input();
-    SLsmg_Char_Type prompt; SLsmg_gotorc(rows-2,0); assert(SLsmg_char_at(&prompt)==0 && prompt.wchars[0]==':');
+    terminal_cell prompt; terminal_move(rows-2,0); assert(terminal_cell_at(&prompt)==0 && prompt.wchars[0]==':');
     snprintf(input_buf,sizeof(input_buf),"%s","e My café.json"); input_len=(int)strlen(input_buf); draw_input();
-    SLsmg_gotorc(rows-2,0); assert(SLsmg_char_at(&prompt)==0 && prompt.wchars[0]==':');
+    terminal_move(rows-2,0); assert(terminal_cell_at(&prompt)==0 && prompt.wchars[0]==':');
     memset(input_buf,'x',sizeof(input_buf)-1); input_buf[sizeof(input_buf)-1]=0;
     input_len=(int)strlen(input_buf); assert(prompt_view_start()>0); draw_input();
     input_len=0; input_buf[0]=0;
-    SLsmg_cls(); draw_state_at(1,0,8,30); /* Compact terminal clipping. */
+    terminal_clear(); draw_state_at(1,0,8,30); /* Compact terminal clipping. */
     input_mode=vi_mode=vi_normal=graphics_disabled=0;
 }
 
 static void check_line(const char *source) {
-    SLsmg_cls();
-    SLsmg_gotorc(0,0);
+    terminal_clear();
+    terminal_move(0,0);
     hl_quote = 0; hl_block_comment = hl_force_comment = 0;
     hl_play = NULL; sel_active = 0;
     int length = (int)strlen(source);
     assert(draw_hl_line(source,70) == length);
     for (int i = 0; i < length; i++) {
-        SLsmg_Char_Type cell;
-        SLsmg_gotorc(0,i);
-        assert(SLsmg_char_at(&cell) == 0);
+        terminal_cell cell;
+        terminal_move(0,i);
+        assert(terminal_cell_at(&cell) == 0);
         assert(cell.nchars == 1 && cell.wchars[0] == (unsigned char)source[i]);
     }
 }
@@ -241,26 +241,26 @@ static void check_live_mode_highlights(void) {
     audio_toggle_play(1);
     vi_mode = vi_normal = sel_active = 0; cur_line = cur_col = 0;
     draw_code();
-    SLsmg_Char_Type note;
-    SLsmg_gotorc(2,12); assert(SLsmg_char_at(&note) == 0 && note.color == 10);
+    terminal_cell note;
+    terminal_move(2,12); assert(terminal_cell_at(&note) == 0 && note.color == 10);
     selection_start(0); cur_col = (int)strlen(code_lines[0]);
     draw_code();
-    SLsmg_gotorc(2,12); assert(SLsmg_char_at(&note) == 0 && note.color == 11);
+    terminal_move(2,12); assert(terminal_cell_at(&note) == 0 && note.color == 11);
     editor_toggle_mode();
     assert(vi_mode && vi_normal && !sel_active && audio_is_playing());
     draw_code();
-    SLsmg_gotorc(2,12); assert(SLsmg_char_at(&note) == 0 && note.color == 10);
+    terminal_move(2,12); assert(terminal_cell_at(&note) == 0 && note.color == 10);
     fill_play_mask(1.1);
     assert(!play_rows[0][6] && play_rows[0][9]);
     hl_play = play_rows[0]; hl_play_len = (int)strlen(code_lines[0]); hl_bias = 0;
-    SLsmg_gotorc(2,6);
+    terminal_move(2,6);
     (void)draw_hl_line(code_lines[0],70);
-    SLsmg_gotorc(2,12); assert(SLsmg_char_at(&note) == 0 && note.color != 10);
-    SLsmg_gotorc(2,15); assert(SLsmg_char_at(&note) == 0 && note.color == 10);
+    terminal_move(2,12); assert(terminal_cell_at(&note) == 0 && note.color != 10);
+    terminal_move(2,15); assert(terminal_cell_at(&note) == 0 && note.color == 10);
     editor_toggle_mode();
     assert(!vi_mode && !sel_active);
     draw_code();
-    SLsmg_gotorc(2,12); assert(SLsmg_char_at(&note) == 0 && note.color == 10);
+    terminal_move(2,12); assert(terminal_cell_at(&note) == 0 && note.color == 10);
     assert(!strcmp(code,current_code));
     audio_toggle_play(0);
     tracks[0].javascript = NULL; track_count = 0;
@@ -285,8 +285,8 @@ static void check_stopped_highlight_growth(void) {
     for (int sub=0;sub<nrows;sub++) {
         int a,b; editor_row_span(comment,width,sub,&a,&b);
         for (int i=a;i<b;i++) {
-            SLsmg_Char_Type cell; SLsmg_gotorc(sub+2,6+i-a);
-            assert(!SLsmg_char_at(&cell) && cell.color==6);
+            terminal_cell cell; terminal_move(sub+2,6+i-a);
+            assert(!terminal_cell_at(&cell) && cell.color==6);
         }
     }
     /* A shorter replacement followed by another growth must stay cleared. */
@@ -316,9 +316,9 @@ static void check_visual_edit_highlights(void) {
     assert(play_rows[2] && play_rows[2][11] && !play_rows[2][14]);
     hl_quote=hl_block_comment=hl_force_comment=0; hl_bias=0;
     hl_play=play_rows[1]; hl_play_len=(int)strlen(code_lines[1]);
-    SLsmg_gotorc(0,0); (void)draw_hl_line(code_lines[1],70);
-    SLsmg_Char_Type cell;
-    SLsmg_gotorc(0,9); assert(SLsmg_char_at(&cell)==0 && cell.color==10 && cell.wchars[0]=='c');
+    terminal_move(0,0); (void)draw_hl_line(code_lines[1],70);
+    terminal_cell cell;
+    terminal_move(0,9); assert(terminal_cell_at(&cell)==0 && cell.color==10 && cell.wchars[0]=='c');
     fill_play_mask(1.1);
     assert(!play_rows[1][9] && play_rows[1][12]);
     assert(!play_rows[2][11] && play_rows[2][14]);
@@ -335,28 +335,27 @@ static void check_visual_edit_highlights(void) {
 }
 
 int main(void) {
-    SLutf8_enable(1);
-    SLtt_get_terminfo();
-    assert(SLsmg_init_smg() == 0);
+    terminal_init_locale();
+    assert(terminal_startup() == 0);
     /* Use an owned plane so the harness is independent of physical geometry. */
     ncplane_options plane_options={.rows=24,.cols=80,.name="render-test"};
     terminal_plane=ncplane_create(notcurses_stdplane(terminal_nc),&plane_options);
     assert(terminal_plane);
-    SLtt_Screen_Cols=80;
-    SLtt_Screen_Rows=24;
-    SLtt_set_color(2,NULL,"yellow","black");
-    SLtt_set_color(3,NULL,"brightcyan","black");
-    SLtt_set_color(5,NULL,"brightblue","black");
-    SLtt_set_color(6,NULL,"gray","black");
-    SLtt_set_color(8,NULL,"brightgreen","black");
-    SLtt_set_color(10,NULL,"black","yellow");
-    SLtt_set_color(11,NULL,"black","brightcyan");
+    terminal_cols=80;
+    terminal_rows=24;
+    terminal_define_role(2,NULL,"yellow","black");
+    terminal_define_role(3,NULL,"brightcyan","black");
+    terminal_define_role(5,NULL,"brightblue","black");
+    terminal_define_role(6,NULL,"gray","black");
+    terminal_define_role(8,NULL,"brightgreen","black");
+    terminal_define_role(10,NULL,"black","yellow");
+    terminal_define_role(11,NULL,"black","brightcyan");
     /* Notcurses owns complete EGCs, including marks sent in separate writes. */
-    SLsmg_gotorc(0,0);
-    SLsmg_write_string("e"); SLsmg_write_string("\xcc\x81");
+    terminal_move(0,0);
+    terminal_write("e"); terminal_write("\xcc\x81");
     char *egc=ncplane_at_yx(terminal_plane,0,0,NULL,NULL);
     assert(egc && !strcmp(egc,"e\xcc\x81")); free(egc);
-    SLsmg_gotorc(0,1); SLsmg_write_string("界x");
+    terminal_move(0,1); terminal_write("界x");
     egc=ncplane_at_yx(terminal_plane,0,3,NULL,NULL);
     assert(egc && !strcmp(egc,"x")); free(egc);
     check_line("  note(\"c4 e4\").gain(.5)");
@@ -368,23 +367,23 @@ int main(void) {
     check_line("  stop");
     check_line("  ");
     check_line("  const amount = 0.5");
-    SLsmg_Char_Type keyword, number;
-    SLsmg_gotorc(0,2); assert(SLsmg_char_at(&keyword) == 0);
-    SLsmg_gotorc(0,17); assert(SLsmg_char_at(&number) == 0);
+    terminal_cell keyword, number;
+    terminal_move(0,2); assert(terminal_cell_at(&keyword) == 0);
+    terminal_move(0,17); assert(terminal_cell_at(&number) == 0);
     assert(keyword.color != number.color);
-    SLsmg_gotorc(1,0);
+    terminal_move(1,0);
     const char *unicode = "  const café = \"♫\";";
     hl_src = unicode;
     assert(draw_hl_line(unicode,70) == 19);
-    SLsmg_Char_Type accent, music, semicolon;
-    SLsmg_gotorc(1,11); assert(SLsmg_char_at(&accent) == 0 && accent.wchars[0] == 0xe9);
-    SLsmg_gotorc(1,16); assert(SLsmg_char_at(&music) == 0 && music.wchars[0] == 0x266b);
-    SLsmg_gotorc(1,18); assert(SLsmg_char_at(&semicolon) == 0 && semicolon.wchars[0] == ';');
+    terminal_cell accent, music, semicolon;
+    terminal_move(1,11); assert(terminal_cell_at(&accent) == 0 && accent.wchars[0] == 0xe9);
+    terminal_move(1,16); assert(terminal_cell_at(&music) == 0 && music.wchars[0] == 0x266b);
+    terminal_move(1,18); assert(terminal_cell_at(&semicolon) == 0 && semicolon.wchars[0] == ';');
     hl_quote = 0;
     highlight_context("note(\"unfinished");
-    SLsmg_gotorc(1,0);
+    terminal_move(1,0);
     assert(draw_hl_line("const amount = 0.5",70) == 18);
-    SLsmg_gotorc(1,0); assert(SLsmg_char_at(&keyword) == 0);
+    terminal_move(1,0); assert(terminal_cell_at(&keyword) == 0);
     assert(keyword.color == 2);
     /* Render wrapped rows through the real editor, including typing a quote. */
     replace_code_with("  const melody = note(\"c4 e4 g4 b4 c5 e5 g5 b5\").gain(.5)\n  note(\"unfinished\n  const amount = 0.5");
@@ -399,8 +398,8 @@ int main(void) {
             int a, b;
             editor_row_span(code_lines[line],width,sub,&a,&b);
             for (int i = a; i < b; i++) {
-                SLsmg_Char_Type cell;
-                SLsmg_gotorc(row,6+i-a); assert(SLsmg_char_at(&cell) == 0);
+                terminal_cell cell;
+                terminal_move(row,6+i-a); assert(terminal_cell_at(&cell) == 0);
                 if (cell.nchars != 1 || cell.wchars[0] != (unsigned char)code_lines[line][i])
                     fprintf(stderr,"render mismatch line=%d sub=%d byte=%d row=%d want=%c got=%u\n",line,sub,i,row,code_lines[line][i],cell.wchars[0]);
                 assert(cell.nchars == 1 && cell.wchars[0] == (unsigned char)code_lines[line][i]);
@@ -417,7 +416,7 @@ int main(void) {
     check_input_readiness();
     check_console_toggle();
     check_help_clears_slider();
-    SLsmg_reset_smg();
+    terminal_shutdown();
     puts("terminal highlight cells and indentation ok");
     return 0;
 }

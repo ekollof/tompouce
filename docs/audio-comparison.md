@@ -231,20 +231,25 @@ live REPL runs on fake time with the same block rule while scheduling real
 pattern audio into a disposable offline context. The shared fixture sample
 is generated once and read byte-identically by both sides; the mock interval
 is honored so no scheduling pass runs after Stop, while mock time keeps
-advancing through stops exactly as the production audio clock does. Four cases
+advancing through stops exactly as the production audio clock does. Five cases
 gate at zero lag (0.99 correlation, 0.85–1.15 RMS): source re-evaluation,
-pattern-level tempo pivots (which both engines anchor at the pivoting hap,
-unlike external tempo changes), transport Stop with fractional tails, and
-transport restart. Restart re-fires early-cycle haps from cycle zero on both
+pattern-level tempo pivots (which both engines anchor at the pivoting hap),
+transport Stop with fractional tails, transport restart, and external tempo
+pivots. Restart re-fires early-cycle haps from cycle zero on both
 sides: the web resets its query cursor and re-anchors at the restart tick,
 matching the native cursor reset and restart-plus-latency anchor, so the
 re-fired onsets agree sample-exactly. An earlier harness froze mock time
 during stops, which made post-restart catch-up windows look older than they
 were and skipped the re-fired hap as too late; advancing time fixed it with
-no native change. An isolated run observed correlation 1.0 in all four.
-External tempo pivot anchoring diverges by design and stays a documented gap
-rather than a gate: the web anchors external pivots at its scheduling
-frontier while native anchors at its phase frontier.
+no native change. An isolated run observed correlation 1.0 in all five.
+External tempo pivots anchor at the scheduling frontier on both sides: the
+web anchors the pivot cycle at its last queried end and the time at its next
+callback phase, matching the native queried-cycle cursor and phase-frontier
+plus-latency anchor, so post-pivot onsets agree sample-exactly. An earlier
+harness ticked the web driver every render chunk instead of the production
+100 ms driver cadence (which the native js_tick gate already follows),
+scheduling one extra query window ahead and shifting web pivots by a window;
+gating web ticks to the production cadence fixed it with no native change.
 
 The CPU-budget fixture test covers nested v1/v2 membership, inherited minimum
 quotas, controller lists, subtree mounts, escaped paths and malformed limits,

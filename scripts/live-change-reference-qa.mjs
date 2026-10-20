@@ -23,6 +23,8 @@ const scenarios={
     ops:[{sample:Math.round(1.0*SR),kind:'eval'}]},
   tempo:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))",
     ops:[]},
+  exttempo:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'tempo'}]},
 };
 const SECOND="s('livefixture').fast(2).clip(.25).late(.311)";
 
@@ -98,9 +100,9 @@ async function main() {
         const bytes=Uint8Array.from(atob(spec.wav),c=>c.charCodeAt(0));
         await samples({livefixture:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]});
         await getAudioContext().decodeAudioData(bytes.buffer.slice(0));
-        let time=0,tick=null;
+        let time=0,tick=null,nextTick=0;
         const haps=[];
-        const host=repl({getTime:()=>time,setInterval:fn=>(tick=fn,1),clearInterval:()=>{tick=null;},
+        const host=repl({getTime:()=>time,setInterval:fn=>(tick=fn,nextTick=time+0.1,1),clearInterval:()=>{tick=null;},
           onSchedule:async(hap,at,cps)=>{haps.push({time:at,fake:time});await webaudioOutput(hap,at,cps);}});
         host.scheduler.setCps(.5);
         /* Evaluate without autostart, then start explicitly: autostart
@@ -127,11 +129,17 @@ async function main() {
             if (op.kind==='stop') host.stop();
             else if (op.kind==='start') host.start();
             else if (op.kind==='eval') await host.evaluate(spec.second,false);
+            else if (op.kind==='tempo') host.scheduler.setCps(1);
             if (host.state.evalError) throw host.state.evalError;
           }
           /* A cleared interval stays dead, exactly as in production: after
-             Stop no further scheduling passes run. Time still advances. */
-          if (tick!==null) { time=done/${SR}; tick(); }
+             Stop no further scheduling passes run. Time still advances.
+             Ticks follow the production 100 ms driver cadence (the native
+             js_tick gate does the same); ticking every render chunk would
+             schedule an extra query window ahead of the native frontier and
+             shift external tempo pivots by a window. */
+          time=done/${SR};
+          if (tick!==null && time+1e-9>=nextTick) { tick(); nextTick=time+0.1; }
           time=(done+chunk)/${SR};
           await new Promise(resolve=>setTimeout(resolve,0));
           done+=chunk;

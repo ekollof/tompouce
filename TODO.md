@@ -211,11 +211,13 @@ gates proved unexpressible: the browser offline render ignores event-level
 cps pivots for onset mapping, so renderer-side threading was reverted.
 Engine operations gate through the deterministic live harness
 (`test-live-reference-web`): source re-evaluation, pattern-level tempo
-pivots and transport Stop/restart with fractional onsets all observe
+pivots, external tempo pivots and transport Stop/restart with fractional
+onsets all observe
 correlation
 1.0 across repeated runs, with equal voice/hap counts on tempo. External
-tempo anchoring diverges by design and remains a documented
-optional gap. A mock interval that stays dead after Stop was required to
+tempo anchoring was assumed divergent until a harness tick-cadence fix
+showed both sides anchor at the scheduling frontier with no product change
+needed. A mock interval that stays dead after Stop was required to
 avoid re-firing scheduled haps, matching production interval cleanup; mock
 time still advances through stops, matching the production audio clock, so
 post-restart catch-up windows are not skipped as too late.
@@ -353,9 +355,13 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Transport restart after Stop is gated: both sides reset to cycle zero and
   re-fire early-cycle haps, with sample-exact onset agreement (correlation
   1.0). Stop itself (held tails finish, no new onsets) was already gated.
-- External tempo-change pivot anchoring: the web anchors at its scheduling
-  frontier, native at its phase frontier. Pattern-level tempo pivots are
-  gated live; external pivots are covered at event-value level.
+- External tempo-change pivot anchoring is gated: both sides anchor the
+  pivot at the scheduling frontier (last queried end / next callback
+  phase), with sample-exact onset agreement (correlation 1.0) through the
+  deterministic live harness (`test-live-reference-web`, now five cases)
+  plus a virtual-time event-onset gate. Pattern-level tempo pivots were
+  already gated live; external pivots were covered at event-value level
+  until the harness tick-cadence fix showed no product change was needed.
 - Multi-room generated sequences stay diagnostic: single seeded rooms gate,
   but exact tail parity is unreachable (production randomness is unknowable:
   one chain-ID draw per trigger plus fresh draws, and the eager harness

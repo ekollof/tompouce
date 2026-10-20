@@ -448,6 +448,29 @@ static void reference_query_failure(int print) {
     assert(track_load_from_code("note(60).gain(0)"));
 }
 
+/* External tempo pivot anchoring against the deployed web scheduler: steady
+   0.5 cps, virtual ticks every 100 ms, external 0.5 -> 1 cps pivot after the
+   tick at 1.0 s. The web anchors the pivot at its scheduling frontier
+   (last queried end, next callback phase); the native anchor must produce
+   the same onset times (web-measured 0.11/1.71/2.71). */
+static void test_external_tempo_anchor(void) {
+    event_queue_clear(); audio_toggle_play(0); audio_set_bpm(120); audio_time=0;
+    assert(track_load_from_code("note(60).gain(.5)"));
+    audio_toggle_play(1);
+    for (int i = 0; i <= 10; i++) live_tick(i * .1);
+    assert(fabs(tracks[0].js_cursor - .6) < 1e-9);
+    assert(qhead && fabs(qhead->ev.time - .11) < 1e-9 && !qhead->next);
+    audio_set_bpm(240);
+    for (int i = 11; i <= 26; i++) live_tick(i * .1);
+    double times[3] = {-1, -1, -1};
+    int n = 0;
+    for (QNode *node = qhead; node && n < 3; node = node->next) times[n++] = node->ev.time;
+    assert(n == 3);
+    assert(fabs(times[0] - .11) < 1e-9 && fabs(times[1] - 1.71) < 1e-9 && fabs(times[2] - 2.71) < 1e-9);
+    audio_toggle_play(0); event_queue_clear();
+    assert(track_load_from_code("note(60).gain(0)"));
+}
+
 static void test_timestamped_onsets(void) {
     event_queue_clear(); audio_toggle_play(0); audio_time=0;
     assert(track_load_from_code("note(69).gain(0)"));
@@ -1306,7 +1329,8 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
     int source = !strcmp(scenario, "source");
     int tempo = !strcmp(scenario, "tempo");
     int restart = !strcmp(scenario, "restart");
-    assert(transport || source || tempo || restart);
+    int exttempo = !strcmp(scenario, "exttempo");
+    assert(transport || source || tempo || restart || exttempo);
     double end = transport ? 2.0 : restart ? 3.0 : 2.5;
     const char *first = tempo ? "s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))"
         : "s('livefixture').fast(4).clip(.25).late(.137)";
@@ -1324,6 +1348,7 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
         op_times[nops] = 1.0; op_kinds[nops++] = 0;
         op_times[nops] = 1.5; op_kinds[nops++] = 1;
     }
+    if (exttempo) { op_times[nops] = 1.0; op_kinds[nops++] = 3; }
     long total = lround(end*SR);
     float *pcm = calloc((size_t)total*2, sizeof(*pcm)); assert(pcm);
     long done = 0;
@@ -1796,6 +1821,7 @@ int main(int argc, char **argv) {
     assert(slider_info(0,&value,NULL,NULL,NULL) && fabs(value-5.01e-9)<1e-20);
     assert(track_load_from_code("note(60).gain(0)"));
     reference_clock(0);
+    test_external_tempo_anchor();
     test_performance_tail();
     test_disabled_delay_keeps_tail();
     reference_cps(0);

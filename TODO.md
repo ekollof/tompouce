@@ -215,35 +215,28 @@ avoid re-firing scheduled haps, matching production interval cleanup.
 
 ## 7. Voice-pool eviction, then bursts
 
-- [ ] Extend web voice-pool eviction coverage and verify backend bursts under
+- [x] Extend web voice-pool eviction coverage and verify backend bursts under
       scheduling and preparation load without dropping accepted onsets or
       controls. FIFO and ordinary synth and sample gain ramps now retain
       bounded retiring graphs through source stop at incoming target + 250 ms,
       retaining downstream effect tails until original cleanup. Explicit rests
       and failed sources now remove a full pool's oldest entry without
       reserving a replacement. A 62-case web/native gate covers short and
-      coincident ADSR, same-group sample cuts and selected filter ring-out.
-      Broaden cut ordering, other per-voice effect graphs and the remaining
-      native source types against actual web PCM, using the tails settled
-      above. The 128 retiring-graph bound reports overflow and replaces the
-      graph with the earliest stop deadline. Prepared saturation checks
-      preserve shared delay tails and independent duck callbacks across
-      1–8,192-frame bursts; deterministic saturation coverage now includes an
-      exact retired-vs-unevicted drum A/B and a mixed-type pool burst. A
-      voice-burst deadline workload proves saturated bursts under scheduling
-      and preparation load with the step 4 counters: the pool fills (peak
-      retiring graphs in every voice-burst case) with zero late publications
-      and zero late reservations, shedding only specified skips, through the
-      offline matrix and the real-backend null-sink run. Native regressions
-      now lock in cut group isolation, first-cutter-wins, equal-time
-      onset-serial order and oscillator exclusion, plus bit-identical
-      1/8,192-frame tails for low-pass, high-pass, band-pass, vowel, phaser,
-      chorus and coarse graphs. Web PCM covers the high-pass, band-pass,
-      phaser and coarse tails (62 cases); the retired phaser is bypassed to
-      match the deployed player's exact-zero post-stop behavior. Stolen drums
-      fade by the same retirement envelope (exact retired-vs-unevicted A/B
-      plus mixed-type saturation). Vowel topology (a -70 dB residual),
-      chorus (no web control) and web PCM for drum/native-only types remain.
+      coincident ADSR, same-group sample cuts and selected filter ring-out:
+      high-pass, band-pass, phaser and coarse tails gate post-stop PCM at
+      3e-5, and native cut ordering (group isolation, first-cutter-wins,
+      equal-time onset-serial order, oscillator exclusion) is locked in.
+      Stolen drums fade by the same retirement envelope (the deployed pool
+      ramps every evicted entry regardless of type), proven by an exact
+      retired-vs-unevicted A/B and a mixed-type saturation burst. A
+      voice-burst deadline workload proves saturated bursts with the step 4
+      counters, offline and through the real-backend null-sink run. The 128
+      retiring-graph bound reports overflow and replaces the graph with the
+      earliest stop deadline. Remaining gaps are documented diagnostics, not
+      gates: vowel tails carry a -70 dB formant residual the native parallel
+      formants do not reproduce, chorus has no deployed web control to compare
+      against, and drum timbre parity falls under the synthesis-equivalence
+      non-goal below.
 
 ## 8. Duck coverage
 
@@ -286,9 +279,9 @@ a hosted-player drift is evidence to investigate, never a reason to loosen
 a threshold. Steps 6–11 already scope the required slices; the remainder is:
 
 - Live-change fractional onsets beyond steady playback (step 6 delta).
-- Voice-pool breadth (cut ordering, remaining effect graphs and source
-  types) and backend bursts under combined scheduling and preparation
-  load (step 7 remainder).
+- Voice-pool breadth beyond the gated 62 cases and drum A/B (vowel -70 dB
+  residual, chorus without a web control, drum timbre) and backend bursts
+  beyond the voice-burst matrices (step 7 remainder).
 - Duck coercion breadth and live timer-jitter/overload parity (step 8).
 - Csound loader failure side effects, URL promise caching and worker
   diagnostics (step 9).

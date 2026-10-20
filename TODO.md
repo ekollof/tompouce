@@ -222,7 +222,12 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       preserve shared delay tails and independent duck callbacks across
       1–8,192-frame bursts; they do not prove producer scheduling or underrun
       safety under preparation load. Run that load proof with the deadline
-      counters from step 4 when the pool exists.
+      counters from step 4 when the pool exists. Native regressions now lock
+      in cut group isolation, first-cutter-wins, equal-time onset-serial order
+      and oscillator exclusion, plus bit-identical 1/8,192-frame tails for
+      low-pass, high-pass, band-pass, vowel, phaser, chorus and coarse graphs;
+      web PCM for the non-low-pass graphs, remaining source types and the burst
+      load proof remain.
 
 ## 8. Duck coverage
 

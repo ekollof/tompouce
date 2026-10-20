@@ -109,6 +109,74 @@ static void voice_pool_fifo(void) {
     memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
 }
 
+static int constant_sample(void);
+
+static void test_cut_ordering(void) {
+    int sample=constant_sample();
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    voice_onset_serial=0; audio_time=0;
+    audio_set_reference_mode(1); audio_toggle_play(1);
+    /* Three sampled voices in group 1, one in group 2, one oscillator with cut=1. */
+    AudioEvent base={.time=.1,.duration=1,.inst=INST_SINE,.freq=440,
+        .smp=sample,.smp_speed=1,.smp_gate=1,.wt=-1,.gain=.1,
+        .att=.001,.dec=.001,.sus=1,.rel=.1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&base.dsp); base.dsp.enabled=1; base.dsp.p[DSP_CUT]=1;
+    audio_trigger_event(&base);
+    base.time=.12; audio_trigger_event(&base);
+    AudioEvent other=base; other.time=.14; other.dsp.p[DSP_CUT]=2;
+    audio_trigger_event(&other);
+    AudioEvent osc={.time=.16,.duration=1,.inst=INST_SINE,.freq=440,
+        .smp=-1,.wt=-1,.gain=.1,.att=.001,.dec=.001,.sus=1,.rel=.1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&osc.dsp); osc.dsp.enabled=1; osc.dsp.p[DSP_CUT]=1;
+    audio_trigger_event(&osc);
+    /* Same start time as the next cutter: onset_serial decides ordering. */
+    AudioEvent same=base; same.time=.2; audio_trigger_event(&same);
+    AudioEvent cutter=base; cutter.time=.2; cutter.gain=.1;
+    audio_trigger_event(&cutter);
+    /* Earlier group-1 sampled voices are cut; group 2 untouched. The first
+       cutter wins: the .1 voice cut at .12 keeps that time, later voices cut
+       at .2. Same-time ordering uses onset_serial. */
+    int cut_group1=0, cut_group2=0;
+    for (int i=0;i<VOICE_SLOTS;i++) {
+        if (!voices[i].active || !voices[i].sampled_source) continue;
+        if (voices[i].dsp.control.p[DSP_CUT]==2) {
+            assert(!voices[i].cut_pending);
+            cut_group2++;
+        } else if (voices[i].start_time<=.2+1e-12 && voices[i].onset_serial<voice_onset_serial) {
+            /* Exclude the newest cutter itself (largest onset_serial). */
+            if (voices[i].onset_serial==voice_onset_serial) continue;
+            assert(voices[i].cut_pending);
+            assert(voices[i].cut_time<=.2+1e-12);
+            cut_group1++;
+        }
+    }
+    assert(cut_group1==3 && cut_group2==1);
+    /* The .1 voice keeps its earliest cut at .12; .12 and same-time voices cut at .2. */
+    int saw_early=0, saw_ontime=0;
+    for (int i=0;i<VOICE_SLOTS;i++) {
+        if (!voices[i].active || !voices[i].sampled_source) continue;
+        if (voices[i].dsp.control.p[DSP_CUT]!=1 || !voices[i].cut_pending) continue;
+        if (fabs(voices[i].cut_time-.12)<1e-12) saw_early=1;
+        if (fabs(voices[i].cut_time-.2)<1e-12) saw_ontime=1;
+    }
+    assert(saw_early && saw_ontime);
+    /* Oscillator with cut=1 is not part of the sampled cut group. */
+    for (int i=0;i<VOICE_SLOTS;i++)
+        if (voices[i].active && !voices[i].sampled_source)
+            assert(!voices[i].cut_pending);
+    /* Re-cutting the same group does not re-arm already-cut voices. */
+    AudioEvent cutter2=base; cutter2.time=.25;
+    audio_trigger_event(&cutter2);
+    for (int i=0;i<VOICE_SLOTS;i++) {
+        if (!voices[i].active || !voices[i].sampled_source) continue;
+        if (fabs(voices[i].start_time-.2)<1e-12 && voices[i].dsp.control.p[DSP_CUT]==1)
+            assert(fabs(voices[i].cut_time-.2)<1e-12 || fabs(voices[i].cut_time-.25)<1e-12);
+    }
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
 static int constant_sample(void) {
     size_t bytes=44+44100*2;
     unsigned char *wav=calloc(bytes,1); assert(wav);
@@ -258,13 +326,26 @@ static void test_coincident_retirement_endpoint(void) {
     memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
 }
 
-static void render_retiring_filter_tail(int sample, unsigned long block, float *pcm) {
+static void render_retiring_effect_tail(int effect, unsigned long block, float *pcm) {
     memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
-    AudioEvent note={.time=.1,.duration=.7,.inst=INST_SINE,.freq=midi_to_freq(60),.smp=sample,.wt=-1,
+    voice_onset_serial=0; retirement_overflow=0;
+    int sample=constant_sample();
+    /* HPF/BPF remove DC, so those cases use a sine source for tail energy. */
+    int sine_source=(effect==1||effect==2);
+    AudioEvent note={.time=.1,.duration=.7,.inst=INST_SINE,.freq=midi_to_freq(60),.smp=sine_source?-1:sample,.wt=-1,
         .gain=.1,.smp_speed=1,.smp_gate=1,.att=.001,.dec=.001,.sus=1,.rel=.1,
         .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
     dsp_params_init(&note.dsp); note.dsp.enabled=1;
-    note.dsp.p[DSP_LPF]=100; note.dsp.p[DSP_LPQ]=10;
+    switch (effect) {
+    case 0: note.dsp.p[DSP_LPF]=100; note.dsp.p[DSP_LPQ]=10; break;
+    case 1: note.dsp.p[DSP_HPF]=5000; note.dsp.p[DSP_HPQ]=1; break;
+    case 2: note.dsp.p[DSP_BPF]=1000; note.dsp.p[DSP_BPQ]=2; break;
+    case 3: note.dsp.p[DSP_VOWEL]=0; break;
+    case 4: note.dsp.p[DSP_PHASER]=2; note.dsp.p[DSP_PHDEPTH]=.75; break;
+    case 5: note.dsp.p[DSP_CHORUS]=.5; break;
+    case 6: note.dsp.p[DSP_COARSE]=8; break;
+    default: assert(0);
+    }
     for(int i=0;i<MAX_VOICES;i++) {audio_trigger_event(&note);note.gain=0;}
     render_interval(pcm,8960,block); note.time=.3; audio_trigger_event(&note);
     render_interval(pcm+8960*2,26460-8960,block);
@@ -273,16 +354,24 @@ static void render_retiring_filter_tail(int sample, unsigned long block, float *
     assert(!voices[MAX_VOICES].active);
     double energy=0;
     for(int frame=24255;frame<26460;frame++) energy+=pcm[frame*2]*pcm[frame*2];
-    assert(energy>1e-12);
+    /* Coarse hold freezes the last value for up to one hold period after the
+       source stops, then renders silence; stateful filters/chorus/phaser
+       retain audible ring-out past retire_end. */
+    if (effect==6) {
+        for(int frame=24400;frame<26460;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
+    } else {
+        assert(energy>1e-12);
+    }
     for(int frame=39691;frame<44100;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
 }
 
 static void test_retiring_filter_tail(void) {
     static float reference[44100*2],actual[44100*2];
-    int sample=constant_sample();
-    render_retiring_filter_tail(sample,1,reference);
-    render_retiring_filter_tail(sample,8192,actual);
-    assert(!memcmp(reference,actual,sizeof(reference)));
+    for (int effect=0;effect<7;effect++) {
+        render_retiring_effect_tail(effect,1,reference);
+        render_retiring_effect_tail(effect,8192,actual);
+        assert(!memcmp(reference,actual,sizeof(reference)));
+    }
     memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
 }
 
@@ -356,11 +445,12 @@ int main(int argc, char **argv) {
         }
     }
     voice_pool_fifo();
+    test_cut_ordering();
     test_retirement_pcm();
     test_retirement_capacity();
     test_empty_source_eviction();
     test_coincident_retirement_endpoint();
     test_retiring_filter_tail();
-    puts("Fractional/reverse PCM, FIFO retirement fades, shared delay tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
+    puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, per-voice effect tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
     return 0;
 }

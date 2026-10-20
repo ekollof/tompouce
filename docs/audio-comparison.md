@@ -298,8 +298,11 @@ post-stop PCM only; DC is injected after the sampled instrument's own ADSR, so
 they do not establish full filtered attack/release waveform parity.
 Downstream filters and native effect graphs now process silence after source
 stop until the original cleanup deadline, retaining state and shared sends.
-Offline regressions check filter ring-out across 1/8,192-frame blocks and native
-effect-state lifetime. Broader cut ordering, other effect graphs, remaining
+Offline regressions check ring-out across 1/8,192-frame blocks for low-pass,
+high-pass, band-pass, vowel, phaser, chorus and coarse graphs, plus native
+effect-state lifetime; a cut-ordering regression checks same-group cuts with
+first-cutter-wins, group isolation, equal-time onset-serial tiebreak and
+oscillator exclusion. Web PCM parity for non-low-pass effect tails, remaining
 source types and scheduling-overload parity still need independent checks.
 
 Generated room preparation runs outside the scheduler and callback. The

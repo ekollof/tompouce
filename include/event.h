@@ -65,6 +65,18 @@ typedef struct {
     double rel;         // release seconds, -1 = default
     int midi_chan;      // MIDI channel 0-15, -1 = off
     int midi_note;      // MIDI note for midi out, -1 = none
+    /* Dominant MIDI extras, parsed in web send order (program, sysex, CC,
+       bend, touch, transport). A rejected extra drops itself and every later
+       extra, matching the web scheduler's throw-abort behavior. */
+    int midi_has_cc, midi_cc, midi_ccv; /* CC number/value, scaled 0..127 */
+    int midi_has_prog, midi_prog;       /* program change 0..127 */
+    int midi_has_bend, midi_bend;       /* pitch bend -8192..8191, zero-centered */
+    int midi_has_touch, midi_touch;     /* channel aftertouch 0..127 */
+    int midi_has_sysex, midi_sysex_id_len, midi_sysex_len;
+    unsigned char midi_sysex_id[3];
+    unsigned char midi_sysex[256];
+    int midi_cmd;         /* 0 none, 1 clock, 2 start, 3 continue, 4 stop */
+    int midi_cycle_start; /* whole.begin == 0 transport start */
     int smp_gate;       // gate sampled notes by duration (melodic banks)
     int is_drum;        // 1 if drum token
     char token[64];     // sound name for drum or note name

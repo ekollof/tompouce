@@ -565,7 +565,8 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
         if (!name || *name == '_' || dsp_supports_control(name)) continue;
         const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
             "attack","decay","sustain","release","speed","detune","delay","delaytime",
-            "delayfeedback","midichan","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
+            "delayfeedback","midichan","midiport","midicmd","ccn","ccv","progNum","sysexid","sysexdata",
+            "midibend","miditouch","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
             "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
@@ -631,17 +632,177 @@ static void discard_prep_job(AudioPrepJob *job) {
     prep_job_release(&job->base);
 }
 
-/* Dominant MIDI bypasses local audio like the web output; the channel
-   defaults to 1 there, and the pitch follows the resolved voice frequency.
-   Returns 0 for pitch-less events (rests are filtered by callers, drums
-   have no frequency), which carry no MIDI note. */
-static int midi_dominant_defaults(AudioEvent *event) {
-    if (event->midi_chan<0) event->midi_chan=0;
-    if (event->midi_note<0) {
-        if (event->freq<=0) return 0;
-        event->midi_note=(int)fmax(0,fmin(127,round(69+12*log2(event->freq/440))));
+/* Dominant MIDI extras, matching the deployed web output's message set and
+   validation. Sends run in web order (program, sysex, CC, bend, touch,
+   cycle-zero start, transport command); a rejected extra drops itself and
+   every later extra, matching the web scheduler's throw-abort behavior.
+   String CC names, MIDI maps and NRPN stay unimplemented and warn through
+   the unknown-control path. */
+static int midi_int(const cJSON *item, int min, int max, int *out) {
+    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble)) return 0;
+    double truncated = item->valuedouble < 0 ? ceil(item->valuedouble) : floor(item->valuedouble);
+    if (truncated < min || truncated > max || truncated != item->valuedouble) return 0;
+    *out = (int)truncated;
+    return 1;
+}
+
+static int midi_sysex_bytes(const cJSON *item, unsigned char *out, int cap, int *len) {
+    *len = 0;
+    if (cJSON_IsNumber(item)) {
+        int byte = 0;
+        if (cap < 1 || !midi_int(item, 0, 255, &byte)) return 0;
+        out[0] = (unsigned char)byte; *len = 1;
+        return 1;
+    }
+    if (!cJSON_IsArray(item)) return 0;
+    int count = cJSON_GetArraySize(item);
+    if (count < 0 || count > cap) return 0;
+    const cJSON *entry = NULL;
+    int n = 0;
+    cJSON_ArrayForEach(entry, item) {
+        int byte = 0;
+        if (!midi_int(entry, 0, 255, &byte)) return 0;
+        out[n++] = (unsigned char)byte;
+    }
+    *len = n;
+    return 1;
+}
+
+static int midi_parse_extras(JsProgram *program, const cJSON *value, AudioEvent *event) {
+    const cJSON *prog = cJSON_GetObjectItemCaseSensitive(value, "progNum");
+    if (prog) {
+        int number = 0;
+        if (!cJSON_IsNumber(prog) || !isfinite(prog->valuedouble) ||
+            prog->valuedouble < 0 || prog->valuedouble > 127) {
+            javascript_warn_control(program, "midi progNum (requires a number 0..127)");
+            return 0;
+        }
+        number = (int)floor(prog->valuedouble);
+        event->midi_has_prog = 1; event->midi_prog = number;
+    }
+    const cJSON *sysex_id = cJSON_GetObjectItemCaseSensitive(value, "sysexid");
+    const cJSON *sysex_data = cJSON_GetObjectItemCaseSensitive(value, "sysexdata");
+    if (sysex_id && sysex_data) {
+        unsigned char id[3]; int id_len = 0, data_len = 0;
+        if (!midi_sysex_bytes(sysex_id, id, 3, &id_len) ||
+            !cJSON_IsArray(sysex_data) ||
+            !midi_sysex_bytes(sysex_data, event->midi_sysex,
+                (int)sizeof(event->midi_sysex), &data_len)) {
+            javascript_warn_control(program, "midi sysex (requires integer id/data bytes 0..255)");
+            return 0;
+        }
+        memcpy(event->midi_sysex_id, id, (size_t)id_len);
+        event->midi_has_sysex = 1;
+        event->midi_sysex_id_len = id_len; event->midi_sysex_len = data_len;
+    }
+    const cJSON *ccn = cJSON_GetObjectItemCaseSensitive(value, "ccn");
+    const cJSON *ccv = cJSON_GetObjectItemCaseSensitive(value, "ccv");
+    if (ccn && ccv) {
+        int number = 0;
+        if (!midi_int(ccn, 0, 127, &number) || !cJSON_IsNumber(ccv) ||
+            !isfinite(ccv->valuedouble) || ccv->valuedouble < 0 || ccv->valuedouble > 1) {
+            javascript_warn_control(program, "midi CC (requires integer ccn 0..127 and ccv 0..1)");
+            return 0;
+        }
+        event->midi_has_cc = 1; event->midi_cc = number;
+        event->midi_ccv = (int)fmax(0, fmin(127, round(ccv->valuedouble * 127)));
+    }
+    const cJSON *bend = cJSON_GetObjectItemCaseSensitive(value, "midibend");
+    if (bend) {
+        if (!cJSON_IsNumber(bend) || !isfinite(bend->valuedouble) ||
+            bend->valuedouble < -1 || bend->valuedouble > 1) {
+            javascript_warn_control(program, "midi bend (requires midibend -1..1)");
+            return 0;
+        }
+        event->midi_has_bend = 1;
+        event->midi_bend = (int)(round((bend->valuedouble + 1) * 16383 / 2) - 8192);
+    }
+    const cJSON *touch = cJSON_GetObjectItemCaseSensitive(value, "miditouch");
+    if (touch) {
+        if (!cJSON_IsNumber(touch) || !isfinite(touch->valuedouble) ||
+            touch->valuedouble < 0 || touch->valuedouble > 1) {
+            javascript_warn_control(program, "midi touch (requires miditouch 0..1)");
+            return 0;
+        }
+        event->midi_has_touch = 1;
+        event->midi_touch = (int)fmax(0, fmin(127, round(touch->valuedouble * 127)));
     }
     return 1;
+}
+
+static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEvent *event) {
+    const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(value, "midicmd");
+    if (cJSON_IsString(cmd) && cmd->valuestring) {
+        if (!strcmp(cmd->valuestring, "clock") || !strcmp(cmd->valuestring, "midiClock"))
+            event->midi_cmd = 1;
+        else if (!strcmp(cmd->valuestring, "start"))
+            event->midi_cmd = 2;
+        else if (!strcmp(cmd->valuestring, "continue"))
+            event->midi_cmd = 3;
+        else if (!strcmp(cmd->valuestring, "stop"))
+            event->midi_cmd = 4;
+        return;
+    }
+    if (!cJSON_IsArray(cmd)) return;
+    if (cJSON_GetArraySize(cmd) < 1) return;
+    const cJSON *head = cJSON_GetArrayItem(cmd, 0);
+    const char *name = cJSON_IsString(head) ? head->valuestring : "";
+    if (!strcmp(name, "progNum") && cJSON_GetArraySize(cmd) == 2) {
+        const cJSON *number = cJSON_GetArrayItem(cmd, 1);
+        if (!cJSON_IsNumber(number) || !isfinite(number->valuedouble) ||
+            number->valuedouble < 0 || number->valuedouble > 127) {
+            javascript_warn_control(program, "midi progNum (requires a number 0..127)");
+            return;
+        }
+        if (!event->midi_has_prog) {
+            event->midi_has_prog = 1;
+            event->midi_prog = (int)floor(number->valuedouble);
+        }
+        return;
+    }
+    if (!strcmp(name, "sysex") && cJSON_GetArraySize(cmd) == 3) {
+        if (event->midi_has_sysex) return;
+        unsigned char id[3]; int id_len = 0, data_len = 0;
+        if (!midi_sysex_bytes(cJSON_GetArrayItem(cmd, 1), id, 3, &id_len) ||
+            !midi_sysex_bytes(cJSON_GetArrayItem(cmd, 2), event->midi_sysex,
+                (int)sizeof(event->midi_sysex), &data_len)) {
+            javascript_warn_control(program, "midi sysex (requires integer id/data bytes 0..255)");
+            return;
+        }
+        memcpy(event->midi_sysex_id, id, (size_t)id_len);
+        event->midi_has_sysex = 1;
+        event->midi_sysex_id_len = id_len; event->midi_sysex_len = data_len;
+        return;
+    }
+    if (!strcmp(name, "cc")) {
+        javascript_warn_control(program, "midi CC (requires integer ccn 0..127 and ccv 0..1)");
+        return;
+    }
+}
+
+/* Dominant MIDI bypasses local audio like the web output; the channel
+   defaults to 1 there. A note is sent only for haps carrying a note key,
+   matching the web scheduler; rests and pitch-less drums carry no note but
+   still deliver extras. Returns 0 when there is nothing to send. */
+static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
+    const cJSON *hap, AudioEvent *event) {
+    if (event->midi_chan < 0) event->midi_chan = 0;
+    int clean = midi_parse_extras(program, value, event);
+    int extras = event->midi_has_prog || event->midi_has_sysex || event->midi_has_cc ||
+        event->midi_has_bend || event->midi_has_touch;
+    if (clean) {
+        const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap, "begin");
+        if (cJSON_IsNumber(begin) && isfinite(begin->valuedouble) && begin->valuedouble == 0)
+            event->midi_cycle_start = 1;
+        midi_parse_command(program, value, event);
+    }
+    if (cJSON_HasObjectItem(value, "note") && event->midi_note < 0) {
+        if (event->freq > 0)
+            event->midi_note = (int)fmax(0, fmin(127, round(69 + 12 * log2(event->freq / 440))));
+    } else if (!cJSON_HasObjectItem(value, "note")) {
+        event->midi_note = -1;
+    }
+    return event->midi_note >= 0 || extras || event->midi_cycle_start || event->midi_cmd != 0;
 }
 
 static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsigned generation) {
@@ -656,7 +817,7 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
             double cycle=control(hap,"begin",0,-1e12,1e12);
             if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {
                 event.osc_only=1; event.generation=generation;
-                if (midi && midi_dominant_defaults(&event)) event.midi_only=1;
+                if (midi && midi_prepare_dominant(program,value,hap,&event)) event.midi_only=1;
                 event_queue_push(&event);
             } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
         }
@@ -672,13 +833,18 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
         }
     } else if (midi && !csound) {
         const char *sound=text_control(value,"s");
-        if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) return;
+        if ((!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) &&
+            !cJSON_HasObjectItem(value,"ccn") && !cJSON_HasObjectItem(value,"ccv") &&
+            !cJSON_HasObjectItem(value,"progNum") && !cJSON_HasObjectItem(value,"sysexid") &&
+            !cJSON_HasObjectItem(value,"sysexdata") && !cJSON_HasObjectItem(value,"midibend") &&
+            !cJSON_HasObjectItem(value,"miditouch") && !cJSON_HasObjectItem(value,"midicmd"))
+            return;
     }
     AudioEvent event;
     if (!audio_event_values(hap,plan->origin,plan->seconds,&event,0)) return;
     event.generation=generation; event.duck_mask=0;
     if (midi) {
-        if (!midi_dominant_defaults(&event)) return;
+        if (!midi_prepare_dominant(program,value,hap,&event)) return;
         event.midi_only=1;
     }
     if (csound) {

@@ -693,10 +693,29 @@ from the resolved voice frequency. An options `midichannel` applies only when
 the hap sets no `midichan`. Each external output fires independently, so
 `.midi()` combines with `.osc()` and `.csound()` while local synthesis stays
 off; a failing Csound schedule still warns while the MIDI note goes out.
-Rests and pitch-less drum patterns carry no MIDI note. Velocity follows
+Rests and pitch-less drum patterns carry no MIDI note, and haps without a
+`note` key send extras without a note, matching the web scheduler. Velocity follows
 `gain` times `velocity` as shared with the `midichan` path (the web default
-.9 differs from the native gain default); CC, program change, bend, touch,
-sysex, midicmd transport and port selection are not implemented.
+.9 differs from the native gain default). CC (`ccn` integer 0..127 with
+`ccv` 0..1, also via `control([ccn, ccv])`), program change (`progNum`
+0..127, truncated), pitch bend (`midibend` -1..1), channel aftertouch
+(`miditouch` 0..1), sysex (integer `sysexid`/`sysexdata` bytes 0..255, up to
+3 id and 256 data bytes framed F0..F7) and transport `midicmd`
+(`clock`/`midiClock`/`start`/`stop`/`continue`, plus `progNum`/`sysex`
+array forms) all send through ALSA. `midiport` values are accepted and
+broadcast to ALSA subscribers. A hap at cycle zero additionally sends
+transport start, as on the web. Sends run in web order (note, program,
+sysex, CC, bend, touch, cycle-zero start, transport); a rejected extra
+drops itself and every later extra for that hap with a console warning,
+matching the web throw-abort behavior. String sysex forms, non-integer CC
+numbers and out-of-range values never send. `cmake --build build --target
+test-midi-reference-web` gates 20 hap-value and commit cases against the
+deployed REPL and pins its send-validation predicates. Open gaps: string CC
+names, MIDI maps, NRPN, `isController` and options-object
+velocity/gain/note-offset defaults, combined scalar-plus-array duplicate
+sends, and numeric-string control coercion drift (pinned 1.2.6 coerces
+`ccn("74")` to 74 while the deployed REPL preserves the string and
+rejects the send).
 
 ## Building and testing
 

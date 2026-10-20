@@ -507,6 +507,177 @@ static void test_midi_loopback(void) {
     puts("midi loopback: CC and keyboard notes cross real ALSA ports");
 }
 
+/* Dominant MIDI extras: commit parsing, web-ordered validation with
+   throw-abort parity, and control-only delivery without notes. */
+
+typedef struct {
+    int midi_only, chan, note, osc_only, csound_only;
+    int has_cc, cc, ccv, has_prog, prog, has_bend, bend, has_touch, touch;
+    int has_sysex, id_len, data_len;
+    unsigned char id[3], data[8];
+    int cmd, cycle_start;
+} MidiExtra;
+
+static int collect_extras(MidiExtra *out, int capacity) {
+    int count = 0;
+    for (QNode *node = qhead; node && count < capacity; node = node->next) {
+        if (node->ev.control_only || node->ev.eviction_only || !node->ev.midi_only) continue;
+        MidiExtra e;
+        memset(&e, 0, sizeof(e));
+        e.midi_only = node->ev.midi_only; e.chan = node->ev.midi_chan; e.note = node->ev.midi_note;
+        e.osc_only = node->ev.osc_only; e.csound_only = node->ev.csound_only;
+        e.has_cc = node->ev.midi_has_cc; e.cc = node->ev.midi_cc; e.ccv = node->ev.midi_ccv;
+        e.has_prog = node->ev.midi_has_prog; e.prog = node->ev.midi_prog;
+        e.has_bend = node->ev.midi_has_bend; e.bend = node->ev.midi_bend;
+        e.has_touch = node->ev.midi_has_touch; e.touch = node->ev.midi_touch;
+        e.has_sysex = node->ev.midi_has_sysex;
+        e.id_len = node->ev.midi_sysex_id_len; e.data_len = node->ev.midi_sysex_len;
+        if (e.id_len > 3) e.id_len = 3;
+        if (e.data_len > 8) e.data_len = 8;
+        memcpy(e.id, node->ev.midi_sysex_id, (size_t)e.id_len);
+        memcpy(e.data, node->ev.midi_sysex, (size_t)e.data_len);
+        e.cmd = node->ev.midi_cmd; e.cycle_start = node->ev.midi_cycle_start;
+        out[count++] = e;
+    }
+    return count;
+}
+
+static void test_midi_extras_commit(void) {
+    MidiExtra extras[16];
+    event_queue_clear(); audio_time = 0; audio_toggle_play(1);
+    assert(prep_pool_start(0, 0));
+    assert(track_load_from_code("note(60).ccn(74).ccv(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && extras[0].has_cc && extras[0].cc == 74 && extras[0].ccv == 64);
+    event_queue_clear();
+    /* Control-only haps carry extras without a note, like the web output. */
+    assert(track_load_from_code("ccn(74).ccv(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note < 0 && extras[0].has_cc && extras[0].ccv == 64);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).progNum(10).midibend(0.25).miditouch(0.75).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].has_prog && extras[0].prog == 10);
+    assert(extras[0].has_bend && extras[0].bend == 2047);
+    assert(extras[0].has_touch && extras[0].touch == 95);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).sysex([0x43, [0x79, 0x09]]).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].has_sysex && extras[0].id_len == 1 && extras[0].id[0] == 0x43);
+    assert(extras[0].data_len == 2 && extras[0].data[0] == 0x79 && extras[0].data[1] == 0x09);
+    event_queue_clear();
+    /* String sysex forms never send on the web; the note still commits. */
+    assert(track_load_from_code("note(60).sysexid(\"0x77\").sysexdata(\"0x01\").midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && !extras[0].has_sysex);
+    event_queue_clear();
+    /* Out-of-range program aborts later extras but keeps the note. */
+    assert(track_load_from_code("note(60).progNum(200).ccn(74).ccv(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && !extras[0].has_prog && !extras[0].has_cc);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).ccn(74).ccv(64).midibend(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && !extras[0].has_cc && !extras[0].has_bend);
+    event_queue_clear();
+    /* A lone CC number without a value sends nothing extra. */
+    assert(track_load_from_code("note(60).ccn(74).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && !extras[0].has_cc);
+    event_queue_clear();
+    /* Rests and drums with extras commit extras without notes. */
+    assert(track_load_from_code("s('~').ccn(74).ccv(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note < 0 && extras[0].has_cc);
+    event_queue_clear();
+    assert(track_load_from_code("s('bd').ccn(20).ccv(0.5).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note < 0 && extras[0].has_cc && extras[0].cc == 20);
+    event_queue_clear();
+    assert(track_load_from_code("midicmd(\"stop\").midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note < 0 && extras[0].cmd == 4);
+    event_queue_clear();
+    /* Unknown transport commands are ignored like the web output. */
+    assert(track_load_from_code("midicmd(\"bogus\").midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].cmd == 0);
+    event_queue_clear();
+    /* Port selection broadcasts to ALSA subscribers. */
+    assert(track_load_from_code("note(60).midiport(2).ccn(1).ccv(1).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60 && extras[0].has_cc);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).midiport(\"no-such-port\").midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].note == 60);
+    event_queue_clear();
+    /* Patterned fan-out resolves per hap with cycle-start only on begin 0. */
+    assert(track_load_from_code("note(\"60 62\").ccn(\"74 75\").ccv(\"0.5 0.25\").midi()"));
+    schedule_loaded(2);
+    assert(collect_extras(extras, 16) == 2);
+    assert(extras[0].note == 60 && extras[0].has_cc && extras[0].cc == 74 && extras[0].ccv == 64);
+    assert(extras[1].note == 62 && extras[1].has_cc && extras[1].cc == 75 && extras[1].ccv == 32);
+    event_queue_clear();
+    /* Extras combine with OSC; a failing Csound schedule still keeps MIDI. */
+    assert(track_load_from_code("note(60).ccn(74).ccv(0.5).midi().osc()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].midi_only && extras[0].osc_only && extras[0].has_cc);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).ccn(3).ccv(0.25).midi().csound('MissingInstrXYZ')"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].midi_only && extras[0].has_cc && extras[0].cc == 3);
+    event_queue_clear();
+    puts("midi extras commit: values, rejections, abort order, control-only, combos ok");
+}
+
+/* Sender-level delivery: exact captured parameters and web send order. */
+static void test_midi_extras_delivery(void) {
+    midi_capture_enable(1);
+    midi_cc(0, 74, 64);
+    midi_program(1, 10);
+    midi_bend(2, 2047);
+    midi_touch(3, 95);
+    unsigned char id[1] = {0x43}, data[2] = {0x79, 0x09};
+    midi_sysex(id, 1, data, 2);
+    midi_transport(1);
+    midi_transport(4);
+    MidiCaptured seen[16];
+    unsigned total = midi_captured_all(seen, 16);
+    assert(total == 7);
+    assert(seen[0].kind == MIDI_CAP_CC && seen[0].chan == 0 && seen[0].d1 == 74 && seen[0].d2 == 64);
+    assert(seen[1].kind == MIDI_CAP_PROG && seen[1].chan == 1 && seen[1].d1 == 10);
+    assert(seen[2].kind == MIDI_CAP_BEND && seen[2].chan == 2 && seen[2].d1 == 2047);
+    assert(seen[3].kind == MIDI_CAP_TOUCH && seen[3].chan == 3 && seen[3].d1 == 95);
+    assert(seen[4].kind == MIDI_CAP_SYSEX && seen[4].d1 == 1 && seen[4].d2 == 2);
+    assert(seen[4].sysex_len == 5 && seen[4].sysex[0] == 0xF0 && seen[4].sysex[1] == 0x43);
+    assert(seen[4].sysex[2] == 0x79 && seen[4].sysex[3] == 0x09 && seen[4].sysex[4] == 0xF7);
+    assert(seen[5].kind == MIDI_CAP_TRANSPORT && seen[5].d1 == 1);
+    assert(seen[6].kind == MIDI_CAP_TRANSPORT && seen[6].d1 == 4);
+    /* Out-of-range sends are dropped before capture. */
+    midi_cc(0, 128, 64); midi_program(0, 200); midi_bend(0, 9000); midi_touch(0, 200);
+    midi_transport(0); midi_transport(9);
+    assert(midi_captured_all(seen, 16) == 7);
+    midi_capture_enable(0);
+    puts("midi extras delivery: captured parameters, framing, order, bounds ok");
+}
+
 #ifdef __SANITIZE_ADDRESS__
 /* ALSA keeps per-handle internals past snd_seq_close; suppress only those,
    never test-code allocations. */
@@ -515,7 +686,112 @@ const char *__lsan_default_suppressions(void) {
 }
 #endif
 
+/* Reference mode for scripts/midi-reference-qa.mjs: stdin is a JSON array
+   of {name, code}; stdout is an array of {name, values, events} where
+   values are the queried hap values (up to 8) and events are the committed
+   dominant MIDI decisions. */
+static int midi_reference_main(void) {
+    log_console_stderr(0);
+    isolate_environment();
+    char *input = NULL;
+    size_t cap = 0, len = 0;
+    int chunk;
+    while ((chunk = getchar()) != EOF && len + 1 < 1024 * 1024) {
+        if (len + 1 >= cap) {
+            size_t grown = cap ? cap * 2 : 65536;
+            char *next = realloc(input, grown);
+            if (!next) break;
+            input = next; cap = grown;
+        }
+        input[len++] = (char)chunk;
+    }
+    if (!input) return 1;
+    input[len] = 0;
+    cJSON *cases = cJSON_Parse(input);
+    free(input);
+    if (!cJSON_IsArray(cases)) return 1;
+    event_queue_clear(); audio_time = 0; audio_toggle_play(1);
+    assert(prep_pool_start(0, 0));
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, cases) {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
+        const cJSON *code = cJSON_GetObjectItemCaseSensitive(item, "code");
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "name", cJSON_IsString(name) ? name->valuestring : "");
+        event_queue_clear();
+        if (!cJSON_IsString(code) || !track_load_from_code(code->valuestring)) {
+            cJSON_AddStringToObject(entry, "error", "load failed");
+            cJSON_AddItemToArray(out, entry);
+            continue;
+        }
+        cJSON *haps = javascript_query_audio(tracks[0].javascript, 0, 1, 0.5);
+        cJSON *values = cJSON_CreateArray();
+        if (cJSON_IsArray(haps)) {
+            const cJSON *hap = NULL;
+            int n = 0;
+            cJSON_ArrayForEach(hap, haps) {
+                if (n++ >= 8) break;
+                const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap, "begin");
+                const cJSON *end = cJSON_GetObjectItemCaseSensitive(hap, "end");
+                const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap, "value");
+                cJSON *dump = cJSON_CreateObject();
+                if (cJSON_IsNumber(begin)) cJSON_AddNumberToObject(dump, "begin", begin->valuedouble);
+                if (cJSON_IsNumber(end)) cJSON_AddNumberToObject(dump, "end", end->valuedouble);
+                cJSON_AddItemToObject(dump, "value", value ? cJSON_Duplicate(value, 1) : cJSON_CreateNull());
+                cJSON_AddItemToArray(values, dump);
+            }
+        }
+        cJSON_Delete(haps);
+        cJSON_AddItemToObject(entry, "values", values);
+        unsigned generation = event_queue_generation();
+        js_audio_schedule(tracks[0].javascript, 0, 0, generation);
+        for (int i = 0; i < 2000 && event_queue_depth() == 0; i++) {
+            if (!prepare_queued_audio(0)) {
+                struct timespec pause = {.tv_nsec = 1000000};
+                nanosleep(&pause, NULL);
+            }
+        }
+        cJSON *events = cJSON_CreateArray();
+        for (QNode *node = qhead; node; node = node->next) {
+            if (node->ev.control_only || node->ev.eviction_only || !node->ev.midi_only) continue;
+            cJSON *dump = cJSON_CreateObject();
+            cJSON_AddNumberToObject(dump, "chan", node->ev.midi_chan);
+            cJSON_AddNumberToObject(dump, "note", node->ev.midi_note);
+            if (node->ev.midi_has_cc) {
+                cJSON_AddNumberToObject(dump, "cc", node->ev.midi_cc);
+                cJSON_AddNumberToObject(dump, "ccv", node->ev.midi_ccv);
+            }
+            if (node->ev.midi_has_prog) cJSON_AddNumberToObject(dump, "prog", node->ev.midi_prog);
+            if (node->ev.midi_has_bend) cJSON_AddNumberToObject(dump, "bend", node->ev.midi_bend);
+            if (node->ev.midi_has_touch) cJSON_AddNumberToObject(dump, "touch", node->ev.midi_touch);
+            if (node->ev.midi_has_sysex) {
+                cJSON *id = cJSON_CreateArray(), *data = cJSON_CreateArray();
+                for (int i = 0; i < node->ev.midi_sysex_id_len; i++)
+                    cJSON_AddItemToArray(id, cJSON_CreateNumber(node->ev.midi_sysex_id[i]));
+                for (int i = 0; i < node->ev.midi_sysex_len; i++)
+                    cJSON_AddItemToArray(data, cJSON_CreateNumber(node->ev.midi_sysex[i]));
+                cJSON_AddItemToObject(dump, "sysex_id", id);
+                cJSON_AddItemToObject(dump, "sysex", data);
+            }
+            if (node->ev.midi_cmd) cJSON_AddNumberToObject(dump, "cmd", node->ev.midi_cmd);
+            if (node->ev.midi_cycle_start) cJSON_AddNumberToObject(dump, "cycle_start", 1);
+            if (node->ev.osc_only) cJSON_AddNumberToObject(dump, "osc", 1);
+            if (node->ev.csound_only) cJSON_AddNumberToObject(dump, "csound", 1);
+            cJSON_AddItemToArray(events, dump);
+        }
+        cJSON_AddItemToObject(entry, "events", events);
+        cJSON_AddItemToArray(out, entry);
+    }
+    cJSON_Delete(cases);
+    char *text = cJSON_PrintUnformatted(out);
+    cJSON_Delete(out);
+    if (text) { printf("%s\n", text); free(text); }
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--midi-reference")) return midi_reference_main();
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
         execl(TOMPOUCE_TEST_CSOUND_WORKER,"test_midi","--csound-worker",(char *)NULL); return 1;
@@ -534,6 +810,8 @@ int main(int argc, char **argv) {
     test_midi_loopback();
     test_midi_keys_commit();
     test_midi_restore_loopback();
+    test_midi_extras_commit();
+    test_midi_extras_delivery();
     event_queue_clear();
     midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");

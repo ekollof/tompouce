@@ -332,9 +332,18 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
   scalar coercion at ramp/PCM level.
 - Csound loader failure side effects beyond the gated URL caching, parked
   engine and console diagnostics (step 9 remainder).
-- Dominant MIDI output beyond note triggering (CC, program change, bend,
-  touch, sysex, midicmd transport, port selection) and combined
-  external-output routing beyond the gated flag matrix (step 10 remainder).
+- Dominant MIDI output is gated beyond note triggering: CC (integer
+  0..127 with 0..1 values, including `control()` aliasing), program
+  change (truncated 0..127), pitch bend, channel aftertouch, framed sysex
+  and transport `midicmd` all send through ALSA in web order with
+  throw-abort parity, control-only haps send extras without notes, and
+  `midiport` values broadcast. A 20-case web/native gate
+  (`test-midi-reference-web`) covers hap values, commit decisions and the
+  deployed send-validation predicates; native commit/delivery tests cover
+  patterned fan-out, combined OSC/Csound routing and failing-Csound
+  retention. Remaining gaps are documented non-gates: string CC names,
+  MIDI maps, NRPN, `isController`/options-object defaults, duplicate
+  scalar-plus-array sends, and pinned-1.2.6 numeric-string coercion drift.
 - Controller input is closed: named senders persist CC state across restarts
   (numeric opens never persist), restore it to the device output on
   (re)connect, and resubscribe by client name after replugs, all proven

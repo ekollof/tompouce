@@ -23,18 +23,46 @@ void midi_state_saved_cc(int client, int port, int chan, int cc, double value);
 
 /* Bounded scheduling observation for tests. Recording is independent of
    hardware: note on/off intent is captured whether or not ALSA accepts
-   bytes, so routing stays verifiable without a sequencer. */
-static MidiCapturedNote midi_captured[MIDI_CAPTURE_CAPACITY];
-static unsigned midi_captured_count;
+   bytes, so routing stays verifiable without a sequencer. The unified log
+   also records dominant MIDI extras (CC, program, bend, touch, sysex,
+   transport) in send order. */
+static MidiCaptured midi_log[MIDI_CAPTURE_CAPACITY];
+static unsigned midi_log_count;
 static int midi_capture_enabled;
 void midi_capture_enable(int on) {
     midi_capture_enabled = on ? 1 : 0;
-    if (on) midi_captured_count = 0;
+    if (on) midi_log_count = 0;
+}
+static void midi_log_add(int kind, int chan, int d1, int d2,
+    const unsigned char *sysex, int sysex_len) {
+    if (!midi_capture_enabled || midi_log_count >= MIDI_CAPTURE_CAPACITY) return;
+    MidiCaptured *slot = &midi_log[midi_log_count++];
+    slot->kind = kind; slot->chan = chan; slot->d1 = d1; slot->d2 = d2;
+    slot->sysex_len = 0;
+    if (sysex && sysex_len > 0) {
+        if (sysex_len > (int)sizeof(slot->sysex)) sysex_len = (int)sizeof(slot->sysex);
+        memcpy(slot->sysex, sysex, (size_t)sysex_len);
+        slot->sysex_len = sysex_len;
+    }
+    slot->at = audio_time_now();
 }
 unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity) {
-    unsigned count = midi_captured_count < capacity ? midi_captured_count : capacity;
-    for (unsigned i = 0; i < count; i++) out[i] = midi_captured[i];
-    return midi_captured_count;
+    unsigned total = 0, copied = 0;
+    for (unsigned i = 0; i < midi_log_count; i++) {
+        int note = midi_log[i].kind == MIDI_CAP_NOTE_ON || midi_log[i].kind == MIDI_CAP_NOTE_OFF;
+        if (!note) continue;
+        if (copied < capacity && out)
+            out[copied++] = (MidiCapturedNote){.on = midi_log[i].kind == MIDI_CAP_NOTE_ON,
+                .chan = midi_log[i].chan, .note = midi_log[i].d1,
+                .vel = midi_log[i].d2, .at = midi_log[i].at};
+        total++;
+    }
+    return total;
+}
+unsigned midi_captured_all(MidiCaptured *out, unsigned capacity) {
+    unsigned count = midi_log_count < capacity ? midi_log_count : capacity;
+    for (unsigned i = 0; i < count; i++) out[i] = midi_log[i];
+    return midi_log_count;
 }
 
 static snd_seq_t *seq = NULL;
@@ -76,10 +104,7 @@ static void *midi_worker(void *arg) {
             memmove(offs, offs + 1, (size_t)(n_offs - 1) * sizeof(OffEv));
             n_offs--;
             send_raw(0, e.ch, e.note, 64);
-            if (midi_capture_enabled && midi_captured_count<MIDI_CAPTURE_CAPACITY) {
-                midi_captured[midi_captured_count++]=(MidiCapturedNote){
-                    .on=0,.chan=e.ch,.note=e.note,.vel=64,.at=e.at};
-            }
+            midi_log_add(MIDI_CAP_NOTE_OFF, e.ch, e.note, 64, NULL, 0);
             continue;
         }
         struct timespec ts;
@@ -160,10 +185,7 @@ void midi_note(int chan, int note, int vel, int dur_ms) {
     if (vel < 1) vel = 1;
     if (vel > 127) vel = 127;
     if (dur_ms < 50) dur_ms = 50;
-    if (midi_capture_enabled && midi_captured_count<MIDI_CAPTURE_CAPACITY) {
-        midi_captured[midi_captured_count++]=(MidiCapturedNote){
-            .on=1,.chan=chan,.note=note,.vel=vel,.at=audio_time_now()};
-    }
+    midi_log_add(MIDI_CAP_NOTE_ON, chan, note, vel, NULL, 0);
     pthread_mutex_lock(&midi_lock);
     if (!midi_running) { pthread_mutex_unlock(&midi_lock); return; }
     if (midi_ok) send_raw(1, chan, note, vel);
@@ -177,6 +199,106 @@ void midi_note(int chan, int note, int vel, int dur_ms) {
         offs[i] = e;
         n_offs++;
         pthread_cond_signal(&midi_cond);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+/* Dominant MIDI extras. Values arrive validated from the scheduler; ranges
+   are rechecked defensively. Without hardware the sends are silent no-ops,
+   but the capture still records scheduling intent. */
+static void send_fixed_locked(snd_seq_event_t *ev) {
+    snd_seq_ev_set_source(ev, seq_port);
+    snd_seq_ev_set_subs(ev);
+    snd_seq_ev_set_direct(ev);
+    snd_seq_event_output(seq, ev);
+    snd_seq_drain_output(seq);
+}
+
+void midi_cc(int chan, int cc, int value) {
+    if (chan < 0 || chan > 15 || cc < 0 || cc > 127 || value < 0 || value > 127) return;
+    midi_log_add(MIDI_CAP_CC, chan, cc, value, NULL, 0);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_controller(&ev, chan, cc, value);
+        send_fixed_locked(&ev);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+void midi_program(int chan, int prog) {
+    if (chan < 0 || chan > 15 || prog < 0 || prog > 127) return;
+    midi_log_add(MIDI_CAP_PROG, chan, prog, 0, NULL, 0);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_pgmchange(&ev, chan, prog);
+        send_fixed_locked(&ev);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+void midi_bend(int chan, int value) {
+    if (chan < 0 || chan > 15 || value < -8192 || value > 8191) return;
+    midi_log_add(MIDI_CAP_BEND, chan, value, 0, NULL, 0);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_pitchbend(&ev, chan, value);
+        send_fixed_locked(&ev);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+void midi_touch(int chan, int value) {
+    if (chan < 0 || chan > 15 || value < 0 || value > 127) return;
+    midi_log_add(MIDI_CAP_TOUCH, chan, value, 0, NULL, 0);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_chanpress(&ev, chan, value);
+        send_fixed_locked(&ev);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+void midi_sysex(const unsigned char *id, int id_len, const unsigned char *data, int len) {
+    if (!id || id_len < 1 || id_len > 3 || !data || len < 0 || len > 256) return;
+    unsigned char framed[261];
+    framed[0] = 0xF0;
+    memcpy(framed + 1, id, (size_t)id_len);
+    if (len) memcpy(framed + 1 + id_len, data, (size_t)len);
+    framed[1 + id_len + len] = 0xF7;
+    int total = id_len + len + 2;
+    midi_log_add(MIDI_CAP_SYSEX, 0, id_len, len, framed, total);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_sysex(&ev, total, framed);
+        snd_seq_ev_set_source(&ev, seq_port);
+        snd_seq_ev_set_subs(&ev);
+        snd_seq_ev_set_direct(&ev);
+        snd_seq_event_output(seq, &ev);
+        snd_seq_drain_output(seq);
+    }
+    pthread_mutex_unlock(&midi_lock);
+}
+
+void midi_transport(int cmd) {
+    if (cmd < 1 || cmd > 4) return;
+    midi_log_add(MIDI_CAP_TRANSPORT, 0, cmd, 0, NULL, 0);
+    pthread_mutex_lock(&midi_lock);
+    if (midi_ok && midi_running) {
+        snd_seq_event_t ev;
+        snd_seq_ev_clear(&ev);
+        ev.type = cmd == 1 ? SND_SEQ_EVENT_CLOCK : cmd == 2 ? SND_SEQ_EVENT_START :
+            cmd == 3 ? SND_SEQ_EVENT_CONTINUE : SND_SEQ_EVENT_STOP;
+        send_fixed_locked(&ev);
     }
     pthread_mutex_unlock(&midi_lock);
 }

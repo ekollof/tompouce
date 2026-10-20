@@ -8,6 +8,15 @@ void midi_shutdown(void);
 int midi_ready(void);
 /* note on now, note off after dur_ms (worker thread). Thread-safe. */
 void midi_note(int chan, int note, int vel, int dur_ms);
+/* Dominant MIDI extras, matching the deployed web output's message set.
+   Channel is 0-15; sends are best-effort like midi_note and always recorded
+   in the scheduling capture when enabled. */
+void midi_cc(int chan, int cc, int value);
+void midi_program(int chan, int prog);
+void midi_bend(int chan, int value); /* -8192..8191, zero-centered */
+void midi_touch(int chan, int value);
+void midi_sysex(const unsigned char *id, int id_len, const unsigned char *data, int len);
+void midi_transport(int cmd); /* 1 clock, 2 start, 3 continue, 4 stop */
 typedef struct MidiHeldKey { int note, chan; double vel, at; int consumed; } MidiHeldKey;
 /* Controller input. Values are normalized 0..1 like the web input; channels
    are 1..16 with 0 selecting the merged stream, and anything else reads 0.
@@ -46,8 +55,16 @@ void midi_test_inject_from(int client, int port, int type, int chan, int p1, int
    Enable to start a fresh capture; read back up to capacity entries in
    send order. Returns the total captured (may exceed capacity). */
 enum { MIDI_CAPTURE_CAPACITY = 4096 };
+enum { MIDI_CAP_NOTE_ON = 0, MIDI_CAP_NOTE_OFF, MIDI_CAP_CC, MIDI_CAP_PROG,
+    MIDI_CAP_BEND, MIDI_CAP_TOUCH, MIDI_CAP_SYSEX, MIDI_CAP_TRANSPORT };
 typedef struct MidiCapturedNote { int on, chan, note, vel; double at; } MidiCapturedNote;
+/* Generic record: CC uses d1=cc d2=value; program uses d1=prog; bend uses
+   d1=value (-8192..8191); touch uses d1=value; transport uses d1=cmd
+   (1 clock, 2 start, 3 continue, 4 stop); sysex carries the framed
+   F0..F7 bytes in sysex. */
+typedef struct MidiCaptured { int kind, chan, d1, d2; unsigned char sysex[264]; int sysex_len; double at; } MidiCaptured;
 void midi_capture_enable(int on);
 unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity);
+unsigned midi_captured_all(MidiCaptured *out, unsigned capacity);
 
 #endif

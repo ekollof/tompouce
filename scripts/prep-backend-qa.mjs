@@ -107,6 +107,7 @@ async function measure(sink) {
   const cases=[];
   for (const count of workers) for (const workload of [0,1]) cases.push([count,workload]);
   cases.push([max,2]);
+  cases.push([max,3]);
   const results=[];
   for (const [count,workload] of cases) {
     const run=spawnSync(binary,[String(count),String(workload),'128','backend'],{
@@ -118,11 +119,13 @@ async function measure(sink) {
     const result=Object.fromEntries([...line.matchAll(/(\w+)=([^\s]+)/g)].map(([,key,value])=>
       [key,Number.isFinite(Number(value))?Number(value):value]));
     /* Cold/live must hold fully; burst overload must shed as skips without
-       late publication/reservation, render overruns or stream drops. */
+       late publication/reservation, render overruns or stream drops. The
+       voice burst must additionally prove saturation via retiring graphs. */
     result.backendHold=result.status==='measured'&&result.backend==='PipeWire'&&
       result.backend_drops===0&&result.rendered_s>=1.75&&result.render_overruns===0&&
       result.published_late===0&&result.reserved_late===0&&
-      (workload===2||result.skipped_late===0);
+      (workload>=2||result.skipped_late===0)&&
+      (workload!==3||result.peak_retiring>0);
     results.push(result); console.log(line);
   }
   return results;

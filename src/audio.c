@@ -1925,6 +1925,15 @@ int audio_active_voices(void) {
     return n;
 }
 
+int audio_retiring_voices(void) {
+    int n = 0;
+    pthread_mutex_lock(&voice_lock);
+    for (int i = MAX_VOICES; i < VOICE_SLOTS; i++)
+        if (voices[i].active) n++;
+    pthread_mutex_unlock(&voice_lock);
+    return n;
+}
+
 void audio_voice_stats(int *active_out, int by_inst[10]) {
     int n = 0;
     int tmp[10] = {0};

@@ -139,17 +139,25 @@ Skip this step when the pool was not built.
       without relaxing execution budgets. Voice-pool burst checks reuse these
       counters. See [measurement details](docs/audio-comparison.md).
 
-The isolated offline matrix completed 18 cases. Cold/live cases at both block
+The isolated offline matrix covers 24 cases. Cold/live cases at both block
 sizes hold fully with 1/2/4 workers; the sixteen-long-stretch burst sheds its
 overload as specified skips (68/26/11 late sources at 128 frames on this
-machine) with zero late publications, zero late reservations, zero callback
-overruns and zero host wake misses in all 18 cases. The 4,096-frame block is
+machine). The matrix gate requires zero late publications, zero late
+reservations, zero callback overruns and zero host wake misses in every case;
+voice-burst cases additionally require retiring graphs. A voice-burst workload
+layers preparation-free sine voices with distinctly-stretched samples so the
+128-voice pool saturates while workers carry real stretch load; its matrix
+cases share the shed-clean gate and additionally require retiring graphs, so
+the saturation proof cannot pass vacuously. Accepted onsets publish with zero
+late publications and zero late reservations, shedding only specified skips.
+The 4,096-frame block is
 the output adapter's render-call cap, so both measured block sizes are
 realizable. `profile-prep-backend` runs the same workloads through the real
 PipeWire backend at 256-frame blocks into an owned null sink (routing verified
-with `pw-dump`, defaults untouched): five cases show zero stream drops, zero
-render overruns and no frame shortfall, with cold/live held and the burst
-shedding only skips. `TOMPOUCE_OUTPUT_TARGET` selects that sink for owned
+with `pw-dump`, defaults untouched): six cases show zero stream drops, zero
+render overruns and no frame shortfall, with cold/live held, the long-stretch
+burst shedding only skips, and the voice burst publishing all 209 sources at
+peak 128 voices with 21 retiring graphs. `TOMPOUCE_OUTPUT_TARGET` selects that sink for owned
 tests only. The maintained web/native audio gates and selected duck/event
 comparisons pass without threshold or execution-budget changes (delay-automation
 and live-change onset gates were added under steps 5–6). Remote-download
@@ -220,18 +228,22 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       above. The 128 retiring-graph bound reports overflow and replaces the
       graph with the earliest stop deadline. Prepared saturation checks
       preserve shared delay tails and independent duck callbacks across
-      1–8,192-frame bursts; they do not prove producer scheduling or underrun
-      safety under preparation load. Run that load proof with the deadline
-      counters from step 4 when the pool exists. Native regressions now lock
-      in cut group isolation, first-cutter-wins, equal-time onset-serial order
-      and oscillator exclusion, plus bit-identical 1/8,192-frame tails for
-      low-pass, high-pass, band-pass, vowel, phaser, chorus and coarse graphs.
-      Web PCM covers the high-pass, band-pass, phaser and coarse tails (62
-      cases); the retired phaser is bypassed to match the deployed player's
-      exact-zero post-stop behavior. Stolen drums fade by the same retirement
-      envelope (exact retired-vs-unevicted A/B plus mixed-type saturation).
-      Vowel topology (a -70 dB residual), chorus (no web control), web PCM
-      for drum/native-only types and the burst load proof remain.
+      1–8,192-frame bursts; deterministic saturation coverage now includes an
+      exact retired-vs-unevicted drum A/B and a mixed-type pool burst. A
+      voice-burst deadline workload proves saturated bursts under scheduling
+      and preparation load with the step 4 counters: the pool fills (peak
+      retiring graphs in every voice-burst case) with zero late publications
+      and zero late reservations, shedding only specified skips, through the
+      offline matrix and the real-backend null-sink run. Native regressions
+      now lock in cut group isolation, first-cutter-wins, equal-time
+      onset-serial order and oscillator exclusion, plus bit-identical
+      1/8,192-frame tails for low-pass, high-pass, band-pass, vowel, phaser,
+      chorus and coarse graphs. Web PCM covers the high-pass, band-pass,
+      phaser and coarse tails (62 cases); the retired phaser is bypassed to
+      match the deployed player's exact-zero post-stop behavior. Stolen drums
+      fade by the same retirement envelope (exact retired-vs-unevicted A/B
+      plus mixed-type saturation). Vowel topology (a -70 dB residual),
+      chorus (no web control) and web PCM for drum/native-only types remain.
 
 ## 8. Duck coverage
 

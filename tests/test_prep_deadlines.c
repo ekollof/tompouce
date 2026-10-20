@@ -87,7 +87,26 @@ static void build_workload_source(char *source, size_t size, int workload) {
     size_t used=0;
     int count=workload==2?16:4;
     int n=snprintf(source,size,"stack("); assert(n>0); used=(size_t)n;
-    for (int i=0;i<count;i++) {
+    if (workload==3) {
+        /* Voice-burst overlap: twelve sine voices per cycle need no
+           preparation and always publish, so the pool saturates
+           deterministically, while four stretched voices with distinct
+           factors load the workers. The long release keeps every accepted
+           voice sounding past the run horizon. */
+        for (int i=0;i<12;i++) {
+            n=snprintf(source+used,size-used,
+                "%ss('sine').note(%d).release(2.5).orbit(%d)",
+                i?",":"",60+i,i%4);
+            assert(n>0 && (size_t)n<size-used); used+=(size_t)n;
+        }
+        static const char *const factors[]={"1.25","1.5","1.75","2"};
+        for (int i=0;i<4;i++) {
+            n=snprintf(source+used,size-used,
+                ",s('prepdeadline').n(%d).note(%d).stretch(%s).release(2.5).orbit(%d)",
+                i,70+i,factors[i],i%4);
+            assert(n>0 && (size_t)n<size-used); used+=(size_t)n;
+        }
+    } else for (int i=0;i<count;i++) {
         n=snprintf(source+used,size-used,
             "%ss('prepdeadline').n(%d).note(%d)%s.orbit(%d)",
             i?",":"",i%4,60+i,workload==2?".stretch(2)":"",i%4);
@@ -97,7 +116,8 @@ static void build_workload_source(char *source, size_t size, int workload) {
         ",s('prepnote').note(60).stretch(2),"
         "s('sine').ir('prepnote').irspeed(slider(1,1,2,.25)).room(.2).roomsize(.25).orbit(2),"
         "s('sine').room(.2).roomsize(slider(.8,.8,1,.05)).roomfade(.01).orbit(3)"
-        ").speed(slider(1,1,2,.25)).gain(.005).fast(4)");
+        ").speed(slider(1,1,2,.25)).gain(.005).fast(%d)",
+        workload==3?10:4);
     assert(n>0 && (size_t)n<size-used);
 }
 
@@ -136,7 +156,7 @@ static void run_backend_workload(unsigned workers, int workload) {
     const char *backend=audio_output_name();
     if (!started || !audio_output_active()) {
         printf("backend workload=%s workers=%u budget=%d status=no-backend backend=%s\n",
-            workload==0?"cold":workload==1?"live":"burst",workers,prep_pool_cpu_budget(),backend);
+            workload==0?"cold":workload==1?"live":workload==2?"burst":"voiceburst",workers,prep_pool_cpu_budget(),backend);
         fflush(stdout);
         prep_pool_stop(); prep_profile_enable(0); cleanup_store(root,names);
         exit(2);
@@ -146,12 +166,15 @@ static void run_backend_workload(unsigned workers, int workload) {
     scheduler_init();
     double begin=monotonic();
     unsigned drops=0,polls=0;
-    int was_active=1,changed=0;
+    int was_active=1,changed=0,peak_voices=0,peak_retiring=0;
     while (monotonic()-begin<2.0) {
         struct timespec pause={.tv_nsec=5000000}; nanosleep(&pause,NULL);
         int active=audio_output_active();
         if (was_active && !active) drops++;
         was_active=active; polls++;
+        int live=audio_active_voices(),retiring=audio_retiring_voices();
+        if (live>peak_voices) peak_voices=live;
+        if (retiring>peak_retiring) peak_retiring=retiring;
         if (workload==1 && !changed && monotonic()-begin>=.55) {
             assert(slider_set(0,1.25) && slider_set(1,.85) && slider_set(2,1.25)); changed=1;
         }
@@ -171,7 +194,7 @@ static void run_backend_workload(unsigned workers, int workload) {
        the commit path deterministically, and the QA matrices report per-case
        counters. Decode/stretch work runs inside pool jobs and is counted
        even when the commit later sheds. */
-    if (workload!=2)
+    if (workload!=2 && workload!=3)
         assert(final_works[PREP_REVERB].calls>0 && final_works[PREP_FFT].calls>0);
     unsigned long long calls=atomic_load(&backend_render_calls);
     printf("backend workload=%s workers=%u budget=%d status=measured backend=%s "
@@ -179,15 +202,16 @@ static void run_backend_workload(unsigned workers, int workload) {
         "render_calls=%llu render_mean_ms=%.3f render_max_ms=%.3f render_overruns=%u "
         "submitted=%llu jobs=%llu published=%llu reserved=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
-        "reserve_late_max_ms=%.3f queued_at_stop=%d\n",
-        workload==0?"cold":workload==1?"live":"burst",workers,prep_pool_cpu_budget(),backend,
+        "reserve_late_max_ms=%.3f queued_at_stop=%d peak_voices=%d peak_retiring=%d\n",
+        workload==0?"cold":workload==1?"live":workload==2?"burst":"voiceburst",workers,prep_pool_cpu_budget(),backend,
         drops,polls,rendered,calls,
         calls?atomic_load(&backend_render_ns)/1e6/calls:0,
         atomic_load(&backend_render_max_ns)/1e6,atomic_load(&backend_render_overruns),
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         (unsigned long long)stats.sources_published,(unsigned long long)stats.sources_reserved,
         (unsigned long long)stats.late_preparation,(unsigned long long)stats.late_publication,
-        (unsigned long long)stats.late_reservation,stats.max_reservation_late_ns/1e6,remaining);
+        (unsigned long long)stats.late_reservation,stats.max_reservation_late_ns/1e6,remaining,
+        peak_voices,peak_retiring);
     fflush(stdout);
     prep_profile_enable(0); cleanup_store(root,names);
 }
@@ -208,7 +232,7 @@ static void run_workload(unsigned workers, int workload, unsigned long block) {
     float *output=calloc(block*2,sizeof(*output)); assert(output);
     double started=monotonic(),max_callback=0,max_wake_late=0;
     unsigned callbacks=0,overruns=0,wake_misses=0;
-    int changed=0;
+    int changed=0,peak_voices=0,peak_retiring=0;
     unsigned long frames=0;
     /* Keep running through the initial cold miss, repeated cache hits and
        (for live) a parameter edit without reevaluation or transport reset. */
@@ -227,6 +251,9 @@ static void run_workload(unsigned workers, int workload, unsigned long block) {
         if (elapsed>max_callback) max_callback=elapsed;
         if (elapsed>block/SR) overruns++;
         for (unsigned long i=0;i<block*2;i++) assert(isfinite(output[i]));
+        int live=audio_active_voices(),retiring=audio_retiring_voices();
+        if (live>peak_voices) peak_voices=live;
+        if (retiring>peak_retiring) peak_retiring=retiring;
         callbacks++; frames+=block;
     }
     PrepDeadlineStat stats; prep_profile_deadlines(&stats);
@@ -246,22 +273,23 @@ static void run_workload(unsigned workers, int workload, unsigned long block) {
        the commit path deterministically, and the QA matrices report per-case
        counters. Decode/stretch work runs inside pool jobs and is counted
        even when the commit later sheds. */
-    if (workload!=2)
+    if (workload!=2 && workload!=3)
         assert(final_works[PREP_REVERB].calls>0 && final_works[PREP_FFT].calls>0);
     printf("deadline workload=%s workers=%u budget=%d block=%lu submitted=%llu jobs=%llu "
         "job_mean_ms=%.3f job_max_ms=%.3f published=%llu reserved=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
         "reserve_late_max_ms=%.3f queued_at_stop=%d callbacks=%u callback_overruns=%u "
         "callback_max_ms=%.3f wake_misses=%u wake_late_max_ms=%.3f "
+        "peak_voices=%d peak_retiring=%d "
         "backend_underruns=unmeasured decode_cpu_ms=%.3f stretch_cpu_ms=%.3f\n",
-        workload==0?"cold":workload==1?"live":"burst",workers,prep_pool_cpu_budget(),block,
+        workload==0?"cold":workload==1?"live":workload==2?"burst":"voiceburst",workers,prep_pool_cpu_budget(),block,
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         stats.jobs?stats.job_latency_ns/1e6/stats.jobs:0,
         stats.max_job_latency_ns/1e6,(unsigned long long)stats.sources_published,
         (unsigned long long)stats.sources_reserved,(unsigned long long)stats.late_preparation,
         (unsigned long long)stats.late_publication,(unsigned long long)stats.late_reservation,
         stats.max_reservation_late_ns/1e6,remaining,callbacks,overruns,max_callback*1000,
-        wake_misses,max_wake_late*1000,works[PREP_DECODE].cpu_ns/1e6,
+        wake_misses,max_wake_late*1000,peak_voices,peak_retiring,works[PREP_DECODE].cpu_ns/1e6,
         works[PREP_STRETCH].cpu_ns/1e6);
     fflush(stdout);
     free(output); prep_profile_enable(0); cleanup_store(root,names);
@@ -274,20 +302,20 @@ int main(int argc, char **argv) {
     if (argc==4) {
         unsigned workers=(unsigned)strtoul(argv[1],NULL,10);
         int workload=atoi(argv[2]); unsigned long block=strtoul(argv[3],NULL,10);
-        assert(workers>=1 && workers<=8 && workload>=0 && workload<=2 && block>=1 && block<=8192);
+        assert(workers>=1 && workers<=8 && workload>=0 && workload<=3 && block>=1 && block<=8192);
         run_workload(workers,workload,block); return 0;
     }
     if (argc==5 && !strcmp(argv[4],"backend")) {
         unsigned workers=(unsigned)strtoul(argv[1],NULL,10);
         int workload=atoi(argv[2]); unsigned long block=strtoul(argv[3],NULL,10);
-        assert(workers>=1 && workers<=8 && workload>=0 && workload<=2 && block>=1 && block<=8192);
+        assert(workers>=1 && workers<=8 && workload>=0 && workload<=3 && block>=1 && block<=8192);
         (void)block;
         run_backend_workload(workers,workload); return 0;
     }
     assert(argc==1);
     /* Fresh child processes prevent earlier workers/workloads warming later
        cache measurements. No shell or user engine is involved. */
-    for (int workload=0;workload<3;workload++) {
+    for (int workload=0;workload<4;workload++) {
         pid_t child=fork(); assert(child>=0);
         if (!child) { run_workload(1,workload,128); _exit(0); }
         int status; assert(waitpid(child,&status,0)==child && WIFEXITED(status) && !WEXITSTATUS(status));

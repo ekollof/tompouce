@@ -115,6 +115,7 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit);
 
 /* nerd-pane stats (thread-safe snapshots) */
 int audio_active_voices(void);
+int audio_retiring_voices(void);
 void audio_voice_stats(int *active_out, int by_inst[10]);
 const char *audio_inst_name(int inst);
 /* recent master output, oldest first (for the scope); returns count */

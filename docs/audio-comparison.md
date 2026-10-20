@@ -140,7 +140,12 @@ threads. A paced, device-free callback renders into memory for two seconds.
 Cold and live cases combine four 8-second stereo WAV decodes, a half-second
 stretch source, a 0.25-second custom IR and a 0.8-second generated room. The live
 case changes speed, custom-IR speed and room size through direct sliders without
-reevaluation. The burst case adds sixteen distinct long-sample stretches.
+reevaluation. The burst case adds sixteen distinct long-sample stretches. The
+voice-burst case instead layers twelve preparation-free sine voices per
+cycle with four distinctly-stretched sample voices: the sines always publish,
+so the 128-voice pool saturates deterministically (peak retiring graphs prove
+eviction happened) while the workers carry real stretch load. Its long
+releases keep every accepted voice sounding past the run horizon.
 Worker counts 1/2/4 (bounded by the process budget) are measured serially with
 128- and 4,096-frame callbacks; no other verification should run during a timing
 capture. 4,096 frames is the output adapter's render-call cap, so both block
@@ -153,16 +158,22 @@ before commit.
 The JSON report separates submitted/completed preparation jobs, queue-to-source
 completion latency, published sources, actual voice reservations, preparation
 skips, late publication/reservation, callback overruns and host wake delays.
-Counters are disabled by default and run outside the callback; callback timing
+The offline report also records peak concurrent voices and peak retiring
+graphs per case. Counters are disabled by default and run outside the callback; callback timing
 is measured by the harness around the real render function. Snapshots are taken
 at the end of the paced interval, before shutdown drains outstanding jobs.
 Queued future events and unfinished jobs explain why published/reserved counts
 can differ; these counts are not full waveform-onset observations. The script
 returns failure unless cold/live cases hold fully (no skips, late
-publication/reservation, overruns, wake misses or unfinished jobs) and every
-case sheds cleanly (no late publication/reservation, overrun or wake miss).
+publication/reservation, overruns, wake misses or unfinished jobs), every
+case sheds cleanly (no late publication/reservation, overrun or wake miss),
+and every voice-burst case shows retiring graphs (the saturation proof is
+vacuous otherwise).
 Local cold reads do not measure remote download latency. An offline callback
-overrun is not a backend underrun.
+overrun is not a backend underrun. On a contended desktop host, sub-3 ms
+128-frame callback budgets can trip on scheduling jitter even for pre-existing
+workloads; the report preserves such violations instead of hiding them, and a
+rerun on a quiet host is the tiebreaker rather than a wider budget.
 
 An isolated 18-case run on a process budget of 16 CPUs observed:
 
@@ -189,12 +200,15 @@ underruns under the same preparation load, using `scripts/prep-backend-qa.mjs`
 and the `backend` mode of `test_prep_deadlines`. It creates an owned null sink,
 targets an inspected silence stream at it, verifies with `pw-dump` that the
 stream has exactly two active links and both reach only that sink, then runs
-cold/live workloads at 1/4 workers and the long-stretch burst at 4 workers
+cold/live workloads at 1/4 workers and the long-stretch burst and the
+voice burst at 4 workers
 through the real PipeWire backend at 256-frame blocks. Default routing is never
 changed and the module is unloaded afterwards. An isolated run observed zero
-stream drops, zero render overruns and no rendered-frame shortfall in all five
-cases, with cold/live fully held and the burst shedding only skips (11 in this
-run) without late publication or reservation. Local fixture reads still do not
+stream drops, zero render overruns and no rendered-frame shortfall in all six
+cases, with cold/live fully held, the long-stretch burst shedding only skips
+(9 in this run) without late publication or reservation, and the voice burst
+publishing all 209 sources with peak 128 concurrent voices and 21 retiring
+graphs. Local fixture reads still do not
 establish remote-download deadline behavior.
 
 `cmake --build build --target test-live-reference-web` compares fractional

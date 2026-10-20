@@ -161,6 +161,67 @@ static void test_orchestra_failed_url_cache(void) {
     cJSON_Delete(loads); csound_program_free(program);
     puts("failed orchestra URLs reject from cache without refetching; the program survives");
 }
+/* Runtime worker diagnostics reach the console ring through a dedicated
+   socket: a note for an unknown instrument must surface its engine message
+   while a valid note keeps rendering. A 40-note flood must neither lose
+   diagnostics silently (an omission summary appears instead) nor wedge the
+   engine. */
+static int console_contains(const char *needle) {
+    char line[512];
+    for (int i=0;i<256;i++) {
+        snprintf(line,sizeof(line),"%s",console_line(i));
+        if (needle[0] && strstr(line,needle)) return 1;
+    }
+    return 0;
+}
+static void test_csound_worker_diagnostics(void) {
+    CsoundProgram *program=compile("instr DiagOk\na1 oscili p5,p4\nout a1,a1\nendin\n",0); assert(program);
+    cJSON *value=cJSON_Parse("{\"csound\":\"NoSuchInstr\",\"gain\":0.5}"); assert(value);
+    assert(csound_program_schedule(program,value,.01,.5,440)); cJSON_Delete(value);
+    value=cJSON_Parse("{\"csound\":\"DiagOk\",\"gain\":0.5}"); assert(value);
+    assert(csound_program_schedule(program,value,.02,.5,440)); cJSON_Delete(value);
+    csound_program_activate(program,0);
+    int saw=0;
+    for (int i=0;i<8820 && !saw;i++) {
+        if (i%64==0) { struct timespec pace={0,1500000}; nanosleep(&pace,NULL); }
+        double left=0,right=0;
+        csound_program_sample(program,&left,&right);
+        assert(isfinite(left) && isfinite(right));
+        if (i%512==0 && console_contains("NoSuchInstr")) saw=1;
+    }
+    assert(saw);
+    for (int n=0;n<40;n++) {
+        char text[64];
+        snprintf(text,sizeof(text),"{\"csound\":\"NoSuchInstr\",\"gain\":0.5}");
+        cJSON *bad=cJSON_Parse(text); assert(bad);
+        if (!csound_program_schedule(program,bad,.05+n*.01,.2,440)) { cJSON_Delete(bad); break; }
+        cJSON_Delete(bad);
+    }
+    for (int i=0;i<44100;i++) {
+        if (i%64==0) { struct timespec pace={0,1000000}; nanosleep(&pace,NULL); }
+        double left=0,right=0;
+        csound_program_sample(program,&left,&right);
+        assert(isfinite(left) && isfinite(right));
+    }
+    int surfaced=0;
+    for (int i=0;i<256;i++) {
+        char line[512]; snprintf(line,sizeof(line),"%s",console_line(i));
+        if (strstr(line,"NoSuchInstr")) surfaced++;
+    }
+    assert(surfaced>=2 || console_contains("omitted"));
+    value=cJSON_Parse("{\"csound\":\"DiagOk\",\"gain\":0.5}"); assert(value);
+    assert(csound_program_schedule(program,value,audio_time_now()+.05,.5,440)); cJSON_Delete(value);
+    double energy=0;
+    for (int i=0;i<4410;i++) {
+        if (i%64==0) { struct timespec pace={0,1000000}; nanosleep(&pace,NULL); }
+        double left=0,right=0;
+        csound_program_sample(program,&left,&right);
+        if (i>2205) energy+=left*left+right*right;
+    }
+    assert(energy>.0001);
+    csound_program_free(program);
+    puts("worker runtime diagnostics reach the console; floods stay bounded and audible");
+}
 /* Loads that succeed before a later failure stay available, matching the
    deployed page engine. The first prepare fails on the dead URL and parks
    its engine; later prepares adopt it without refetching. Uses direct
@@ -311,6 +372,7 @@ int main(int argc, char **argv) {
     cJSON_Delete(corpus);
     puts("native Csound loaders, rendering, invalid-source and execution-budget checks ok");
     test_csound_stash_adopts();
+    test_csound_worker_diagnostics();
 #endif
     return 0;
 }

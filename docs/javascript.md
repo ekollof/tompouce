@@ -687,7 +687,10 @@ parent using the existing URL policy. The audio callback consumes buffered
 stereo PCM without IPC, allocation, or Csound calls. Failed fetching or host
 initialization keeps the previous playable program; orchestra syntax diagnostics
 retain existing definitions while allowing the new musical pattern, as above.
-The compiler thread has the same confinement as the renderer. Up to 16 loads
+Engine runtime messages (for example an unknown instrument at note time)
+travel back over a dedicated socket into the console ring through the
+render pump thread, bounded with an omission summary under floods; compile
+diagnostics keep their existing reply path. The compiler thread has the same confinement as the renderer. Up to 16 loads
 per evaluation, 2 MiB of combined source per update and 64 cached orchestra URLs
 per Csound session are accepted. Failed orchestra fetches stay rejected
 without refetching, matching the deployed loader's session promise cache;

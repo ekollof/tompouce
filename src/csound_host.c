@@ -25,7 +25,7 @@
 #define CS_RING 4096
 #define CS_QUEUE 512
 #define CS_CODE_MAX (2*1024*1024)
-enum { CS_COMPILE = 1, CS_EVENT, CS_RENDER, CS_UPDATE };
+enum { CS_COMPILE = 1, CS_EVENT, CS_RENDER, CS_UPDATE, CS_DIAG };
 typedef struct { unsigned command, length; } Message;
 typedef struct { int status; char error[1024]; } Reply;
 typedef struct {
@@ -40,7 +40,7 @@ struct CsoundProgram {
     pthread_mutex_t update_lock;
     atomic_uint merge_requested, merge_completed;
     pthread_t thread;
-    int socket, update_socket, started;
+    int socket, update_socket, diag_fd, started;
     pid_t child;
     double origin;
     Pending pending[CS_QUEUE];
@@ -118,10 +118,48 @@ static int receive_header(int fd, Message *header) {
 }
 
 static _Thread_local Reply *worker_reply;
+/* Performance-time engine messages have no compile reply to join. They wait
+   in a bounded ring for the next loop turn, which forwards them to the
+   parent; beyond the bound only a dropped count survives. */
+enum { WORKER_DIAG_COUNT = 8, WORKER_DIAG_LENGTH = 224 };
+static char worker_diags[WORKER_DIAG_COUNT][WORKER_DIAG_LENGTH];
+static unsigned worker_diag_head, worker_diag_count, worker_diag_dropped;
+static void worker_diag_emit(const char *text) {
+    if (!text || !*text) return;
+    if (worker_diag_count<WORKER_DIAG_COUNT) {
+        snprintf(worker_diags[(worker_diag_head+worker_diag_count)%WORKER_DIAG_COUNT],
+            WORKER_DIAG_LENGTH,"%.223s",text);
+        worker_diag_count++;
+    } else worker_diag_dropped++;
+}
+static void worker_diag_flush(void) {
+    if (worker_diag_dropped) {
+        char summary[WORKER_DIAG_LENGTH];
+        snprintf(summary,sizeof(summary),"earlier worker messages omitted (%u)",worker_diag_dropped);
+        Message header={CS_DIAG,0};
+        /* Fixed framing: a header with no bytes can never arrive split. */
+        char frame[sizeof(header)+WORKER_DIAG_LENGTH];
+        size_t body=strlen(summary)+1;
+        header.length=(unsigned)body;
+        memcpy(frame,&header,sizeof(header)); memcpy(frame+sizeof(header),summary,body);
+        if (send(5,frame,sizeof(header)+body,MSG_DONTWAIT|MSG_NOSIGNAL)<0) return;
+        worker_diag_dropped=0;
+    }
+    while (worker_diag_count) {
+        Message header={CS_DIAG,0};
+        char frame[sizeof(header)+WORKER_DIAG_LENGTH];
+        size_t body=strlen(worker_diags[worker_diag_head])+1;
+        header.length=(unsigned)body;
+        memcpy(frame,&header,sizeof(header));
+        memcpy(frame+sizeof(header),worker_diags[worker_diag_head],body);
+        if (send(5,frame,sizeof(header)+body,MSG_DONTWAIT|MSG_NOSIGNAL)<0) return;
+        worker_diag_head=(worker_diag_head+1)%WORKER_DIAG_COUNT; worker_diag_count--;
+    }
+}
 static void cs_message(CSOUND *engine, int attr, const char *text) {
     (void)engine; (void)attr;
     Reply *reply=worker_reply;
-    if (!reply) return;
+    if (!reply) { worker_diag_emit(text); return; }
     size_t length = strlen(text), used = strlen(reply->error);
     if (length >= sizeof(reply->error)) { snprintf(reply->error,sizeof(reply->error),"%.1000s",text); return; }
     if (used+length >= sizeof(reply->error)) {
@@ -229,7 +267,7 @@ int csound_worker_main(void) {
     if (pthread_create(&compiler_thread,NULL,compile_worker,&compiler)) return 1;
     /* Retain only the two private transports after trusted initialization. */
     close(0); close(1); close(2);
-    if (close_range(5,~0u,0)) return 1;
+    if (close_range(6,~0u,0)) return 1;
     if (clearenv()) return 1;
     if (!confine_worker()) return 1;
     int initialized = 0;
@@ -259,6 +297,8 @@ int csound_worker_main(void) {
             initialized = !reply.status;
             atomic_store_explicit(&compiler.initialized,initialized,memory_order_release);
             if (!transfer(3,&reply,sizeof(reply),1)) { free(data); break; }
+            /* Later engine messages are runtime diagnostics, not compile output. */
+            worker_reply=NULL;
         } else if (header.command == CS_EVENT && data && initialized) {
 #ifdef HAVE_CSOUND7
             csoundEventString(engine,data,0);
@@ -280,6 +320,7 @@ int csound_worker_main(void) {
             }
             if (!transfer(3,output,sizeof(output),1)) { free(data); break; }
         } else { free(data); break; }
+        worker_diag_flush();
         free(data);
     }
     /* Exit tears down the confined instance without running plugin finalizers. */
@@ -288,10 +329,29 @@ int csound_worker_main(void) {
 }
 
 #ifdef HAVE_CSOUND
+/* Drain worker runtime diagnostics without blocking the render pump. The
+   audio callback never touches IPC; this thread already owns the sockets. */
+static void drain_worker_diags(CsoundProgram *program) {
+    if (program->diag_fd<0) return;
+    for (int i=0;i<16;i++) {
+        struct pollfd ready={program->diag_fd,POLLIN,0};
+        int status;
+        do status=poll(&ready,1,0); while (status<0 && errno==EINTR);
+        if (status<=0 || !(ready.revents&POLLIN)) return;
+        Message header;
+        if (!transfer(program->diag_fd,&header,sizeof(header),0) ||
+            header.command!=CS_DIAG || !header.length || header.length>WORKER_DIAG_LENGTH) return;
+        char text[WORKER_DIAG_LENGTH];
+        if (!transfer(program->diag_fd,text,header.length,0)) return;
+        text[sizeof(text)-1]=0;
+        log_console("Csound: %s",text);
+    }
+}
 static void *render_worker(void *opaque) {
     CsoundProgram *program = opaque;
     unsigned long frame = 0;
     while (!atomic_load(&program->stop)) {
+        drain_worker_diags(program);
         unsigned long read_frame = atomic_load_explicit(&program->read_frame,memory_order_acquire);
         unsigned merge=atomic_load_explicit(&program->merge_requested,memory_order_acquire);
         int fence=merge!=atomic_load_explicit(&program->merge_completed,memory_order_relaxed);
@@ -395,6 +455,7 @@ CsoundProgram *csound_program_create(const cJSON *loads, char *error, size_t siz
     CsoundProgram *program = calloc(1,sizeof(*program));
     if (!program) return NULL;
     program->socket = program->update_socket = -1; program->child = -1;
+    program->diag_fd = -1;
     atomic_init(&program->refs,1); atomic_init(&program->stop,0); atomic_init(&program->active,0);
     atomic_init(&program->read_frame,0); atomic_init(&program->write_frame,0);
     atomic_init(&program->merge_requested,0); atomic_init(&program->merge_completed,0);
@@ -403,29 +464,35 @@ CsoundProgram *csound_program_create(const cJSON *loads, char *error, size_t siz
     OrchestraLoads batch;
     if (!prepare_loads(program,loads,&batch,error,size)) { csound_program_free(program); return NULL; }
     if (!batch.used) batch.code[batch.used++]='\n';
-    int sockets[2], updates[2];
+    int sockets[2], updates[2], diags[2];
     if (socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,sockets)) goto failed;
     if (socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,updates)) { close(sockets[0]); close(sockets[1]); goto failed; }
-    program->socket=sockets[0]; program->update_socket=updates[0];
+    if (socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,diags)) {
+        close(sockets[0]); close(sockets[1]); close(updates[0]); close(updates[1]); goto failed;
+    }
+    program->socket=sockets[0]; program->update_socket=updates[0]; program->diag_fd=diags[0];
     char executable[4096];
     ssize_t length = readlink("/proc/self/exe",executable,sizeof(executable)-1);
-    if (length <= 0) { close(sockets[1]); close(updates[1]); goto failed; }
+    if (length <= 0) { close(sockets[1]); close(updates[1]); close(diags[0]); close(diags[1]); goto failed; }
     executable[length] = 0;
     posix_spawn_file_actions_t actions;
-    if (posix_spawn_file_actions_init(&actions)) { close(sockets[1]); close(updates[1]); goto failed; }
+    if (posix_spawn_file_actions_init(&actions)) {
+        close(sockets[1]); close(updates[1]); close(diags[0]); close(diags[1]); goto failed;
+    }
     int action_error = posix_spawn_file_actions_adddup2(&actions,sockets[1],3);
     if (!action_error) action_error = posix_spawn_file_actions_adddup2(&actions,updates[1],4);
+    if (!action_error) action_error = posix_spawn_file_actions_adddup2(&actions,diags[1],5);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,0,"/dev/null",O_RDONLY,0);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,1,"/dev/null",O_WRONLY,0);
     if (!action_error) action_error = posix_spawn_file_actions_addopen(&actions,2,"/dev/null",O_WRONLY,0);
-    int inherited[]={sockets[0],sockets[1],updates[0],updates[1]};
-    for (int i=0;i<4 && !action_error;i++) if (inherited[i]>4)
+    int inherited[]={sockets[0],sockets[1],updates[0],updates[1],diags[0],diags[1]};
+    for (int i=0;i<6 && !action_error;i++) if (inherited[i]>5)
         action_error=posix_spawn_file_actions_addclose(&actions,inherited[i]);
     char *args[] = {executable,"--csound-worker",NULL};
     extern char **environ;
     int spawned = action_error ? action_error : posix_spawn(&program->child,executable,&actions,NULL,args,environ);
     posix_spawn_file_actions_destroy(&actions);
-    close(sockets[1]); close(updates[1]);
+    close(sockets[1]); close(updates[1]); close(diags[1]);
     if (spawned) goto failed;
     Reply reply = {0};
     if (!send_message(program->socket,CS_COMPILE,batch.code,batch.used) || !transfer(program->socket,&reply,sizeof(reply),0)) {
@@ -490,6 +557,7 @@ void csound_program_free(CsoundProgram *program) {
     if (program->started) pthread_join(program->thread,NULL);
     if (program->socket >= 0) close(program->socket);
     if (program->update_socket >= 0) close(program->update_socket);
+    if (program->diag_fd >= 0) close(program->diag_fd);
     if (program->child > 0) { while (waitpid(program->child,NULL,0) < 0 && errno == EINTR) {} }
     for (unsigned i=0;i<program->url_count;i++) free(program->loaded_urls[i]);
     pthread_mutex_destroy(&program->update_lock); pthread_mutex_destroy(&program->lock); free(program);

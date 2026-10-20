@@ -10,11 +10,25 @@
 #include <assert.h>
 
 char *websamp_fetch_text(const char *url);
-static int orchestra_fetches;
+static int orchestra_fetches, missing_orchestra_fetches, gone_orchestra_fetches, lost_orchestra_fetches,
+    kept_orchestra_fetches;
 char *csound_test_fetch(const char *url) {
     if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/tone.orc")) {
         orchestra_fetches++;
         return strdup_safe("instr Cached\na1 oscili p5,p4\nout a1,a1\nendin\n");
+    }
+    if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/missing.orc")) {
+        missing_orchestra_fetches++; return NULL;
+    }
+    if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/gone.orc")) {
+        gone_orchestra_fetches++; return NULL;
+    }
+    if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/lost.orc")) {
+        lost_orchestra_fetches++; return NULL;
+    }
+    if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/kept.orc")) {
+        kept_orchestra_fetches++;
+        return strdup_safe("instr Kept\na1 oscili p5,p4\nout a1,a1\nendin\n");
     }
     return websamp_fetch_text(url);
 }
@@ -127,6 +141,57 @@ static void test_orchestra_url_cache(void) {
     assert(update(program,"instr AfterPause\na1 oscili p5,p4\nout a1,a1\nendin\n",0));
     cJSON_Delete(loads); csound_program_free(program);
 }
+/* Failed orchestra fetches stay rejected without refetching, matching the
+   deployed loader's session promise cache (one observable fetch for two
+   loadOrc calls). A distinct dead URL still fetches once, and the program
+   keeps working afterwards. */
+static void test_orchestra_failed_url_cache(void) {
+    CsoundProgram *program=compile("instr Alive\na1 oscili p5,p4\nout a1,a1\nendin\n",0); assert(program);
+    cJSON *loads=cJSON_Parse("[{\"url\":\"github:fixture/orchestra/main/missing.orc\"}]"); assert(loads);
+    char error[1024],first_error[1024];
+    assert(!csound_program_update(program,loads,error,sizeof(error)) && missing_orchestra_fetches==1);
+    snprintf(first_error,sizeof(first_error),"%s",error);
+    assert(!csound_program_update(program,loads,error,sizeof(error)) && missing_orchestra_fetches==1);
+    assert(!strcmp(error,first_error));
+    assert(cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(loads,0),"url"),
+        "github:fixture/orchestra/main/gone.orc"));
+    assert(!csound_program_update(program,loads,error,sizeof(error)) && gone_orchestra_fetches==1);
+    assert(missing_orchestra_fetches==1);
+    assert(update(program,"instr AfterFailure\na1 oscili p5,p4\nout a1,a1\nendin\n",0));
+    cJSON_Delete(loads); csound_program_free(program);
+    puts("failed orchestra URLs reject from cache without refetching; the program survives");
+}
+/* Loads that succeed before a later failure stay available, matching the
+   deployed page engine. The first prepare fails on the dead URL and parks
+   its engine; later prepares adopt it without refetching. Uses direct
+   prepares with unique fixture URLs, so it runs anywhere in the suite. */
+static void test_csound_stash_adopts(void) {
+    char error[1024]; cJSON *metadata=NULL;
+    JsProgram *bad=javascript_compile(
+        "await loadOrc('github:fixture/orchestra/main/kept.orc');"
+        "await loadOrc('github:fixture/orchestra/main/lost.orc'); note(60)",
+        120,&metadata,error,sizeof(error));
+    assert(bad && metadata);
+    assert(!javascript_prepare_csound_from(bad,metadata,NULL,error,sizeof(error)));
+    assert(kept_orchestra_fetches==1 && lost_orchestra_fetches==1);
+    cJSON_Delete(metadata); javascript_free(bad);
+    metadata=NULL;
+    JsProgram *plain=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(plain && metadata);
+    assert(javascript_prepare_csound_from(plain,metadata,NULL,error,sizeof(error)));
+    CsoundProgram *engine=javascript_csound(plain); assert(engine);
+    assert(kept_orchestra_fetches==1 && lost_orchestra_fetches==1);
+    cJSON_Delete(metadata); metadata=NULL;
+    JsProgram *reuse=javascript_compile(
+        "await loadOrc('github:fixture/orchestra/main/kept.orc'); note(60)",
+        120,&metadata,error,sizeof(error));
+    assert(reuse && metadata);
+    assert(javascript_prepare_csound_from(reuse,metadata,NULL,error,sizeof(error)));
+    assert(javascript_csound(reuse)==engine);
+    assert(kept_orchestra_fetches==1 && lost_orchestra_fetches==1);
+    cJSON_Delete(metadata); javascript_free(reuse); javascript_free(plain);
+    puts("failed prepare parks its engine; later prepares adopt it without refetching");
+}
 static void render(CsoundProgram *program, const char *instrument, int midi) {
     cJSON *value = cJSON_CreateObject();
     assert(value);
@@ -170,6 +235,7 @@ int main(int argc, char **argv) {
 #else
     test_live_orchestra();
     test_orchestra_url_cache();
+    test_orchestra_failed_url_cache();
     CsoundProgram *program = compile("instr Test\na1 oscili p5,p4\nout a1,a1\nendin\n",0);
     assert(program); render(program,"Test",0); csound_program_free(program);
     program = compile("instr 1\na1 oscili (p5/127)*.2,cpsmidinn(p4)\nout a1,a1\nendin\n",0);
@@ -244,6 +310,7 @@ int main(int argc, char **argv) {
     }
     cJSON_Delete(corpus);
     puts("native Csound loaders, rendering, invalid-source and execution-budget checks ok");
+    test_csound_stash_adopts();
 #endif
     return 0;
 }

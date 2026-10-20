@@ -222,19 +222,51 @@ void javascript_retain(JsProgram *p) {
 int javascript_prepare_csound(JsProgram *p, const cJSON *metadata, char *error, size_t size) {
     return javascript_prepare_csound_from(p,metadata,NULL,error,size);
 }
+/* Session Csound engine: the deployed page keeps one engine across
+   evaluations, so loads that succeed before a later failure stay available
+   for the next evaluation. A new program shares the surviving previous
+   engine; when none exists, the stashed engine is adopted instead of
+   discarding partial loads with the failed evaluation. */
+static CsoundProgram *stashed_csound;
+static pthread_mutex_t stashed_csound_lock = PTHREAD_MUTEX_INITIALIZER;
+static void park_csound(JsProgram *p) {
+    if (!p || !p->csound) return;
+    pthread_mutex_lock(&stashed_csound_lock);
+    if (stashed_csound!=p->csound) {
+        csound_program_free(stashed_csound);
+        stashed_csound=p->csound; csound_program_retain(stashed_csound);
+    }
+    pthread_mutex_unlock(&stashed_csound_lock);
+}
 int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
                                    JsProgram *previous, char *error, size_t size) {
     const cJSON *loads = cJSON_GetObjectItemCaseSensitive(metadata,"csound");
     if (cJSON_IsArray(loads) && cJSON_GetArraySize(loads)>16) {
         snprintf(error,size,"Csound: too many orchestra loads"); return 0;
     }
-    if (!cJSON_IsArray(loads) && (!previous || !previous->csound)) return 1;
+    if (!cJSON_IsArray(loads) && (!previous || !previous->csound)) {
+        /* Evaluations without loads keep running without an engine, unless a
+           failed evaluation parked one with surviving loads. */
+        pthread_mutex_lock(&stashed_csound_lock);
+        if (stashed_csound) {
+            p->csound=stashed_csound; csound_program_retain(p->csound);
+            pthread_mutex_unlock(&stashed_csound_lock);
+        } else {
+            pthread_mutex_unlock(&stashed_csound_lock);
+            return 1;
+        }
+    }
     p->csound_source=cJSON_IsArray(loads)?cJSON_PrintUnformatted(loads):
-        strdup_safe(previous->csound_source?previous->csound_source:"[]");
+        strdup_safe(previous&&previous->csound_source?previous->csound_source:"[]");
     if (!p->csound_source) return 0;
     if (previous && previous->csound) {
         p->csound=previous->csound; csound_program_retain(p->csound);
     } else {
+        pthread_mutex_lock(&stashed_csound_lock);
+        p->csound=stashed_csound; csound_program_retain(p->csound);
+        pthread_mutex_unlock(&stashed_csound_lock);
+    }
+    if (!p->csound) {
         cJSON *empty=cJSON_CreateArray();
         if (!empty) return 0;
         p->csound=csound_program_create(empty,error,size); cJSON_Delete(empty);
@@ -250,7 +282,7 @@ int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
         if (!single || !cJSON_AddItemReferenceToArray(single,(cJSON *)load)) { cJSON_Delete(single); return 0; }
         CsoundUpdateResult result=csound_program_update(p->csound,single,error,size);
         cJSON_Delete(single);
-        if (result==CSOUND_UPDATE_FAILED) return 0;
+        if (result==CSOUND_UPDATE_FAILED) { park_csound(p); return 0; }
         if (result==CSOUND_UPDATE_REJECTED) log_console("%s",error);
     }
     return 1;

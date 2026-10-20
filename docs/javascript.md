@@ -689,7 +689,12 @@ initialization keeps the previous playable program; orchestra syntax diagnostics
 retain existing definitions while allowing the new musical pattern, as above.
 The compiler thread has the same confinement as the renderer. Up to 16 loads
 per evaluation, 2 MiB of combined source per update and 64 cached orchestra URLs
-per Csound session are accepted. Named instruments receive frequency,
+per Csound session are accepted. Failed orchestra fetches stay rejected
+without refetching, matching the deployed loader's session promise cache;
+oversize content is not cached, so shrunken upstream text loads normally.
+Loads that succeed before a later failure stay available to the next
+evaluation through a parked session engine, matching the deployed page
+engine. Named instruments receive frequency,
 gain, and the slash-separated Strudel control map as p4/p5/p6, matching the
 upstream bridge.
 

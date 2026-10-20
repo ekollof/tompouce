@@ -263,9 +263,14 @@ avoid re-firing scheduled haps, matching production interval cleanup.
 ## 9. Csound loader side effects
 
 - [ ] Match Csound loader side effects before a later JavaScript failure, failed
-      URL Promise caching and runtime worker diagnostics. This is the confined
-      compiler and renderer, not the preparation pool. Combined-output routing
-      depends on what a failed load leaves active.
+      URL Promise caching and runtime worker diagnostics. Failed orchestra
+      fetches stay rejected without refetching, matching the deployed
+      loader's session promise cache (one observable fetch for two calls;
+      oversize content still refetches). Loads that succeed before a later
+      failure park their engine for the next evaluation, matching the
+      deployed page engine. This is the confined compiler and
+      renderer, not the preparation pool. Combined-output routing depends on
+      what a failed load leaves active.
 
 ## 10. MIDI and combined output routing
 

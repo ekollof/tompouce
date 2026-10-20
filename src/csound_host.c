@@ -52,6 +52,42 @@ struct CsoundProgram {
 
 /* Private socket protocol, never the application's MCP stdout. */
 #ifdef HAVE_CSOUND
+/* Failed orchestra fetches stay rejected without refetching, matching the
+   deployed loader's session promise cache: the second loadOrc of a dead URL
+   rejects from cache (one observable fetch for two calls). Successes stay
+   per-program (each engine still compiles its own copy); failures are
+   process-lifetime like the page session. Oversize content is not cached:
+   upstream text may shrink below the limit. */
+static char *failed_orchestra_urls[64];
+static unsigned failed_orchestra_url_count;
+static pthread_mutex_t failed_orchestra_urls_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int orchestra_fetch_failed(const char *resolved) {
+    int failed=0;
+    pthread_mutex_lock(&failed_orchestra_urls_lock);
+    for (unsigned i=0;i<failed_orchestra_url_count;i++)
+        if (!strcmp(failed_orchestra_urls[i],resolved)) { failed=1; break; }
+    pthread_mutex_unlock(&failed_orchestra_urls_lock);
+    return failed;
+}
+
+static void orchestra_record_fetch_failure(const char *resolved) {
+    char *key=strdup_safe(resolved);
+    if (!key) return;
+    pthread_mutex_lock(&failed_orchestra_urls_lock);
+    if (failed_orchestra_url_count<64) {
+        int known=0;
+        for (unsigned i=0;i<failed_orchestra_url_count;i++)
+            if (!strcmp(failed_orchestra_urls[i],resolved)) { known=1; break; }
+        if (known) free(key);
+        else failed_orchestra_urls[failed_orchestra_url_count++]=key;
+    } else {
+        /* Best effort: without room the next evaluation refetches and fails
+           with the same error. */
+        free(key);
+    }
+    pthread_mutex_unlock(&failed_orchestra_urls_lock);
+}
 static int transfer(int fd, void *buffer, size_t size, int sending) {
     unsigned char *p = buffer;
     while (size) {
@@ -322,6 +358,9 @@ static int prepare_loads(CsoundProgram *program, const cJSON *items, OrchestraLo
             for (unsigned i=0;i<program->url_count;i++) if (!strcmp(program->loaded_urls[i],resolved)) cached=1;
             for (unsigned i=0;i<loads->count;i++) if (!strcmp(loads->urls[i],resolved)) cached=1;
             if (cached) continue;
+            if (orchestra_fetch_failed(resolved)) {
+                snprintf(error,size,"Csound: orchestra fetch failed or source exceeds limit"); goto failed;
+            }
             if (program->url_count+loads->count>=64) {
                 snprintf(error,size,"Csound: orchestra URL cache limit exceeded"); goto failed;
             }
@@ -331,6 +370,7 @@ static int prepare_loads(CsoundProgram *program, const cJSON *items, OrchestraLo
         }
         char *downloaded=remote?websamp_fetch_text(resolved):NULL;
         const char *text=cJSON_IsString(inline_code)?inline_code->valuestring:downloaded;
+        if (remote && !downloaded) orchestra_record_fetch_failure(resolved);
         if (!text || strlen(text)+1>CS_CODE_MAX-loads->used) {
             snprintf(error,size,"Csound: orchestra fetch failed or source exceeds limit"); free(downloaded); goto failed;
         }

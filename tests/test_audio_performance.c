@@ -355,10 +355,13 @@ static void render_retiring_effect_tail(int effect, unsigned long block, float *
     double energy=0;
     for(int frame=24255;frame<26460;frame++) energy+=pcm[frame*2]*pcm[frame*2];
     /* Coarse hold freezes the last value for up to one hold period after the
-       source stops, then renders silence; stateful filters/chorus/phaser
-       retain audible ring-out past retire_end. */
+       source stops, then renders silence; stateful filters and chorus retain
+       audible ring-out past retire_end. The retired phaser is bypassed (the
+       web's eviction gain sits downstream of it), so its tail is silent. */
     if (effect==6) {
         for(int frame=24400;frame<26460;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
+    } else if (effect==4) {
+        for(int frame=24255;frame<26460;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
     } else {
         assert(energy>1e-12);
     }

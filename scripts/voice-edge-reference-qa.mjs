@@ -12,11 +12,20 @@ async function capture() {
     {attack:.02,decay:0,sustain:.6,release:.1},
     {attack:0,decay:0,sustain:1,release:.1},
     {attack:.02,decay:.03,sustain:.6,release:.1,cutoff:100,resonance:10},
+    {attack:.02,decay:.03,sustain:.6,release:.1,hcutoff:1000,tailOnly:1},
+    {attack:.02,decay:.03,sustain:.6,release:.1,bandf:1000,bandq:2,tailOnly:1},
+    {attack:.02,decay:.03,sustain:.6,release:.1,phaserrate:2,tailOnly:1},
+    {attack:.02,decay:.03,sustain:.6,release:.1,coarse:8,tailOnly:1},
+    // No web oracle for chorus (the deployed player exposes no chorus
+    // control) or vowel tails (a -70 dB formant residual the native parallel
+    // formants do not reproduce); both stay native-only regressions below.
   ];
   const sampleEnvelopes=[envelopes[3],{...envelopes[3],cutoff:100,resonance:10}];
+  const tailOnly=value=>value.cutoff||value.tailOnly;
   for(const sound of ['sine','piano']) for(const value of sound==='sine'?envelopes:sampleEnvelopes)
-    for(const duration of value.cutoff?[.7]:[.015,.05,.2,.7]) for(const incoming of [.25,.3])
+    for(const duration of tailOnly(value)?[.7]:[.015,.05,.2,.7]) for(const incoming of [.25,.3])
       for(const cut of sound==='piano'?[false,true]:[false]) {
+        const {tailOnly:_,...params}=value;
         const context=new OfflineAudioContext(2,44100,44100);
         setAudioContext(context);setSuperdoughAudioController(null);resetGlobalEffects();
         await initAudio({maxPolyphony:1,multiChannelOrbits:false});
@@ -37,7 +46,7 @@ async function capture() {
           return result;
         };
         try {
-          await superdough({s:sound,note:60,gain:.1,postgain:1,...value,clip:1,...(cut?{cut:1}:{})},.1,duration,.5,0);
+          await superdough({s:sound,note:60,gain:.1,postgain:1,...params,clip:1,...(cut?{cut:1}:{})},.1,duration,.5,0);
           const suspended=context.suspend(8960/44100),rendered=context.startRendering();
           await suspended;
           await superdough({s:sound,note:60,gain:0,...(cut?{cut:1}:{})},incoming,.4,.5,0);
@@ -50,7 +59,7 @@ async function capture() {
             const time=frame/44100,age=time-.1;
             // Filter fixtures gate the post-stop ring-out; the unfiltered
             // fixtures above gate envelope/cut automation before source stop.
-            if(value.cutoff && time<incoming+.25) continue;
+            if(tailOnly(value) && time<incoming+.25) continue;
             const envelope=sound==='piano'?(age<=duration?1:Math.max(0,1-(age-duration)/value.release)):1;
             points.push({frame,gain:pcm[frame]/.1*envelope});
           }

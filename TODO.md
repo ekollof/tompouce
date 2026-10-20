@@ -213,7 +213,7 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       bounded retiring graphs through source stop at incoming target + 250 ms,
       retaining downstream effect tails until original cleanup. Explicit rests
       and failed sources now remove a full pool's oldest entry without
-      reserving a replacement. A 54-case web/native gate covers short and
+      reserving a replacement. A 62-case web/native gate covers short and
       coincident ADSR, same-group sample cuts and selected filter ring-out.
       Broaden cut ordering, other per-voice effect graphs and the remaining
       native source types against actual web PCM, using the tails settled
@@ -225,8 +225,11 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       counters from step 4 when the pool exists. Native regressions now lock
       in cut group isolation, first-cutter-wins, equal-time onset-serial order
       and oscillator exclusion, plus bit-identical 1/8,192-frame tails for
-      low-pass, high-pass, band-pass, vowel, phaser, chorus and coarse graphs;
-      web PCM for the non-low-pass graphs, remaining source types and the burst
+      low-pass, high-pass, band-pass, vowel, phaser, chorus and coarse graphs.
+      Web PCM covers the high-pass, band-pass, phaser and coarse tails (62
+      cases); the retired phaser is bypassed to match the deployed player's
+      exact-zero post-stop behavior. Vowel topology (a -70 dB residual),
+      chorus (no web control), remaining source types and the burst
       load proof remain.
 
 ## 8. Duck coverage

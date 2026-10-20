@@ -1421,9 +1421,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                        remain connected until the original graph cleanup. */
                     if (voice_has_effect_tail(V) && audio_time<V->graph_end) {
                         double gate=V->gate_end-V->start_time;
+                        /* The web's eviction gain sits downstream of the
+                           phaser: a retired phaser goes silent at stop while
+                           downstream biquads still ring. Bypass the swept
+                           allpass cascade here so its frozen state cannot be
+                           pumped back up; everything else flushes normally. */
+                        double phaser=V->dsp.control.p[DSP_PHASER];
+                        double phaser_right=V->dsp_right.control.p[DSP_PHASER];
+                        V->dsp.control.p[DSP_PHASER]=0;
+                        V->dsp_right.control.p[DSP_PHASER]=0;
                         double left=dsp_process(&V->dsp,0,V->age,gate),right=left;
                         if(V->smp_channels==2 || V->inst==INST_SUPERSAW || V->inst==INST_NATIVE)
                             right=dsp_process(&V->dsp_right,0,V->age,gate);
+                        V->dsp.control.p[DSP_PHASER]=phaser;
+                        V->dsp_right.control.p[DSP_PHASER]=phaser_right;
                         route_voice(V,left,right,&mixes[V->orbit]);
                         V->age+=dt;
                         continue;

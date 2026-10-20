@@ -290,7 +290,8 @@ The scheduler harness verifies the rest/silent/missing/silent/stretch sequence.
 
 `cmake --build build --target test-voice-reference-web` also runs
 `scripts/voice-edge-reference-qa.mjs`: 48 web/native short-envelope, coincident
-endpoint and sample-cut cases, plus six selected low-pass ring-out cases.
+endpoint and sample-cut cases, plus ring-out cases for low-pass, high-pass,
+band-pass, phaser and coarse graphs (62 cases total).
 An existing automation endpoint at the exact stealing deadline remains audible
 until source stop. Sample cuts schedule their future unity set and 10 ms ramp
 at preparation time, overriding an intervening stealing fade. Filter cases gate
@@ -298,11 +299,16 @@ post-stop PCM only; DC is injected after the sampled instrument's own ADSR, so
 they do not establish full filtered attack/release waveform parity.
 Downstream filters and native effect graphs now process silence after source
 stop until the original cleanup deadline, retaining state and shared sends.
+The retired phaser is bypassed there: the deployed player holds a retired
+phaser at exactly zero post-stop while its low-pass rings, so the eviction
+gain sits downstream of the phaser graph. The deployed player exposes no
+chorus control, and its vowel tail carries a -70 dB wandering residual the
+native parallel formants do not reproduce; both stay native-only.
 Offline regressions check ring-out across 1/8,192-frame blocks for low-pass,
 high-pass, band-pass, vowel, phaser, chorus and coarse graphs, plus native
 effect-state lifetime; a cut-ordering regression checks same-group cuts with
 first-cutter-wins, group isolation, equal-time onset-serial tiebreak and
-oscillator exclusion. Web PCM parity for non-low-pass effect tails, remaining
+oscillator exclusion. Vowel topology, remaining
 source types and scheduling-overload parity still need independent checks.
 
 Generated room preparation runs outside the scheduler and callback. The

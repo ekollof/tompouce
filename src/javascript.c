@@ -1,6 +1,7 @@
 #include "javascript.h"
 #include "common.h"
 #include "slider.h"
+#include "midi.h"
 #include <quickjs.h>
 #include <ctype.h>
 #include <limits.h>
@@ -95,6 +96,65 @@ static JSValue host_slider_read(JSContext *ctx, JSValueConst self, int argc, JSV
     if (!argc || JS_ToInt32(ctx,&index,argv[0])<0 || !slider_bank_read(program->sliders,index,&value))
         return JS_ThrowRangeError(ctx,"invalid slider binding");
     return JS_NewFloat64(ctx,value);
+}
+
+/* MIDI controller input reads. The port argument only selects the
+   subscription; values merge across senders like a single controller. */
+static JSValue host_midi_open(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    if (!argc) return JS_NewInt32(ctx,0);
+    if (JS_IsNumber(argv[0])) {
+        int32_t ordinal;
+        if (JS_ToInt32(ctx,&ordinal,argv[0])<0) return JS_ThrowTypeError(ctx,"midi input index must be an integer");
+        return JS_NewInt32(ctx,midi_open_input(NULL,ordinal));
+    }
+    const char *name=JS_ToCString(ctx,argv[0]);
+    if (!name) return JS_ThrowTypeError(ctx,"midi input must be a device name, index or empty");
+    int open=name[0]?midi_open_input(name,-1):midi_open_input(NULL,0);
+    JS_FreeCString(ctx,name);
+    return JS_NewInt32(ctx,open);
+}
+
+static JSValue host_midi_read(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    int32_t cc=0,chan=0;
+    if (argc>0 && JS_ToInt32(ctx,&cc,argv[0])<0) return JS_ThrowTypeError(ctx,"midi cc must be an integer");
+    if (argc>1 && !JS_IsUndefined(argv[1]) && JS_ToInt32(ctx,&chan,argv[1])<0)
+        return JS_ThrowTypeError(ctx,"midi channel must be an integer");
+    return JS_NewFloat64(ctx,midi_cc_value(cc,chan));
+}
+
+static JSValue host_midi_keys(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    double horizon=1e12;
+    if (argc>0) {
+        if (JS_ToFloat64(ctx,&horizon,argv[0])<0) return JS_ThrowTypeError(ctx,"midi key horizon must be a number");
+        if (!isfinite(horizon)) horizon=1e12;
+    }
+    MidiHeldKey keys[64];
+    unsigned count=midi_take_keys(keys,64,horizon);
+    JSValue result=JS_NewArray(ctx);
+    if (JS_IsException(result)) return result;
+    for (unsigned i=0;i<count;i++) {
+        JSValue entry=JS_NewObject(ctx);
+        if (JS_IsException(entry)) {
+            JS_FreeValue(ctx,result);
+            return JS_ThrowOutOfMemory(ctx);
+        }
+        if (JS_SetPropertyStr(ctx,entry,"note",JS_NewInt32(ctx,keys[i].note))<0 ||
+            JS_SetPropertyStr(ctx,entry,"velocity",JS_NewFloat64(ctx,keys[i].vel))<0 ||
+            JS_SetPropertyStr(ctx,entry,"midichan",JS_NewInt32(ctx,keys[i].chan))<0 ||
+            JS_SetPropertyStr(ctx,entry,"at",JS_NewFloat64(ctx,keys[i].at))<0) {
+            JS_FreeValue(ctx,entry); JS_FreeValue(ctx,result);
+            return JS_ThrowOutOfMemory(ctx);
+        }
+        /* The final call consumes entry in all paths. */
+        if (JS_SetPropertyUint32(ctx,result,i,entry)<0) {
+            JS_FreeValue(ctx,result);
+            return JS_ThrowOutOfMemory(ctx);
+        }
+    }
+    return result;
 }
 
 static JSValue global_function(JSContext *ctx, const char *name) {
@@ -307,8 +367,11 @@ static int initialize(JsProgram *p, char *error, int n) {
     int b = JS_SetPropertyStr(ctx, global, "__hostSlider", JS_NewCFunction(ctx, host_slider, "__hostSlider", 4));
     int c = JS_SetPropertyStr(ctx, global, "__hostSliderBind", JS_NewCFunction(ctx, host_slider_bind, "__hostSliderBind", 4));
     int d = JS_SetPropertyStr(ctx, global, "__hostSliderRead", JS_NewCFunction(ctx, host_slider_read, "__hostSliderRead", 1));
+    int e = JS_SetPropertyStr(ctx, global, "__hostMidiOpen", JS_NewCFunction(ctx, host_midi_open, "__hostMidiOpen", 1));
+    int f = JS_SetPropertyStr(ctx, global, "__hostMidiRead", JS_NewCFunction(ctx, host_midi_read, "__hostMidiRead", 2));
+    int g = JS_SetPropertyStr(ctx, global, "__hostMidiKeys", JS_NewCFunction(ctx, host_midi_keys, "__hostMidiKeys", 1));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {

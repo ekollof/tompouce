@@ -287,6 +287,48 @@ globalThis.all = (fn) => { allTransforms.push(fn); return core.silence; };
 globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
 core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
 globalThis.osc = pattern=>pattern.osc();
+/* MIDI controller input, mirroring the upstream input package: midin opens
+   a sender and returns a per-CC live reader (values normalized 0..1, default
+   0); midikeys returns live keyboard notes with fixed durations. Native
+   values merge across senders into one store; without a connected sender the
+   readers stay at their defaults, and midikeys rejects a missing device.
+   Held notes sound on the next scheduled window after arrival (like live
+   slider moves) and fire once: audio queries consume, visual queries peek. */
+let midiConsumeKeys = false;
+const midiInputError = (name) => new Error(
+  `[midi] Midi input cannot be a pattern. Make sure to pass device name with single quotes.`);
+globalThis.midin = async (input) => {
+  if (core.isPattern(input)) throw midiInputError('midin');
+  __hostMidiOpen(input ?? 0);
+  return (cc, chan) => core.ref(() => __hostMidiRead(cc, chan));
+};
+globalThis.midikeys = async (input) => {
+  if (core.isPattern(input)) throw midiInputError('midikeys');
+  const open = __hostMidiOpen(input ?? 0);
+  if (!open) throw new Error(`[midi] Midi device "${input ?? 0}" not found. Connect a sender with aconnect.`);
+  const tag = `${input ?? 0}`;
+  const kb = (noteLength = 0.5) => {
+    const nlPat = core.reify(noteLength);
+    const query = (state) => {
+      const windowBegin = Number(state.span.begin);
+      const keys = __hostMidiKeys(midiConsumeKeys ? 1e12 : -1);
+      const haps = [];
+      let offset = 0;
+      for (const key of keys) {
+        const at = windowBegin + offset; offset += 0.001;
+        const durs = nlPat.query(state.setSpan(new core.TimeSpan(at, at)));
+        const nl = durs.length ? Number(durs[0].value) : 0.5;
+        if (!Number.isFinite(nl) || nl <= 0) continue;
+        const span = new core.TimeSpan(at, at + nl);
+        const value = { _midikey: `${tag}_${key.note}`, note: key.note, velocity: key.velocity, midichan: key.midichan };
+        haps.push(new core.Hap(span, span, value, {}));
+      }
+      return haps;
+    };
+    return new core.Pattern(query);
+  };
+  return kb;
+};
 /* Dominant MIDI output, mirroring the web routing (local audio bypassed,
    channel from midichan defaulting to 1). The port argument only selects a
    web device; native ALSA subscribers receive every note. An options object
@@ -512,7 +554,13 @@ globalThis.__query = (begin, end, cps, probes = false) => {
   core.setTime(() => begin);
   cps = Number.isFinite(cps) && cps > 0 ? cps : (tempo ?? initialBpm)/240;
   queryCps=cps;
-  const haps = selected.queryArc(beginTime, endTime, { _cps: cps });
+  midiConsumeKeys = true;
+  let haps;
+  try {
+    haps = selected.queryArc(beginTime, endTime, { _cps: cps });
+  } finally {
+    midiConsumeKeys = false;
+  }
   if (haps.length > 4096) throw new Error('Pattern exceeds 4096 haps per query');
   const events = [];
   for (const hap of haps) {

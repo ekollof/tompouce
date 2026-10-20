@@ -44,6 +44,21 @@ moving a slider inside `setcpm(slider(30))` requires F5 to change tempo. Use
 `.cpm(...)` transform uses current scheduler CPS; numeric `.cpm(...)` keeps
 evaluation-time scaling, matching the web helper.
 
+`midin(input?)` opens an ALSA sender for MIDI controller input and returns a
+per-CC live reader, mirroring the upstream input package: `cc(0)` reads the
+most recently received value normalized 0..1 (optionally restricted with a
+1..16 channel), defaulting to 0 with no input. `midikeys(input?)` returns live
+keyboard notes with fixed durations like the web helper (`kb()` defaults to
+0.5, pattern arguments scale durations; `note`, `velocity` and 1..16
+`midichan` travel with each hap). Values merge across senders into one store;
+Pattern input is rejected, and `midikeys` rejects a missing device while
+`midin` keeps default readers. Held notes sound on the next scheduled window
+after arrival, like live slider moves, and fire once: audio queries consume,
+visual queries peek. Input names accept `client:port`, numeric client ids and
+device-name substrings (a bare call tries the first sender); without a sender,
+connect one with `aconnect`. Pitch bend, touch, CC output restore,
+background reconnect and persisted CC state are not implemented.
+
 JavaScript playback uses the web scheduler's 50 ms query windows,
 100 ms timer and overlap, and 100 ms output latency. Already submitted notes
 keep their values; the next query reads the new control. This applies equally

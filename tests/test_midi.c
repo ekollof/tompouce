@@ -5,6 +5,7 @@
 #include "../src/scheduler.c"
 #include "midi.h"
 #include <assert.h>
+#include <alsa/asoundlib.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -53,6 +54,22 @@ static void test_commit_routing(void) {
     CommittedNote notes[16];
     event_queue_clear(); audio_time=0; audio_toggle_play(1);
     assert(prep_pool_start(0,0));
+#ifdef HAVE_CSOUND
+    /* First: engine creation happens in a quiet process (worker spawn timing
+       under sanitizers degrades with heap churn). */
+    fprintf(stderr,"DBG plain-csound\n");
+    assert(track_load_from_code("await loadCsound`instr ComboTone\\na1 oscili p5,p4\\nout a1,a1\\nendin`; note('c3')"));
+    fprintf(stderr,"DBG plain-csound ok\n");
+    assert(track_load_from_code("await loadCsound`instr ComboTone\\na1 oscili p5,p4\\nout a1,a1\\nendin`; note('c3').csound('ComboTone')"));
+    schedule_loaded(1);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).midi().csound('ComboTone')"));
+    schedule_loaded(1);
+    assert(collect_committed(notes,16)==1);
+    assert(notes[0].midi_only && notes[0].csound_only && !notes[0].osc_only);
+    assert(notes[0].chan==0 && notes[0].note==60);
+    event_queue_clear();
+#endif
     assert(track_load_from_code("note(\"60 62\").midi()"));
     schedule_loaded(2);
     assert(collect_committed(notes,16)==2);
@@ -97,17 +114,6 @@ static void test_commit_routing(void) {
     event_queue_clear();
     assert(!track_load_from_code("note(60).midi(note(61))"));
     event_queue_clear();
-#ifdef HAVE_CSOUND
-    assert(track_load_from_code("await loadCsound`instr ComboTone\\na1 oscili p5,p4\\nout a1,a1\\nendin`; note('c3').csound('ComboTone')"));
-    schedule_loaded(1);
-    event_queue_clear();
-    assert(track_load_from_code("note(60).midi().csound('ComboTone')"));
-    schedule_loaded(1);
-    assert(collect_committed(notes,16)==1);
-    assert(notes[0].midi_only && notes[0].csound_only && !notes[0].osc_only);
-    assert(notes[0].chan==0 && notes[0].note==60);
-    event_queue_clear();
-#endif
     puts("midi commit: dominance flags, channels, combos, rests and Pattern rejection ok");
 }
 
@@ -190,17 +196,197 @@ static void test_threaded_delivery(void) {
     assert(found67);
     scheduler_shutdown();
     midi_capture_enable(0);
-    midi_shutdown();
     puts("midi delivery: ordered notes with velocity, no local voices, legacy path intact");
 }
 
+static void test_midi_input_stores(void) {
+    MidiHeldKey keys[300];
+    assert(midi_cc_value(120,0)==0 && midi_cc_value(120,3)==0);
+    midi_test_inject(1,2,120,64);
+    assert(fabs(midi_cc_value(120,0)-64/127.0)<1e-12);
+    assert(fabs(midi_cc_value(120,3)-64/127.0)<1e-12);
+    assert(midi_cc_value(120,4)==0);
+    assert(midi_cc_value(120,99)==0);
+    midi_test_inject(1,5,120,127);
+    assert(fabs(midi_cc_value(120,0)-1)<1e-12);
+    assert(fabs(midi_cc_value(120,6)-1)<1e-12);
+    assert(fabs(midi_cc_value(120,3)-64/127.0)<1e-12);
+    midi_test_inject(1,99,120,100);
+    midi_test_inject(1,0,200,100);
+    assert(fabs(midi_cc_value(120,0)-1)<1e-12);
+    midi_test_inject(0,0,60,0);
+    assert(midi_take_keys(keys,64,-1)==0);
+    midi_test_inject(0,0,60,100);
+    midi_test_inject(0,1,62,127);
+    assert(midi_take_keys(keys,64,1e12)==2);
+    assert(keys[0].note==60 && keys[0].chan==1 && fabs(keys[0].vel-100/127.0)<1e-12);
+    assert(keys[1].note==62 && keys[1].chan==2 && keys[1].vel==1);
+    assert(midi_take_keys(keys,64,1e12)==0);
+    midi_test_inject(0,0,64,100);
+    assert(midi_take_keys(keys,64,-1)==0);
+    assert(midi_take_keys(keys,64,1e12)==1 && keys[0].note==64);
+    for (int i=0;i<301;i++) midi_test_inject(0,0,i%128,100);
+    assert(midi_take_keys(keys,300,1e12)==256 && keys[0].note==45 && keys[255].note==44);
+    puts("midi input stores: merged/per-channel CC, consume-once keys, bounds ok");
+}
+
+/* MIDI controller input through real evaluation and queries. CC readers
+   follow injected values across cycles; keyboard patterns emit held notes
+   once with fixed durations and channel attribution. */
+static double committed_lpf(void) {
+    for (QNode *node=qhead;node;node=node->next) {
+        if (node->ev.control_only || node->ev.eviction_only) continue;
+        return node->ev.dsp.p[DSP_LPF];
+    }
+    return NAN;
+}
+
+static void test_midi_input_js(void) {
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    assert(track_load_from_code("const cc = await midin('no-such-device-xyz'); note(60).s('sine').lpf(cc(7).range(0,1000))"));
+    schedule_loaded(1);
+    assert(fabs(committed_lpf()-0)<1e-9);
+    midi_test_inject(1,0,7,64);
+    event_queue_clear();
+    assert(track_load_from_code("const cc = await midin('no-such-device-xyz'); note(60).s('sine').lpf(cc(7).range(0,1000))"));
+    schedule_loaded(1);
+    assert(fabs(committed_lpf()-1000*64/127.0)<1e-6);
+    midi_test_inject(1,2,8,127);
+    event_queue_clear();
+    assert(track_load_from_code("const cc = await midin('no-such-device-xyz'); note(60).s('sine').lpf(cc(8,3).range(0,100))"));
+    schedule_loaded(1);
+    assert(fabs(committed_lpf()-100)<1e-6);
+    event_queue_clear();
+    assert(!track_load_from_code("await midin(note(60))"));
+    assert(!track_load_from_code("await midikeys('no-such-device-xyz')"));
+    assert(!track_load_from_code("await midikeys(note(60))"));
+    event_queue_clear();
+    puts("midi input JS: live CC reads, channels, Pattern rejection, missing-device errors ok");
+}
+
+/* Keyboard commit through injected arrivals: held notes voice once with
+   channel attribution, then consume so re-queries stay silent. Requires a
+   live sender (see the loopback test below); skipped without one. */
+static int loopback_sender_ready;
+static snd_seq_t *loopback_sender;
+static void test_midi_keys_commit(void) {
+    if (!loopback_sender_ready) {
+        puts("SKIP midi keys commit: no ALSA sequencer");
+        return;
+    }
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    midi_test_inject(0,3,69,110);
+    assert(track_load_from_code("const kb = await midikeys('test-none-xyz'); kb().s('saw')"));
+    schedule_loaded(1);
+    int voices=0;
+    for (QNode *node=qhead;node;node=node->next) {
+        if (node->ev.control_only || node->ev.eviction_only) continue;
+        voices++;
+        assert(fabs(node->ev.freq-440*pow(2,(69-69)/12.0))<1e-9);
+        assert(node->ev.midi_chan==3);
+        assert(fabs(node->ev.gain-.8*110/127.0)<1e-9);
+    }
+    assert(voices==1);
+    event_queue_clear();
+    assert(track_load_from_code("const kb = await midikeys('test-none-xyz'); kb().s('saw')"));
+    schedule_loaded(0);
+    voices=0;
+    for (QNode *node=qhead;node;node=node->next)
+        if (!node->ev.control_only && !node->ev.eviction_only) voices++;
+    assert(voices==0);
+    event_queue_clear();
+    if (loopback_sender) { snd_seq_close(loopback_sender); loopback_sender=NULL; }
+    puts("midi keys commit: held notes voice once with channel attribution");
+}
+
+/* Full hardware loop: a local ALSA sender feeds the real input thread and
+   subscription path. Skipped gracefully without a sequencer. */
+static void test_midi_loopback(void) {
+    snd_seq_t *sender=NULL;
+    if (snd_seq_open(&sender,"default",SND_SEQ_OPEN_OUTPUT,0)<0 || !sender) {
+        puts("SKIP midi loopback: no ALSA sequencer");
+        return;
+    }
+    snd_seq_set_client_name(sender,"tompouce-midi-loopback");
+    int sport=snd_seq_create_simple_port(sender,"src",
+        SND_SEQ_PORT_CAP_READ|SND_SEQ_PORT_CAP_SUBS_READ,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
+    if (sport<0) { snd_seq_close(sender); puts("SKIP midi loopback: no sender port"); return; }
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    assert(track_load_from_code("const cc = await midin('tompouce-midi-loopback'); note(60)"));
+    assert(midi_open_input("tompouce-midi-loopback",-1));
+
+    assert(track_load_from_code(
+        "const cc = await midin('tompouce-midi-loopback');"
+        "const kb = await midikeys('tompouce-midi-loopback');"
+        "stack(note(60).s('sine').lpf(cc(20).range(0,1000)), kb().s('saw'))"));
+    schedule_loaded(2);
+    assert(fabs(committed_lpf()-0)<1e-9);
+    snd_seq_event_t ev;
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_controller(&ev,0,20,96);
+    snd_seq_ev_set_source(&ev,sport);
+    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_direct(&ev);
+    assert(snd_seq_event_output_direct(sender,&ev)>=0);
+    double end=monotonic()+5;
+    while (fabs(midi_cc_value(20,0)-96/127.0)>=1e-12 && monotonic()<end) {
+        struct timespec pause={.tv_nsec=5000000}; nanosleep(&pause,NULL);
+    }
+    assert(fabs(midi_cc_value(20,0)-96/127.0)<1e-12);
+    assert(fabs(midi_cc_value(20,1)-96/127.0)<1e-12);
+    event_queue_clear();
+    assert(track_load_from_code(
+        "const cc = await midin('tompouce-midi-loopback');"
+        "note(60).s('sine').lpf(cc(20).range(0,1000))"));
+    schedule_loaded(1);
+    assert(fabs(committed_lpf()-1000*96/127.0)<1e-6);
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_noteon(&ev,1,67,100);
+    snd_seq_ev_set_source(&ev,sport);
+    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_direct(&ev);
+    assert(snd_seq_event_output_direct(sender,&ev)>=0);
+    end=monotonic()+5;
+    int keys=0;
+    MidiHeldKey held[64];
+    while (monotonic()<end) {
+        if (midi_take_keys(held,64,1e12)>0) { keys=1; break; }
+        struct timespec pause={.tv_nsec=5000000}; nanosleep(&pause,NULL);
+    }
+    assert(keys && held[0].note==67 && held[0].chan==2 && fabs(held[0].vel-100/127.0)<1e-12);
+    /* The sender stays open so later keyboard tests have a live device. */
+    loopback_sender_ready=1;
+    loopback_sender=sender;
+    puts("midi loopback: CC and keyboard notes cross real ALSA ports");
+}
+
+#ifdef __SANITIZE_ADDRESS__
+/* ALSA keeps per-handle internals past snd_seq_close; suppress only those,
+   never test-code allocations. */
+const char *__lsan_default_suppressions(void) {
+    return "leak:snd_seq_hw_open\n";
+}
+#endif
+
 int main(int argc, char **argv) {
-    if (argc>1 && !strcmp(argv[1],"--csound-worker")) return csound_worker_main();
+    if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
+#ifdef TOMPOUCE_TEST_CSOUND_WORKER
+        execl(TOMPOUCE_TEST_CSOUND_WORKER,"test_midi","--csound-worker",(char *)NULL); return 1;
+#else
+        return csound_worker_main();
+#endif
+    }
     log_console_stderr(0);
     isolate_environment();
+    test_midi_input_stores();
     test_commit_routing();
     test_threaded_delivery();
+    test_midi_input_js();
+    test_midi_loopback();
+    test_midi_keys_commit();
     event_queue_clear();
+    midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");
     return 0;
 }

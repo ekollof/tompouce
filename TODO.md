@@ -292,10 +292,16 @@ avoid re-firing scheduled haps, matching production interval cleanup.
 
 ## 11. Controller input
 
-- [ ] Verify MIDI and controller input, expression and live mapping changes
+- [x] Verify MIDI and controller input, expression and live mapping changes
       against the actual web REPL rather than inferring behavior from control
-      names. This only reads controls; doing it earlier would churn the
-      live-control captures used above.
+      names. `midin` opens an ALSA sender and returns per-CC live readers
+      (normalized 0..1, default 0, optional 1..16 channel); `midikeys`
+      returns live keyboard notes with fixed durations, channel attribution
+      and consume-once queries, rejecting a missing device like the web.
+      Values merge across senders; input names accept client:port, numeric
+      ids, substrings and first-sender default. Pitch bend, touch, CC restore,
+      reconnect and persisted state remain open. This only reads controls;
+      doing it earlier would churn the live-control captures used above.
 
 ## Optional: full REPL parity
 
@@ -316,7 +322,9 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Dominant MIDI output beyond note triggering (CC, program change, bend,
   touch, sysex, midicmd transport, port selection) and combined
   external-output routing beyond the gated flag matrix (step 10 remainder).
-- Controller input and expression mapping (step 11).
+- Controller input beyond live CC reads and fixed-duration keyboard notes
+  (pitch bend, touch, CC restore, reconnect, persisted state; step 11
+  remainder).
 - Transport restart after Stop: the web re-fires early-cycle haps and
   continues the cycle, while native resets to cycle zero without
   re-firing. Stop itself (held tails finish, no new onsets) is gated.

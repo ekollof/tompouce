@@ -1541,6 +1541,10 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     continue;
                 } else if (V->smpbuf) { V->active = 0; continue; }
                 if (is_drum) {
+                    /* Stolen drums fade like every other evicted source; the
+                       web ramps each evicted pool entry to zero at the
+                       incoming target plus 250 ms regardless of type. */
+                    double drum_fade = retiring_envelope(V,1.0);
                     // per-drum envelope
                     if (V->inst == INST_KICK) {
                         double t = age;
@@ -1554,7 +1558,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         // phase
                         V->phase += (2*M_PI * V->freq)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI)) * env;
-                        mix_voice(V,s*V->amp*.9,vm);
+                        mix_voice(V,s*V->amp*.9*drum_fade,vm);
                     } else if (V->inst == INST_SNARE) {
                         double t = age;
                         double dur = 0.25;
@@ -1564,7 +1568,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double tone = wt_sample(V->wt, 200.0*audio_time); // fixed 200
                         double s = (0.7*noise + 0.3*tone)*env;
-                        mix_voice(V,s*V->amp*.7,vm);
+                        mix_voice(V,s*V->amp*.7*drum_fade,vm);
                     } else if (V->inst == INST_HH) {
                         double t = age;
                         double dur = 0.08;
@@ -1575,7 +1579,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         static double prev = 0;
                         double hp = noise - prev; prev = noise*0.5 + prev*0.5; // crude
                         double s = hp*env;
-                        mix_voice(V,s*V->amp*.5,vm);
+                        mix_voice(V,s*V->amp*.5*drum_fade,vm);
                     } else if (V->inst == INST_CP) {
                         double t = age;
                         double dur = 0.2;
@@ -1583,7 +1587,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double env = exp(-t*12.0);
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double s = noise*env;
-                        mix_voice(V,s*V->amp*.6,vm);
+                        mix_voice(V,s*V->amp*.6*drum_fade,vm);
                     } else if (V->inst == INST_TOM) {
                         double t = age;
                         double dur = 0.3;
@@ -1592,7 +1596,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double pitch = V->freq;
                         V->phase += (2*M_PI * pitch)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI))*env;
-                        mix_voice(V,s*V->amp*.8,vm);
+                        mix_voice(V,s*V->amp*.8*drum_fade,vm);
                     }
                 } else {
                     // synth with ADSR gate until note_off

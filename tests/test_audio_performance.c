@@ -110,6 +110,101 @@ static void voice_pool_fifo(void) {
 }
 
 static int constant_sample(void);
+static void render_interval(float *out, int frames, unsigned long block);
+
+static void drum_note(AudioEvent *note, const char *token, int inst, double gain) {
+    memset(note,0,sizeof(*note));
+    note->time=.1; note->duration=1; note->inst=inst; note->freq=440;
+    note->smp=-1; note->wt=-1; note->gain=gain;
+    note->att=.001; note->dec=.001; note->sus=1; note->rel=.1;
+    note->midi_chan=-1; note->midi_note=-1;
+    note->delay_prepared=1; note->room_prepared=1; note->is_drum=1;
+    snprintf(note->token,sizeof(note->token),"%s",token);
+    dsp_params_init(&note->dsp); note->dsp.enabled=1;
+}
+
+/* Stolen drums fade like every other evicted source. The deployed pool ramps
+   each evicted entry to zero at the incoming target plus 250 ms regardless of
+   source type (bd/sd/hh captures all show ramp+stop pairs in FIFO order). */
+static void test_drum_retirement(void) {
+    wt_init();
+    static float reference[44100*2],pressured[44100*2];
+    memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+    voice_onset_serial=0; retirement_overflow=0;
+    audio_set_reference_mode(1); audio_toggle_play(1);
+    AudioEvent tom;
+    drum_note(&tom,"tom",INST_TOM,.1);
+    audio_trigger_event(&tom);
+    render_interval(reference,44100,128);
+    /* Pool pressure: the audible TOM is oldest, 127 silent TOMs fill the
+       pool, and a silent TOM evicts it at .3 (retire_end .55). */
+    memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+    voice_onset_serial=0; retirement_overflow=0;
+    audio_trigger_event(&tom);
+    tom.gain=0;
+    for (int i=1;i<MAX_VOICES;i++) audio_trigger_event(&tom);
+    assert(audio_active_voices()==MAX_VOICES);
+    render_interval(pressured,8960,128);
+    tom.time=.3; audio_trigger_event(&tom);
+    assert(voices[MAX_VOICES].active && voices[MAX_VOICES].retiring);
+    assert(fabs(voices[MAX_VOICES].retire_end-.55)<1e-12);
+    assert(!retirement_overflow);
+    double anchor=voices[MAX_VOICES].retire_anchor,level=voices[MAX_VOICES].retire_level;
+    double span=voices[MAX_VOICES].retire_end-anchor; assert(span>0);
+    double trigged=8960.0/SR;
+    render_interval(pressured+8960*2,44100-8960,128);
+    /* The retired TOM is the solo TOM scaled by the retirement fade; the
+       silent pool voices contribute nothing. Afterwards it stops dead. */
+    for (int frame=0;frame<44100;frame++) {
+        double t=frame/SR;
+        float expected;
+        if (frame>=24255) expected=0;
+        else if (t<trigged || t<anchor) expected=reference[frame*2];
+        else expected=(float)(reference[frame*2]*level*(.55-t)/span);
+        assert(fabs(pressured[frame*2]-expected)<2e-6 && fabs(pressured[frame*2+1]-expected)<2e-6);
+    }
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
+/* Mixed deterministic types under pool pressure: FIFO eviction, the same
+   +250 ms stop deadline for every source type, bounded retiring graphs and
+   bit-identical rendering across callback sizes. */
+static void test_mixed_pool_saturation(void) {
+    wt_init();
+    int sample=constant_sample();
+    static float reference[44100*2],actual[44100*2];
+    AudioEvent sine={.time=.1,.duration=1,.inst=INST_SINE,.freq=440,
+        .smp=-1,.wt=-1,.gain=.05,.att=.01,.dec=.05,.sus=.8,.rel=.1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&sine.dsp); sine.dsp.enabled=1;
+    AudioEvent kick; drum_note(&kick,"bd",INST_KICK,.05);
+    AudioEvent tom; drum_note(&tom,"tom",INST_TOM,.05);
+    AudioEvent samp={.time=.1,.duration=1,.inst=INST_SINE,.freq=midi_to_freq(60),
+        .smp=sample,.smp_speed=1,.smp_gate=1,.wt=-1,.gain=.05,
+        .att=.01,.dec=.05,.sus=.8,.rel=.1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    dsp_params_init(&samp.dsp); samp.dsp.enabled=1;
+    for (int pass=0;pass<2;pass++) {
+        memset(voices,0,sizeof(voices)); audio_time=0; next_voice_onset=HUGE_VAL;
+        voice_onset_serial=0; retirement_overflow=0;
+        audio_set_reference_mode(1); audio_toggle_play(1);
+        for (int i=0;i<MAX_VOICES;i++) {
+            AudioEvent note=sine;
+            if (i%4==1) note=kick; else if (i%4==2) note=tom; else if (i%4==3) note=samp;
+            audio_trigger_event(&note);
+        }
+        assert(audio_active_voices()==MAX_VOICES);
+        AudioEvent evictor=sine; evictor.time=.3; evictor.gain=0;
+        audio_trigger_event(&evictor);
+        assert(audio_active_voices()==MAX_VOICES);
+        assert(voices[MAX_VOICES].active && voices[MAX_VOICES].retiring);
+        assert(fabs(voices[MAX_VOICES].retire_end-.55)<1e-12);
+        assert(!retirement_overflow);
+        render_interval(pass?actual:reference,44100,pass?8192:1);
+    }
+    assert(!memcmp(reference,actual,sizeof(reference)));
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
 
 static void test_cut_ordering(void) {
     int sample=constant_sample();
@@ -449,11 +544,13 @@ int main(int argc, char **argv) {
     }
     voice_pool_fifo();
     test_cut_ordering();
+    test_drum_retirement();
+    test_mixed_pool_saturation();
     test_retirement_pcm();
     test_retirement_capacity();
     test_empty_source_eviction();
     test_coincident_retirement_endpoint();
     test_retiring_filter_tail();
-    puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, per-voice effect tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
+    puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, drum fades, mixed-type saturation, per-voice effect tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
     return 0;
 }

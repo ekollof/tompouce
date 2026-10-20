@@ -288,6 +288,15 @@ free current-source slot. They produce no MIDI or note-history entry and do not
 prepare shared effects. A rejected duck timer still aborts before this operation.
 The scheduler harness verifies the rest/silent/missing/silent/stretch sequence.
 
+Drum voices fade like every other evicted source: a stolen drum scales by the
+same retirement envelope through source stop at the incoming target plus
+250 ms, then stops. The deployed pool ramps each evicted entry regardless of
+source type (bd/sd/hh captures all show ramp+stop pairs in FIFO order). A
+native A/B regression renders a retired TOM against its unevicted self and
+requires exact fade scaling plus post-stop silence; a mixed
+sine/kick/tom/sample saturation burst requires FIFO order, the same stop
+deadline for every type and bit-identical 1/8,192-frame rendering.
+
 `cmake --build build --target test-voice-reference-web` also runs
 `scripts/voice-edge-reference-qa.mjs`: 48 web/native short-envelope, coincident
 endpoint and sample-cut cases, plus ring-out cases for low-pass, high-pass,

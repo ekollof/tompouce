@@ -228,9 +228,10 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       low-pass, high-pass, band-pass, vowel, phaser, chorus and coarse graphs.
       Web PCM covers the high-pass, band-pass, phaser and coarse tails (62
       cases); the retired phaser is bypassed to match the deployed player's
-      exact-zero post-stop behavior. Vowel topology (a -70 dB residual),
-      chorus (no web control), remaining source types and the burst
-      load proof remain.
+      exact-zero post-stop behavior. Stolen drums fade by the same retirement
+      envelope (exact retired-vs-unevicted A/B plus mixed-type saturation).
+      Vowel topology (a -70 dB residual), chorus (no web control), web PCM
+      for drum/native-only types and the burst load proof remain.
 
 ## 8. Duck coverage
 

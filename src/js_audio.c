@@ -136,6 +136,39 @@ static void duck_assign(const cJSON *v, const cJSON *target, int index, AudioEve
     ev->ducks[orbit].depth=duck_numeric(v,"duckdepth",index,1);
 }
 
+static void duck_controls(const cJSON *v, AudioEvent *ev);
+int js_audio_duck_entries(const cJSON *v, int *orbits, DuckControl *controls, int capacity) {
+    if (!v || !orbits || !controls || capacity <= 0) return 0;
+    int count = 0;
+    const cJSON *duck = cJSON_GetObjectItemCaseSensitive(v, "duckorbit");
+    if (!duck) duck = cJSON_GetObjectItemCaseSensitive(v, "duck");
+    if (cJSON_IsArray(duck)) {
+        int index = 0;
+        const cJSON *target;
+        cJSON_ArrayForEach(target, duck) {
+            int at = index++;
+            int orbit = duck_target(target);
+            if (orbit < 0 || count >= capacity) continue;
+            AudioEvent scratch;
+            memset(&scratch, 0, sizeof(scratch));
+            duck_assign(v, target, at, &scratch);
+            orbits[count] = orbit;
+            controls[count] = scratch.ducks[orbit];
+            count++;
+        }
+        return count;
+    }
+    int orbit = duck_target(duck);
+    if (orbit < 0 || count >= capacity) return 0;
+    AudioEvent event;
+    memset(&event, 0, sizeof(event));
+    duck_controls(v, &event);
+    if (!(event.duck_mask & (1u << orbit))) return 0;
+    orbits[0] = orbit;
+    controls[0] = event.ducks[orbit];
+    return 1;
+}
+
 static void duck_controls(const cJSON *v, AudioEvent *ev) {
     ev->duck_attack=fmax(.002,control(v,"duckattack",control(v,"duckatt",control(v,"datt",.1,0,10),0,10),0,10));
     ev->duck_depth=control(v,"duckdepth",1,0,1);

@@ -54,6 +54,8 @@ add_custom_target(test-duck-reference-web
         node scripts/duck-timing-reference-qa.mjs
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
         node scripts/duck-timer-reference-qa.mjs
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>"
+        node scripts/duck-mapping-reference-qa.mjs
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_DUCK_ONSET_BINARY=$<TARGET_FILE:test_duck_onset>"
         node scripts/duck-onset-reference-qa.mjs
     DEPENDS test_live_sliders test_duck_onset WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

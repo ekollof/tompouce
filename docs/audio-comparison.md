@@ -394,6 +394,18 @@ against a full voice pool, retained independent timers, late preparation and
 Csound/OSC bypass. Valid rest/missing-source pool eviction remains a separate
 open comparison. The timer gate also runs through `test-duck-reference-web`.
 
+`duck-mapping-reference-qa.mjs` adds 59 web/native per-target mapping cases:
+which array element (or scalar) reaches each ducked orbit. It covers scalar,
+pair, short, long, empty and null-entry onset/attack/depth arrays across one
+to three targets, repeated targets with per-entry controls, scalar targets
+with array controls, nested singleton targets, string targets, invalid
+targets (which still consume their forEach index), and missing control keys.
+An empty control array selects undefined at the orbit, reaching the orbit
+parameter defaults for onset and depth, while attack has already passed
+through Math.max and arrives as NaN. Null and boolean selections are
+compared through the same single-step coercions the timing gate proves at
+ramp/PCM level, including seven new null/boolean scalar timing cases.
+
 A native 150-note duck flood covers live callback execution under pool
 saturation without a browser: overlapping 2 s voices across all 12 orbits
 fill the 128-voice pool (peak retiring graphs required) while 150 timers

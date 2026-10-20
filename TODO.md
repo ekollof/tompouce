@@ -318,9 +318,12 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Voice-pool breadth beyond the gated 62 cases and drum A/B (vowel -70 dB
   residual, chorus without a web control, drum timbre) and backend bursts
   beyond the voice-burst matrices (step 7 remainder).
-- Duck coercion breadth and wall-clock timer-fire parity under host
-  contention (step 8 remainder; native dispatch is sample-accurate by
-  construction).
+- Duck wall-clock timer-fire parity under host contention (step 8 remainder;
+  native dispatch is sample-accurate by construction; the web fires from a
+  setTimeout 10 ms early and re-anchors late callbacks at its scheduling
+  frontier, which no deterministic gate can reproduce). Coercion breadth is
+  gated: per-target array mapping (59 web/native cases) plus null/boolean
+  scalar coercion at ramp/PCM level.
 - Csound loader failure side effects beyond the gated URL caching, parked
   engine and console diagnostics (step 9 remainder).
 - Dominant MIDI output beyond note triggering (CC, program change, bend,
@@ -343,7 +346,7 @@ Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,
 Hydra/browser input-device APIs and arbitrary npm module resolution.
 
-The maintained audio matrix has 40 passing gates, including eight independently
+The maintained audio matrix has 41 passing gates, including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
 fractional sample-onset cases, four shared delay-automation cases and two
 live-change fractional-onset cases. Seeded generated rooms are gated; ordinary

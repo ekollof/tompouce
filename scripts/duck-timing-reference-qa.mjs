@@ -75,6 +75,13 @@ for(const onset of ['e-324','e309','e'+'0'.repeat(100),'1'+' '.repeat(100),'0'.r
   [[null]],[[false]],[[[]]],[[[1]]]])
   cases.push({name:`onset ${JSON.stringify(onset)}`,sourceTime:.3,callbackAt:.29,
     controls:{onset,attack:.1,depth:.25}});
+// Null/boolean selections: the mapping gate normalizes these single-step
+// coercions, so prove them end to end at ramp/PCM level here.
+for(const controls of [{onset:null,attack:.1,depth:.25},{onset:0,attack:null,depth:.25},
+  {onset:0,attack:.1,depth:null},{onset:0,attack:.1,depth:true},
+  {onset:0,attack:false,depth:.25},{onset:true,attack:.1,depth:.25},
+  {onset:false,attack:true,depth:null}])
+  cases.push({name:`coerce ${JSON.stringify(controls)}`,sourceTime:.3,callbackAt:.29,controls});
 for(const [index,onset] of ['0'.repeat(128),'0'.repeat(10000),'1'+' '.repeat(10000),
   'e'+'0'.repeat(10000),'e-'+'0'.repeat(10000)+'1','0'.repeat(10000)+'1',
   '0'.repeat(1000)+'e-1','\u00a0'.repeat(1000),'0'.repeat(1000)+'bad'].entries())

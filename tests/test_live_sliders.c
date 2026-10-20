@@ -1591,6 +1591,51 @@ static void duck_timer_reference(void) {
     cJSON_Delete(tests); cJSON_Delete(results);
 }
 
+static void duck_mapping_format_number(cJSON *call, const char *name, double value) {
+    if (isnan(value)) { cJSON_AddStringToObject(call, name, "NaN"); return; }
+    if (value == 0) value = 0; /* Normalize -0: JSON has a single zero. */
+    uint64_t bits; memcpy(&bits, &value, sizeof(bits));
+    char hex[17];
+    for (int i = 7; i >= 0; i--) {
+        hex[(7 - i) * 2] = "0123456789abcdef"[(bits >> (i * 8 + 4)) & 15];
+        hex[(7 - i) * 2 + 1] = "0123456789abcdef"[(bits >> (i * 8)) & 15];
+    }
+    hex[16] = 0; cJSON_AddStringToObject(call, name, hex);
+}
+
+static void duck_mapping_reference(void) {
+    char input[65536]; size_t length = fread(input, 1, sizeof(input) - 1, stdin);
+    assert(!ferror(stdin) && feof(stdin)); input[length] = 0;
+    cJSON *tests = cJSON_Parse(input), *results = cJSON_CreateArray(); assert(tests && results);
+    const cJSON *test;
+    cJSON_ArrayForEach(test, tests) {
+        const cJSON *value = cJSON_GetObjectItemCaseSensitive(test, "value");
+        int orbits[256]; DuckControl controls[256];
+        int count = js_audio_duck_entries(value, orbits, controls, 256);
+        assert(count >= 0 && count <= 256);
+        cJSON *result = cJSON_CreateObject(), *calls = cJSON_CreateArray(); assert(result && calls);
+        for (int i = 0; i < count; i++) {
+            const DuckControl *control = &controls[i];
+            cJSON *call = cJSON_CreateObject(); assert(call);
+            cJSON_AddNumberToObject(call, "orbit", orbits[i]);
+            if (control->string_onset == DUCK_ONSET_SUMMARY) {
+                cJSON_AddStringToObject(call, "onset", "SUMMARY");
+            } else if (control->string_onset) {
+                char text[160]; snprintf(text, sizeof(text), "s:%s", control->onset_text);
+                cJSON_AddStringToObject(call, "onset", text);
+            } else {
+                duck_mapping_format_number(call, "onset", control->onset);
+            }
+            duck_mapping_format_number(call, "attack", control->attack);
+            duck_mapping_format_number(call, "depth", control->depth);
+            cJSON_AddItemToArray(calls, call);
+        }
+        cJSON_AddItemToObject(result, "calls", calls); cJSON_AddItemToArray(results, result);
+    }
+    char *json = cJSON_PrintUnformatted(results); assert(json); puts(json); free(json);
+    cJSON_Delete(tests); cJSON_Delete(results);
+}
+
 int main(int argc, char **argv) {
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
@@ -1611,6 +1656,7 @@ int main(int argc, char **argv) {
     }
     if (argc>1 && !strcmp(argv[1],"--duck-timer-reference")) { duck_timer_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--duck-reference")) { duck_reference(); return 0; }
+    if (argc>1 && !strcmp(argv[1],"--duck-mapping-reference")) { duck_mapping_reference(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--clock-reference")) { reference_clock(1); return 0; }
     if (argc>1 && !strcmp(argv[1],"--live-onset-reference")) {
         assert(argc > 3);

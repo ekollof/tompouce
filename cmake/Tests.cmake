@@ -84,6 +84,12 @@ add_custom_target(test-midi-reference-web
     DEPENDS test_midi WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(test-midi-input-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_MIDI_INPUT_BINARY=$<TARGET_FILE:test_midi>"
+        node scripts/midi-input-reference-qa.mjs
+    DEPENDS test_midi WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_custom_target(test-live-reference-web
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_LIVE_ONSET_BINARY=$<TARGET_FILE:test_live_sliders>"
         node scripts/live-change-reference-qa.mjs

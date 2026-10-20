@@ -757,6 +757,144 @@ const char *__lsan_default_suppressions(void) {
 }
 #endif
 
+/* JSON has no integer booleans; test scripts pass 0/1 numbers for flags. */
+static int json_flag(const cJSON *value) {
+    return cJSON_IsTrue(value) ||
+        (cJSON_IsNumber(value) && value->valuedouble != 0);
+}
+
+/* Reference mode for scripts/midi-input-reference-qa.mjs: stdin is a JSON
+   array of input ops; stdout echoes one result object per op. Fully
+   deterministic without hardware: injection writes the stores directly,
+   audio_time is scripted, and state files stay under the script-owned
+   XDG_CONFIG_HOME (this mode deliberately skips isolate_environment so the
+   script can pre-seed state files). Refuses to run without XDG_CONFIG_HOME
+   so manual invocations can never touch the real config tree. */
+static int midi_input_reference_main(void) {
+    log_console_stderr(0);
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    if (!xdg || !*xdg) {
+        fprintf(stderr, "midi-input-reference requires XDG_CONFIG_HOME\n");
+        return 1;
+    }
+    char *input = NULL;
+    size_t cap = 0, len = 0;
+    int chunk;
+    while ((chunk = getchar()) != EOF && len + 1 < 1024 * 1024) {
+        if (len + 1 >= cap) {
+            size_t grown = cap ? cap * 2 : 65536;
+            char *next = realloc(input, grown);
+            if (!next) break;
+            input = next; cap = grown;
+        }
+        input[len++] = (char)chunk;
+    }
+    if (!input) return 1;
+    input[len] = 0;
+    cJSON *ops = cJSON_Parse(input);
+    free(input);
+    if (!cJSON_IsArray(ops)) return 1;
+    event_queue_clear();
+    audio_time = 0; audio_toggle_play(1);
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *op = NULL;
+    cJSON_ArrayForEach(op, ops) {
+        cJSON *entry = cJSON_CreateObject();
+        const cJSON *kind = cJSON_GetObjectItemCaseSensitive(op, "op");
+        const char *name = cJSON_IsString(kind) ? kind->valuestring : "";
+        cJSON_AddStringToObject(entry, "op", name);
+        if (!strcmp(name, "time")) {
+            const cJSON *t = cJSON_GetObjectItemCaseSensitive(op, "t");
+            audio_time = cJSON_IsNumber(t) ? t->valuedouble : 0;
+            cJSON_AddNumberToObject(entry, "t", audio_time);
+        } else if (!strcmp(name, "add_sender")) {
+            const cJSON *client = cJSON_GetObjectItemCaseSensitive(op, "client");
+            const cJSON *port = cJSON_GetObjectItemCaseSensitive(op, "port");
+            const cJSON *sname = cJSON_GetObjectItemCaseSensitive(op, "name");
+            const cJSON *named = cJSON_GetObjectItemCaseSensitive(op, "named");
+            midi_test_add_sender(cJSON_IsNumber(client) ? client->valueint : -1,
+                cJSON_IsNumber(port) ? port->valueint : 0,
+                cJSON_IsString(sname) ? sname->valuestring : "",
+                json_flag(named));
+            cJSON_AddNumberToObject(entry, "ok", 1);
+        } else if (!strcmp(name, "inject")) {
+            const cJSON *client = cJSON_GetObjectItemCaseSensitive(op, "client");
+            const cJSON *port = cJSON_GetObjectItemCaseSensitive(op, "port");
+            const cJSON *type = cJSON_GetObjectItemCaseSensitive(op, "type");
+            const cJSON *chan = cJSON_GetObjectItemCaseSensitive(op, "chan");
+            const cJSON *p1 = cJSON_GetObjectItemCaseSensitive(op, "p1");
+            const cJSON *p2 = cJSON_GetObjectItemCaseSensitive(op, "p2");
+            int c = cJSON_IsNumber(client) ? client->valueint : -1;
+            int args[4] = {cJSON_IsNumber(type) ? type->valueint : -1,
+                cJSON_IsNumber(chan) ? chan->valueint : -1,
+                cJSON_IsNumber(p1) ? p1->valueint : -1,
+                cJSON_IsNumber(p2) ? p2->valueint : -1};
+            if (c < 0) midi_test_inject(args[0], args[1], args[2], args[3]);
+            else midi_test_inject_from(c,
+                cJSON_IsNumber(port) ? port->valueint : 0, args[0], args[1], args[2], args[3]);
+            cJSON_AddNumberToObject(entry, "ok", 1);
+        } else if (!strcmp(name, "read")) {
+            const cJSON *cc = cJSON_GetObjectItemCaseSensitive(op, "cc");
+            const cJSON *chan = cJSON_GetObjectItemCaseSensitive(op, "chan");
+            cJSON_AddNumberToObject(entry, "value",
+                midi_cc_value(cJSON_IsNumber(cc) ? cc->valueint : -1,
+                    cJSON_IsNumber(chan) ? chan->valueint : -99));
+        } else if (!strcmp(name, "take") || !strcmp(name, "peek")) {
+            MidiHeldKey keys[64];
+            unsigned count = !strcmp(name, "take") ?
+                midi_take_keys(keys, 64, 1e12) : midi_peek_keys(keys, 64);
+            cJSON *list = cJSON_CreateArray();
+            for (unsigned i = 0; i < count; i++) {
+                cJSON *key = cJSON_CreateObject();
+                cJSON_AddNumberToObject(key, "note", keys[i].note);
+                cJSON_AddNumberToObject(key, "velocity", keys[i].vel);
+                cJSON_AddNumberToObject(key, "midichan", keys[i].chan);
+                cJSON_AddNumberToObject(key, "at", keys[i].at);
+                cJSON_AddItemToArray(list, key);
+            }
+            cJSON_AddItemToObject(entry, "keys", list);
+        } else if (!strcmp(name, "load")) {
+            const cJSON *sname = cJSON_GetObjectItemCaseSensitive(op, "name");
+            cJSON_AddNumberToObject(entry, "loaded",
+                midi_state_load(cJSON_IsString(sname) ? sname->valuestring : ""));
+        } else if (!strcmp(name, "open")) {
+            const cJSON *sname = cJSON_GetObjectItemCaseSensitive(op, "name");
+            cJSON_AddNumberToObject(entry, "open",
+                midi_open_input(cJSON_IsString(sname) ? sname->valuestring : NULL, -1));
+        } else if (!strcmp(name, "announce")) {
+            const cJSON *added = cJSON_GetObjectItemCaseSensitive(op, "added");
+            const cJSON *client = cJSON_GetObjectItemCaseSensitive(op, "client");
+            const cJSON *port = cJSON_GetObjectItemCaseSensitive(op, "port");
+            const cJSON *sname = cJSON_GetObjectItemCaseSensitive(op, "name");
+            cJSON_AddNumberToObject(entry, "match",
+                midi_test_announce(json_flag(added),
+                    cJSON_IsNumber(client) ? client->valueint : -1,
+                    cJSON_IsNumber(port) ? port->valueint : 0,
+                    cJSON_IsString(sname) ? sname->valuestring : NULL));
+        } else if (!strcmp(name, "alive")) {
+            const cJSON *client = cJSON_GetObjectItemCaseSensitive(op, "client");
+            const cJSON *port = cJSON_GetObjectItemCaseSensitive(op, "port");
+            cJSON_AddNumberToObject(entry, "alive",
+                midi_test_sender_alive(cJSON_IsNumber(client) ? client->valueint : -1,
+                    cJSON_IsNumber(port) ? port->valueint : 0));
+        } else if (!strcmp(name, "eval")) {
+            const cJSON *code = cJSON_GetObjectItemCaseSensitive(op, "code");
+            event_queue_clear();
+            cJSON_AddNumberToObject(entry, "ok",
+                cJSON_IsString(code) && track_load_from_code(code->valuestring));
+            event_queue_clear();
+        } else {
+            cJSON_AddStringToObject(entry, "error", "unknown op");
+        }
+        cJSON_AddItemToArray(out, entry);
+    }
+    cJSON_Delete(ops);
+    char *text = cJSON_PrintUnformatted(out);
+    cJSON_Delete(out);
+    if (text) { printf("%s\n", text); free(text); }
+    return 0;
+}
+
 /* Reference mode for scripts/midi-reference-qa.mjs: stdin is a JSON array
    of {name, code}; stdout is an array of {name, values, events} where
    values are the queried hap values (up to 8) and events are the committed
@@ -894,6 +1032,7 @@ static int midi_reference_main(void) {
 
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--midi-reference")) return midi_reference_main();
+    if (argc > 1 && !strcmp(argv[1], "--midi-input-reference")) return midi_input_reference_main();
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
         execl(TOMPOUCE_TEST_CSOUND_WORKER,"test_midi","--csound-worker",(char *)NULL); return 1;

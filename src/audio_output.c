@@ -21,6 +21,63 @@
 #define OUTPUT_FRAMES 4096
 #define CONNECT_SECONDS 2
 
+/* Missed device cycles observed on the output thread. A gap between process
+   callbacks beyond 1.5x the delivered quantum means the server cycled
+   without this stream, i.e. an underrun of this stream's output. Quantum
+   changes never mask a gap: benign resizes land near the new period, while
+   an underrun gap exceeds both the old and the new quantum (servers often
+   resize while recovering). Empty callbacks are reported separately. All
+   counters are lock-free; timing state is output-thread local and never
+   touched by DSP. */
+static atomic_ullong xrun_calls, xrun_gaps, xrun_max_gap_ns, xrun_empty;
+static struct timespec xrun_last;
+static unsigned long xrun_last_frames;
+static int xrun_seen, xrun_injected;
+static long xrun_inject_ms;
+
+static uint64_t timespec_delta_ns(const struct timespec *from, const struct timespec *to) {
+    int64_t seconds = (int64_t)to->tv_sec-(int64_t)from->tv_sec;
+    int64_t nsec = (int64_t)to->tv_nsec-(int64_t)from->tv_nsec;
+    int64_t total = seconds*1000000000ll+nsec;
+    return total > 0 ? (uint64_t)total : 0;
+}
+
+static void xrun_observe(unsigned long frames) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC,&now) != 0) return;
+    atomic_fetch_add(&xrun_calls,1);
+    if (xrun_seen && frames) {
+        uint64_t gap = timespec_delta_ns(&xrun_last,&now);
+        /* Count against the larger quantum: a benign quantum upshift lands
+           near the new period, while an underrun exceeds both, even when
+           the server resizes buffers while recovering. */
+        uint64_t old_expected = (uint64_t)xrun_last_frames*1000000000ull/(uint64_t)SR;
+        uint64_t new_expected = (uint64_t)frames*1000000000ull/(uint64_t)SR;
+        uint64_t bound = old_expected > new_expected ? old_expected : new_expected;
+        if (gap > bound+bound/2) {
+            atomic_fetch_add(&xrun_gaps,1);
+            uint64_t prev = atomic_load(&xrun_max_gap_ns);
+            while (gap > prev && !atomic_compare_exchange_weak(&xrun_max_gap_ns,&prev,gap))
+                ;
+        }
+    }
+    xrun_last = now; xrun_last_frames = frames; xrun_seen = 1;
+}
+
+void audio_output_xrun_stats(unsigned long long *calls, unsigned long long *gaps,
+    unsigned long long *max_gap_ns, unsigned long long *empty) {
+    if (calls) *calls = atomic_load(&xrun_calls);
+    if (gaps) *gaps = atomic_load(&xrun_gaps);
+    if (max_gap_ns) *max_gap_ns = atomic_load(&xrun_max_gap_ns);
+    if (empty) *empty = atomic_load(&xrun_empty);
+}
+
+void audio_output_xrun_reset(void) {
+    atomic_store(&xrun_calls,0); atomic_store(&xrun_gaps,0);
+    atomic_store(&xrun_max_gap_ns,0); atomic_store(&xrun_empty,0);
+    xrun_seen = 0; xrun_last_frames = 0; xrun_injected = 0;
+}
+
 typedef struct {
     const char *name;
     int (*open)(void);
@@ -52,8 +109,17 @@ static void pw_state_changed(void *data, enum pw_stream_state old, enum pw_strea
 
 static void pw_process(void *data) {
     (void)data;
+    /* Test-only stall injection (owned null-sink runs): sleep once inside
+       the output thread so the next gap accounting fires for certain. */
+    if (!xrun_injected && xrun_inject_ms > 0 && atomic_load(&xrun_calls) >= 10) {
+        xrun_injected = 1;
+        struct timespec stall = {.tv_sec = xrun_inject_ms/1000,
+            .tv_nsec = (xrun_inject_ms%1000)*1000000L};
+        while (nanosleep(&stall, &stall) != 0 && errno == EINTR)
+            ;
+    }
     struct pw_buffer *buffer=pw_stream_dequeue_buffer(native_pw.stream);
-    if (!buffer) return;
+    if (!buffer) { atomic_fetch_add(&xrun_empty,1); return; }
     struct spa_buffer *spa=buffer->buffer;
     if (spa && spa->n_datas && spa->datas[0].data && spa->datas[0].chunk) {
         struct spa_data *out=&spa->datas[0];
@@ -61,6 +127,7 @@ static void pw_process(void *data) {
 #if PW_CHECK_VERSION(0,3,50)
         if (buffer->requested && buffer->requested<frames) frames=(uint32_t)buffer->requested;
 #endif
+        xrun_observe(frames);
         /* Cap individual DSP calls, including unusually large server buffers. */
         for (uint32_t at=0;at<frames;) {
             unsigned long count=frames-at;
@@ -90,6 +157,13 @@ static int pipewire_open(void) {
        sink instead of the default sink; default routing is never changed. */
     const char *target=getenv("TOMPOUCE_OUTPUT_TARGET");
     if (target && *target) pw_properties_set(props,PW_KEY_TARGET_OBJECT,target);
+    xrun_inject_ms=0;
+    const char *inject=getenv("TOMPOUCE_XRUN_INJECT_MS");
+    if (inject && *inject) {
+        char *end=NULL;
+        long value=strtol(inject,&end,10);
+        if (end && !*end && value>0 && value<=5000) xrun_inject_ms=value;
+    }
     native_pw.stream=pw_stream_new_simple(pw_thread_loop_get_loop(native_pw.loop),"Tompouce",props,&pw_events,NULL);
     if (!native_pw.stream) return 0;
     uint8_t storage[1024]; struct spa_pod_builder builder=SPA_POD_BUILDER_INIT(storage,sizeof(storage));

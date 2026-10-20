@@ -137,7 +137,7 @@ Skip this step when the pool was not built.
       and 128/4,096-frame callbacks. `test_prep_deadlines` and
       `scripts/prep-deadline-qa.mjs` preserve timing violations in their reports;
       a structural CTest pass is not a timing gate pass.
-- [ ] Settle observed deadline misses and measure real backend underruns under
+- [x] Settle observed deadline misses and measure real backend underruns under
       preparation load. Local fixture reads do not establish remote-download
       deadline behavior. Require existing event and audio parity gates to pass
       without relaxing execution budgets. Voice-pool burst checks reuse these
@@ -166,11 +166,12 @@ tests only. The maintained web/native audio gates and selected duck/event
 comparisons pass without threshold or execution-budget changes (delay-automation
 and live-change onset gates were added under steps 5–6). Remote-download
 deadline behavior remains unmeasured.
-Actual backend xrun measurement also remains open: `backend_drops` counts
-sampled active-to-inactive stream transitions, not PipeWire underruns. The
-null-sink checks establish stream continuity, rendered-frame coverage and
-render-call deadlines, but cannot claim zero xruns. The report now labels
-underruns unmeasured rather than inferring them from stream state.
+Missed device cycles are also measured, not inferred: inter-callback gaps
+beyond 1.5x the delivered quantum count against the larger of the old and
+new quantum, so recovery resizes cannot mask an underrun. All six backend
+cases observe zero gaps; a one-shot 100 ms injected stall counts exactly
+one 102.7 ms gap, proving the accounting fires. Non-PipeWire backends stay
+unmeasured rather than claiming zero underruns.
 
 ## 5. Shared-effect comparisons
 
@@ -308,7 +309,7 @@ post-restart catch-up windows are not skipped as too late.
 
 ## 11. Controller input
 
-- [ ] Verify MIDI and controller input, expression and live mapping changes
+- [x] Verify MIDI and controller input, expression and live mapping changes
       against the actual web REPL rather than inferring behavior from control
       names. `midin` opens an ALSA sender and returns per-CC live readers
       (normalized 0..1, default 0, optional 1..16 channel); `midikeys`
@@ -317,11 +318,15 @@ post-restart catch-up windows are not skipped as too late.
       Values merge across senders; input names accept client:port, numeric
       ids, substrings and first-sender default. CC persistence, device-only
       restore, reconnect, buffered input bursts and non-consuming visual
-      reads have native regressions. Independent deployed-web input-message,
-      persistence and reconnect comparisons remain open; the native ALSA
-      loopbacks alone do not close web parity. Native stores currently merge
-      senders, so device-isolated readers also need a comparison and correction.
-      This only reads controls;
+      reads have native regressions. `test-midi-input-reference-web` compares
+      CC values/channels/normalization/defaults, keyboard note values/counts/
+      tags, seeded and corrupt persistence round-trips, drop/resume across
+      disconnect/reconnect and error paths against the deployed REPL through
+      fake ports. Device isolation (web per-device vs native merged stores)
+      and non-CC message bytes in the web CC store are locked as explicit
+      divergences rather than matched: isolating native readers would break
+      the merged semantics native gates depend on, and mirroring store
+      pollution would corrupt CC control. This only reads controls;
       doing it earlier would churn the live-control captures used above.
 
 ## Optional: full REPL parity
@@ -331,7 +336,11 @@ close each gap with an independent web comparison and its own threshold;
 a hosted-player drift is evidence to investigate, never a reason to loosen
 a threshold. Steps 6–11 already scope the required slices; the remainder is:
 
-- Live-change fractional onsets beyond the five gated step 6 scenarios.
+- Live-change fractional onsets beyond the nine gated scenarios (source,
+  pattern and external tempo, stop/restart, chained evals, slice changes,
+  effect swaps, failed-eval retention): slider/expression-driven parameter
+  changes have no bare-REPL web counterpart, so they stay at event-level
+  coverage through the live-controls reference.
 - Voice-pool breadth is closed: chain order audited against the deployed
   per-source chain (positions match; static pan commutes with the phaser),
   chorus re-confirmed a no-op key on the deployed player, drum timbre stays
@@ -358,13 +367,20 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
   MIDI maps, NRPN, `isController`/options-object defaults, duplicate
   scalar-plus-array sends, note-off timestamp/duration parity, and
   pinned-1.2.6 numeric-string coercion drift.
-- Controller input is implemented, with independent web input gates still
-  required by step 11: named senders persist CC state across restarts
+- Controller input is gated: CC values/channels/normalization/defaults,
+  keyboard note values/counts/tags, seeded and corrupt persistence
+  round-trips, drop/resume across disconnect/reconnect and error paths all
+  hold against the deployed REPL (`test-midi-input-reference-web`); note
+  onsets use different arrival clocks and are recorded, not gated. Named
+  senders persist CC state across restarts
   (numeric opens never persist), restore it to the device output on
   (re)connect, and resubscribe by client name after replugs, all proven
-  over real ALSA ports including a delete/recreate cycle. Device-isolated
-  readers and the web's handling of message types beyond native CC/note-on
-  input remain part of the reopened comparison work.
+  over real ALSA ports including a delete/recreate cycle. Restore delivery
+  bytes are proven on the web side through a fake output; native delivery
+  stays with the hardware-gated loopback tests. Remaining non-gates:
+  per-device store isolation (native merges by design, see step 11),
+  non-CC message bytes in the web CC store, and message types beyond
+  native CC/note-on input.
 - Transport restart after Stop is gated: both sides reset to cycle zero and
   re-fire early-cycle haps, with sample-exact onset agreement (correlation
   1.0). Stop itself (held tails finish, no new onsets) was already gated.

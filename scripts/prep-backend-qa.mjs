@@ -41,10 +41,13 @@ async function main() {
   try {
     const routing=await verifyRouting(sink);
     const results=await measure(sink);
+    const positive=await positiveControl(sink);
     const gatePassed=results.every(result=>result.backendHold);
+    const gaps=results.reduce((total,r)=>total+r.xrun_gaps,0);
     const report={capturedAt:new Date().toISOString(),binary:path.resolve(binary),
       probe:path.resolve(probe),sink,routing,status:gatePassed?'passed':'failed',
-      backendUnderruns:'unmeasured: sampled stream state is not an xrun counter',
+      backendUnderruns:gaps===0?'none observed (missed process-cycle accounting on the owned stream)':'OBSERVED missed process cycles',
+      xrunGaps:gaps,positiveControl:positive,
       streamStateDrops:results.reduce((total,r)=>total+r.backend_drops,0),
       results};
     await fs.writeFile(path.join(directory,'report.json'),JSON.stringify(report,null,2)+'\n');
@@ -120,16 +123,35 @@ async function measure(sink) {
     const result=Object.fromEntries([...line.matchAll(/(\w+)=([^\s]+)/g)].map(([,key,value])=>
       [key,Number.isFinite(Number(value))?Number(value):value]));
     /* Cold/live must hold fully; burst overload must shed as skips without
-       late publication/reservation, render overruns or stream drops. The
-       voice burst must additionally prove saturation via retiring graphs. */
+       late publication/reservation, render overruns, stream drops or missed
+       process cycles. The voice burst must additionally prove saturation via
+       retiring graphs. */
     result.backendHold=result.status==='measured'&&result.backend==='PipeWire'&&
       result.backend_drops===0&&result.rendered_s>=1.75&&result.render_overruns===0&&
-      result.published_late===0&&result.reserved_late===0&&
+      result.xrun_gaps===0&&result.published_late===0&&result.reserved_late===0&&
       (workload>=2||result.skipped_late===0)&&
       (workload!==3||(result.peak_retiring>0&&result.controls>0));
     results.push(result); console.log(line);
   }
   return results;
+}
+
+/* Positive control: a one-shot stall inside the output thread must surface
+   as counted gaps, proving the accounting fires instead of silently
+   passing. This case never gates hold status. */
+async function positiveControl(sink) {
+  const run=spawnSync(binary,['1','0','128','backend'],{
+    env:{...process.env,TOMPOUCE_OUTPUT_TARGET:sink,TOMPOUCE_XRUN_INJECT_MS:'100'},
+    encoding:'utf8',timeout:90000,maxBuffer:1024*1024});
+  assert.equal(run.status,0,run.stderr||run.stdout||String(run.error));
+  const line=run.stdout.trim().split('\n').find(entry=>entry.startsWith('backend '));
+  assert(line,run.stdout);
+  const result=Object.fromEntries([...line.matchAll(/(\w+)=([^\s]+)/g)].map(([,key,value])=>
+    [key,Number.isFinite(Number(value))?Number(value):value]));
+  console.log(line);
+  assert.equal(result.status,'measured','injected run did not measure');
+  assert(result.xrun_gaps>=1,'injected stall produced no counted gap');
+  return {gaps:result.xrun_gaps,max_ms:result.xrun_max_ms};
 }
 
 await main();

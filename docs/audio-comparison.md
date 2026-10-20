@@ -219,11 +219,15 @@ cases, with cold/live fully held, the long-stretch burst shedding only skips
 (9 in this run) without late publication or reservation, and the voice burst
 publishing all 209 sources with peak 128 concurrent voices and 21 retiring
 graphs. Local fixture reads still do not
-establish remote-download deadline behavior. The `backend_drops` counter samples
-active-to-inactive stream-state transitions every 5 ms. It does not count
-PipeWire xruns, including underruns that leave the stream active; neither
-continuous state nor frame coverage proves zero xruns. Reports explicitly label
-backend underruns unmeasured, and TODO step 4 remains open for that measurement.
+establish remote-download deadline behavior. Missed device cycles are counted
+on the output thread itself: gaps between PipeWire process callbacks beyond
+1.5x the delivered quantum (against the larger of the old and new quantum,
+so recovery resizes cannot mask an underrun) report an underrun of the owned
+stream, with empty callbacks counted separately. A one-shot injected stall
+positive control proves the accounting fires. An isolated run observed zero
+gaps in all six load cases; the injected run counted exactly one gap of
+102.7 ms for a 100 ms stall. Backends other than PipeWire leave the counters
+at zero, which the report treats as unmeasured rather than zero underruns.
 
 `cmake --build build --target test-live-reference-web` compares fractional
 sample onsets under live engine operations, using
@@ -235,17 +239,19 @@ live REPL runs on fake time with the same block rule while scheduling real
 pattern audio into a disposable offline context. The shared fixture sample
 is generated once and read byte-identically by both sides; the mock interval
 is honored so no scheduling pass runs after Stop, while mock time keeps
-advancing through stops exactly as the production audio clock does. Five cases
+advancing through stops exactly as the production audio clock does. Nine cases
 gate at zero lag (0.99 correlation, 0.85–1.15 RMS): source re-evaluation,
 pattern-level tempo pivots (which both engines anchor at the pivoting hap),
-transport Stop with fractional tails, transport restart, and external tempo
-pivots. Restart re-fires early-cycle haps from cycle zero on both
+transport Stop with fractional tails, transport restart, external tempo
+pivots, chained double re-evaluation, sample slice/begin-end changes,
+shared-effect automation swaps, and failed-evaluation retention (the failure
+must report on both sides; invalid code evaluating cleanly fails the gate). Restart re-fires early-cycle haps from cycle zero on both
 sides: the web resets its query cursor and re-anchors at the restart tick,
 matching the native cursor reset and restart-plus-latency anchor, so the
 re-fired onsets agree sample-exactly. An earlier harness froze mock time
 during stops, which made post-restart catch-up windows look older than they
 were and skipped the re-fired hap as too late; advancing time fixed it with
-no native change. An isolated run observed correlation 1.0 in all five.
+no native change. An isolated run observed correlation 1.0 in all nine.
 External tempo pivots anchor at the scheduling frontier on both sides: the
 web anchors the pivot cycle at its last queried end and the time at its next
 callback phase, matching the native queried-cycle cursor and phase-frontier

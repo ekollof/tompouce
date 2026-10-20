@@ -164,6 +164,7 @@ static void run_backend_workload(unsigned workers, int workload) {
     }
     assert(track_load_from_code(source));
     prep_profile_reset();
+    audio_output_xrun_reset();
     scheduler_init();
     double begin=monotonic();
     unsigned drops=0,polls=0;
@@ -198,9 +199,12 @@ static void run_backend_workload(unsigned workers, int workload) {
     if (workload!=2 && workload!=3)
         assert(final_works[PREP_REVERB].calls>0 && final_works[PREP_FFT].calls>0);
     unsigned long long calls=atomic_load(&backend_render_calls);
+    unsigned long long xrun_calls=0,xrun_gaps=0,xrun_max_ns=0,xrun_empty=0;
+    audio_output_xrun_stats(&xrun_calls,&xrun_gaps,&xrun_max_ns,&xrun_empty);
     printf("backend workload=%s workers=%u budget=%d status=measured backend=%s "
         "backend_drops=%u backend_polls=%u rendered_s=%.3f expected_s=2.000 "
         "render_calls=%llu render_mean_ms=%.3f render_max_ms=%.3f render_overruns=%u "
+        "xrun_calls=%llu xrun_gaps=%llu xrun_max_ms=%.3f xrun_empty=%llu "
         "submitted=%llu jobs=%llu published=%llu reserved=%llu controls=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
         "reserve_late_max_ms=%.3f queued_at_stop=%d peak_voices=%d peak_retiring=%d\n",
@@ -208,6 +212,7 @@ static void run_backend_workload(unsigned workers, int workload) {
         drops,polls,rendered,calls,
         calls?atomic_load(&backend_render_ns)/1e6/calls:0,
         atomic_load(&backend_render_max_ns)/1e6,atomic_load(&backend_render_overruns),
+        xrun_calls,xrun_gaps,xrun_max_ns/1e6,xrun_empty,
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         (unsigned long long)stats.sources_published,(unsigned long long)stats.sources_reserved,
         (unsigned long long)stats.controls_published,

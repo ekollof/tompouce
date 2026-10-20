@@ -1330,25 +1330,41 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
     int tempo = !strcmp(scenario, "tempo");
     int restart = !strcmp(scenario, "restart");
     int exttempo = !strcmp(scenario, "exttempo");
-    assert(transport || source || tempo || restart || exttempo);
+    int chain = !strcmp(scenario, "chain");
+    int slices = !strcmp(scenario, "slices");
+    int effects = !strcmp(scenario, "effects");
+    int faileval = !strcmp(scenario, "faileval");
+    assert(transport || source || tempo || restart || exttempo ||
+        chain || slices || effects || faileval);
     double end = transport ? 2.0 : restart ? 3.0 : 2.5;
     const char *first = tempo ? "s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))"
         : "s('livefixture').fast(4).clip(.25).late(.137)";
     const char *second = "s('livefixture').fast(2).clip(.25).late(.311)";
+    const char *third = "s('livefixture').fast(8).clip(.125).late(.077)";
+    const char *sliced = "s('livefixture').fast(4).clip(.25).late(.137).begin(.3).end(.6)";
+    const char *wetted = "s('livefixture').fast(4).clip(.25).late(.137).dry(0).delay(1).delaytime(.05).delayfeedback(.5)";
+    const char *broken = "s('livefixture').fast(4).clip(.25).late(.137";
     log_console_stderr(0);
     assert(prep_pool_start(0,0));
     event_queue_clear();
     audio_time = 0; audio_toggle_play(1); audio_set_reference_mode(1); audio_set_bpm(120);
     assert(track_load_from_code(first));
     enum { MAX_OPS = 2 };
-    double op_times[MAX_OPS]; int op_kinds[MAX_OPS]; int nops = 0;
-    if (transport) { op_times[nops] = 1.0; op_kinds[nops++] = 0; }
-    if (source) { op_times[nops] = 1.0; op_kinds[nops++] = 2; }
+    double op_times[MAX_OPS]; int op_kinds[MAX_OPS]; const char *op_codes[MAX_OPS]; int nops = 0;
+    if (transport) { op_times[nops] = 1.0; op_kinds[nops] = 0; op_codes[nops++] = NULL; }
+    if (source) { op_times[nops] = 1.0; op_kinds[nops] = 2; op_codes[nops++] = second; }
     if (restart) {
-        op_times[nops] = 1.0; op_kinds[nops++] = 0;
-        op_times[nops] = 1.5; op_kinds[nops++] = 1;
+        op_times[nops] = 1.0; op_kinds[nops] = 0; op_codes[nops++] = NULL;
+        op_times[nops] = 1.5; op_kinds[nops] = 1; op_codes[nops++] = NULL;
     }
-    if (exttempo) { op_times[nops] = 1.0; op_kinds[nops++] = 3; }
+    if (exttempo) { op_times[nops] = 1.0; op_kinds[nops] = 3; op_codes[nops++] = NULL; }
+    if (chain) {
+        op_times[nops] = 1.0; op_kinds[nops] = 2; op_codes[nops++] = second;
+        op_times[nops] = 1.75; op_kinds[nops] = 2; op_codes[nops++] = third;
+    }
+    if (slices) { op_times[nops] = 1.0; op_kinds[nops] = 2; op_codes[nops++] = sliced; }
+    if (effects) { op_times[nops] = 1.0; op_kinds[nops] = 2; op_codes[nops++] = wetted; }
+    if (faileval) { op_times[nops] = 1.0; op_kinds[nops] = 4; op_codes[nops++] = broken; }
     long total = lround(end*SR);
     float *pcm = calloc((size_t)total*2, sizeof(*pcm)); assert(pcm);
     long done = 0;
@@ -1367,8 +1383,10 @@ static void reference_live_onset(const char *scenario, const char *pcm_path) {
             fired[i] = 1;
             if (op_kinds[i] == 0) scheduler_transport_set(0);
             else if (op_kinds[i] == 1) scheduler_transport_set(1);
-            else if (op_kinds[i] == 2) assert(track_load_from_code(second));
+            else if (op_kinds[i] == 2) assert(op_codes[i] && track_load_from_code(op_codes[i]));
             else if (op_kinds[i] == 3) audio_set_bpm(240);
+            else if (op_kinds[i] == 4) assert(op_codes[i] && !track_load_from_code(op_codes[i]));
+            else assert(!"unknown live op");
         }
         double now = (double)done/SR;
         live_tick(now);

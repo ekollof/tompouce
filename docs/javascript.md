@@ -61,11 +61,18 @@ connect one with `aconnect`. CC values persist per string sender name across
 restarts and load as reader defaults on open (numeric opens never persist);
 on (re)connect the stored values are addressed only to the device's writable port,
 restoring motorized controls like the web input, and replugged devices are
-resubscribed by client name. Native readers currently handle CC and note-on
-messages; other message types and device-isolated reader behavior still need
-web comparison. Native ALSA tests cover
-these features; independent deployed-web input/persistence/reconnect gates
-remain outstanding.
+resubscribed by client name. Native readers handle CC and note-on messages.
+`cmake --build build --target test-midi-input-reference-web` compares the
+input path against the deployed REPL through fake ports (`scripts/midi-input-reference-qa.mjs`
+plus a `--midi-input-reference` driver mode): CC values, channels,
+normalization and defaults, keyboard note values/counts/tags, seeded and
+corrupt persistence round-trips, drop/resume across disconnect/reconnect and
+error paths all hold. Two divergences are locked explicitly rather than
+matched: the web isolates stores per device while native merges senders
+(correction would break the merged semantics native gates depend on), and
+the web files every message byte into its CC store (notes zero it on noteoff)
+while native keeps CC/notes/bend paths separate. Native ALSA tests cover
+these features alongside the web gates.
 
 JavaScript playback uses the web scheduler's 50 ms query windows,
 100 ms timer and overlap, and 100 ms output latency. Already submitted notes

@@ -728,7 +728,10 @@ int midi_state_load(const char *name) {
     text[len] = 0;
     cJSON *doc = cJSON_Parse(text);
     free(text);
-    if (!doc) return 0;
+    if (!doc) {
+        log_console("midi: ignoring unreadable state for '%s'", name ? name : "");
+        return 0;
+    }
     int count = 0;
     const cJSON *scope;
     cJSON_ArrayForEach(scope, doc) if (cJSON_IsObject(scope)) {

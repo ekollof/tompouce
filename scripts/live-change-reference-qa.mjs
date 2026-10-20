@@ -20,13 +20,21 @@ const scenarios={
   restart:{end:3.0,first:"s('livefixture').fast(4).clip(.25).late(.137)",
     ops:[{sample:Math.round(1.0*SR),kind:'stop'},{sample:Math.round(1.5*SR),kind:'start'}]},
   source:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
-    ops:[{sample:Math.round(1.0*SR),kind:'eval'}]},
+    ops:[{sample:Math.round(1.0*SR),kind:'eval',code:"s('livefixture').fast(2).clip(.25).late(.311)"}]},
   tempo:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137).cps(fastcat(0.5,0.5,1,1))",
     ops:[]},
   exttempo:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
     ops:[{sample:Math.round(1.0*SR),kind:'tempo'}]},
+  chain:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'eval',code:"s('livefixture').fast(2).clip(.25).late(.311)"},
+      {sample:Math.round(1.75*SR),kind:'eval',code:"s('livefixture').fast(8).clip(.125).late(.077)"}]},
+  slices:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'eval',code:"s('livefixture').fast(4).clip(.25).late(.137).begin(.3).end(.6)"}]},
+  effects:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'eval',code:"s('livefixture').fast(4).clip(.25).late(.137).dry(0).delay(1).delaytime(.05).delayfeedback(.5)"}]},
+  faileval:{end:2.5,first:"s('livefixture').fast(4).clip(.25).late(.137)",
+    ops:[{sample:Math.round(1.0*SR),kind:'faileval',code:"s('livefixture').fast(4).clip(.25).late(.137"}]},
 };
-const SECOND="s('livefixture').fast(2).clip(.25).late(.311)";
 
 function fixtureWav() {
   const frames=SR, wav=Buffer.alloc(44+frames*4);
@@ -93,7 +101,7 @@ async function main() {
       const nativeSummary=JSON.parse(run.stdout.trim());
       const native=parseF32(await fs.readFile(pcmPath));
       const captured=await browser.evaluate(`(async()=>{
-        const spec=${JSON.stringify({first:scenario.first,second:SECOND,end:scenario.end,ops:scenario.ops,wav:wav.toString('base64')})};
+        const spec=${JSON.stringify({first:scenario.first,end:scenario.end,ops:scenario.ops,wav:wav.toString('base64')})};
         const context=new OfflineAudioContext(2,Math.round(spec.end*${SR}),${SR});
         setAudioContext(context); setSuperdoughAudioController(null); resetGlobalEffects();
         await initAudio({maxPolyphony:128,multiChannelOrbits:false});
@@ -128,9 +136,14 @@ async function main() {
             op.done=true;
             if (op.kind==='stop') host.stop();
             else if (op.kind==='start') host.start();
-            else if (op.kind==='eval') await host.evaluate(spec.second,false);
+            else if (op.kind==='eval') { await host.evaluate(op.code,false); op.error=String(host.state.evalError?.message??host.state.evalError??''); }
+            else if (op.kind==='faileval') {
+              await host.evaluate(op.code,false);
+              op.error=String(host.state.evalError?.message??host.state.evalError??'');
+              if (!host.state.evalError) throw new Error('invalid code evaluated cleanly');
+            }
             else if (op.kind==='tempo') host.scheduler.setCps(1);
-            if (host.state.evalError) throw host.state.evalError;
+            if (op.kind!=='faileval' && host.state.evalError) throw host.state.evalError;
           }
           /* A cleared interval stays dead, exactly as in production: after
              Stop no further scheduling passes run. Time still advances.
@@ -150,7 +163,8 @@ async function main() {
           for (let i=0;i<u8.length;i+=8192) binary+=String.fromCharCode(...u8.subarray(i,i+8192));
           return btoa(binary);};
         return {left:encode(rendered.getChannelData(0)),right:encode(rendered.getChannelData(1)),
-          haps,sampleRate:rendered.sampleRate,cps:host.scheduler.cps};
+          haps,sampleRate:rendered.sampleRate,cps:host.scheduler.cps,
+          opErrors:ops.map(op=>op.error??null)};
       })()`);
       /* Browser channels arrive as base64 Float32 PCM; interleave stereo. */
       const decode=(text)=>{const bytes=Uint8Array.from(atob(text),c=>c.charCodeAt(0));
@@ -162,11 +176,17 @@ async function main() {
       const ints=new Float64Array(native.length);
       for (let i=0;i<left.length;i++) { ints[i*2]=left[i]; ints[i*2+1]=right[i]; }
       await fs.writeFile(path.join(directory,`${name}-browser.json`),
-        JSON.stringify({haps:captured.haps,cps:captured.cps},null,2));
+        JSON.stringify({haps:captured.haps,cps:captured.cps,opErrors:captured.opErrors},null,2));
       const metrics=correlate(native,ints);
-      const hold=metrics.correlation>=.99&&metrics.rmsRatio>=.85&&metrics.rmsRatio<=1.15;
+      /* A failed evaluation must report itself on both sides; anything else
+         failing to error (or erroring unexpectedly) fails the gate loudly
+         instead of passing on coincidentally matching audio. */
+      const errorsOk=name==='faileval'
+        ? captured.opErrors.length===1 && !!captured.opErrors[0]
+        : captured.opErrors.every(error=>!error);
+      const hold=errorsOk&&metrics.correlation>=.99&&metrics.rmsRatio>=.85&&metrics.rmsRatio<=1.15;
       results.push({name,frames:nativeSummary.frames,voices:nativeSummary.voices,
-        webHaps:captured.haps.length,webCps:captured.cps,...metrics,hold});
+        webHaps:captured.haps.length,webCps:captured.cps,opErrors:captured.opErrors,...metrics,hold});
       console.log(name,JSON.stringify(metrics),hold?'PASS':'FAIL',
         `native voices=${nativeSummary.voices} web haps=${captured.haps.length}`);
     }

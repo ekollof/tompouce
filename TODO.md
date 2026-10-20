@@ -319,9 +319,11 @@ a hosted-player drift is evidence to investigate, never a reason to loosen
 a threshold. Steps 6–11 already scope the required slices; the remainder is:
 
 - Live-change fractional onsets beyond steady playback (step 6 delta).
-- Voice-pool breadth beyond the gated 62 cases, drum A/B and 15-vowel filter
-  gate (chorus without a web control, drum timbre) and backend bursts
-  beyond the voice-burst matrices (step 7 remainder).
+- Voice-pool breadth is closed: chain order audited against the deployed
+  per-source chain (positions match; static pan commutes with the phaser),
+  chorus re-confirmed a no-op key on the deployed player, drum timbre stays
+  under the synthesis-equivalence non-goal, and bursts stay covered by the
+  existing saturation/shedding/determinism matrices.
 - Duck wall-clock timer-fire parity under host contention (step 8 remainder;
   native dispatch is sample-accurate by construction; the web fires from a
   setTimeout 10 ms early and re-anchors late callbacks at its scheduling

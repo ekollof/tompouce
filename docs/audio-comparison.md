@@ -347,7 +347,11 @@ is gated instead: `voice-vowel-reference-qa.mjs` compares one-second impulse
 responses for all fifteen vowels against the deployed five-formant parallel
 filter (per-formant gains, makeup gain 8, Q up to 140), worst case 1.2e-7,
 through the real letter-to-params path. The old three-formant approximation
-fails that gate.
+fails that gate. Chain placement was audited against the deployed chain and
+matches (filter, vowel, coarse/crush/shape/distort, tremolo, compressor,
+phaser); static pan commutes with the per-channel phaser, so mono pre-pan and
+stereo post-pan filtering agree. Full-voice vowel PCM stays at IR level by
+design: raw oscillator parity is separately ungated and would conflate.
 Offline regressions check ring-out across 1/8,192-frame blocks for low-pass,
 high-pass, band-pass, vowel, phaser, chorus and coarse graphs, plus native
 effect-state lifetime; a cut-ordering regression checks same-group cuts with

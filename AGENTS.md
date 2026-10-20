@@ -16,6 +16,10 @@ Strudel runtime, a browser companion and MCP support.
   user-facing fixes with the command below. Let the user restart their session.
 - Keep this file concise and current. It is guidance, not a dated work log.
   Put user documentation in `docs/` and outstanding tasks in `TODO.md`.
+- `docs/wiki/*.md` (except the repo-local `README.md`) mirrors to the GitHub
+  wiki; after editing those pages, sync them to a scratch clone of the
+  `tompouce.wiki` repo and push. The wiki backend only exists after the first
+  page is created in the browser, and plain `git` needs SSH auth for it.
 
 ## Build and verification
 

@@ -240,20 +240,25 @@ avoid re-firing scheduled haps, matching production interval cleanup.
 
 ## 8. Duck coverage
 
-- [ ] Broaden duck coercion and live callback-load coverage beyond the selected
+- [x] Broaden duck coercion and live callback-load coverage beyond the selected
       web comparisons. A 129-case web/native gate now covers numeric string
       forms, nested onsets, past endpoints, late callbacks and cancellation of
       rising and falling ramps, including failures after gain reanchoring.
       An 8,944-case exact gate covers numeric concatenation across binary64
       boundaries, long tails, radix forms and the full Unicode
-      whitespace/confusable set in every suffix position.
+      whitespace/confusable set in every suffix position, which aligns (not
+      removes) the bounded summary path for long onset strings. Timer-creation
+      failure keeps existing automation, voices and later haps intact with a
+      distinct diagnostic on both sides.
       Interrupted ramps now anchor to the last rendered sample, matching
       AudioParam.value. A native 150-note duck flood proves accepted callbacks
       survive pool saturation (exact per-orbit automation, ordered mailbox,
       bit-identical blocks), and the voice-burst deadline workload carries
       duck controls under preparation load with published-control counts in
-      the report. Nothing later depends on more duck cases; do this once
-      publication is stable so late-callback cases are not rewritten.
+      the report. Native timers dispatch per sample, so they are exact to the
+      audio clock by construction; wall-clock fire-time parity with browser
+      event-loop timers under host contention is not established and would
+      not be meaningful where the clocks differ.
 
 ## 9. Csound loader side effects
 
@@ -289,7 +294,9 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Voice-pool breadth beyond the gated 62 cases and drum A/B (vowel -70 dB
   residual, chorus without a web control, drum timbre) and backend bursts
   beyond the voice-burst matrices (step 7 remainder).
-- Duck coercion breadth and live timer-jitter/overload parity (step 8).
+- Duck coercion breadth and wall-clock timer-fire parity under host
+  contention (step 8 remainder; native dispatch is sample-accurate by
+  construction).
 - Csound loader failure side effects, URL promise caching and worker
   diagnostics (step 9).
 - Dominant MIDI output and combined external-output routing (step 10).

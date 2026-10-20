@@ -473,6 +473,113 @@ static void test_retiring_filter_tail(void) {
     memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
 }
 
+/* Live duck-callback load: 150 ducking notes across all orbits with invalid
+   depths/attacks mixed in, overlapping long enough to saturate the voice
+   pool. Every accepted timer must dispatch (orbit automation matches the last
+   duck per orbit exactly), rejections must land in the bounded mailbox in
+   dispatch order, and rendering must be bit-identical across block sizes.
+   Duck callbacks live on an independent timeline, so pool eviction must not
+   disturb them. */
+enum { DUCK_FLOOD_NOTES=150, DUCK_FLOOD_FRAMES=176400 };
+static int duck_flood_peak_voices,duck_flood_peak_retiring;
+static void render_duck_flood(float *pcm, unsigned long block) {
+    memset(voices,0,sizeof(voices)); memset(web_duck,0,sizeof(web_duck));
+    memset(duck_depth,0,sizeof(duck_depth)); memset(duck_atk,0,sizeof(duck_atk));
+    memset(duck_t,0,sizeof(duck_t));
+    memset(pending_ducks,0,sizeof(pending_ducks));
+    memset(duck_errors,0,sizeof(duck_errors));
+    pending_duck_count=0; pending_duck_serial=0;
+    duck_error_count=0; duck_error_overflow=0;
+    voice_onset_serial=0; retirement_overflow=0;
+    next_voice_onset=HUGE_VAL; audio_time=0;
+    audio_set_reference_mode(1); audio_toggle_play(1);
+    for (int i=0;i<DUCK_FLOOD_NOTES;i++) {
+        AudioEvent note;
+        memset(&note,0,sizeof(note));
+        note.time=.1+i*.01; note.duration=2; note.inst=INST_SINE; note.freq=440;
+        note.smp=-1; note.wt=-1; note.gain=.02;
+        note.att=.01; note.dec=.05; note.sus=.8; note.rel=.1;
+        note.midi_chan=-1; note.midi_note=-1; note.orbit=i%N_ORBITS;
+        note.delay_prepared=1; note.room_prepared=1;
+        note.duck_mask=1u<<((i+5)%N_ORBITS);
+        note.duck_onset=0; note.duck_attack=.02;
+        note.duck_depth=(i%4+1)*.25;
+        /* Orbits 10 and 11 receive only invalid ducks (i%12==5: NaN depth;
+           i%12==6: NaN attack), so the other orbits always return to unity
+           between ducks and end with a valid duck. */
+        if (i%12==5) note.duck_depth=NAN;
+        if (i%12==6) note.duck_attack=NAN;
+        dsp_params_init(&note.dsp); note.dsp.enabled=1;
+        audio_trigger_event(&note);
+    }
+    duck_flood_peak_voices=duck_flood_peak_retiring=0;
+    for (int at=0;at<DUCK_FLOOD_FRAMES;) {
+        int count=DUCK_FLOOD_FRAMES-at;
+        if (count>(int)block) count=(int)block;
+        /* Sample the pool storm as it happens; the 2 s voices overlap the
+           whole 1.5 s onset span, so saturation with evictions is required. */
+        pa_callback(NULL,pcm+at*2,(unsigned long)count,NULL,0,NULL); at+=count;
+        int live=audio_active_voices(),retiring=audio_retiring_voices();
+        if (live>duck_flood_peak_voices) duck_flood_peak_voices=live;
+        if (retiring>duck_flood_peak_retiring) duck_flood_peak_retiring=retiring;
+    }
+}
+
+static void test_duck_flood(void) {
+    static float reference[DUCK_FLOOD_FRAMES*2],actual[DUCK_FLOOD_FRAMES*2];
+    render_duck_flood(reference,1);
+    /* The storm saturated the pool: 128 concurrent voices with evictions. */
+    assert(duck_flood_peak_voices==MAX_VOICES && duck_flood_peak_retiring>0);
+    /* Every accepted timer dispatched; the pool storm did not lose any. */
+    assert(!pending_duck_count);
+    /* 25 invalid ducks (i%12==5 depth, i%12==6 attack) in dispatch order. */
+    assert(duck_error_count==25 && !duck_error_overflow);
+    double last_time=-1;
+    int seen=0;
+    for (int i=0;i<DUCK_FLOOD_NOTES;i++) {
+        int bad_attack=i%12==6, bad_depth=i%12==5;
+        if (!bad_attack && !bad_depth) continue;
+        unsigned orbit=(i+5)%N_ORBITS;
+        assert(orbit==10 || orbit==11);
+        assert(seen<25);
+        assert(duck_errors[seen].orbit==(int)orbit);
+        assert(duck_errors[seen].returning==bad_attack);
+        assert(!duck_errors[seen].timer);
+        assert(duck_errors[seen].time>=last_time);
+        last_time=duck_errors[seen].time;
+        seen++;
+    }
+    assert(seen==25);
+    /* Orbits 0-9 hold their last valid duck exactly: no invalid duck ever
+       targets them, and 120 ms spacing lets each return to unity, so every
+       one anchors at 1.0. Orbits 10 and 11 only ever see invalid ducks and
+       freeze instead. */
+    for (int o=0;o<N_ORBITS;o++) {
+        if (o==10 || o==11) {
+            assert(web_duck[o].enabled && web_duck[o].hold);
+            continue;
+        }
+        int last=-1;
+        for (int i=0;i<DUCK_FLOOD_NOTES;i++)
+            if ((i+5)%N_ORBITS==o && i%12!=5 && i%12!=6) last=i;
+        assert(last>=0 && last%12!=5 && last%12!=6);
+        double t=.1+last*.01,depth=(last%4+1)*.25;
+        double target=depth>=1?0.01:1-sqrt(depth);
+        assert(web_duck[o].enabled && !web_duck[o].hold);
+        assert(fabs(web_duck[o].initial-1)<1e-12);
+        assert(fabs(web_duck[o].target-target)<1e-12);
+        assert(fabs(web_duck[o].minimum-t)<1e-12);
+        assert(fabs(web_duck[o].end-(t+.02))<1e-12);
+    }
+    /* Orbit 10 froze at unity on its first NaN-depth duck; orbit 11 froze at
+       its downward target on NaN attack (all its depths are .75). */
+    assert(fabs(web_duck[10].target-1)<1e-12);
+    assert(fabs(web_duck[11].target-(1-sqrt(.75)))<1e-12);
+    render_duck_flood(actual,8192);
+    assert(!memcmp(reference,actual,sizeof(reference)));
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+}
+
 static void voice_reference(void) {
     size_t capacity=1024*1024; char *input=malloc(capacity); assert(input);
     size_t length=fread(input,1,capacity-1,stdin);
@@ -551,6 +658,7 @@ int main(int argc, char **argv) {
     test_empty_source_eviction();
     test_coincident_retirement_endpoint();
     test_retiring_filter_tail();
-    puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, drum fades, mixed-type saturation, per-voice effect tails and independent duck callbacks survive 1..8192-frame bursts; retirement capacity is bounded and observable");
+    test_duck_flood();
+    puts("Fractional/reverse PCM, FIFO retirement fades, cut ordering, drum fades, mixed-type saturation, per-voice effect tails and a 150-note duck flood with pool saturation survive 1..8192-frame bursts; retirement capacity is bounded and observable");
     return 0;
 }

@@ -245,7 +245,9 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       forms, nested onsets, past endpoints, late callbacks and cancellation of
       rising and falling ramps, including failures after gain reanchoring.
       Interrupted ramps now anchor to the last rendered sample, matching
-      AudioParam.value. Nothing later depends on more duck cases; do this once
+      AudioParam.value. A native 150-note duck flood proves accepted callbacks
+      survive pool saturation (exact per-orbit automation, ordered mailbox,
+      bit-identical blocks). Nothing later depends on more duck cases; do this once
       publication is stable so late-callback cases are not rewritten.
 
 ## 9. Csound loader side effects

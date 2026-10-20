@@ -389,4 +389,15 @@ against a full voice pool, retained independent timers, late preparation and
 Csound/OSC bypass. Valid rest/missing-source pool eviction remains a separate
 open comparison. The timer gate also runs through `test-duck-reference-web`.
 
+A native 150-note duck flood covers live callback execution under pool
+saturation without a browser: overlapping 2 s voices across all 12 orbits
+fill the 128-voice pool (peak retiring graphs required) while 150 timers
+dispatch, including NaN-depth and NaN-attack rejections confined to orbits 10
+and 11. Every accepted timer must dispatch, each orbit 0–9 must hold its last
+valid duck exactly, the 25 rejections must land in the bounded mailbox in
+dispatch order without overflow, and rendering must be bit-identical across
+1/8,192-frame callbacks. This proves accepted callbacks survive voice
+stealing; it does not establish live timer-jitter parity under preparation
+load or timer-creation failure side effects.
+
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

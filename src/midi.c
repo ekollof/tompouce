@@ -12,6 +12,22 @@
 
 typedef struct { double at; int ch; int note; } OffEv;
 
+/* Bounded scheduling observation for tests. Recording is independent of
+   hardware: note on/off intent is captured whether or not ALSA accepts
+   bytes, so routing stays verifiable without a sequencer. */
+static MidiCapturedNote midi_captured[MIDI_CAPTURE_CAPACITY];
+static unsigned midi_captured_count;
+static int midi_capture_enabled;
+void midi_capture_enable(int on) {
+    midi_capture_enabled = on ? 1 : 0;
+    if (on) midi_captured_count = 0;
+}
+unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity) {
+    unsigned count = midi_captured_count < capacity ? midi_captured_count : capacity;
+    for (unsigned i = 0; i < count; i++) out[i] = midi_captured[i];
+    return midi_captured_count;
+}
+
 static snd_seq_t *seq = NULL;
 static int seq_port = -1;
 static int midi_ok = 0;
@@ -51,6 +67,10 @@ static void *midi_worker(void *arg) {
             memmove(offs, offs + 1, (size_t)(n_offs - 1) * sizeof(OffEv));
             n_offs--;
             send_raw(0, e.ch, e.note, 64);
+            if (midi_capture_enabled && midi_captured_count<MIDI_CAPTURE_CAPACITY) {
+                midi_captured[midi_captured_count++]=(MidiCapturedNote){
+                    .on=0,.chan=e.ch,.note=e.note,.vel=64,.at=e.at};
+            }
             continue;
         }
         struct timespec ts;
@@ -70,22 +90,23 @@ void midi_init(void) {
     if (rc != 0 || !seq) {
         log_console("midi: ALSA sequencer unavailable");
         seq = NULL;
-        return;
+    } else {
+        snd_seq_set_client_name(seq, "tompouce");
+        seq_port = snd_seq_create_simple_port(seq, "out",
+            SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
+            SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+        if (seq_port < 0) {
+            log_console("midi: port creation failed");
+            snd_seq_close(seq);
+            seq = NULL;
+        }
     }
-    snd_seq_set_client_name(seq, "tompouce");
-    seq_port = snd_seq_create_simple_port(seq, "out",
-        SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
-        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
-    if (seq_port < 0) {
-        log_console("midi: port creation failed");
-        snd_seq_close(seq);
-        seq = NULL;
-        return;
-    }
-    midi_ok = 1;
+    /* The scheduler thread runs regardless so note-off timing stays
+       observable (and audible nowhere) without hardware. */
+    midi_ok = seq != NULL;
     midi_running = 1;
     pthread_create(&midi_tid, NULL, midi_worker, NULL);
-    log_console("midi out %d:%d (connect with aconnect)",
+    if (midi_ok) log_console("midi out %d:%d (connect with aconnect)",
         snd_seq_client_id(seq), seq_port);
 }
 
@@ -110,9 +131,13 @@ void midi_note(int chan, int note, int vel, int dur_ms) {
     if (vel < 1) vel = 1;
     if (vel > 127) vel = 127;
     if (dur_ms < 50) dur_ms = 50;
+    if (midi_capture_enabled && midi_captured_count<MIDI_CAPTURE_CAPACITY) {
+        midi_captured[midi_captured_count++]=(MidiCapturedNote){
+            .on=1,.chan=chan,.note=note,.vel=vel,.at=audio_time_now()};
+    }
     pthread_mutex_lock(&midi_lock);
-    if (!midi_ok || !midi_running) { pthread_mutex_unlock(&midi_lock); return; }
-    send_raw(1, chan, note, vel);
+    if (!midi_running) { pthread_mutex_unlock(&midi_lock); return; }
+    if (midi_ok) send_raw(1, chan, note, vel);
     if (n_offs < MIDI_MAX_OFFS) {
         OffEv e;
         e.at = audio_time_now() + dur_ms / 1000.0;

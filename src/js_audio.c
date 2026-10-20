@@ -557,7 +557,8 @@ static int plan_hap(JsProgram *program, const cJSON *hap, double time,
     if (time<=cutoff || time+1/SR<audio_time_now()) return 0;
     const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
     javascript_cache_hap(program,hap,plan->origin,seconds);
-    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc")) ||
+        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_midi"))) {
         plan->kind=HAP_IMMEDIATE; return 1;
     }
     int csound=cJSON_HasObjectItem(value,"csound");
@@ -597,42 +598,69 @@ static void discard_prep_job(AudioPrepJob *job) {
     prep_job_release(&job->base);
 }
 
+/* Dominant MIDI bypasses local audio like the web output; the channel
+   defaults to 1 there, and the pitch follows the resolved voice frequency.
+   Returns 0 for pitch-less events (rests are filtered by callers, drums
+   have no frequency), which carry no MIDI note. */
+static int midi_dominant_defaults(AudioEvent *event) {
+    if (event->midi_chan<0) event->midi_chan=0;
+    if (event->midi_note<0) {
+        if (event->freq<=0) return 0;
+        event->midi_note=(int)fmax(0,fmin(127,round(69+12*log2(event->freq/440))));
+    }
+    return 1;
+}
+
 static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsigned generation) {
     if (plan->time+1/SR<audio_time_now()) return;
     const cJSON *hap=plan->hap;
     const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
-    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"))) {
+    int osc=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_osc"));
+    int midi=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(value,"_midi"));
+    if (osc) {
         AudioEvent event;
         if (audio_event_values(hap,plan->origin,plan->seconds,&event,0)) {
             double cycle=control(hap,"begin",0,-1e12,1e12);
             if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {
-                event.osc_only=1; event.generation=generation; event_queue_push(&event);
+                event.osc_only=1; event.generation=generation;
+                if (midi && midi_dominant_defaults(&event)) event.midi_only=1;
+                event_queue_push(&event);
             } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
         }
         return;
     }
     int csound=cJSON_HasObjectItem(value,"csound");
-    if (!csound) {
+    if (!csound && !midi) {
         if (!schedule_local_ducks(value,plan->time,generation)) return;
         const char *sound=text_control(value,"s");
         if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) {
             schedule_source_eviction(plan->time,cJSON_HasObjectItem(value,"stretch")?1:0,generation);
             return;
         }
+    } else if (midi && !csound) {
+        const char *sound=text_control(value,"s");
+        if (!strcmp(sound,"~") || !strcmp(sound,"-") || !strcmp(sound,"_")) return;
     }
     AudioEvent event;
     if (!audio_event_values(hap,plan->origin,plan->seconds,&event,0)) return;
     event.generation=generation; event.duck_mask=0;
+    if (midi) {
+        if (!midi_dominant_defaults(&event)) return;
+        event.midi_only=1;
+    }
     if (csound) {
-        event.midi_chan=event.midi_note=-1; /* Dominant output bypasses ALSA too. */
+        if (!midi) event.midi_chan=event.midi_note=-1; /* Dominant output bypasses ALSA too. */
         pthread_mutex_lock(&tracks_lock);
         int current=generation==event_queue_generation();
         int scheduled=current && csound_program_schedule(javascript_csound(program),value,event.time,event.duration,event.freq);
+        /* MIDI fires independently of Csound scheduling: a live renderer
+           failure still warns, but the external note goes out. */
         if (current && !scheduled)
             javascript_warn_control(program,"csound (renderer unavailable or event rejected)");
-        else if (scheduled) { event.csound_only=1; event_queue_push(&event); }
+        if (scheduled) event.csound_only=1;
+        if (scheduled || midi) event_queue_push(&event);
         pthread_mutex_unlock(&tracks_lock);
-    }
+    } else if (midi) event_queue_push(&event);
 }
 
 static void commit_source_hap(JsProgram *program, const HapPlan *plan,

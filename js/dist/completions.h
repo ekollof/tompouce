@@ -1703,6 +1703,7 @@ static const char *const strudel_method_words[] = {
     "markcss",
     "mask",
     "maskAll",
+    "midi",
     "midibend",
     "midichan",
     "midicmd",

@@ -287,6 +287,21 @@ globalThis.all = (fn) => { allTransforms.push(fn); return core.silence; };
 globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
 core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
 globalThis.osc = pattern=>pattern.osc();
+/* Dominant MIDI output, mirroring the web routing (local audio bypassed,
+   channel from midichan defaulting to 1). The port argument only selects a
+   web device; native ALSA subscribers receive every note. An options object
+   may carry midichannel as a default when the hap sets no midichan. */
+core.Pattern.prototype.midi = function (port, options) {
+  if (core.isPattern(port)) throw new Error(`.midi does not accept Pattern input for midiport. Make sure to pass device name with single quotes.`);
+  const settings = port && typeof port === 'object' ? {...options,...port} : {...options};
+  const channel = Number.isFinite(settings.midichannel) ? settings.midichannel : undefined;
+  return this.fmap(value=> {
+    const object = {...((value && typeof value==='object')?value:{note:value})};
+    object._midi = true;
+    if (channel !== undefined && object.midichan == null) object.midichan = channel;
+    return object;
+  });
+};
 globalThis.cpm = core.register('cpm', (value, pattern) => pattern._fast(Number(value) / 60 / (queryCps ?? ((tempo ?? initialBpm) / 240))));
 modules['@strudel/core'] = { ...core, cpm: globalThis.cpm };
 globalThis.setcps = globalThis.setCps = (v) => {

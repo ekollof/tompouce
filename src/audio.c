@@ -1136,7 +1136,7 @@ static int oldest_full_pool_voice(void) {
 }
 
 void audio_trigger_event(AudioEvent *ev) {
-    if (ev->csound_only || ev->osc_only) return;
+    if (ev->csound_only || ev->osc_only || ev->midi_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
     if (ev->eviction_only) {
         VoiceResources previous={0};

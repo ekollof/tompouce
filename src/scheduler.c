@@ -673,7 +673,7 @@ static int prepare_queued_audio(double now) {
     AudioEvent event; int found=0;
     pthread_mutex_lock(&qlock);
     for (QNode *node=qhead;node && node->ev.time<=now+.1;node=node->next) {
-        if (!node->ev.generation || node->ev.audio_prepared || node->ev.csound_only || node->ev.osc_only) continue;
+        if (!node->ev.generation || node->ev.audio_prepared || node->ev.csound_only || node->ev.osc_only || node->ev.midi_only) continue;
         node->ev.audio_prepared=1; event=node->ev; found=1;
         native_synth_retain(event.native_synth); stretch_retain(event.stretch_buffer);
         break;
@@ -706,7 +706,12 @@ static void *consumer_thread(void *arg) {
                 if (!ev.audio_prepared) audio_trigger_event(&ev);
                 native_synth_release(ev.native_synth);
                 stretch_release(ev.stretch_buffer);
-                if (!ev.control_only && !ev.osc_only && !ev.csound_only && ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
+                /* Dominant MIDI combines with every external output but never
+                   with a local voice: plain and midichan voices keep local
+                   audio plus ALSA, while Csound and OSC stay silent unless
+                   their own markers are also present. */
+                if (!ev.control_only && (ev.midi_only || (!ev.osc_only && !ev.csound_only)) &&
+                    ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
                     int vel = (int)(ev.gain * 127.0);
                     int dur = (int)(ev.duration * 1000.0);
                     midi_note(ev.midi_chan, ev.midi_note, vel, dur);

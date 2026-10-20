@@ -666,8 +666,18 @@ missing-source events can still duck another bus. Missing sounds stay silent
 and report an error. As in Superdough, `clip(0)` falls back to full duration.
 Csound and OSC output bypass local orbit creation and ducking. Csound also
 bypasses ALSA note output even when `midichan` is present. Native `midichan`
-without either output keeps its existing local-audio-plus-ALSA behavior;
-the web's dominant `.midi()` output and combined output callbacks remain open.
+without either output keeps its existing local-audio-plus-ALSA behavior.
+`.midi()` (port name, number or options object; Pattern input is rejected
+like the web) selects dominant MIDI instead: the ALSA note goes out with no
+local voice, and the channel follows `midichan` (defaulting to 1) with pitch
+from the resolved voice frequency. An options `midichannel` applies only when
+the hap sets no `midichan`. Each external output fires independently, so
+`.midi()` combines with `.osc()` and `.csound()` while local synthesis stays
+off; a failing Csound schedule still warns while the MIDI note goes out.
+Rests and pitch-less drum patterns carry no MIDI note. Velocity follows
+`gain` times `velocity` as shared with the `midichan` path (the web default
+.9 differs from the native gain default); CC, program change, bend, touch,
+sysex, midicmd transport and port selection are not implemented.
 
 ## Building and testing
 

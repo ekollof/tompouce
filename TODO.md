@@ -277,9 +277,15 @@ avoid re-firing scheduled haps, matching production interval cleanup.
 
 ## 10. MIDI and combined output routing
 
-- [ ] Implement dominant MIDI and combined external-output routing against the
-      web REPL. Native `midichan` currently keeps local audio plus ALSA output;
-      the web's `.midi()` bypasses local audio. Preserve Csound and OSC
+- [x] Implement dominant MIDI and combined external-output routing against the
+      web REPL. `.midi()` now selects dominant MIDI (ALSA note, no local
+      voice) with channel from `midichan` defaulting to 1 and pitch from the
+      resolved voice frequency; each external output (MIDI, OSC, Csound)
+      fires independently while local synthesis stays off, and a failing
+      Csound schedule still warns while MIDI goes out. Native `midichan`
+      keeps its local-audio-plus-ALSA behavior. Rests and pitch-less drums
+      carry no MIDI note; CC, program change, bend, touch, sysex, midicmd
+      transport and port selection remain open. Preserve Csound and OSC
       isolation and verify ordering and effects when multiple output callbacks
       are combined. Note triggering, effect tails and Csound bypass are settled
       by the previous steps.
@@ -307,7 +313,9 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
   construction).
 - Csound loader failure side effects beyond the gated URL caching, parked
   engine and console diagnostics (step 9 remainder).
-- Dominant MIDI output and combined external-output routing (step 10).
+- Dominant MIDI output beyond note triggering (CC, program change, bend,
+  touch, sysex, midicmd transport, port selection) and combined
+  external-output routing beyond the gated flag matrix (step 10 remainder).
 - Controller input and expression mapping (step 11).
 - Transport restart after Stop: the web re-fires early-cycle haps and
   continues the cycle, while native resets to cycle zero without

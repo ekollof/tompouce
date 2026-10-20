@@ -45,6 +45,7 @@ typedef struct {
     unsigned scope_mask; /* visualization call sites attached to this pattern */
     int csound_only;     /* scheduled by native renderer; retain UI note history */
     int osc_only;
+    int midi_only;       /* dominant MIDI: ALSA note without a local voice */
     int control_only;   /* shared controls with no source/MIDI/history event */
     int eviction_only;  /* failed/rest source still removes a full pool's oldest entry */
     int audio_prepared; /* consumer reserved a timestamped voice before onset */

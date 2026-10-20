@@ -54,14 +54,18 @@ keyboard notes with fixed durations like the web helper (`kb()` defaults to
 Pattern input is rejected, and `midikeys` rejects a missing device while
 `midin` keeps default readers. Held notes sound on the next scheduled window
 after arrival, like live slider moves, and fire once: audio queries consume,
-visual queries peek. Input names accept `client:port`, numeric client ids and
+visual queries peek without consuming pending notes. A missing explicit device
+does not fall back to an unrelated connected sender. Input names accept `client:port`, numeric client ids and
 device-name substrings (a bare call tries the first sender); without a sender,
 connect one with `aconnect`. CC values persist per string sender name across
 restarts and load as reader defaults on open (numeric opens never persist);
-on (re)connect the stored values are sent back to the device's writable port,
+on (re)connect the stored values are addressed only to the device's writable port,
 restoring motorized controls like the web input, and replugged devices are
-resubscribed by client name. Pitch bend and touch stay unimplemented: the
-upstream input ignores non-note messages the same way.
+resubscribed by client name. Native readers currently handle CC and note-on
+messages; other message types and device-isolated reader behavior still need
+web comparison. Native ALSA tests cover
+these features; independent deployed-web input/persistence/reconnect gates
+remain outstanding.
 
 JavaScript playback uses the web scheduler's 50 ms query windows,
 100 ms timer and overlap, and 100 ms output latency. Already submitted notes
@@ -482,6 +486,13 @@ python3 scripts/companion.py --open
 python3 scripts/companion.py --port 18990 --mcp-port 18789
 ```
 
+Standalone TCP engines and bridges must share `TOMPOUCE_MCP_TOKEN`, a secret of
+64 lowercase hexadecimal characters (see README). The bridge authenticates each
+MCP request; this capability is separate from its browser request token. The
+terminal's `/companion` launch generates or uses the engine capability and
+passes it to the helper over a private stdin pipe, without putting it in the
+browser or helper command line. Stdio MCP is unchanged.
+
 Open the loopback URL printed by the command in Chromium. The companion
 shows sounding voices, pitch, level and sample progress, the console and
 engine health. It provides play/stop, tempo, reevaluation and a source editor.
@@ -695,8 +706,10 @@ the hap sets no `midichan`. Each external output fires independently, so
 off; a failing Csound schedule still warns while the MIDI note goes out.
 Rests and pitch-less drum patterns carry no MIDI note, and haps without a
 `note` key send extras without a note, matching the web scheduler. Velocity follows
-`gain` times `velocity` as shared with the `midichan` path (the web default
-.9 differs from the native gain default). CC (`ccn` integer 0..127 with
+`gain` times `velocity`, defaulting to 1 times .9 for dominant MIDI, with
+seven-bit rounding including zero. Local audio gain stages do not affect it;
+an out-of-range note velocity aborts that MIDI hap. The legacy `midichan`
+path keeps its local gain rules. CC (`ccn` integer 0..127 with
 `ccv` 0..1, also via `control([ccn, ccv])`), program change (`progNum`
 0..127, truncated), pitch bend (`midibend` -1..1), channel aftertouch
 (`miditouch` 0..1), sysex (integer `sysexid`/`sysexdata` bytes 0..255, up to
@@ -709,8 +722,10 @@ sysex, CC, bend, touch, cycle-zero start, transport); a rejected extra
 drops itself and every later extra for that hap with a console warning,
 matching the web throw-abort behavior. String sysex forms, non-integer CC
 numbers and out-of-range values never send. `cmake --build build --target
-test-midi-reference-web` gates 20 hap-value and commit cases against the
-deployed REPL and pins its send-validation predicates. Open gaps: string CC
+test-midi-reference-web` gates 24 hap-value, commit and actual send-byte/order
+cases against the deployed REPL. Only MIDI transport and clock mapping are
+mocked; the deployed scheduler and WebMidi conversion/validation run normally.
+Note-off timestamps and durations are not compared. Open gaps: string CC
 names, MIDI maps, NRPN, `isController` and options-object
 velocity/gain/note-offset defaults, combined scalar-plus-array duplicate
 sends, and numeric-string control coercion drift (pinned 1.2.6 coerces

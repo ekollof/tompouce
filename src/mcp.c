@@ -25,12 +25,53 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
+#include <sys/random.h>
 
 FILE *mcp_out_stream = NULL;
 int mcp_input_fd = -1;
 static int mcp_listen_fd = -1;
 static int mcp_port_bound = 0;
+static char mcp_token[65];
+static int mcp_output_socket = -1, mcp_input_tcp, mcp_send_failed;
+static double mcp_client_deadline;
 static char *mcp_init_code;
+
+static int mcp_auth_init(int generate) {
+    if (mcp_token[0]) return 1;
+    const char *configured = getenv("TOMPOUCE_MCP_TOKEN");
+    if (configured) {
+        if (strlen(configured) != 64) return 0;
+        for (int i=0;i<64;i++)
+            if (!((configured[i]>='0' && configured[i]<='9') ||
+                  (configured[i]>='a' && configured[i]<='f'))) return 0;
+        memcpy(mcp_token,configured,65); return 1;
+    }
+    if (!generate) return 0;
+    unsigned char bytes[32]; size_t used=0;
+    while (used<sizeof(bytes)) {
+        ssize_t got=getrandom(bytes+used,sizeof(bytes)-used,0);
+        if (got<0 && errno==EINTR) continue;
+        if (got<=0) return 0;
+        used+=(size_t)got;
+    }
+    const char *hex="0123456789abcdef";
+    for (int i=0;i<32;i++) { mcp_token[i*2]=hex[bytes[i]>>4]; mcp_token[i*2+1]=hex[bytes[i]&15]; }
+    return 1;
+}
+
+const char *mcp_tcp_token(void) { return mcp_token[0]?mcp_token:NULL; }
+
+static int mcp_dispatch_tcp(const char *frame) {
+    cJSON *request=cJSON_ParseWithOpts(frame,NULL,1);
+    const cJSON *auth=cJSON_GetObjectItemCaseSensitive(request,"auth");
+    int valid=cJSON_IsObject(request) && cJSON_IsString(auth) && strlen(auth->valuestring)==64;
+    unsigned difference=0;
+    if (valid) for (int i=0;i<64;i++) difference|=(unsigned char)auth->valuestring[i]^(unsigned char)mcp_token[i];
+    valid=valid && !difference && mcp_token[0];
+    if (valid) { handle_request(request); mcp_client_deadline=now_seconds()+10; }
+    cJSON_Delete(request);
+    return valid && !mcp_send_failed;
+}
 
 void mcp_set_init_code(const char *code) {
     free(mcp_init_code);
@@ -58,6 +99,7 @@ static void mcp_take_line(char **out, size_t nl) {
 
 int mcp_read_frame(int fd, char **out) {
     char tmp[8192];
+    size_t received=0;
     *out = NULL;
     for (;;) {
         /* try to extract a complete line from the pending buffer */
@@ -79,6 +121,8 @@ int mcp_read_frame(int fd, char **out) {
                 return 1;
             }
         }
+        /* A continuous unterminated sender must yield to the foreground. */
+        if (received>=64*1024) return 0;
         ssize_t r = read(fd, tmp, sizeof(tmp));
         if (r < 0) {
             if (errno == EINTR) continue;
@@ -94,12 +138,16 @@ int mcp_read_frame(int fd, char **out) {
             }
             return -1;
         }
+        received+=(size_t)r;
         for (ssize_t i = 0; i < r; i++) {
             if (mcp_frame_drop) {
                 if (tmp[i] == '\n') { mcp_frame_drop = 0; mcp_pending_len = 0; }
                 continue;
             }
             if (mcp_pending_len >= MCP_MAX_FRAME) {
+                /* TCP framing is fail-closed; never skip a hostile preamble
+                   and resume dispatching later lines on that connection. */
+                if (mcp_output_socket>=0 && fd==mcp_output_socket) return -1;
                 mcp_frame_drop = 1;
                 mcp_pending_len = 0;
                 continue;
@@ -113,9 +161,22 @@ static void send_json(cJSON *obj) {
     FILE *out = mcp_out_stream ? mcp_out_stream : stdout;
     char *s = cJSON_PrintUnformatted(obj);
     if (s) {
-        fputs(s, out);
-        fputc('\n', out);
-        fflush(out);
+        if (mcp_output_socket>=0) {
+            /* Never block the foreground or raise SIGPIPE for a peer. A slow
+               or disconnected client loses its connection, not the engine. */
+            const char *parts[]={s,"\n"};
+            for (int i=0;i<2 && !mcp_send_failed;i++) {
+                const char *p=parts[i]; size_t left=strlen(p);
+                while (left) {
+                    ssize_t sent=send(mcp_output_socket,p,left,MSG_NOSIGNAL|MSG_DONTWAIT);
+                    if (sent<0 && errno==EINTR) continue;
+                    if (sent<=0) { mcp_send_failed=1; break; }
+                    p+=sent; left-=(size_t)sent;
+                }
+            }
+        } else {
+            fputs(s, out); fputc('\n', out); fflush(out);
+        }
         free(s);
     }
     cJSON_Delete(obj);
@@ -692,6 +753,7 @@ static void mcp_reset_pending(void) {
 }
 
 static void mcp_drop_client(void) {
+    mcp_output_socket=-1; mcp_input_tcp=0; mcp_send_failed=0; mcp_client_deadline=0;
     if (mcp_out_stream && mcp_out_stream != stdout) {
         fclose(mcp_out_stream);
         mcp_out_stream = NULL;
@@ -705,7 +767,8 @@ static void mcp_drop_client(void) {
 
 /* Loopback only. One accepted client at a time; the UI thread polls it. */
 static int mcp_open_listen(int port) {
-    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    if (!mcp_auth_init(1)) { log_console("mcp: TCP requires a valid 64-character lowercase hex TOMPOUCE_MCP_TOKEN or secure randomness"); return -1; }
+    int ls = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
     if (ls < 0) return -1;
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -776,14 +839,14 @@ void mcp_poll(void) {
             int cs = accept(mcp_listen_fd, NULL, NULL);
             if (cs >= 0) {
                 int flags = fcntl(cs, F_GETFL, 0);
-                if (flags >= 0) fcntl(cs, F_SETFL, flags | O_NONBLOCK);
-                FILE *fout = fdopen(dup(cs), "w");
-                if (!fout) {
+                if (flags<0 || fcntl(cs,F_SETFL,flags|O_NONBLOCK)<0 || fcntl(cs,F_SETFD,FD_CLOEXEC)<0) {
                     close(cs);
                 } else {
                     if (mcp_out_stream && mcp_out_stream != stdout) fclose(mcp_out_stream);
-                    mcp_out_stream = fout;
+                    mcp_out_stream = NULL;
                     mcp_input_fd = cs;
+                    mcp_input_tcp=1; mcp_output_socket=cs; mcp_send_failed=0;
+                    mcp_client_deadline=now_seconds()+2;
                     mcp_reset_pending();
                     /* Short-lived polling clients are normal (companion UI).
                        Connection state is visible through mcp_status(). */
@@ -792,6 +855,7 @@ void mcp_poll(void) {
         }
     }
     if (mcp_input_fd < 0) return;
+    if (mcp_input_tcp && now_seconds()>mcp_client_deadline) { mcp_drop_client(); return; }
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(mcp_input_fd, &rfds);
@@ -816,10 +880,11 @@ void mcp_poll(void) {
             free(frame);
             return;
         }
-        cJSON *req = cJSON_Parse(frame);
-        if (req) {
-            handle_request(req);
-            cJSON_Delete(req);
+        if (mcp_input_tcp) {
+            if (!mcp_dispatch_tcp(frame)) { free(frame); mcp_drop_client(); return; }
+        } else {
+            cJSON *req = cJSON_Parse(frame);
+            if (req) { handle_request(req); cJSON_Delete(req); }
         }
         free(frame);
     }
@@ -900,15 +965,19 @@ void mcp_run(int ui_mode, int tcp_port) {
     ai_shutdown();
 }
 
-void mcp_run_tcp(int port) {
+int mcp_run_tcp(int port) {
+    if (!mcp_auth_init(0)) {
+        log_console("mcp: --mcp-port requires TOMPOUCE_MCP_TOKEN (64 lowercase hex characters)");
+        return 1;
+    }
     audio_init();
     ai_init();
     scheduler_init();
     audio_toggle_play(1);
     if (mcp_init_code && mcp_init_code[0]) track_load_from_code(mcp_init_code);
 
-    int ls = socket(AF_INET, SOCK_STREAM, 0);
-    if (ls < 0) { log_console("tcp: socket failed"); return; }
+    int ls = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
+    if (ls < 0) { log_console("tcp: socket failed"); scheduler_shutdown(); audio_shutdown(); ai_shutdown(); return 1; }
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     struct sockaddr_in addr;
@@ -920,7 +989,7 @@ void mcp_run_tcp(int port) {
         listen(ls, 4) != 0) {
         log_console("tcp: bind/listen %d failed", port);
         close(ls);
-        return;
+        scheduler_shutdown(); audio_shutdown(); ai_shutdown(); return 1;
     }
     log_console("mcp tcp on 127.0.0.1:%d", port);
     for (;;) {
@@ -930,11 +999,12 @@ void mcp_run_tcp(int port) {
             break;
         }
         int flags = fcntl(cs, F_GETFL, 0);
-        if (flags >= 0) fcntl(cs, F_SETFL, flags | O_NONBLOCK);
-        FILE *fout = fdopen(dup(cs), "w");
-        mcp_out_stream = fout ? fout : stdout;
+        if (flags<0 || fcntl(cs,F_SETFL,flags|O_NONBLOCK)<0 || fcntl(cs,F_SETFD,FD_CLOEXEC)<0) { close(cs); continue; }
+        mcp_output_socket=cs; mcp_send_failed=0; mcp_reset_pending();
+        mcp_client_deadline=now_seconds()+2;
         int alive = 1;
         while (alive) {
+            if (now_seconds()>mcp_client_deadline) break;
             fd_set rfds;
             FD_ZERO(&rfds);
             FD_SET(cs, &rfds);
@@ -946,19 +1016,16 @@ void mcp_run_tcp(int port) {
                     int rr = mcp_read_frame(cs, &frame);
                     if (rr < 0) { alive = 0; break; }
                     if (rr == 0) break;
-                    cJSON *req = cJSON_Parse(frame);
-                    if (req) {
-                        handle_request(req);
-                        cJSON_Delete(req);
-                    }
+                    int accepted=mcp_dispatch_tcp(frame);
                     free(frame);
+                    if (!accepted) { alive=0; break; }
                 }
             } else if (sel < 0) {
                 if (errno == EINTR) continue;
                 alive = 0;
             }
         }
-        if (fout) fclose(fout);
+        mcp_output_socket=-1; mcp_send_failed=0; mcp_reset_pending();
         mcp_out_stream = stdout;
         close(cs);
     }
@@ -966,4 +1033,5 @@ void mcp_run_tcp(int port) {
     scheduler_shutdown();
     audio_shutdown();
     ai_shutdown();
+    return 0;
 }

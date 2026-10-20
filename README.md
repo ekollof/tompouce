@@ -472,6 +472,26 @@ Run as an MCP server over stdio:
 ./build/tompouce --mcp
 ```
 
+TCP MCP requires a shared capability. Generate it in the launching shell:
+
+```sh
+export TOMPOUCE_MCP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+./build/tompouce --mcp-port 18789
+```
+
+Every newline-delimited TCP request must include the top-level `"auth"` field
+with that token. A separately launched companion uses the same environment
+variable. Stdio MCP needs no token. The terminal's `/companion` command handles
+credentials automatically through a private pipe; its browser page never gets
+the MCP capability. TCP rejects HTTP preambles and unauthenticated frames,
+expires unauthenticated connections after two seconds and idle clients after
+ten seconds, and disconnects peers that cannot accept a response promptly.
+
+Remote sample and orchestra downloads validate the actual connection address
+on every connection, including redirects. They connect directly and ignore
+proxy environment variables so proxy-side DNS cannot bypass the public-address
+policy. AI endpoint configuration retains its separate network policy.
+
 Tools: `music_set_code`, `music_evaluate`, `music_play`, `music_stop`, `music_set_bpm`, `music_get_status`, `music_get_code`, `music_get_console`, `music_ai`, `music_song`, `music_track`, `music_session`, `music_health`, `music_debug`. Example Claude Code config:
 
 ```json

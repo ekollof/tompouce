@@ -14,6 +14,33 @@ static double monotonic(void) {
     return now.tv_sec+now.tv_nsec/1e9;
 }
 
+static void *capture_writer(void *argument) {
+    int channel = *(int *)argument;
+    for (int i = 0; i < 200; i++) midi_cc(channel, 74, i % 128);
+    return NULL;
+}
+
+static void test_capture_concurrency(void) {
+    /* Run before MIDI startup: these sends cannot reach any hardware. */
+    pthread_t writers[4]; int channels[] = {0,1,2,3};
+    midi_capture_enable(1);
+    for (int i = 0; i < 4; i++) assert(!pthread_create(&writers[i], NULL, capture_writer, &channels[i]));
+    for (int i = 0; i < 100; i++) {
+        MidiCaptured snapshot[8];
+        assert(midi_captured_all(snapshot,8) <= 800);
+    }
+    for (int i = 0; i < 4; i++) assert(!pthread_join(writers[i], NULL));
+    MidiCaptured seen[800]; int counts[4] = {0};
+    assert(midi_captured_all(seen,800) == 800);
+    for (int i = 0; i < 800; i++) {
+        assert(seen[i].kind == MIDI_CAP_CC && seen[i].chan >= 0 && seen[i].chan < 4);
+        assert(seen[i].d1 == 74 && seen[i].d2 == counts[seen[i].chan] % 128);
+        counts[seen[i].chan]++;
+    }
+    for (int i = 0; i < 4; i++) assert(counts[i] == 200);
+    midi_capture_enable(0);
+}
+
 static void isolate_environment(void) {
     char root[]="/tmp/tompouce-midi-XXXXXX";
     assert(mkdtemp(root));
@@ -157,7 +184,7 @@ static void test_threaded_delivery(void) {
     int rotation[6]={-1,-1,-1,-1,-1,-1},gathered=0;
     for (unsigned i=0;i<total && i<512 && gathered<6;i++) {
         if (!seen[i].on) continue;
-        assert(seen[i].chan==0 && seen[i].vel==63);
+        assert(seen[i].chan==0 && seen[i].vel==64);
         assert(seen[i].note==60 || seen[i].note==62 || seen[i].note==64);
         rotation[gathered++]=seen[i].note;
     }
@@ -218,6 +245,8 @@ static void test_midi_input_stores(void) {
     assert(midi_take_keys(keys,64,-1)==0);
     midi_test_inject(0,0,60,100);
     midi_test_inject(0,1,62,127);
+    assert(midi_peek_keys(keys,64)==2 && keys[0].note==60 && keys[1].note==62);
+    assert(midi_peek_keys(keys,64)==2); /* inspection never consumes */
     assert(midi_take_keys(keys,64,1e12)==2);
     assert(keys[0].note==60 && keys[0].chan==1 && fabs(keys[0].vel-100/127.0)<1e-12);
     assert(keys[1].note==62 && keys[1].chan==2 && keys[1].vel==1);
@@ -323,8 +352,10 @@ static void test_midi_keys_commit(void) {
         return;
     }
     event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    assert(!track_load_from_code("await midikeys('test-none-xyz')"));
+    assert(!midi_open_input(NULL, 999));
     midi_test_inject(0,3,69,110);
-    assert(track_load_from_code("const kb = await midikeys('test-none-xyz'); kb().s('saw')"));
+    assert(track_load_from_code("const kb = await midikeys('tompouce-midi-loopback'); kb().s('saw')"));
     schedule_loaded(1);
     int voices=0;
     for (QNode *node=qhead;node;node=node->next) {
@@ -336,7 +367,7 @@ static void test_midi_keys_commit(void) {
     }
     assert(voices==1);
     event_queue_clear();
-    assert(track_load_from_code("const kb = await midikeys('test-none-xyz'); kb().s('saw')"));
+    assert(track_load_from_code("const kb = await midikeys('tompouce-midi-loopback'); kb().s('saw')"));
     schedule_loaded(0);
     voices=0;
     for (QNode *node=qhead;node;node=node->next)
@@ -362,7 +393,9 @@ static int drain_controllers(snd_seq_t *handle, int ch0, int cc0, int v0, int ch
     double end = monotonic() + timeout_s;
     int found0 = 0, found1 = 0;
     for (;;) {
-        if (nfds > 0) {
+        if (snd_seq_event_input_pending(handle, 0) > 0) {
+            /* Drain ALSA's userspace buffer before polling its kernel fd. */
+        } else if (nfds > 0) {
             snd_seq_poll_descriptors(handle, fds, (unsigned)nfds, POLLIN);
             if (poll(fds, (nfds_t)nfds, 50) <= 0) {
                 if ((found0 && found1) || monotonic() >= end) return found0 + found1;
@@ -422,6 +455,28 @@ static void test_midi_restore_loopback(void) {
     }
     assert(fabs(midi_cc_value(21, 0) - 80 / 127.0) < 1e-12);
     assert(midi_state_load("tompouce-midi-restore") == 4);
+    /* A normal output subscriber must never receive another device's
+       restored controls. Find only this test's engine through our source
+       subscription, so a running user engine is never involved. */
+    snd_seq_query_subscribe_t *query;
+    snd_seq_query_subscribe_alloca(&query);
+    snd_seq_addr_t root = {(unsigned)snd_seq_client_id(sender), (unsigned)sport};
+    snd_seq_query_subscribe_set_root(query, &root);
+    snd_seq_query_subscribe_set_type(query, SND_SEQ_QUERY_SUBS_READ);
+    snd_seq_query_subscribe_set_index(query, 0);
+    assert(snd_seq_query_port_subscribers(sender, query) >= 0);
+    snd_seq_addr_t engine = *snd_seq_query_subscribe_get_addr(query);
+    snd_seq_t *observer = NULL;
+    assert(snd_seq_open(&observer, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) >= 0);
+    int observer_port = snd_seq_create_simple_port(observer, "unrelated output",
+        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_APPLICATION);
+    assert(observer_port >= 0);
+    assert(snd_seq_connect_from(observer, observer_port, engine.client, engine.port) >= 0);
+    assert(midi_restore_sender("tompouce-midi-restore") == 2);
+    snd_seq_event_t *unexpected = NULL;
+    assert(snd_seq_event_input(observer, &unexpected) == -EAGAIN);
+    assert(drain_controllers(sender, 0, 21, 80, 1, 22, 100, 2) == 2);
+    snd_seq_close(observer);
     /* Drop the source port: the announce path must mark the sender dead. */
     assert(snd_seq_delete_simple_port(sender, sport) >= 0);
     end = monotonic() + 5;
@@ -481,6 +536,22 @@ static void test_midi_loopback(void) {
     }
     assert(fabs(midi_cc_value(20,0)-96/127.0)<1e-12);
     assert(fabs(midi_cc_value(20,1)-96/127.0)<1e-12);
+    /* Deliver one buffered burst, then no further events: every CC must
+       drain even when ALSA has already moved it out of the kernel fd. */
+    for (int cc = 30; cc < 94; cc++) {
+        snd_seq_ev_clear(&ev);
+        snd_seq_ev_set_controller(&ev, 0, cc, cc);
+        snd_seq_ev_set_source(&ev, sport);
+        snd_seq_ev_set_subs(&ev);
+        snd_seq_ev_set_direct(&ev);
+        assert(snd_seq_event_output(sender, &ev) >= 0);
+    }
+    assert(snd_seq_drain_output(sender) >= 0);
+    end = monotonic() + 2;
+    while (fabs(midi_cc_value(93,1)-93/127.0)>=1e-12 && monotonic()<end) {
+        struct timespec pause={.tv_nsec=5000000}; nanosleep(&pause,NULL);
+    }
+    for (int cc = 30; cc < 94; cc++) assert(fabs(midi_cc_value(cc,1)-cc/127.0)<1e-12);
     event_queue_clear();
     assert(track_load_from_code(
         "const cc = await midin('tompouce-midi-loopback');"
@@ -753,8 +824,10 @@ static int midi_reference_main(void) {
             }
         }
         cJSON *events = cJSON_CreateArray();
+        midi_capture_enable(1);
         for (QNode *node = qhead; node; node = node->next) {
             if (node->ev.control_only || node->ev.eviction_only || !node->ev.midi_only) continue;
+            dispatch_midi_event(&node->ev);
             cJSON *dump = cJSON_CreateObject();
             cJSON_AddNumberToObject(dump, "chan", node->ev.midi_chan);
             cJSON_AddNumberToObject(dump, "note", node->ev.midi_note);
@@ -781,6 +854,35 @@ static int midi_reference_main(void) {
             cJSON_AddItemToArray(events, dump);
         }
         cJSON_AddItemToObject(entry, "events", events);
+        MidiCaptured captured[128];
+        unsigned count = midi_captured_all(captured, 128);
+        assert(count <= 128);
+        midi_capture_enable(0);
+        cJSON *sends = cJSON_CreateArray();
+        for (unsigned i = 0; i < count; i++) {
+            MidiCaptured *msg = &captured[i];
+            unsigned char bytes[264]; int nbytes = 0;
+            if (msg->kind == MIDI_CAP_NOTE_ON || msg->kind == MIDI_CAP_CC) {
+                bytes[0] = (msg->kind == MIDI_CAP_NOTE_ON ? 0x90 : 0xB0) + msg->chan;
+                bytes[1] = msg->d1; bytes[2] = msg->d2; nbytes = 3;
+            } else if (msg->kind == MIDI_CAP_PROG || msg->kind == MIDI_CAP_TOUCH) {
+                bytes[0] = (msg->kind == MIDI_CAP_PROG ? 0xC0 : 0xD0) + msg->chan;
+                bytes[1] = msg->d1; nbytes = 2;
+            } else if (msg->kind == MIDI_CAP_BEND) {
+                int bend = msg->d1 + 8192;
+                bytes[0] = 0xE0 + msg->chan; bytes[1] = bend & 127; bytes[2] = bend >> 7; nbytes = 3;
+            } else if (msg->kind == MIDI_CAP_SYSEX) {
+                nbytes = msg->sysex_len; memcpy(bytes, msg->sysex, (size_t)nbytes);
+            } else if (msg->kind == MIDI_CAP_TRANSPORT) {
+                const unsigned char commands[] = {0, 0xF8, 0xFA, 0xFB, 0xFC};
+                bytes[0] = commands[msg->d1]; nbytes = 1;
+            }
+            if (!nbytes) continue;
+            cJSON *message = cJSON_CreateArray();
+            for (int byte = 0; byte < nbytes; byte++) cJSON_AddItemToArray(message, cJSON_CreateNumber(bytes[byte]));
+            cJSON_AddItemToArray(sends, message);
+        }
+        cJSON_AddItemToObject(entry, "sends", sends);
         cJSON_AddItemToArray(out, entry);
     }
     cJSON_Delete(cases);
@@ -801,6 +903,7 @@ int main(int argc, char **argv) {
     }
     log_console_stderr(0);
     isolate_environment();
+    test_capture_concurrency();
     test_midi_input_stores();
     test_commit_routing();
     test_threaded_delivery();

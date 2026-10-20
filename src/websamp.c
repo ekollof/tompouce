@@ -639,43 +639,44 @@ static int addr_is_public(struct addrinfo *ai) {
             if (a == 172 && b >= 16 && b <= 31) return 0;
             if (a == 192 && b == 168) return 0;
             if (a == 100 && b >= 64 && b <= 127) return 0;
+            unsigned c=(ip>>8)&255;
+            if (a==192 && b==0 && (c==0 || c==2)) return 0;
+            if (a==198 && (b==18 || b==19 || (b==51 && c==100))) return 0;
+            if (a==203 && b==0 && c==113) return 0;
             if (a >= 224) return 0;
         } else if (ai->ai_family == AF_INET6) {
             unsigned char *b = ((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr.s6_addr;
             int v4 = 1;
             for (int i = 0; i < 10; i++) if (b[i]) v4 = 0;
             if (v4 && b[10] == 0xff && b[11] == 0xff) {
-                unsigned a = b[12], bb = b[13];
-                if (a == 0 || a == 10 || a == 127) return 0;
-                if (a == 169 && bb == 254) return 0;
-                if (a == 172 && bb >= 16 && bb <= 31) return 0;
-                if (a == 192 && bb == 168) return 0;
-                if (a >= 224) return 0;
+                struct sockaddr_in mapped={.sin_family=AF_INET};
+                memcpy(&mapped.sin_addr,b+12,4);
+                struct addrinfo one={.ai_family=AF_INET,.ai_addr=(struct sockaddr *)&mapped};
+                if (!addr_is_public(&one)) return 0;
                 continue;
             }
-            int loop = 1;
-            for (int i = 0; i < 15; i++) if (b[i]) loop = 0;
-            if (loop && b[15] == 1) return 0;
-            if (b[0] == 0xff) return 0;
-            if ((b[0] & 0xfe) == 0xfc) return 0;
-            if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 0;
-        }
+            /* Global unicast only; exclude special-purpose/transition ranges
+               whose embedded destinations may be private. */
+            if ((b[0]&0xe0)!=0x20) return 0;
+            if (b[0]==0x20 && b[1]==0x01 && b[2]<2) return 0;
+            if (b[0]==0x20 && b[1]==0x01 && b[2]==0x0d && b[3]==0xb8) return 0;
+            if (b[0]==0x20 && b[1]==0x02) return 0;
+        } else return 0;
     }
     return 1;
 }
 
-static int host_resolves_public(const char *url) {
-    char host[256];
-    if (!host_of(url, host, (int)sizeof(host))) return 0;
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family = AF_UNSPEC;
-    struct addrinfo *ai = NULL;
-    if (getaddrinfo(host, NULL, &hints, &ai) != 0 || !ai) return 0;
-    int ok = addr_is_public(ai);
-    freeaddrinfo(ai);
-    return ok;
+static curl_socket_t public_socket(void *unused, curlsocktype purpose, struct curl_sockaddr *address) {
+    (void)unused;
+    if (purpose!=CURLSOCKTYPE_IPCXN || (address->socktype&~(SOCK_CLOEXEC|SOCK_NONBLOCK))!=SOCK_STREAM ||
+        (address->family!=AF_INET && address->family!=AF_INET6) ||
+        address->addrlen!=(address->family==AF_INET?sizeof(struct sockaddr_in):sizeof(struct sockaddr_in6)))
+        return CURL_SOCKET_BAD;
+    struct addrinfo peer={.ai_family=address->family,.ai_addr=&address->addr};
+    /* Validate exactly the numeric destination curl will connect to. No
+       separate DNS lookup can change the answer after this check. */
+    if (!addr_is_public(&peer)) return CURL_SOCKET_BAD;
+    return socket(address->family,address->socktype|SOCK_CLOEXEC,address->protocol);
 }
 
 struct WebMem {
@@ -714,8 +715,15 @@ static size_t file_write(void *contents, size_t size, size_t nmemb, void *userp)
 }
 
 static CURL *curl_new(const char *url) {
+    if (!websamp_url_allowed(url)) return NULL;
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
+    /* Proxy-side resolution would bypass the destination policy. Remote
+       assets use direct connections, regardless of ambient proxy settings. */
+    if (curl_easy_setopt(curl,CURLOPT_PROXY,"")!=CURLE_OK ||
+        curl_easy_setopt(curl,CURLOPT_OPENSOCKETFUNCTION,public_socket)!=CURLE_OK) {
+        curl_easy_cleanup(curl); return NULL;
+    }
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -732,7 +740,7 @@ static int http_get_mem(const char *url, struct WebMem *m) {
     char cur[WEB_URL];
     snprintf(cur, sizeof(cur), "%s", url);
     for (int hop = 0; hop < 4; hop++) {
-        if (!websamp_url_allowed(cur) || !host_resolves_public(cur)) return 0;
+        if (!websamp_url_allowed(cur)) return 0;
         CURL *curl = curl_new(cur);
         if (!curl) return 0;
         m->data = NULL;
@@ -836,7 +844,7 @@ static int download_audio_unlocked(const char *url, char *path_out, int pathlen)
     char cur[WEB_URL];
     snprintf(cur, sizeof(cur), "%s", url);
     for (int hop = 0; hop < 4; hop++) {
-        if (!websamp_url_allowed(cur) || !host_resolves_public(cur)) {
+        if (!websamp_url_allowed(cur)) {
             unlink(part);
             return 0;
         }

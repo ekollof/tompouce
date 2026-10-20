@@ -26,6 +26,8 @@ typedef struct MidiHeldKey { int note, chan; double vel, at; int consumed; } Mid
    midi_input_live reports a currently connected sender. */
 double midi_cc_value(int cc, int chan);
 unsigned midi_take_keys(MidiHeldKey *out, unsigned capacity, double horizon);
+/* Inspect pending notes without consuming them (foreground visual queries). */
+unsigned midi_peek_keys(MidiHeldKey *out, unsigned capacity);
 int midi_open_input(const char *name, int ordinal);
 int midi_input_live(void);
 void midi_test_inject(int type, int chan, int p1, int p2);

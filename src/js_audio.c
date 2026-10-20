@@ -787,6 +787,16 @@ static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEven
 static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
     const cJSON *hap, AudioEvent *event) {
     if (event->midi_chan < 0) event->midi_chan = 0;
+    /* MIDI has its own defaults and ignores the local audio gain stages. */
+    const cJSON *gain = cJSON_GetObjectItemCaseSensitive(value, "gain");
+    const cJSON *velocity = cJSON_GetObjectItemCaseSensitive(value, "velocity");
+    event->gain = (gain && cJSON_IsNumber(gain) ? gain->valuedouble : 1) *
+        (velocity && cJSON_IsNumber(velocity) ? velocity->valuedouble : .9);
+    if (cJSON_HasObjectItem(value, "note") &&
+        (!isfinite(event->gain) || event->gain < 0 || event->gain > 1)) {
+        javascript_warn_control(program, "midi velocity (requires gain * velocity 0..1)");
+        return 0;
+    }
     int clean = midi_parse_extras(program, value, event);
     int extras = event->midi_has_prog || event->midi_has_sysex || event->midi_has_cc ||
         event->midi_has_bend || event->midi_has_touch;

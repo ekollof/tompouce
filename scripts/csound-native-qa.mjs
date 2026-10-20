@@ -18,12 +18,13 @@ function pactl(kind) {
   const result=spawnSync('pactl',['--format=json','list',kind],{encoding:'utf8',timeout:5000});
   assert.equal(result.status,0,result.stderr); return JSON.parse(result.stdout);
 }
+const mcpToken='c'.repeat(64); // disposable owned engine only
 function tool(port,name,args={}) {
   return new Promise((resolve,reject)=>{
     const socket=net.connect(port,'127.0.0.1'); let buffer='';
     socket.setTimeout(10000,()=>socket.destroy(new Error('MCP timed out')));
     socket.on('error',reject);
-    socket.on('connect',()=>socket.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})+'\n'));
+    socket.on('connect',()=>socket.write(JSON.stringify({jsonrpc:'2.0',id:1,auth:mcpToken,method:'tools/call',params:{name,arguments:args}})+'\n'));
     socket.on('data',bytes=>{
       buffer+=bytes;
       const end=buffer.indexOf('\n'); if (end<0) return;
@@ -55,7 +56,7 @@ try {
   const listener=net.createServer(); await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));
   port=listener.address().port; await new Promise(resolve=>listener.close(resolve));
   engine=spawn(process.env.TOMPOUCE_TEST_BINARY??'./build/tompouce',['--mcp-port',String(port),'--code','note(60).gain(0)'],{
-    stdio:['ignore','ignore','pipe'],env:{...process.env,XDG_CONFIG_HOME:root,XDG_CACHE_HOME:root,XDG_STATE_HOME:root,TOMPOUCE_BANKS:root,
+    stdio:['ignore','ignore','pipe'],env:{...process.env,TOMPOUCE_MCP_TOKEN:mcpToken,XDG_CONFIG_HOME:root,XDG_CACHE_HOME:root,XDG_STATE_HOME:root,TOMPOUCE_BANKS:root,
       PIPEWIRE_REMOTE:'tompouce-csound-qa-missing',PULSE_SINK:sinkName}});
   engine.stderr.on('data',bytes=>{diagnostics=(diagnostics+bytes).slice(-12000);});
   let ready=false;

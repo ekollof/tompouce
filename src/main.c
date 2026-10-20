@@ -45,8 +45,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (mcp_port > 0) {
-        mcp_run_tcp(mcp_port);
-        return 0;
+        return mcp_run_tcp(mcp_port);
     }
     if (mcp) {
         mcp_run(0, 0);

@@ -10,9 +10,11 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound
-        audio audio_performance prep_profile prep_deadlines prep_cpu room duck_onset terminal_graphics audio_output native_synth live_sliders midi)
+        audio audio_performance prep_profile prep_deadlines prep_cpu room duck_onset terminal_graphics audio_output native_synth live_sliders midi mcp_security websamp_security)
     tompouce_test(${name})
 endforeach()
+target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
+target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 
 set(test_environment "TOMPOUCE_TEST_BINARY=$<TARGET_FILE:tompouce>")
 foreach(name terminal_render_pty install sound_import sounds companion osc tui_pty)
@@ -122,9 +124,10 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance room duck_onset native_synth editor terminal_render live_sliders csound midi)
+foreach(name audio audio_performance room duck_onset native_synth editor terminal_render live_sliders csound midi mcp_security websamp_security)
     set(sources tests/test_${name}.c)
-    if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound")
+    if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
+        AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security")
         list(APPEND sources src/stretch.c)
     endif()
     if(name STREQUAL "native_synth")
@@ -132,6 +135,9 @@ foreach(name audio audio_performance room duck_onset native_synth editor termina
     endif()
     if(name STREQUAL "live_sliders")
         list(APPEND sources src/slider.c src/javascript.c src/js_audio.c src/duck_onset.c)
+    endif()
+    if(name STREQUAL "midi")
+        list(APPEND sources src/midi.c src/slider.c src/javascript.c src/js_audio.c src/duck_onset.c)
     endif()
     add_executable(test_${name}_sanitize EXCLUDE_FROM_ALL ${sources})
     set_target_properties(test_${name}_sanitize PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
@@ -154,6 +160,19 @@ foreach(name audio audio_performance room duck_onset native_synth editor termina
         add_dependencies(test_midi_sanitize test_midi)
     endif()
 endforeach()
+target_link_libraries(test_websamp_security_sanitize PRIVATE ${CMAKE_DL_LIBS})
+target_link_options(test_websamp_security_sanitize PRIVATE -Wl,--export-dynamic)
+add_custom_target(test-security
+    COMMAND $<TARGET_FILE:test_mcp_security>
+    COMMAND $<TARGET_FILE:test_websamp_security>
+    COMMAND "${Python3_EXECUTABLE}" tests/test_companion.py
+    DEPENDS test_mcp_security test_websamp_security
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+add_custom_target(test-security-sanitize
+    COMMAND $<TARGET_FILE:test_mcp_security_sanitize>
+    COMMAND $<TARGET_FILE:test_websamp_security_sanitize>
+    DEPENDS test_mcp_security_sanitize test_websamp_security_sanitize
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_audio_sanitize>
     COMMAND $<TARGET_FILE:test_audio_performance_sanitize>

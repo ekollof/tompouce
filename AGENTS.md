@@ -49,6 +49,8 @@ Useful focused checks:
 - `cmake --build build --target test-tui`
 - `cmake --build build --target test-sanitize`
 - `cmake --build build --target test-terminal-sanitize`
+- `cmake --build build --target test-security`
+- `cmake --build build --target test-security-sanitize`
 - `cmake --build build --target test-controls-reference-web`
 - `cmake --build build --target test-duck-reference-web`
 - `cmake --build build --target test-voice-reference-web`
@@ -101,6 +103,12 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   Notcurses owns keyboard and mouse protocols. Keep input decoding, wrapped-row
   geometry, cursor placement, selection and undo consistent. Palette replies
   must be consumed before editor input; do not add raw mouse-mode escapes.
+  Known paste flood/drop and split-UTF-8 hangs await upstream fixes:
+  [#2948](https://github.com/dankamongmen/notcurses/issues/2948) (related to
+  [#2548](https://github.com/dankamongmen/notcurses/issues/2548)) and
+  [#2947](https://github.com/dankamongmen/notcurses/issues/2947). Do not attempt
+  local fixes for these failures or replace system Notcurses while upstream
+  fixes are pending. Preserve the reproductions and report failures honestly.
   Missing Tree-sitter children are normal while typing; check for null nodes
   before calling byte/point accessors.
 - `src/visual.c`, `src/visual_render.c` and `src/terminal_graphics.c` own bounded
@@ -115,6 +123,12 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 
 ## Security and code quality
 
+- Treat security as part of implementation and review, before a bug report.
+  For new or changed input, IPC, network, filesystem and subprocess code, trace
+  untrusted data to its effects and check authentication, confinement, resource
+  limits and failure behavior. Reuse the existing guarded entry points; do not
+  add an alternate route that bypasses their checks. Fail closed before side
+  effects when validation or authorization fails.
 - Use C11/C17 and preserve warning-as-error builds. Keep functions focused and
   state within its owning module; use `strtok_r` in reentrant/multilayer parsers.
 - Validate external JSON, terminal/AI input, environment values and paths for
@@ -124,6 +138,25 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   argv helpers must retain path confinement and size limits.
 - Keep persistence under the intended config/storage roots. MCP session names
   are sanitized; do not expose unrestricted save/load/import paths.
+  TCP MCP requires a capability on every frame; companion credentials travel
+  through a private pipe, never browser HTML. Asset URL policy must check the
+  actual connection address, including redirects, without a proxy bypass.
+- Loopback listeners are trust boundaries: local users and browser-originated
+  traffic must not gain unauthenticated control. Keep credentials out of logs,
+  URLs and process arguments. Preserve companion Origin/Host checks in addition
+  to authentication; validate complete protocol frames before dispatch.
+- Bound input size, nesting, queued work, downloads and connection lifetimes.
+  Slow, malformed or disconnected peers must not block playback, exhaust memory
+  or terminate the engine. Check size arithmetic for overflow before allocation
+  and retain ownership and cleanup on every error path.
+- Enforce filesystem confinement at the operation, accounting for traversal,
+  symlinks and check/use races; string prefix checks alone are insufficient.
+  Give helper processes only the descriptors and privileges they need.
+- Add focused regression tests for security fixes, covering rejected inputs and
+  absence of side effects as well as valid behavior. Use owned local fixtures;
+  never probe real internal services or expose credentials. Run `test-security`
+  and `test-security-sanitize` when changing these boundaries, and document any
+  remaining limitations without weakening protections to make tests pass.
 - Use mutexes/atomics for shared state and signal-safe flags for handlers. Keep
   UI/terminal work on the foreground thread and logging observable through the
   console ring; do not add hidden control channels.

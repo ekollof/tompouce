@@ -139,6 +139,7 @@ console ring buffer feeds both UI console pane and music_get_console.
 | Console line | 512 B | `MAX_LINE` |
 | BPM | 20–400, finite only | `audio_set_bpm` + MCP check |
 | MCP frame | 1 MiB, oversized dropped | `mcp_read_frame` |
+| TCP MCP | per-request capability; first request within 2 s, idle timeout 10 s; nonblocking socket output | `mcp_dispatch_tcp`, `send_json` |
 | Console | 256 lines | `MAX_CONSOLE` |
 | Voices | 128 | `MAX_VOICES` |
 | Retiring source graphs | 128 | separate bounded slots in `audio.c`; overflow is reported |
@@ -149,3 +150,11 @@ console ring buffer feeds both UI console pane and music_get_console.
 - `./build/tompouce --mcp` — headless MCP server (stdin/stdout = JSON-RPC).
 - `./build/tompouce --mcp --ui` — UI on `/dev/tty`. JSON stays on stdio when
   stdin is a pipe. From a terminal, MCP listens on `127.0.0.1:18789`.
+
+TCP listeners require a top-level `auth` capability on every JSON frame and
+close the connection on invalid framing, authentication or failed output.
+Explicit headless TCP launches require `TOMPOUCE_MCP_TOKEN`; UI companion
+listeners can generate a capability and deliver it through a private helper
+stdin pipe. Remote asset fetches check the numeric sockaddr in libcurl's
+socket-open callback for every connection and disable proxies. DNS validation
+is therefore applied to the address used, not to an earlier lookup.

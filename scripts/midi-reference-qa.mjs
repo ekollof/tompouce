@@ -1,10 +1,9 @@
 /* Dominant MIDI extras against the deployed web REPL: hap value shapes from
-   live pattern queries plus deployed send-validation predicates, compared
-   with native commit decisions. Headless Chromium grants no WebMIDI access,
-   so browser sends cannot be captured; instead the gate checks the exact
-   hap values the scheduler would send (queryArc on a disposable test REPL)
-   and asserts the deployed bundle still carries the validation predicates
-   and byte mappings the native rules were verified against. A deployed
+   live pattern queries and real WebMidi sends to an owned fake transport,
+   compared with native commit and consumer-send decisions. Only the raw
+   transport and clock mapping are replaced; deployed scheduling, validation
+   and byte conversion run unchanged. Note-off timestamps remain outside
+   this gate. A deployed
    change fails the gate for investigation, never for threshold loosening.
    Mini-notation strings are spelled with explicit mini() because the test
    REPL evaluates without the page transpiler; the native runtime transpiles
@@ -60,6 +59,14 @@ const cases = [
     events: [{chan: 0, note: 60, prog: 10, cycle_start: 1}]},
   {name: 'bendends', code: 'note(60).midibend(-1).miditouch(1).midi()',
     events: [{chan: 0, note: 60, bend: -8192, touch: 127, cycle_start: 1}]},
+  {name: 'zero-velocity', code: 'note(60).velocity(0).midi()',
+    events: [{chan: 0, note: 60, cycle_start: 1}]},
+  {name: 'invalid-velocity', code: 'note(60).gain(2).ccn(74).ccv(0.5).midi()', events: []},
+  {name: 'local-gain-stages', code: 'note(60).amp(2).busgain(2).overgain(2).midi()',
+    events: [{chan: 0, note: 60, cycle_start: 1}]},
+  {name: 'send-order', code: 'note(60).progNum(10).sysex([67,[1,2]]).ccn(74).ccv(0.5).midibend(0.25).miditouch(0.75).midi()',
+    events: [{chan: 0, note: 60, prog: 10, sysex_id: [67], sysex: [1,2], cc: 74, ccv: 64,
+      bend: 2047, touch: 95, cycle_start: 1}]},
 ];
 // Pinned 1.2.6 coerces numeric strings in control args (ccn("74") arrives
 // as 74; sysexid "0x77" as 119) while the deployed REPL preserves them, so
@@ -68,16 +75,33 @@ const cases = [
 
 async function webValues(browser) {
   return browser.evaluate(`(async()=>{
+    const sent=[];
+    const ports=Array.from({length:3},(_,i)=>({id:'qa'+i,name:i?'out'+i:'out',
+      manufacturer:'Tompouce QA',type:'output',state:'connected',connection:'open',
+      open(){return Promise.resolve(this)},close(){return Promise.resolve(this)},
+      send(data){sent.push(Array.from(data))}}));
+    Object.defineProperty(navigator,'requestMIDIAccess',{configurable:true,value:async()=>({
+      inputs:new Map(),outputs:new Map(ports.map(p=>[p.id,p])),sysexEnabled:true})});
+    setAudioContext(new OfflineAudioContext(2,44100,44100));
     const results = [];
     for (const test of ${JSON.stringify(cases.map(c => ({name: c.name, code: c.webcode ?? c.code})))} ) {
       const instance = repl({getTime:()=>0, onSchedule:()=>{}, setInterval:()=>1, clearInterval:()=>{}});
       const entry = {name: test.name};
       try {
         await instance.evaluate(test.code, false);
+        if (!WebMidi.enabled) await new Promise(resolve=>WebMidi.addOneTimeListener('enabled',resolve));
+        getClockBridge().getPerformanceTime=at=>1000+at*1000;
         if (instance.state.evalError) entry.error = String(instance.state.evalError?.message ?? instance.state.evalError);
         else {
           const haps = instance.scheduler.pattern.queryArc(0, 1);
           entry.values = haps.slice(0, 4).map(h => ({begin: Number(h.whole.begin), end: Number(h.whole.end), value: h.value}));
+          sent.length=0;
+          entry.sendErrors=[];
+          for (const hap of haps) {
+            try {hap.context.onSchedule(hap,Number(hap.whole.begin)*2,.5);}
+            catch(error){entry.sendErrors.push(String(error?.message??error));}
+          }
+          entry.sends=sent.filter(bytes=>(bytes[0]&0xF0)!==0x80);
         }
       } catch (error) { entry.error = String(error?.message ?? error); }
       try { instance.stop(); } catch {}
@@ -156,6 +180,8 @@ for (const test of cases) {
   try {
     assert.deepEqual(got.events ?? [], test.events);
   } catch { failures.push(`${test.name}: commit differs (want ${JSON.stringify(test.events)} got ${JSON.stringify(got.events)})`); }
+  try {assert.deepEqual(got.sends,want.sends);}
+  catch {failures.push(`${test.name}: sends differ (web ${JSON.stringify(want.sends)} native ${JSON.stringify(got.sends)})`);}
 }
 assert.deepEqual(failures, []);
 console.log(`${cases.length} web/native MIDI cases passed (bundle ${bundleInfo.sha256_16})`);

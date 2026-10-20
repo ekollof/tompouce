@@ -20,12 +20,13 @@ function pactl(kind) {
   const result=spawnSync('pactl',['--format=json','list',kind],{encoding:'utf8',timeout:5000});
   if (result.status!==0) throw new Error(result.stderr); return JSON.parse(result.stdout);
 }
+const mcpToken='b'.repeat(64); // disposable owned engine only
 function tool(port,name,args={}) {
   return new Promise((resolve,reject)=>{
     const socket=net.connect(port,'127.0.0.1'); let buffer='';
     socket.setTimeout(10000,()=>socket.destroy(new Error('MCP timed out')));
     socket.on('error',reject);
-    socket.on('connect',()=>socket.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})+'\n'));
+    socket.on('connect',()=>socket.write(JSON.stringify({jsonrpc:'2.0',id:1,auth:mcpToken,method:'tools/call',params:{name,arguments:args}})+'\n'));
     socket.on('data',bytes=>{
       buffer+=bytes; const end=buffer.indexOf('\n'); if (end<0) return;
       socket.end(); const response=JSON.parse(buffer.slice(0,end));
@@ -38,7 +39,7 @@ try {
   const server=net.createServer(); await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const port=server.address().port; await new Promise(r=>server.close(r));
   engine=spawn(process.env.TOMPOUCE_TEST_BINARY??'./build/tompouce',['--mcp-port',String(port),'--code','note(60).gain(0)'],{
-    env:{...process.env,XDG_CONFIG_HOME:root,XDG_CACHE_HOME:root,TOMPOUCE_BANKS:root,
+    env:{...process.env,TOMPOUCE_MCP_TOKEN:mcpToken,XDG_CONFIG_HOME:root,XDG_CACHE_HOME:root,TOMPOUCE_BANKS:root,
       PIPEWIRE_REMOTE:'tompouce-qa-missing-native',PULSE_SINK:sinkName},stdio:['ignore','ignore','pipe'],
   });
   let diagnostics=''; engine.stderr.on('data',bytes=>{diagnostics+=bytes;});
@@ -51,7 +52,7 @@ try {
   const inputs=pactl('sink-inputs').filter(s=>String(s.properties?.['application.process.id'])===String(engine.pid));
   assert.equal(inputs.length,1,'owned stream missing'); assert.equal(inputs[0].sink,sink.index,'refuse audible QA route');
   assert((await tool(port,'music_health')).includes('backend=PulseAudio'));
-  bridge=spawn('python3',['scripts/companion.py','--mcp-port',String(port)],{stdio:['ignore','pipe','pipe'],env:{...process.env,XDG_CONFIG_HOME:root}});
+  bridge=spawn('python3',['scripts/companion.py','--mcp-port',String(port)],{stdio:['ignore','pipe','pipe'],env:{...process.env,TOMPOUCE_MCP_TOKEN:mcpToken,XDG_CONFIG_HOME:root}});
   const url=await new Promise((resolve,reject)=>{
     const timeout=setTimeout(()=>reject(new Error('Companion did not start')),10000); let output='';
     bridge.on('error',reject); bridge.stdout.on('data',bytes=>{

@@ -44,7 +44,8 @@ async function main() {
     const gatePassed=results.every(result=>result.backendHold);
     const report={capturedAt:new Date().toISOString(),binary:path.resolve(binary),
       probe:path.resolve(probe),sink,routing,status:gatePassed?'passed':'failed',
-      backendUnderruns:results.every(r=>r.backend_drops===0)?'none observed':'OBSERVED',
+      backendUnderruns:'unmeasured: sampled stream state is not an xrun counter',
+      streamStateDrops:results.reduce((total,r)=>total+r.backend_drops,0),
       results};
     await fs.writeFile(path.join(directory,'report.json'),JSON.stringify(report,null,2)+'\n');
     console.log(`Backend preparation load: ${results.filter(r=>r.backendHold).length}/${results.length} hold; `+

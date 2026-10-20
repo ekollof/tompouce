@@ -293,8 +293,8 @@ globalThis.osc = pattern=>pattern.osc();
    values merge across senders into one store; without a connected sender the
    readers stay at their defaults, and midikeys rejects a missing device.
    Named senders persist CC state across restarts, restore it to the device
-   on (re)connect, and resubscribe by client name after replugs. Pitch bend
-   and touch are ignored upstream too. Held notes sound on the next scheduled
+   on (re)connect, and resubscribe by client name after replugs. Native readers
+   currently handle CC and note-on input. Held notes sound on the next scheduled
    window after arrival (like live slider moves) and fire once: audio queries
    consume, visual queries peek. */
 let midiConsumeKeys = false;

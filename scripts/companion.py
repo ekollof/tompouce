@@ -8,6 +8,8 @@ import secrets
 import socket
 import subprocess
 import shutil
+import sys
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 from sound_import import SoundStore, MAX_FILE
@@ -19,11 +21,15 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--open", action="store_true", help="open a Chromium tab")
     parser.add_argument("--parent-pid", type=int, help="exit if the launching engine exits")
+    parser.add_argument("--mcp-token-stdin", action="store_true", help="read the engine capability from a private stdin pipe")
     args = parser.parse_args()
     if not 1 <= args.mcp_port <= 65535 or not 0 <= args.port <= 65535:
         parser.error("invalid port")
     if args.parent_pid is not None and args.parent_pid < 1:
         parser.error("invalid parent pid")
+    mcp_token = sys.stdin.readline(65) if args.mcp_token_stdin else os.environ.get("TOMPOUCE_MCP_TOKEN", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", mcp_token):
+        parser.error("MCP requires TOMPOUCE_MCP_TOKEN (64 lowercase hex characters), or the engine's private token pipe")
     token = secrets.token_urlsafe(32)
     style_nonce = secrets.token_urlsafe(24)
     assets = Path(__file__).resolve().parent.parent / "web"
@@ -33,7 +39,7 @@ def main():
     tools.update({"music_sounds", "music_reload_sounds"})
 
     def call_mcp(name, arguments):
-        message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        message = {"jsonrpc": "2.0", "id": 1, "auth": mcp_token, "method": "tools/call",
                    "params": {"name": name, "arguments": arguments}}
         with socket.create_connection(("127.0.0.1", args.mcp_port), timeout=5) as connection:
             connection.settimeout(10)

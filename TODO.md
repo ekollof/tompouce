@@ -9,9 +9,9 @@ Follow [AGENTS.md](AGENTS.md) for implementation, verification and installation.
 Keep the source buffer plain text, with live widgets beside the code. The
 supported language direction is upstream JavaScript Strudel.
 
-Terminal follow-up: resolve large ASCII/Unicode paste loss/hangs and UTF-8
-codepoints split between reads in the Notcurses integration, retaining the
-system library and its protocol ownership. `tests/test_paste_stress.py` keeps
+Terminal follow-up: large ASCII/Unicode paste loss/hangs and UTF-8
+codepoints split between reads in the Notcurses integration await upstream
+fixes, retaining the system library and its protocol ownership. `tests/test_paste_stress.py` keeps
 these failing reproductions separate from the maintained acceptance cases.
 The 100 ms inter-chunk cancellation bug is fixed; delayed bodies, delayed
 closing markers and shutdown of an unfinished paste have owned PTY checks.
@@ -106,8 +106,8 @@ the serial lane adds one thread beyond the general workers. A room completion
 holds the generation guard across its generation check and convolver
 publication, so a program transition cannot make the check stale. Room kernels
 still publish on that serial lane rather than the event-queue transaction;
-ordering against an intervening custom IR and failure side effects remains a
-step 5 comparison. Pool startup failure falls back to inline source/kernel
+ordering against an intervening custom IR and failure side effects is covered
+by the step 5 comparison. Pool startup failure falls back to inline source/kernel
 preparation and is reported on the console; room requests report a room failure
 instead.
 
@@ -137,7 +137,7 @@ Skip this step when the pool was not built.
       and 128/4,096-frame callbacks. `test_prep_deadlines` and
       `scripts/prep-deadline-qa.mjs` preserve timing violations in their reports;
       a structural CTest pass is not a timing gate pass.
-- [x] Settle observed deadline misses and measure real backend underruns under
+- [ ] Settle observed deadline misses and measure real backend underruns under
       preparation load. Local fixture reads do not establish remote-download
       deadline behavior. Require existing event and audio parity gates to pass
       without relaxing execution budgets. Voice-pool burst checks reuse these
@@ -166,6 +166,11 @@ tests only. The maintained web/native audio gates and selected duck/event
 comparisons pass without threshold or execution-budget changes (delay-automation
 and live-change onset gates were added under steps 5–6). Remote-download
 deadline behavior remains unmeasured.
+Actual backend xrun measurement also remains open: `backend_drops` counts
+sampled active-to-inactive stream transitions, not PipeWire underruns. The
+null-sink checks establish stream continuity, rendered-frame coverage and
+render-call deadlines, but cannot claim zero xruns. The report now labels
+underruns unmeasured rather than inferring them from stream state.
 
 ## 5. Shared-effect comparisons
 
@@ -206,7 +211,7 @@ Pattern-expressed changes gate through the static matrix: stretch-variant
 switches, shared delay automation and (as a diagnostic) generated-room
 switches with fractional onsets. The room-switch onsets align to the exact
 sample; its wet tails differ because the web regenerates rooms with fresh
-randomness per call while native reseeds per call and caches. Static tempo
+randomness per call while native uses a continuous seeded stream and caches. Static tempo
 gates proved unexpressible: the browser offline render ignores event-level
 cps pivots for onset mapping, so renderer-side threading was reverted.
 Engine operations gate through the deterministic live harness
@@ -294,23 +299,29 @@ post-restart catch-up windows are not skipped as too late.
       fires independently while local synthesis stays off, and a failing
       Csound schedule still warns while MIDI goes out. Native `midichan`
       keeps its local-audio-plus-ALSA behavior. Rests and pitch-less drums
-      carry no MIDI note; CC, program change, bend, touch, sysex, midicmd
-      transport and port selection remain open. Preserve Csound and OSC
+      carry no MIDI note. CC, program change, bend, touch, sysex and midicmd
+      transport have deployed send coverage below; native port selection
+      still broadcasts to subscribers. Preserve Csound and OSC
       isolation and verify ordering and effects when multiple output callbacks
       are combined. Note triggering, effect tails and Csound bypass are settled
       by the previous steps.
 
 ## 11. Controller input
 
-- [x] Verify MIDI and controller input, expression and live mapping changes
+- [ ] Verify MIDI and controller input, expression and live mapping changes
       against the actual web REPL rather than inferring behavior from control
       names. `midin` opens an ALSA sender and returns per-CC live readers
       (normalized 0..1, default 0, optional 1..16 channel); `midikeys`
       returns live keyboard notes with fixed durations, channel attribution
       and consume-once queries, rejecting a missing device like the web.
       Values merge across senders; input names accept client:port, numeric
-      ids, substrings and first-sender default. Pitch bend, touch, CC restore,
-      reconnect and persisted state remain open. This only reads controls;
+      ids, substrings and first-sender default. CC persistence, device-only
+      restore, reconnect, buffered input bursts and non-consuming visual
+      reads have native regressions. Independent deployed-web input-message,
+      persistence and reconnect comparisons remain open; the native ALSA
+      loopbacks alone do not close web parity. Native stores currently merge
+      senders, so device-isolated readers also need a comparison and correction.
+      This only reads controls;
       doing it earlier would churn the live-control captures used above.
 
 ## Optional: full REPL parity
@@ -320,7 +331,7 @@ close each gap with an independent web comparison and its own threshold;
 a hosted-player drift is evidence to investigate, never a reason to loosen
 a threshold. Steps 6–11 already scope the required slices; the remainder is:
 
-- Live-change fractional onsets beyond steady playback (step 6 delta).
+- Live-change fractional onsets beyond the five gated step 6 scenarios.
 - Voice-pool breadth is closed: chain order audited against the deployed
   per-source chain (positions match; static pan commutes with the phaser),
   chorus re-confirmed a no-op key on the deployed player, drum timbre stays
@@ -339,19 +350,21 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
   change (truncated 0..127), pitch bend, channel aftertouch, framed sysex
   and transport `midicmd` all send through ALSA in web order with
   throw-abort parity, control-only haps send extras without notes, and
-  `midiport` values broadcast. A 20-case web/native gate
-  (`test-midi-reference-web`) covers hap values, commit decisions and the
-  deployed send-validation predicates; native commit/delivery tests cover
+  `midiport` values broadcast. A 24-case web/native gate
+  (`test-midi-reference-web`) covers hap values, commit decisions and actual
+  deployed send bytes/order through an owned fake MIDI transport; native commit/delivery tests cover
   patterned fan-out, combined OSC/Csound routing and failing-Csound
   retention. Remaining gaps are documented non-gates: string CC names,
   MIDI maps, NRPN, `isController`/options-object defaults, duplicate
-  scalar-plus-array sends, and pinned-1.2.6 numeric-string coercion drift.
-- Controller input is closed: named senders persist CC state across restarts
+  scalar-plus-array sends, note-off timestamp/duration parity, and
+  pinned-1.2.6 numeric-string coercion drift.
+- Controller input is implemented, with independent web input gates still
+  required by step 11: named senders persist CC state across restarts
   (numeric opens never persist), restore it to the device output on
   (re)connect, and resubscribe by client name after replugs, all proven
-  over real ALSA ports including a delete/recreate cycle. Pitch bend and
-  touch stay unimplemented: the upstream input ignores non-note messages
-  the same way.
+  over real ALSA ports including a delete/recreate cycle. Device-isolated
+  readers and the web's handling of message types beyond native CC/note-on
+  input remain part of the reopened comparison work.
 - Transport restart after Stop is gated: both sides reset to cycle zero and
   re-fire early-cycle haps, with sample-exact onset agreement (correlation
   1.0). Stop itself (held tails finish, no new onsets) was already gated.
@@ -373,7 +386,8 @@ Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,
 Hydra/browser input-device APIs and arbitrary npm module resolution.
 
-The maintained audio matrix has 42 passing gates, including eight independently
+The maintained audio matrix has 40 passing gates and two diagnostic cases (42
+cases total), including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
 fractional sample-onset cases, four shared delay-automation cases and two
 live-change fractional-onset cases. Seeded generated rooms are gated; ordinary

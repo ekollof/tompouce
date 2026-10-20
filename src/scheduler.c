@@ -663,6 +663,25 @@ void event_queue_generation_guard_end(void) {
     pthread_mutex_unlock(&generation_lock);
 }
 
+/* Shared by the consumer and the device-free send reference harness. */
+static void dispatch_midi_event(const AudioEvent *ev) {
+    if (ev->control_only) return;
+    if ((ev->midi_only || (!ev->osc_only && !ev->csound_only)) &&
+        ev->midi_chan >= 0 && ev->midi_note >= 0 && !ev->is_drum) {
+        int vel = ev->midi_only ? (int)lround(ev->gain * 127.0) : (int)fmax(1, ev->gain * 127.0);
+        midi_note(ev->midi_chan, ev->midi_note, vel, (int)(ev->duration * 1000.0));
+    }
+    if (!ev->midi_only || ev->midi_chan < 0) return;
+    if (ev->midi_has_prog) midi_program(ev->midi_chan, ev->midi_prog);
+    if (ev->midi_has_sysex)
+        midi_sysex(ev->midi_sysex_id, ev->midi_sysex_id_len, ev->midi_sysex, ev->midi_sysex_len);
+    if (ev->midi_has_cc) midi_cc(ev->midi_chan, ev->midi_cc, ev->midi_ccv);
+    if (ev->midi_has_bend) midi_bend(ev->midi_chan, ev->midi_bend);
+    if (ev->midi_has_touch) midi_touch(ev->midi_chan, ev->midi_touch);
+    if (ev->midi_cycle_start) midi_transport(2);
+    if (ev->midi_cmd) midi_transport(ev->midi_cmd);
+}
+
 /* consumer thread */
 static pthread_t consumer_tid, generator_tid;
 
@@ -712,23 +731,7 @@ static void *consumer_thread(void *arg) {
                    their own markers are also present. Extras (CC, program,
                    bend, touch, sysex, transport) fire only on dominant MIDI
                    haps, in web send order after the note. */
-                if (!ev.control_only && (ev.midi_only || (!ev.osc_only && !ev.csound_only)) &&
-                    ev.midi_chan >= 0 && ev.midi_note >= 0 && !ev.is_drum) {
-                    int vel = (int)(ev.gain * 127.0);
-                    int dur = (int)(ev.duration * 1000.0);
-                    midi_note(ev.midi_chan, ev.midi_note, vel, dur);
-                }
-                if (!ev.control_only && ev.midi_only && ev.midi_chan >= 0) {
-                    if (ev.midi_has_prog) midi_program(ev.midi_chan, ev.midi_prog);
-                    if (ev.midi_has_sysex)
-                        midi_sysex(ev.midi_sysex_id, ev.midi_sysex_id_len,
-                            ev.midi_sysex, ev.midi_sysex_len);
-                    if (ev.midi_has_cc) midi_cc(ev.midi_chan, ev.midi_cc, ev.midi_ccv);
-                    if (ev.midi_has_bend) midi_bend(ev.midi_chan, ev.midi_bend);
-                    if (ev.midi_has_touch) midi_touch(ev.midi_chan, ev.midi_touch);
-                    if (ev.midi_cycle_start) midi_transport(2);
-                    if (ev.midi_cmd) midi_transport(ev.midi_cmd);
-                }
+                dispatch_midi_event(&ev);
                 if (!ev.control_only) {
                     NoteHist h;
                     h.t0 = ev.time;

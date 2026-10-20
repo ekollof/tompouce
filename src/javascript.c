@@ -132,7 +132,7 @@ static JSValue host_midi_keys(JSContext *ctx, JSValueConst self, int argc, JSVal
         if (!isfinite(horizon)) horizon=1e12;
     }
     MidiHeldKey keys[64];
-    unsigned count=midi_take_keys(keys,64,horizon);
+    unsigned count=horizon<0 ? midi_peek_keys(keys,64) : midi_take_keys(keys,64,horizon);
     JSValue result=JS_NewArray(ctx);
     if (JS_IsException(result)) return result;
     for (unsigned i=0;i<count;i++) {

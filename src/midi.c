@@ -8,12 +8,14 @@
 #include <time.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <stdatomic.h>
 
 #define MIDI_MAX_OFFS 1024
 
 static pthread_mutex_t midi_in_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t midi_in_tid;
-static int midi_in_running;
+static atomic_int midi_in_running;
+static int midi_in_started;
 static void *midi_input_worker(void *arg);
 
 typedef struct { double at; int ch; int note; } OffEv;
@@ -29,13 +31,19 @@ void midi_state_saved_cc(int client, int port, int chan, int cc, double value);
 static MidiCaptured midi_log[MIDI_CAPTURE_CAPACITY];
 static unsigned midi_log_count;
 static int midi_capture_enabled;
+static pthread_mutex_t midi_log_lock = PTHREAD_MUTEX_INITIALIZER;
 void midi_capture_enable(int on) {
+    pthread_mutex_lock(&midi_log_lock);
     midi_capture_enabled = on ? 1 : 0;
     if (on) midi_log_count = 0;
+    pthread_mutex_unlock(&midi_log_lock);
 }
 static void midi_log_add(int kind, int chan, int d1, int d2,
     const unsigned char *sysex, int sysex_len) {
-    if (!midi_capture_enabled || midi_log_count >= MIDI_CAPTURE_CAPACITY) return;
+    pthread_mutex_lock(&midi_log_lock);
+    if (!midi_capture_enabled || midi_log_count >= MIDI_CAPTURE_CAPACITY) {
+        pthread_mutex_unlock(&midi_log_lock); return;
+    }
     MidiCaptured *slot = &midi_log[midi_log_count++];
     slot->kind = kind; slot->chan = chan; slot->d1 = d1; slot->d2 = d2;
     slot->sysex_len = 0;
@@ -45,9 +53,11 @@ static void midi_log_add(int kind, int chan, int d1, int d2,
         slot->sysex_len = sysex_len;
     }
     slot->at = audio_time_now();
+    pthread_mutex_unlock(&midi_log_lock);
 }
 unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity) {
     unsigned total = 0, copied = 0;
+    pthread_mutex_lock(&midi_log_lock);
     for (unsigned i = 0; i < midi_log_count; i++) {
         int note = midi_log[i].kind == MIDI_CAP_NOTE_ON || midi_log[i].kind == MIDI_CAP_NOTE_OFF;
         if (!note) continue;
@@ -57,12 +67,16 @@ unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity) {
                 .vel = midi_log[i].d2, .at = midi_log[i].at};
         total++;
     }
+    pthread_mutex_unlock(&midi_log_lock);
     return total;
 }
 unsigned midi_captured_all(MidiCaptured *out, unsigned capacity) {
+    pthread_mutex_lock(&midi_log_lock);
     unsigned count = midi_log_count < capacity ? midi_log_count : capacity;
-    for (unsigned i = 0; i < count; i++) out[i] = midi_log[i];
-    return midi_log_count;
+    if (out) for (unsigned i = 0; i < count; i++) out[i] = midi_log[i];
+    unsigned total = midi_log_count;
+    pthread_mutex_unlock(&midi_log_lock);
+    return total;
 }
 
 static snd_seq_t *seq = NULL;
@@ -143,7 +157,12 @@ void midi_init(void) {
        needs a sequencer to poll and only runs with one. */
     midi_ok = seq != NULL;
     midi_running = 1;
-    pthread_create(&midi_tid, NULL, midi_worker, NULL);
+    if (pthread_create(&midi_tid, NULL, midi_worker, NULL)) {
+        midi_running = midi_ok = 0;
+        if (seq) { snd_seq_close(seq); seq = NULL; }
+        log_console("midi: note worker startup failed");
+        return;
+    }
     if (seq) {
         /* Watch connects/disconnects so subscriptions follow replugged
            devices, like the web input's reconnect loop. Best effort. */
@@ -156,7 +175,10 @@ void midi_init(void) {
         if (snd_seq_subscribe_port(seq, announce))
             log_console("midi: announce subscription failed; reconnect disabled");
         midi_in_running = 1;
-        pthread_create(&midi_in_tid, NULL, midi_input_worker, NULL);
+        if (pthread_create(&midi_in_tid, NULL, midi_input_worker, NULL)) {
+            midi_in_running = 0;
+            log_console("midi: input worker startup failed");
+        } else midi_in_started = 1;
     }
     if (midi_ok) log_console("midi out %d:%d (connect with aconnect)",
         snd_seq_client_id(seq), seq_port);
@@ -171,7 +193,7 @@ void midi_shutdown(void) {
     pthread_mutex_unlock(&midi_lock);
     pthread_join(midi_tid, NULL);
     midi_in_running = 0;
-    if (seq) pthread_join(midi_in_tid, NULL);
+    if (midi_in_started) { pthread_join(midi_in_tid, NULL); midi_in_started = 0; }
     pthread_mutex_lock(&midi_lock);
     if (seq) { snd_seq_close(seq); seq = NULL; }
     midi_ok = 0;
@@ -182,7 +204,7 @@ int midi_ready(void) { return midi_ok; }
 
 void midi_note(int chan, int note, int vel, int dur_ms) {
     if (chan < 0 || chan > 15 || note < 0 || note > 127) return;
-    if (vel < 1) vel = 1;
+    if (vel < 0) vel = 0;
     if (vel > 127) vel = 127;
     if (dur_ms < 50) dur_ms = 50;
     midi_log_add(MIDI_CAP_NOTE_ON, chan, note, vel, NULL, 0);
@@ -349,12 +371,13 @@ double midi_cc_value(int cc, int chan) {
 
 /* Copy unconsumed held keys with onset at or before horizon into out,
    marking them consumed so each fires once. Returns the count copied. */
-unsigned midi_take_keys(MidiHeldKey *out, unsigned capacity, double horizon) {
+static unsigned midi_read_keys(MidiHeldKey *out, unsigned capacity, double horizon, int consume) {
+    if (!out) return 0;
     unsigned count = 0;
     pthread_mutex_lock(&midi_in_lock);
     for (unsigned i = 0; i < midi_held_count && count < capacity; i++) {
         if (!midi_held[i].consumed && midi_held[i].at <= horizon) {
-            midi_held[i].consumed = 1;
+            if (consume) midi_held[i].consumed = 1;
             out[count].note = midi_held[i].note;
             out[count].vel = midi_held[i].vel;
             out[count].chan = midi_held[i].chan;
@@ -365,6 +388,14 @@ unsigned midi_take_keys(MidiHeldKey *out, unsigned capacity, double horizon) {
     }
     pthread_mutex_unlock(&midi_in_lock);
     return count;
+}
+
+unsigned midi_take_keys(MidiHeldKey *out, unsigned capacity, double horizon) {
+    return midi_read_keys(out, capacity, horizon, 1);
+}
+
+unsigned midi_peek_keys(MidiHeldKey *out, unsigned capacity) {
+    return midi_read_keys(out, capacity, INFINITY, 0);
 }
 
 typedef struct { int client, port; char name[128]; char client_name[64]; int named, alive; } MidiSender;
@@ -541,18 +572,16 @@ static int midi_enumerate_outputs(MidiSender *out, unsigned capacity) {
     return (int)count;
 }
 
-/* Restores go through one transient subscription with subscribed broadcast:
-   addressed direct output is not honored by every sequencer backend, while
-   subscribed delivery is the same path the input side proves, and churning
-   one subscription per event races delivery. Values address one device, so
-   the brief broadcast window is harmless. */
-static int midi_send_cc_queued(int chan, int cc, int value) {
-    /* midi_lock held, restore subscription established. */
+/* Address restores explicitly: subscribed broadcast would also change every
+   connected synth and temporarily route ordinary notes to the controller. */
+static int midi_send_cc_queued(int client, int port, int chan, int cc, int value) {
+    /* midi_lock held. */
+    if (!midi_ok || !midi_running) return 0;
     snd_seq_event_t ev;
     snd_seq_ev_clear(&ev);
     snd_seq_ev_set_controller(&ev, chan, cc, value);
     snd_seq_ev_set_source(&ev, seq_port);
-    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_dest(&ev, client, port);
     snd_seq_ev_set_direct(&ev);
     int rc = snd_seq_event_output_direct(seq, &ev);
     if (rc >= 0) snd_seq_drain_output(seq);
@@ -582,38 +611,17 @@ int midi_restore_sender(const char *client_name) {
         log_console("midi: input '%s' has no writable port for CC restore", client_name);
         return 0;
     }
-    pthread_mutex_lock(&midi_lock);
-    int ok = midi_ok ? 1 : 0;
     int sent = 0;
-    snd_seq_port_subscribe_t *subs = NULL;
-    if (ok) {
-        snd_seq_port_subscribe_alloca(&subs);
-        snd_seq_addr_t src = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
-        snd_seq_addr_t dst = {(unsigned)outputs[dest].client, (unsigned)outputs[dest].port};
-        snd_seq_port_subscribe_set_sender(subs, &src);
-        snd_seq_port_subscribe_set_dest(subs, &dst);
-        if (snd_seq_subscribe_port(seq, subs) < 0) ok = 0;
-    }
-    pthread_mutex_unlock(&midi_lock);
     /* Unlocked gaps: never stall note scheduling on restore pacing. */
-    if (ok)
-        for (int i = 0; i < count; i++) {
-            pthread_mutex_lock(&midi_lock);
-            int rc = ok ? midi_send_cc_queued(entries[i].chan, entries[i].cc, entries[i].value) : 0;
-            pthread_mutex_unlock(&midi_lock);
-            sent += rc;
-            struct timespec gap = {.tv_nsec = 5000000};
-            nanosleep(&gap, NULL);
-        }
-    pthread_mutex_lock(&midi_lock);
-    if (subs && ok) {
-        struct timespec settle = {.tv_nsec = 50000000};
-        pthread_mutex_unlock(&midi_lock);
-        nanosleep(&settle, NULL);
+    for (int i = 0; i < count; i++) {
         pthread_mutex_lock(&midi_lock);
-        snd_seq_unsubscribe_port(seq, subs);
+        int rc = midi_send_cc_queued(outputs[dest].client, outputs[dest].port,
+            entries[i].chan, entries[i].cc, entries[i].value);
+        pthread_mutex_unlock(&midi_lock);
+        sent += rc;
+        struct timespec gap = {.tv_nsec = 5000000};
+        nanosleep(&gap, NULL);
     }
-    pthread_mutex_unlock(&midi_lock);
     if (sent != count) log_console("midi: CC restore to '%s' sent %d/%d", client_name, sent, count);
     return sent;
 }
@@ -644,7 +652,7 @@ int midi_open_input(const char *name, int ordinal) {
         }
         return 1;
     }
-    if (midi_has_live_sender()) return 1;
+    if ((!name || !*name) && ordinal == 0 && midi_has_live_sender()) return 1;
     if (name && *name) log_console("midi: input '%s' not found (connect with aconnect)", name);
     else log_console("midi: no input sender found (connect with aconnect)");
     return 0;
@@ -1020,7 +1028,9 @@ static void *midi_input_worker(void *arg) {
                 else if (!snap[i].alive) midi_sender_revive(snap[i].name);
             }
         }
-        if (nfds > 0) {
+        if (snd_seq_event_input_pending(seq, 0) > 0) {
+            /* ALSA can buffer several events in one kernel read. */
+        } else if (nfds > 0) {
             snd_seq_poll_descriptors(seq, fds, (unsigned)nfds, POLLIN);
             int ready = poll(fds, (nfds_t)nfds, 10);
             if (ready <= 0) continue;
@@ -1034,8 +1044,8 @@ static void *midi_input_worker(void *arg) {
         for (;;) {
             for (int i = 0; i < nfds; i++) { fds[i].revents = 0; }
             snd_seq_poll_descriptors(seq, fds, (unsigned)nfds, POLLIN);
-            int ready = poll(fds, (nfds_t)nfds, 0);
-            if (ready <= 0) break;
+            if (snd_seq_event_input_pending(seq, 0) <= 0 &&
+                poll(fds, (nfds_t)nfds, 0) <= 0) break;
             snd_seq_event_t *event = NULL;
             if (snd_seq_event_input(seq, &event) < 0 || !event) break;
             double at = audio_time_now();

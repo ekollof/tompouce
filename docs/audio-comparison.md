@@ -205,8 +205,8 @@ exploratory harness also included ambient catalog discovery; the maintained
 fixture now fixes the bank root and working directory to its own store so those
 startup costs do not contaminate source-work comparisons.
 
-`cmake --build build --target profile-prep-backend` measures real backend
-underruns under the same preparation load, using `scripts/prep-backend-qa.mjs`
+`cmake --build build --target profile-prep-backend` measures stream continuity,
+render deadlines and frame coverage under real backend preparation load, using `scripts/prep-backend-qa.mjs`
 and the `backend` mode of `test_prep_deadlines`. It creates an owned null sink,
 targets an inspected silence stream at it, verifies with `pw-dump` that the
 stream has exactly two active links and both reach only that sink, then runs
@@ -219,7 +219,11 @@ cases, with cold/live fully held, the long-stretch burst shedding only skips
 (9 in this run) without late publication or reservation, and the voice burst
 publishing all 209 sources with peak 128 concurrent voices and 21 retiring
 graphs. Local fixture reads still do not
-establish remote-download deadline behavior.
+establish remote-download deadline behavior. The `backend_drops` counter samples
+active-to-inactive stream-state transitions every 5 ms. It does not count
+PipeWire xruns, including underruns that leave the stream active; neither
+continuous state nor frame coverage proves zero xruns. Reports explicitly label
+backend underruns unmeasured, and TODO step 4 remains open for that measurement.
 
 `cmake --build build --target test-live-reference-web` compares fractional
 sample onsets under live engine operations, using

@@ -2,6 +2,7 @@
 #include "companion.h"
 #include "common.h"
 #include "sound_store.h"
+#include "mcp.h"
 #include <spawn.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -78,7 +79,7 @@ static int helper_script(const char *name, char *script, size_t size) {
     return 1;
 }
 
-static int helper_spawn(Helper *helper, char *const *argv) {
+static int helper_spawn(Helper *helper, char *const *argv, const char *secret) {
     int pipefd[2];
     if (pipe2(pipefd,O_CLOEXEC)) return 0;
     int flags = fcntl(pipefd[0],F_GETFL);
@@ -86,15 +87,26 @@ static int helper_spawn(Helper *helper, char *const *argv) {
         close(pipefd[0]); close(pipefd[1]); return 0;
     }
     posix_spawn_file_actions_t actions;
+    int credentials[2]={-1,-1};
+    if (secret) {
+        if (pipe2(credentials,O_CLOEXEC)) { close(pipefd[0]); close(pipefd[1]); return 0; }
+        size_t length=strlen(secret);
+        ssize_t written;
+        do written=write(credentials[1],secret,length); while (written<0 && errno==EINTR);
+        close(credentials[1]); credentials[1]=-1;
+        if (written!=(ssize_t)length) { close(credentials[0]); close(pipefd[0]); close(pipefd[1]); return 0; }
+    }
     int error = posix_spawn_file_actions_init(&actions);
-    if (error) { close(pipefd[0]); close(pipefd[1]); return 0; }
-    error = posix_spawn_file_actions_addopen(&actions,STDIN_FILENO,"/dev/null",O_RDONLY,0);
+    if (error) { if (credentials[0]>=0) close(credentials[0]); close(pipefd[0]); close(pipefd[1]); return 0; }
+    error = secret ? posix_spawn_file_actions_adddup2(&actions,credentials[0],STDIN_FILENO) :
+        posix_spawn_file_actions_addopen(&actions,STDIN_FILENO,"/dev/null",O_RDONLY,0);
     if (!error) error = posix_spawn_file_actions_adddup2(&actions,pipefd[1],STDOUT_FILENO);
     if (!error) error = posix_spawn_file_actions_adddup2(&actions,pipefd[1],STDERR_FILENO);
     if (!error) error = posix_spawn_file_actions_addclosefrom_np(&actions,3);
     pid_t launched = 0;
     if (!error) error = posix_spawnp(&launched,"python3",&actions,NULL,argv,environ);
     posix_spawn_file_actions_destroy(&actions);
+    if (credentials[0]>=0) close(credentials[0]);
     close(pipefd[1]);
     if (error) {
         close(pipefd[0]); log_console("companion: launch failed: %s",strerror(error)); return 0;
@@ -113,8 +125,10 @@ int companion_start(int mcp_port) {
     char script[PATH_MAX], port[16], parent[32];
     if (!helper_script("companion.py",script,sizeof(script))) return 0;
     snprintf(port,sizeof(port),"%d",mcp_port); snprintf(parent,sizeof(parent),"%ld",(long)getpid());
-    char *argv[] = {"python3",script,"--mcp-port",port,"--parent-pid",parent,"--open",NULL};
-    if (!helper_spawn(&bridge,argv)) return 0;
+    const char *secret=mcp_tcp_token();
+    if (!secret) return 0;
+    char *argv[] = {"python3",script,"--mcp-port",port,"--parent-pid",parent,"--mcp-token-stdin","--open",NULL};
+    if (!helper_spawn(&bridge,argv,secret)) return 0;
     log_console("starting companion and Chromium...");
     return 1;
 }
@@ -127,6 +141,6 @@ int companion_import_folder(const char *folder) {
     if (!helper_script("sound_import.py",script,sizeof(script))) return 0;
     snprintf(parent,sizeof(parent),"%ld",(long)getpid());
     char *argv[] = {"python3",script,"--folder",(char *)folder,"--parent-pid",parent,NULL};
-    if (!helper_spawn(&importer,argv)) return 0;
+    if (!helper_spawn(&importer,argv,NULL)) return 0;
     log_console("importing local sounds in background..."); return 1;
 }

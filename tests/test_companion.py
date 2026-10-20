@@ -20,6 +20,7 @@ class CompanionTest(unittest.TestCase):
         class MCP(socketserver.StreamRequestHandler):
             def handle(self):
                 message = json.loads(self.rfile.readline())
+                assert message.get("auth") == "a" * 64
                 cls.calls.append(message["params"])
                 reply = {"jsonrpc": "2.0", "id": message["id"], "result": {
                     "content": [{"type": "text", "text": "stub response"}]}}
@@ -32,7 +33,7 @@ class CompanionTest(unittest.TestCase):
         cls.process = subprocess.Popen(["python3", "scripts/companion.py", "--mcp-port",
                                         str(cls.mcp.server_address[1])], stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True,
-                                       env=dict(os.environ, XDG_CONFIG_HOME=cls.storage.name))
+                                       env=dict(os.environ, XDG_CONFIG_HOME=cls.storage.name, TOMPOUCE_MCP_TOKEN="a"*64))
         if not select.select([cls.process.stdout], [], [], 5)[0]:
             cls.process.kill()
             raise AssertionError("companion startup timed out")
@@ -74,6 +75,38 @@ class CompanionTest(unittest.TestCase):
             self.assertEqual(error.exception.code, 403)
             error.exception.close()
         self.assertEqual(len(self.calls), before)
+
+    def test_engine_capability_is_private_and_pipe_launch_works(self):
+        env = {key: value for key, value in os.environ.items() if key != "TOMPOUCE_MCP_TOKEN"}
+        process = subprocess.Popen(["python3", "scripts/companion.py", "--mcp-port",
+                                    str(self.mcp.server_address[1]), "--mcp-token-stdin"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, env=env)
+        try:
+            process.stdin.write("a" * 64)
+            process.stdin.close()
+            process.stdin = None
+            self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+            url = re.search(r"http://127\.0\.0\.1:\d+", process.stdout.readline()).group()
+            with urllib.request.urlopen(url) as response:
+                html = response.read().decode()
+            self.assertNotIn("a" * 64, html)
+            web_token = re.search(r'name="companion-token" content="([^"]+)"', html).group(1)
+            request = urllib.request.Request(url + "/api/tool",
+                json.dumps({"name": "music_get_code"}).encode(), headers={
+                    "Origin": url, "X-Companion-Token": web_token, "Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                self.assertIn("stub response", response.read().decode())
+        finally:
+            process.terminate()
+            process.communicate(timeout=5)
+
+    def test_missing_engine_capability_refuses_startup(self):
+        env = {key: value for key, value in os.environ.items() if key != "TOMPOUCE_MCP_TOKEN"}
+        result = subprocess.run(["python3", "scripts/companion.py"], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("http://", result.stdout)
 
     def test_refuse_unknown_tool_and_paths(self):
         with self.assertRaises(urllib.error.HTTPError) as error:

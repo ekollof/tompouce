@@ -9,7 +9,8 @@
    samples('https://host/strudel.json')
    The map is replaced on each code load. Audio files download
    into ~/.cache/tompouce/web the first time a name is played.
-   http and https only; loopback and private addresses are refused. */
+   http and https only; actual connection addresses must be public, including
+   every redirect. Proxy environment variables are ignored for these assets. */
 
 void websamp_load_code(const char *code);
 /* JSON array of evaluated samples(...) argument arrays, from the JS host. */

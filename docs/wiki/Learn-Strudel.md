@@ -32,7 +32,7 @@ The [Strudel browser editor](https://strudel.cc/) is useful for following those 
 
 ## Bring what you learn into Tompouce
 
-Tompouce pins Strudel 1.2.6 and uses a native audio backend. Current upstream docs can describe newer behavior, browser-only devices, visuals or effects. Use the project [native audio reference](https://github.com/ekollof/tompouce/blob/master/docs/javascript.md) to check support; runtime warnings identify unavailable controls. Native GM soundfont variants and advanced wavetable morph/warp processing differ from the browser.
+Tompouce pins Strudel 1.2.6 and uses a native audio backend. Current upstream docs can describe newer behavior, browser-only devices, visuals or effects. Use the project [native audio reference](https://github.com/ekollof/tompouce/blob/master/docs/javascript.md) to check support; runtime warnings identify unavailable controls. The web's additional GM soundfont variants (beyond the default per name) and advanced wavetable morph/warp processing differ from the browser.
 
 Begin with a built-in synth, then change one thing at a time. Try replacing spaces with brackets, moving a melody through a scale, layering a bass, patterning a filter and adding one view. Compare predictions with what you hear. Keep each experiment in a separate song buffer and save a working version before extending it.
 

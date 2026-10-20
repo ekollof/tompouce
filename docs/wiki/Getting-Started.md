@@ -11,11 +11,11 @@ cd tompouce
 ~/.local/bin/tompouce
 ```
 
-An authenticated `gh repo clone ekollof/tompouce` also works. Access to a private repository requires an authorized GitHub account.
+A plain `git clone https://github.com/ekollof/tompouce.git` works anonymously; an authenticated `gh repo clone ekollof/tompouce` works too.
 
 The default installation puts the runtime in `~/.local/lib/tompouce` and its launcher in `~/.local/bin`. The installer uses sudo for distro dependencies, builds in an isolated directory, and installs pinned banks separately. Node/npm is unnecessary for normal installation because JavaScript bundles are committed.
 
-Default banks include Dirt, piano, drum machines, uzu and AKWF wavetables, about 456 MiB. `--all-banks` adds VCSL and mridangam, bringing the total to roughly 3 GiB. Installed banks work offline. Debian/Fedora package plans have automated coverage; actual package-manager execution still needs validation on those distributions.
+Default banks include Dirt, piano, drum machines, uzu, AKWF wavetables and gm webaudiofont packs, about 473 MiB. `--all-banks` adds VCSL and mridangam, bringing the total to roughly 3 GiB. Installed banks work offline. Debian/Fedora package plans have automated coverage; actual package-manager execution still needs validation on those distributions.
 
 Useful installer options:
 
@@ -24,7 +24,7 @@ Useful installer options:
 | `--dry-run` | Inspect the dependency and installation plan |
 | `--prefix /absolute/path` | Choose another installation root |
 | `--skip-deps` | Use dependencies already installed |
-| `--skip-banks` | Preserve existing banks or use built-in synths only |
+| `--skip-banks` | Preserve existing banks or use built-in synths only (`gm_*` then fetches packs on first play) |
 | `--no-browser` | Omit browser installation |
 | `--jobs 4` | Bound build parallelism |
 

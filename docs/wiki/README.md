@@ -6,4 +6,6 @@ New to Strudel? Start with [Strudeltutor](Live-Coding-and-Strudeltutor.md) or th
 
 Ask questions and share patterns in [GitHub Discussions](https://github.com/ekollof/tompouce/discussions).
 
-These pages are published in the repository so they share its private access settings. GitHub's separate Wiki feature is not enabled for this repository; the handbook provides the documentation here instead.
+These pages live in the repository alongside the code and are mirrored to the
+[project wiki](https://github.com/ekollof/tompouce/wiki), which serves them with
+a sidebar. Edit them here; the wiki is published from `docs/wiki`.

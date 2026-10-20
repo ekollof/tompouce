@@ -20,7 +20,7 @@ See the [MCP setup](https://github.com/ekollof/tompouce/blob/master/README.md#mc
 
 ## MIDI
 
-The native backend supports MIDI notes and `midichan` through ALSA output. Check F4 or MCP health for MIDI readiness and the project reference for current startup/device configuration. This is separate from `gm_` synths, which render a local soundfont to audio.
+The native backend supports MIDI notes and `midichan` through ALSA output. Check F4 or MCP health for MIDI readiness and the project reference for current startup/device configuration. This is separate from `gm_` synths, which play the web's per-instrument sample packs to audio (FluidSynth is only their offline fallback).
 
 ## OSC
 

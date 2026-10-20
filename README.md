@@ -1,7 +1,6 @@
 # Tompouce
 
-Source: [ekollof/tompouce](https://github.com/ekollof/tompouce) (private repository).
-Access requires a GitHub account with permission to this repository.
+Source: [ekollof/tompouce](https://github.com/ekollof/tompouce).
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 
@@ -159,8 +158,8 @@ Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `lib
 `libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus
 pkg-config and `xxd`. Optional packages detected at configuration time are
 `libpipewire-0.3` (0.3.7+), `libpulse`, `samplerate` and `fluidsynth` (2.2+).
-FluidSynth also needs an installed GM soundfont for the `gm_` instruments.
-The installer includes these packages and FluidR3 GM.
+FluidSynth is only the offline fallback for `gm_` instruments; their primary
+playback needs no soundfont. The installer includes these packages and FluidR3 GM.
 
 For a minimal PortAudio build:
 
@@ -255,25 +254,24 @@ the browser's advanced wavetable morph/warp processing is not implemented.
 AKWF attribution and its author's public-domain statement are preserved in
 `thirdparty/waveforms/NOTICE`.
 
-The **synths** category also includes 125 Strudel-compatible `gm_` soundfont
-names, such as `gm_piano`, `gm_flute` and `gm_acoustic_bass`, when native GM
-support is available. For example: `note("c4 e4 g4").s("gm_flute")`.
-These play locally through FluidSynth using the installed FluidR3 GM font;
-they do not require an external MIDI connection. Set `TOMPOUCE_SOUNDFONT`
-before starting to choose another SF2/SF3 file (512 MiB maximum).
-Native playback provides one voice per name; the web client's multiple
-soundfont variants selected by `n` are not replicated. Explicit sample maps
+The **synths** category also includes 125 Strudel-compatible `gm_` names,
+such as `gm_piano`, `gm_flute` and `gm_acoustic_bass`. For example:
+`note("c4 e4 g4").s("gm_flute")`. These play the same per-instrument sample
+packs as the Strudel web REPL (MIT-licensed WebAudioFont data, preinstalled
+under `assets/banks/gm-webaudiofont/` and fetched on first play when
+missing), so levels, sustain loops and pitch match the browser; they do not
+require an external MIDI connection. Native playback provides the web's
+default (first) soundfont variant per name; the web client's additional
+variants selected by `n` are not replicated. Explicit sample maps
 and imported sounds with the same name retain priority. Standard envelopes,
 pitch modulation, gain, pan and native effects apply; speed and stretch scale
-native GM pitch, while sample slicing/loop-region controls are not applied.
-GM notes are prepared into immutable stereo PCM on the generator thread,
-with a 60-second note-plus-release limit. They share the 128-buffer/128 MiB
-prepared-audio cache; referenced queued/sounding notes survive eviction.
-FluidSynth's own audio-device probes are disabled; Tompouce's selected output
-backend plays the prepared PCM. The audio callback never loads fonts or calls
-FluidSynth. A first GM note loads the font; later matching notes reuse prepared
-PCM. This is native soundfont playback, not a waveform replica of the web
-client's renderer.
+native GM pitch. GM notes are always note-gated like the web trigger.
+Without the packs and without network access, `gm_` sounds fall back to
+FluidSynth when available, using the installed FluidR3 GM font — set
+`TOMPOUCE_SOUNDFONT` before starting to choose another SF2/SF3 file
+(512 MiB maximum). FluidSynth's own audio-device probes are disabled;
+Tompouce's selected output backend plays the prepared PCM, and the audio
+callback never loads fonts or calls FluidSynth.
 
 The editor’s bottom mini scope and piano roll can be hidden with F2 →
 `/scope off` (restored with `/scope on`). This preference persists across
@@ -571,6 +569,5 @@ otherwise indicated; it does not relicense those dependencies or sound recording
 
 When distributing binaries, provide the corresponding source under the AGPL,
 including the files needed to build them. For modified versions offered over a
-network, follow the source-offer requirements in section 13. A private repository
-link alone is insufficient for recipients who cannot access it: give them access
-or provide the corresponding source separately.
+network, follow the source-offer requirements in section 13. The public
+repository link above serves the corresponding source.

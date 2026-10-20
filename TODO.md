@@ -247,7 +247,9 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       Interrupted ramps now anchor to the last rendered sample, matching
       AudioParam.value. A native 150-note duck flood proves accepted callbacks
       survive pool saturation (exact per-orbit automation, ordered mailbox,
-      bit-identical blocks). Nothing later depends on more duck cases; do this once
+      bit-identical blocks), and the voice-burst deadline workload carries
+      duck controls under preparation load with published-control counts in
+      the report. Nothing later depends on more duck cases; do this once
       publication is stable so late-callback cases are not rewritten.
 
 ## 9. Csound loader side effects

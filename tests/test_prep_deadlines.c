@@ -92,10 +92,11 @@ static void build_workload_source(char *source, size_t size, int workload) {
            preparation and always publish, so the pool saturates
            deterministically, while four stretched voices with distinct
            factors load the workers. The long release keeps every accepted
-           voice sounding past the run horizon. */
+           voice sounding past the run horizon. The sine ducks exercise
+           control publication and timer dispatch under that load. */
         for (int i=0;i<12;i++) {
             n=snprintf(source+used,size-used,
-                "%ss('sine').note(%d).release(2.5).orbit(%d)",
+                "%ss('sine').note(%d).release(2.5).orbit(%d).duckorbit(2).duckattack(.02).duckdepth(.5)",
                 i?",":"",60+i,i%4);
             assert(n>0 && (size_t)n<size-used); used+=(size_t)n;
         }
@@ -200,7 +201,7 @@ static void run_backend_workload(unsigned workers, int workload) {
     printf("backend workload=%s workers=%u budget=%d status=measured backend=%s "
         "backend_drops=%u backend_polls=%u rendered_s=%.3f expected_s=2.000 "
         "render_calls=%llu render_mean_ms=%.3f render_max_ms=%.3f render_overruns=%u "
-        "submitted=%llu jobs=%llu published=%llu reserved=%llu "
+        "submitted=%llu jobs=%llu published=%llu reserved=%llu controls=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
         "reserve_late_max_ms=%.3f queued_at_stop=%d peak_voices=%d peak_retiring=%d\n",
         workload==0?"cold":workload==1?"live":workload==2?"burst":"voiceburst",workers,prep_pool_cpu_budget(),backend,
@@ -209,6 +210,7 @@ static void run_backend_workload(unsigned workers, int workload) {
         atomic_load(&backend_render_max_ns)/1e6,atomic_load(&backend_render_overruns),
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         (unsigned long long)stats.sources_published,(unsigned long long)stats.sources_reserved,
+        (unsigned long long)stats.controls_published,
         (unsigned long long)stats.late_preparation,(unsigned long long)stats.late_publication,
         (unsigned long long)stats.late_reservation,stats.max_reservation_late_ns/1e6,remaining,
         peak_voices,peak_retiring);
@@ -276,7 +278,7 @@ static void run_workload(unsigned workers, int workload, unsigned long block) {
     if (workload!=2 && workload!=3)
         assert(final_works[PREP_REVERB].calls>0 && final_works[PREP_FFT].calls>0);
     printf("deadline workload=%s workers=%u budget=%d block=%lu submitted=%llu jobs=%llu "
-        "job_mean_ms=%.3f job_max_ms=%.3f published=%llu reserved=%llu "
+        "job_mean_ms=%.3f job_max_ms=%.3f published=%llu reserved=%llu controls=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
         "reserve_late_max_ms=%.3f queued_at_stop=%d callbacks=%u callback_overruns=%u "
         "callback_max_ms=%.3f wake_misses=%u wake_late_max_ms=%.3f "
@@ -286,7 +288,8 @@ static void run_workload(unsigned workers, int workload, unsigned long block) {
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         stats.jobs?stats.job_latency_ns/1e6/stats.jobs:0,
         stats.max_job_latency_ns/1e6,(unsigned long long)stats.sources_published,
-        (unsigned long long)stats.sources_reserved,(unsigned long long)stats.late_preparation,
+        (unsigned long long)stats.sources_reserved,(unsigned long long)stats.controls_published,
+        (unsigned long long)stats.late_preparation,
         (unsigned long long)stats.late_publication,(unsigned long long)stats.late_reservation,
         stats.max_reservation_late_ns/1e6,remaining,callbacks,overruns,max_callback*1000,
         wake_misses,max_wake_late*1000,peak_voices,peak_retiring,works[PREP_DECODE].cpu_ns/1e6,

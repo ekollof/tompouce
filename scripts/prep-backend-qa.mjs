@@ -125,7 +125,7 @@ async function measure(sink) {
       result.backend_drops===0&&result.rendered_s>=1.75&&result.render_overruns===0&&
       result.published_late===0&&result.reserved_late===0&&
       (workload>=2||result.skipped_late===0)&&
-      (workload!==3||result.peak_retiring>0);
+      (workload!==3||(result.peak_retiring>0&&result.controls>0));
     results.push(result); console.log(line);
   }
   return results;

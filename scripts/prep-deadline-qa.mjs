@@ -41,7 +41,7 @@ const shedClean=results.every(result=>result.shedClean);
 /* The voice-burst proof is vacuous unless the pool actually saturated:
    every voiceburst case must show retiring graphs (evictions happened). */
 const voiceCases=results.filter(result=>result.workload==='voiceburst');
-const voiceProof=voiceCases.length>0&&voiceCases.every(result=>result.peak_retiring>0);
+const voiceProof=voiceCases.length>0&&voiceCases.every(result=>result.peak_retiring>0&&result.controls>0);
 const report={capturedAt:new Date().toISOString(),binary:path.resolve(binary),budget,
   backendUnderruns:'unmeasured: paced offline callback, no device; see profile-prep-backend',
   coldFetch:'local owned WAV reads/decodes, not remote network latency',

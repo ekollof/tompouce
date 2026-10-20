@@ -145,7 +145,10 @@ voice-burst case instead layers twelve preparation-free sine voices per
 cycle with four distinctly-stretched sample voices: the sines always publish,
 so the 128-voice pool saturates deterministically (peak retiring graphs prove
 eviction happened) while the workers carry real stretch load. Its long
-releases keep every accepted voice sounding past the run horizon.
+releases keep every accepted voice sounding past the run horizon. The sine
+voices also duck a shared orbit, so control publication and timer dispatch
+run under the same load; the report records published controls alongside
+sources.
 Worker counts 1/2/4 (bounded by the process budget) are measured serially with
 128- and 4,096-frame callbacks; no other verification should run during a timing
 capture. 4,096 frames is the output adapter's render-call cap, so both block

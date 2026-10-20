@@ -244,6 +244,9 @@ avoid re-firing scheduled haps, matching production interval cleanup.
       web comparisons. A 129-case web/native gate now covers numeric string
       forms, nested onsets, past endpoints, late callbacks and cancellation of
       rising and falling ramps, including failures after gain reanchoring.
+      An 8,944-case exact gate covers numeric concatenation across binary64
+      boundaries, long tails, radix forms and the full Unicode
+      whitespace/confusable set in every suffix position.
       Interrupted ramps now anchor to the last rendered sample, matching
       AudioParam.value. A native 150-note duck flood proves accepted callbacks
       survive pool saturation (exact per-orbit automation, ordered mailbox,

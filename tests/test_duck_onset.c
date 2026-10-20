@@ -24,8 +24,8 @@ static void check(const char *suffix,double base,double attack) {
 }
 
 static void reference(void) {
-    char *input=malloc(4*1024*1024+1); assert(input);
-    size_t length=fread(input,1,4*1024*1024,stdin); assert(!ferror(stdin) && feof(stdin));
+    char *input=malloc(8*1024*1024+1); assert(input);
+    size_t length=fread(input,1,8*1024*1024,stdin); assert(!ferror(stdin) && feof(stdin));
     input[length]=0; cJSON *cases=cJSON_Parse(input),*results=cJSON_CreateArray(); free(input);
     assert(cases && results);
     const cJSON *item;

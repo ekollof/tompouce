@@ -372,9 +372,11 @@ Long zero/exponent/whitespace strings and embedded NUL controls are included.
 This does not establish live timer-jitter/overload parity or timer-creation
 failure side effects.
 
-`duck-onset-reference-qa.mjs` adds 1,264 exact browser/native numeric
+`duck-onset-reference-qa.mjs` adds 8,944 exact browser/native numeric
 concatenations, comparing binary64 bits at decimal halfway, subnormal and
-overflow boundaries, with long tails, radix forms and scientific time prefixes.
+overflow boundaries, with long tails, radix forms, scientific time prefixes
+and every Unicode WhiteSpace/LineTerminator plus confusable non-space code
+points in every suffix position.
 The native summary uses fixed-size integer arithmetic rather than the pinned
 QuickJS decimal reader's deliberately limited precision. The `duck_onset`
 CTest checks bounded cache exhaustion, deduplication and retained references;

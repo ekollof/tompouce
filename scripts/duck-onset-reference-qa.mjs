@@ -24,6 +24,15 @@ function fixtures() {
     'x'+'0'.repeat(1000)+'10','b'+'0'.repeat(1000)+'1','o'+'0'.repeat(1000)+'7',
     'x'+'f'.repeat(256),'x'+'f'.repeat(257),'b'+'1'.repeat(1024),'b'+'1'.repeat(1025),
     'o1'+'0'.repeat(341),'o7'+'0'.repeat(341));
+  /* Every Unicode WhiteSpace/LineTerminator plus confusable non-space code
+     points, in every position a suffix can occupy after base digits. */
+  const wsPoints=[0x09,0x0a,0x0b,0x0c,0x0d,0x20,0xa0,0x1680,0x2000,0x2001,
+    0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200a,0x2028,
+    0x2029,0x202f,0x205f,0x3000,0xfeff,
+    0x180e,0x200b,0x200c,0x200d,0x0085,0x00ad,0x061c].map(c=>String.fromCharCode(c));
+  for(const ws of wsPoints)
+    onsets.push('',' ','12'+ws,'12'+ws+ws,'0x10'+ws,'1_0'+ws,'e5'+ws,ws,
+      '1'+ws+'e5','1e'+ws+'5','-'+ws+'5',ws+'-'+ws+'5');
   let seed=0xc0ffee;
   for(let test=0;test<12;test++) {
     let digits='';
@@ -61,7 +70,7 @@ const artifacts=process.argv[2]??'/tmp/tompouce-duck-onset-reference';
 await fs.mkdir(artifacts,{recursive:true});
 await fs.writeFile(path.join(artifacts,'web.json'),JSON.stringify(cases)+'\n');
 const native=spawnSync(process.env.TOMPOUCE_DUCK_ONSET_BINARY??'./build/tests/test_duck_onset',
-  ['--reference'],{input:JSON.stringify(cases),encoding:'utf8',maxBuffer:4*1024*1024});
+  ['--reference'],{input:JSON.stringify(cases),encoding:'utf8',maxBuffer:8*1024*1024});
 assert.equal(native.status,0,native.stderr);
 const actual=JSON.parse(native.stdout);
 await fs.writeFile(path.join(artifacts,'native.json'),JSON.stringify(actual)+'\n');

@@ -292,8 +292,11 @@ globalThis.osc = pattern=>pattern.osc();
    0); midikeys returns live keyboard notes with fixed durations. Native
    values merge across senders into one store; without a connected sender the
    readers stay at their defaults, and midikeys rejects a missing device.
-   Held notes sound on the next scheduled window after arrival (like live
-   slider moves) and fire once: audio queries consume, visual queries peek. */
+   Named senders persist CC state across restarts, restore it to the device
+   on (re)connect, and resubscribe by client name after replugs. Pitch bend
+   and touch are ignored upstream too. Held notes sound on the next scheduled
+   window after arrival (like live slider moves) and fire once: audio queries
+   consume, visual queries peek. */
 let midiConsumeKeys = false;
 const midiInputError = (name) => new Error(
   `[midi] Midi input cannot be a pattern. Make sure to pass device name with single quotes.`);

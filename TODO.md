@@ -335,9 +335,12 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - Dominant MIDI output beyond note triggering (CC, program change, bend,
   touch, sysex, midicmd transport, port selection) and combined
   external-output routing beyond the gated flag matrix (step 10 remainder).
-- Controller input beyond live CC reads and fixed-duration keyboard notes
-  (pitch bend, touch, CC restore, reconnect, persisted state; step 11
-  remainder).
+- Controller input is closed: named senders persist CC state across restarts
+  (numeric opens never persist), restore it to the device output on
+  (re)connect, and resubscribe by client name after replugs, all proven
+  over real ALSA ports including a delete/recreate cycle. Pitch bend and
+  touch stay unimplemented: the upstream input ignores non-note messages
+  the same way.
 - Transport restart after Stop is gated: both sides reset to cycle zero and
   re-fire early-cycle haps, with sample-exact onset agreement (correlation
   1.0). Stop itself (held tails finish, no new onsets) was already gated.

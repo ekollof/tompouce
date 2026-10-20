@@ -264,6 +264,54 @@ static void test_midi_input_js(void) {
     puts("midi input JS: live CC reads, channels, Pattern rejection, missing-device errors ok");
 }
 
+/* Persisted CC state without hardware: injection through a named sender
+   writes the sender file (zeros included); ordinal/unnamed senders never
+   persist; loading restores reader defaults. */
+static void test_midi_persist(void) {
+    midi_test_add_sender(41, 0, "PersistBox:0", 1);
+    midi_test_add_sender(42, 0, "OtherBox:0", 0);
+    midi_test_inject_from(41, 0, 1, 2, 7, 64);
+    assert(fabs(midi_cc_value(7, 0) - 64 / 127.0) < 1e-12);
+    midi_test_inject_from(41, 0, 1, 2, 9, 0);
+    assert(midi_cc_value(9, 0) == 0);
+    midi_test_inject_from(42, 0, 1, 2, 11, 100);
+    assert(midi_state_load("OtherBox:0") == 0);
+    /* Dirty the live stores without saving, then reload: values and zeros
+       both come back from the sender file. */
+    midi_test_inject(1, 2, 7, 100);
+    midi_test_inject(1, 2, 9, 100);
+    assert(fabs(midi_cc_value(7, 0) - 100 / 127.0) < 1e-12);
+    int loaded = midi_state_load("PersistBox");
+    assert(loaded == 4);
+    assert(fabs(midi_cc_value(7, 0) - 64 / 127.0) < 1e-12);
+    assert(fabs(midi_cc_value(7, 3) - 64 / 127.0) < 1e-12);
+    assert(midi_cc_value(9, 0) == 0);
+    assert(midi_state_load("") == -1);
+    assert(midi_state_load("a/b") == 0);
+    assert(midi_restore_sender("PersistBox") == 0);
+    puts("midi persist: named-sender files, zeros, ordinal exclusion, load-as-defaults ok");
+}
+
+/* Reconnect matching without hardware: exit marks senders dead, unrelated
+   traffic is ignored, ordinal senders never revive by name. */
+static void test_midi_reconnect(void) {
+    midi_test_add_sender(51, 0, "ReBox:0", 1);
+    midi_test_add_sender(52, 0, "OrdBox:0", 0);
+    assert(midi_test_sender_alive(51, 0) && midi_test_sender_alive(52, 0));
+    assert(midi_test_announce(0, 99, 9, NULL) == 0);
+    assert(midi_test_sender_alive(51, 0));
+    assert(midi_test_announce(0, 51, 0, NULL) == 1);
+    assert(!midi_test_sender_alive(51, 0) && midi_test_sender_alive(52, 0));
+    assert(midi_test_announce(0, 51, 0, NULL) == 0);
+    assert(midi_test_announce(1, 0, 0, "Nope") == 0);
+    assert(midi_test_announce(1, 0, 0, "OrdBox") == 0);
+    assert(midi_test_announce(1, 0, 0, "ReBox") == 1);
+    assert(!midi_test_sender_alive(51, 0));
+    assert(midi_test_announce(0, 52, 0, NULL) == 1);
+    assert(!midi_test_sender_alive(52, 0));
+    puts("midi reconnect: dead-marking, name gating, ordinal exclusion ok");
+}
+
 /* Keyboard commit through injected arrivals: held notes voice once with
    channel attribution, then consume so re-queries stay silent. Requires a
    live sender (see the loopback test below); skipped without one. */
@@ -297,6 +345,104 @@ static void test_midi_keys_commit(void) {
     event_queue_clear();
     if (loopback_sender) { snd_seq_close(loopback_sender); loopback_sender=NULL; }
     puts("midi keys commit: held notes voice once with channel attribution");
+}
+
+/* Full hardware loop for restore and reconnect: a duplex sender with a
+   source port and a writable sink port. CCs cross the real worker into the
+   sender file; deleting the source port marks it dead; recreating it
+   resubscribes by client name and restores the CCs to the sink. Skipped
+   gracefully without a sequencer. */
+/* Collect controller triples for up to timeout_s; returns how many of the
+   two wanted triples arrived (order-independent). */
+static int drain_controllers(snd_seq_t *handle, int ch0, int cc0, int v0, int ch1, int cc1, int v1,
+    double timeout_s) {
+    int nfds = snd_seq_poll_descriptors_count(handle, POLLIN);
+    struct pollfd fds[8];
+    if (nfds > 8) nfds = 8;
+    double end = monotonic() + timeout_s;
+    int found0 = 0, found1 = 0;
+    for (;;) {
+        if (nfds > 0) {
+            snd_seq_poll_descriptors(handle, fds, (unsigned)nfds, POLLIN);
+            if (poll(fds, (nfds_t)nfds, 50) <= 0) {
+                if ((found0 && found1) || monotonic() >= end) return found0 + found1;
+                continue;
+            }
+        } else if (monotonic() >= end) return found0 + found1;
+        snd_seq_event_t *event = NULL;
+        if (snd_seq_event_input(handle, &event) < 0 || !event) {
+            if ((found0 && found1) || monotonic() >= end) return found0 + found1;
+            continue;
+        }
+        if (event->type != SND_SEQ_EVENT_CONTROLLER) continue;
+        int ch = event->data.control.channel, cc = (int)event->data.control.param,
+            v = event->data.control.value;
+        if (ch == ch0 && cc == cc0 && v == v0) found0 = 1;
+        if (ch == ch1 && cc == cc1 && v == v1) found1 = 1;
+        if (found0 && found1) return 2;
+    }
+}
+
+static void test_midi_restore_loopback(void) {
+    snd_seq_t *sender = NULL;
+    if (snd_seq_open(&sender, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0 || !sender) {
+        puts("SKIP midi restore loopback: no ALSA sequencer");
+        return;
+    }
+    snd_seq_set_client_name(sender, "tompouce-midi-restore");
+    int sport = snd_seq_create_simple_port(sender, "src",
+        SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+    int sink = snd_seq_create_simple_port(sender, "sink",
+        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+    if (sport < 0 || sink < 0) { snd_seq_close(sender); puts("SKIP midi restore loopback: no ports"); return; }
+    assert(midi_open_input("tompouce-midi-restore", -1));
+    snd_seq_event_t ev;
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_controller(&ev, 0, 21, 80);
+    snd_seq_ev_set_source(&ev, sport);
+    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_direct(&ev);
+    assert(snd_seq_event_output_direct(sender, &ev) >= 0);
+    /* Back-to-back direct sends can drop sequencer events; pace them. */
+    { struct timespec pause = {.tv_nsec = 100000000};
+      nanosleep(&pause, NULL); }
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_controller(&ev, 1, 22, 100);
+    snd_seq_ev_set_source(&ev, sport);
+    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_direct(&ev);
+    assert(snd_seq_event_output_direct(sender, &ev) >= 0);
+    double end = monotonic() + 5;
+    while ((fabs(midi_cc_value(21, 0) - 80 / 127.0) >= 1e-12 ||
+        fabs(midi_cc_value(22, 0) - 100 / 127.0) >= 1e-12) && monotonic() < end) {
+        struct timespec pause = {.tv_nsec = 5000000};
+        nanosleep(&pause, NULL);
+    }
+    assert(fabs(midi_cc_value(21, 0) - 80 / 127.0) < 1e-12);
+    assert(midi_state_load("tompouce-midi-restore") == 4);
+    /* Drop the source port: the announce path must mark the sender dead. */
+    assert(snd_seq_delete_simple_port(sender, sport) >= 0);
+    end = monotonic() + 5;
+    int dead = 0;
+    while (monotonic() < end) {
+        if (!midi_input_live()) { dead = 1; break; }
+        struct timespec pause = {.tv_nsec = 5000000};
+        nanosleep(&pause, NULL);
+    }
+    assert(dead);
+    /* Recreate under the same client name (possibly a new port number): the
+       revive path resubscribes by name and restores both CCs to the sink. */
+    sport = snd_seq_create_simple_port(sender, "src",
+        SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
+    assert(sport >= 0);
+    int got = drain_controllers(sender, 0, 21, 80, 1, 22, 100, 10);
+    assert(got == 2);
+    assert(midi_input_live());
+    snd_seq_close(sender);
+    puts("midi restore loopback: persist, disconnect, reconnect and CC restore ok");
 }
 
 /* Full hardware loop: a local ALSA sender feeds the real input thread and
@@ -383,8 +529,11 @@ int main(int argc, char **argv) {
     test_commit_routing();
     test_threaded_delivery();
     test_midi_input_js();
+    test_midi_persist();
+    test_midi_reconnect();
     test_midi_loopback();
     test_midi_keys_commit();
+    test_midi_restore_loopback();
     event_queue_clear();
     midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");

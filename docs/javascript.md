@@ -56,8 +56,12 @@ Pattern input is rejected, and `midikeys` rejects a missing device while
 after arrival, like live slider moves, and fire once: audio queries consume,
 visual queries peek. Input names accept `client:port`, numeric client ids and
 device-name substrings (a bare call tries the first sender); without a sender,
-connect one with `aconnect`. Pitch bend, touch, CC output restore,
-background reconnect and persisted CC state are not implemented.
+connect one with `aconnect`. CC values persist per string sender name across
+restarts and load as reader defaults on open (numeric opens never persist);
+on (re)connect the stored values are sent back to the device's writable port,
+restoring motorized controls like the web input, and replugged devices are
+resubscribed by client name. Pitch bend and touch stay unimplemented: the
+upstream input ignores non-note messages the same way.
 
 JavaScript playback uses the web scheduler's 50 ms query windows,
 100 ms timer and overlap, and 100 ms output latency. Already submitted notes

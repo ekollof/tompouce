@@ -82,8 +82,15 @@ Generated native rooms now use convolution with the reference decay, fade and
 gradual low-pass algorithm. The generated-room gate uses an explicit LCG seed
 0xc0ffee in both implementations; it observed correlation 0.9921 and RMS ratio
 1.0311. The seed is part of the case/report, not an implicit replacement for
-ordinary browser randomness. Native rooms use this deterministic seed; ordinary
-browser rooms remain randomized. Custom IR correlation remains 0.99999997.
+ordinary browser randomness. Native continues that stream across generations
+(advancing past cache hits) so rooms vary per call deterministically instead
+of reseeding to identical kernels; ordinary browser rooms remain randomized.
+Multi-room sequences stay diagnostic: each superdough trigger also draws one
+chain-ID random before any room draw, so exact seeded alignment would require
+mirroring that incidental consumption, and the eager comparison renderer
+bounds each hap's capture to its clipped duration (hard zeros past it), so no
+convolver tail reaches a gate there. A CTest locks sequence variety (distinct
+rooms differ) and cache identity. Custom IR correlation remains 0.99999997.
 
 Original wet Arpoon is captured as a diagnostic with no pass threshold. It has
 independent random impulses and observed opening correlation around 0.94–0.95.

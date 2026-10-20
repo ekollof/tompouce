@@ -342,9 +342,12 @@ a threshold. Steps 6–11 already scope the required slices; the remainder is:
 - External tempo-change pivot anchoring: the web anchors at its scheduling
   frontier, native at its phase frontier. Pattern-level tempo pivots are
   gated live; external pivots are covered at event-value level.
-- Multi-room generated sequences: the web regenerates with fresh randomness
-  per call while native reseeds per call and caches. Single seeded rooms
-  are gated; sequences stay diagnostic.
+- Multi-room generated sequences stay diagnostic: single seeded rooms gate,
+  but exact tail parity is unreachable (production randomness is unknowable:
+  one chain-ID draw per trigger plus fresh draws, and the eager harness
+  bounds per-hap capture). Native continues one LCG stream across
+  generations so rooms vary per call deterministically; a CTest locks
+  sequence variety and cache identity.
 
 Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,

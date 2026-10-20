@@ -19,6 +19,9 @@ typedef struct {
 /* Generator thread only. Immutable cached kernels live for the process. */
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin);
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim);
+/* Reset the generated-room random stream to its startup seed. Tests call this
+   for isolation; the comparison renderer starts every case from the seed. */
+void convolution_reverb_reset_stream(void);
 /* Test/offline builder; normalization follows WebAudio when normalize != 0. */
 ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, int normalize);
 void convolution_kernel_free(ConvKernel *kernel);

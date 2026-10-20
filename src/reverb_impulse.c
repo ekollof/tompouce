@@ -6,10 +6,25 @@
 #include "prep_profile.h"
 #include <stdint.h>
 
+/* Process-wide generated-room random stream; see convolution_prepare_reverb.
+   Generation misses are serialized by the room lane, so unlocked stream
+   steps below never interleave; the locked lookup/hit path is atomic. */
+static uint32_t reverb_stream=0xc0ffeeu;
+
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim) {
     enum { CACHE=16 };
     static struct { double size,fade,lp,dim; ConvKernel *kernel; int reserved; } cache[CACHE];
     static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+    /* The web regenerates rooms with fresh randomness per call and keeps no
+       cache; comparison pages seed Math.random with this same LCG. Native
+       continues one process-wide stream across generations so rooms vary per
+       call deterministically instead of reseeding to identical kernels.
+       Cache hits advance past the segment a regeneration would have consumed.
+       Renderers start every case from the seed; tests reset explicitly.
+       Exact tail parity stays out of reach: production randomness is
+       unknowable (one chain-ID draw per trigger plus fresh room draws), and
+       the eager comparison renderer bounds per-hap capture, so sequences
+       stay diagnostic. */
     if (!isfinite(size) || !isfinite(fade) || !isfinite(lp) || !isfinite(dim) || size<=0 || size>10 ||
         fade<0 || fade>10 || lp<0 || lp>SR/2 || dim<0 || dim>SR/2) return NULL;
     long frames=lround(size*1.5*SR), decay=lround(size*SR), fade_frames=lround(fade*SR);
@@ -17,7 +32,9 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
     prep_lock(&lock, PREP_LOCK_REVERB);
     for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
         cache[i].lp==lp && cache[i].dim==dim) {
-        const ConvKernel *result=cache[i].kernel; prep_unlock(&lock, PREP_LOCK_REVERB); return result;
+        const ConvKernel *result=cache[i].kernel;
+        for (long skip=0;skip<2*frames;skip++) reverb_stream=reverb_stream*1664525u+1013904223u;
+        prep_unlock(&lock, PREP_LOCK_REVERB); return result;
     }
     int slot=-1;
     for (unsigned i=0;i<CACHE;i++) if (!cache[i].kernel && !cache[i].reserved) { slot=(int)i; break; }
@@ -31,13 +48,12 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
         prep_unlock(&lock, PREP_LOCK_REVERB);
         return NULL;
     }
-    /* Reproducible random input; comparison pages seed their generator too. */
-    uint32_t random=0xc0ffeeu;
+    /* Continuing stream: the web consumes fresh randomness per call. */
     double decay_base=pow(.001,1.0/decay);
     prep_work_begin(PREP_REVERB);
     for (int ch=0;ch<2;ch++) for (long i=0;i<frames;i++) {
-        random=random*1664525u+1013904223u;
-        double value=(random/2147483648.0-1)*pow(decay_base,(double)i);
+        reverb_stream=reverb_stream*1664525u+1013904223u;
+        double value=(reverb_stream/2147483648.0-1)*pow(decay_base,(double)i);
         if (i<fade_frames) value*=i/(double)fade_frames;
         impulse[(size_t)i*2+ch]=(float)value;
     }
@@ -72,4 +88,8 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
     } else cache[slot].reserved=0;
     prep_unlock(&lock, PREP_LOCK_REVERB);
     return kernel;
+}
+
+void convolution_reverb_reset_stream(void) {
+    reverb_stream=0xc0ffeeu;
 }

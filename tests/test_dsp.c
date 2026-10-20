@@ -99,6 +99,16 @@ int main(void) {
     assert(convolution_prepare_reverb(room_params.p[DSP_SIZE],
         room_params.p[DSP_ROOMFADE],room_params.p[DSP_ROOMLP],room_params.p[DSP_ROOMDIM]));
     cJSON_Delete(room_defaults);
+    /* Generated-room sequences vary per call: consecutive distinct rooms use
+       disjoint stream segments (no reseeding to identical kernels), while
+       repeats hit the cache. */
+    convolution_reverb_reset_stream();
+    const ConvKernel *first=convolution_prepare_reverb(2,.1,15000,1000);
+    const ConvKernel *second=convolution_prepare_reverb(1,.1,15000,1000);
+    assert(first && second && first!=second);
+    assert(memcmp(first->head,second->head,sizeof(first->head)));
+    assert(convolution_prepare_reverb(2,.1,15000,1000)==first);
+    assert(convolution_prepare_reverb(1,.1,15000,1000)==second);
     test_standalone_file_event();
     double alias_naive = 0, alias_filtered = 0;
     for (int i = 0; i < 256; i++) {

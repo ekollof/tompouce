@@ -1,0 +1,767 @@
+{
+  "version": 1,
+  "source": {
+    "repo": "felixroos/webaudiofontdata",
+    "branch": "master",
+    "license": "MIT",
+    "upstream": "https://github.com/surikov/webaudiofontdata",
+    "commit": "23ca907d4370a04fd89ca483a92915e4d6159ab9"
+  },
+  "packs": [
+    {
+      "name": "gm_accordion",
+      "file": "0210_JCLive_sf2_file.js",
+      "sha256": "16f98d1e6ec1db8fe5c4d64d7516ca317c79d7cd080414475b40884ee46a9a29",
+      "bytes": 82685
+    },
+    {
+      "name": "gm_acoustic_bass",
+      "file": "0320_JCLive_sf2_file.js",
+      "sha256": "8808899461c4a6218744233e032b25f6882f703393fd571c0ce591b91951d5c8",
+      "bytes": 41100
+    },
+    {
+      "name": "gm_acoustic_guitar_nylon",
+      "file": "0240_JCLive_sf2_file.js",
+      "sha256": "89290d911f7df3d6831b23130a8d210ab3d33a19c10596889e1fcbbb3f4ad73c",
+      "bytes": 295258
+    },
+    {
+      "name": "gm_acoustic_guitar_steel",
+      "file": "0253_Acoustic_Guitar_sf2_file.js",
+      "sha256": "52a7617c033ab66f161218ac95dee79d535f34c30f7dcf8204f31001fd266dcc",
+      "bytes": 817095
+    },
+    {
+      "name": "gm_agogo",
+      "file": "1130_JCLive_sf2_file.js",
+      "sha256": "7e01a2e4c6f674e87e1594d2c994e5342747897ddd1820d1709255bec93006f9",
+      "bytes": 5932
+    },
+    {
+      "name": "gm_alto_sax",
+      "file": "0650_JCLive_sf2_file.js",
+      "sha256": "9e33848b44aab3508f4fc9a251610c37ce2546587e97e273f5452e0d51c456fb",
+      "bytes": 98900
+    },
+    {
+      "name": "gm_applause",
+      "file": "1260_JCLive_sf2_file.js",
+      "sha256": "3f2ca0a4f44c2a0cd54e0e57b0742919eb62e95d2d3f15e43fee73ceba4bea2c",
+      "bytes": 16704
+    },
+    {
+      "name": "gm_bagpipe",
+      "file": "1090_Aspirin_sf2_file.js",
+      "sha256": "8196152c92c81c018e7a10b56ff3e1497375c99033c897fbd4fe6973fc46b01d",
+      "bytes": 12579
+    },
+    {
+      "name": "gm_bandoneon",
+      "file": "0230_Aspirin_sf2_file.js",
+      "sha256": "2afbe48113fc382c34cd95427a22da1203bfb7cc2b22d869168de14bf979f6f6",
+      "bytes": 39123
+    },
+    {
+      "name": "gm_banjo",
+      "file": "1050_FluidR3_GM_sf2_file.js",
+      "sha256": "793e94ef40da43f60eba6f7fb6a90099c67dd0069498a2d23b232dc49c6a8fcb",
+      "bytes": 191584
+    },
+    {
+      "name": "gm_baritone_sax",
+      "file": "0670_JCLive_sf2_file.js",
+      "sha256": "1682bb4a3252ff0789985fef887f3bb63b541f6f7f4dfd60eeb801ec2028c47a",
+      "bytes": 137073
+    },
+    {
+      "name": "gm_bassoon",
+      "file": "0700_JCLive_sf2_file.js",
+      "sha256": "73d1820f6c5bcebc069ce32d9a292358e6a1da11847999005c2d6750093896b9",
+      "bytes": 25625
+    },
+    {
+      "name": "gm_bird_tweet",
+      "file": "1230_FluidR3_GM_sf2_file.js",
+      "sha256": "05613c6bee2fb231748f32da60bbf878f1df8d93dd34fb3b2c64b6bd24689d1e",
+      "bytes": 31297
+    },
+    {
+      "name": "gm_blown_bottle",
+      "file": "0760_FluidR3_GM_sf2_file.js",
+      "sha256": "4155b46924c503a86f063e18f77bf27cac25a977295a4f17e55f934247824b46",
+      "bytes": 20559
+    },
+    {
+      "name": "gm_brass_section",
+      "file": "0610_JCLive_sf2_file.js",
+      "sha256": "338c70ecea6abb6934c0f711201da630a464a74a5dbb3917aab7e54faa4785bc",
+      "bytes": 131162
+    },
+    {
+      "name": "gm_breath_noise",
+      "file": "1210_FluidR3_GM_sf2_file.js",
+      "sha256": "7dba4fa344b64bbe53d47e487fd1230ae2bc5dda0e65efeadb10ed22e47fc5ea",
+      "bytes": 7190
+    },
+    {
+      "name": "gm_celesta",
+      "file": "0080_JCLive_sf2_file.js",
+      "sha256": "44a38af5ba89a250d1ccd7e50983f318e95521b500c21e0c4cd7cc5fb58f218a",
+      "bytes": 70940
+    },
+    {
+      "name": "gm_cello",
+      "file": "0420_Aspirin_sf2_file.js",
+      "sha256": "f545821ddc27e39dd79c3194084245b0932fe59c61d381471ec9499aa6403a9c",
+      "bytes": 230679
+    },
+    {
+      "name": "gm_choir_aahs",
+      "file": "0520_Aspirin_sf2_file.js",
+      "sha256": "1925e221cca3ae8628b0670ec45d14406261077fcc0269d3b7077350a887e8df",
+      "bytes": 99647
+    },
+    {
+      "name": "gm_church_organ",
+      "file": "0190_JCLive_sf2_file.js",
+      "sha256": "7e514e9c23aa988bb6697d036f805d2db5d90b229a80703886167645de4b7f5c",
+      "bytes": 342653
+    },
+    {
+      "name": "gm_clarinet",
+      "file": "0710_JCLive_sf2_file.js",
+      "sha256": "81f11ba6840d99f2e3fb9af467e6dd5aac49aa823cdb21bf4375e0647e4d9ed8",
+      "bytes": 33215
+    },
+    {
+      "name": "gm_clavinet",
+      "file": "0070_JCLive_sf2_file.js",
+      "sha256": "7578380c00526d90e0af824d8e87d5e99691cfba3152d53eac545dd8a96d7fdf",
+      "bytes": 135429
+    },
+    {
+      "name": "gm_contrabass",
+      "file": "0430_Aspirin_sf2_file.js",
+      "sha256": "488ac31eff08ed5a15fea20b2dfc95935cc8ad9dffa5255060e840418ee54130",
+      "bytes": 230679
+    },
+    {
+      "name": "gm_distortion_guitar",
+      "file": "0300_FluidR3_GM_sf2_file.js",
+      "sha256": "6cb34e1813daafde46e305b1751642c7b22faa614aa60e3cad13c92b15f67562",
+      "bytes": 781129
+    },
+    {
+      "name": "gm_drawbar_organ",
+      "file": "0160_JCLive_sf2_file.js",
+      "sha256": "9b51718094bbf895ac4b0fee5424059de57442488aba388547e3f84724e94c14",
+      "bytes": 65499
+    },
+    {
+      "name": "gm_dulcimer",
+      "file": "0150_Aspirin_sf2_file.js",
+      "sha256": "fed701474e196cb42baa3cd9256bdbb5cb3db99ae93ca206fc26aab757497c65",
+      "bytes": 102212
+    },
+    {
+      "name": "gm_electric_bass_finger",
+      "file": "0330_JCLive_sf2_file.js",
+      "sha256": "4e51bf05a4050c64895c922b01e7b25abb48a93d32f35c0bc7604085589e0d4b",
+      "bytes": 24041
+    },
+    {
+      "name": "gm_electric_bass_pick",
+      "file": "0340_JCLive_sf2_file.js",
+      "sha256": "21c88085f5851e9089d5aa08b5a057c7f5314194ced37b23796f49dd252e0b55",
+      "bytes": 38979
+    },
+    {
+      "name": "gm_electric_guitar_clean",
+      "file": "0270_Aspirin_sf2_file.js",
+      "sha256": "6d522c6b2fbcb11337963f48ef46f06a58fa4f8ff8137f3ba6951e27617164e2",
+      "bytes": 48478
+    },
+    {
+      "name": "gm_electric_guitar_jazz",
+      "file": "0260_JCLive_sf2_file.js",
+      "sha256": "e26f4d3c2b1b630425e07e7fbc3d1d58285b3b9ce9c9049c26f7ae0fab85699f",
+      "bytes": 810598
+    },
+    {
+      "name": "gm_electric_guitar_muted",
+      "file": "0280_Aspirin_sf2_file.js",
+      "sha256": "1ec0124fca6f4918ccb7690fd0ee0e35d2f6f777afca064b2e9b8c93cad88422",
+      "bytes": 19625
+    },
+    {
+      "name": "gm_english_horn",
+      "file": "0690_JCLive_sf2_file.js",
+      "sha256": "d94f5572bb1df28716a408b1ad68f878e983490e0f5a59af9549acc082ccda3e",
+      "bytes": 50520
+    },
+    {
+      "name": "gm_epiano1",
+      "file": "0040_JCLive_sf2_file.js",
+      "sha256": "8df36d429bf20d288470301bcdafb3acd2b2324c2959303f4d84b2595392e2a8",
+      "bytes": 290213
+    },
+    {
+      "name": "gm_epiano2",
+      "file": "0050_JCLive_sf2_file.js",
+      "sha256": "463cb52ec7e118c3b6c3ebf04f1da5eb716e0c127cb710523084a616446db7f5",
+      "bytes": 381435
+    },
+    {
+      "name": "gm_fiddle",
+      "file": "1100_JCLive_sf2_file.js",
+      "sha256": "2d442742d6d3d11e693307f47b7f3dd8f10feb87a4a8bb13e9cc9c20de17ad54",
+      "bytes": 371905
+    },
+    {
+      "name": "gm_flute",
+      "file": "0730_JCLive_sf2_file.js",
+      "sha256": "4f0ddc2c2db407692d05cf38aa41e71b51e7e7486859e2d852fca3b44dfaa962",
+      "bytes": 332277
+    },
+    {
+      "name": "gm_french_horn",
+      "file": "0600_Aspirin_sf2_file.js",
+      "sha256": "6c7157507db7e5478c416db1a1f940193b4f21c45a8d9303f00599697c297153",
+      "bytes": 139965
+    },
+    {
+      "name": "gm_fretless_bass",
+      "file": "0350_Aspirin_sf2_file.js",
+      "sha256": "1194c1c1caa9f4a9c8050845b776ca1d6277c11f3653f14327c067487d06e885",
+      "bytes": 16044
+    },
+    {
+      "name": "gm_fx_atmosphere",
+      "file": "0990_JCLive_sf2_file.js",
+      "sha256": "01bd5e5f9008794a90873fc22d1857d325731866357bfc0ee052510017e2bff6",
+      "bytes": 62735
+    },
+    {
+      "name": "gm_fx_brightness",
+      "file": "1000_JCLive_sf2_file.js",
+      "sha256": "41f54cb3e79ecf5e325d7809913d9ae6edeadeb34747f9bcd62aa4f0ead2d7a7",
+      "bytes": 71369
+    },
+    {
+      "name": "gm_fx_crystal",
+      "file": "0980_Aspirin_sf2_file.js",
+      "sha256": "a34689c257cabef749e745fa32dd120c89ffa98c2e837dcc9aa97cd6ac0948c3",
+      "bytes": 194575
+    },
+    {
+      "name": "gm_fx_echoes",
+      "file": "1020_FluidR3_GM_sf2_file.js",
+      "sha256": "fe271b2920a8fcd79cb4fe01a34627eec99faf85b503fa0253f7d5ae391aec78",
+      "bytes": 236112
+    },
+    {
+      "name": "gm_fx_goblins",
+      "file": "1010_FluidR3_GM_sf2_file.js",
+      "sha256": "e47c54f0c4b06594e56d43e3adecdd5922ba1786cd051d71debf3790cf011390",
+      "bytes": 49680
+    },
+    {
+      "name": "gm_fx_rain",
+      "file": "0960_FluidR3_GM_sf2_file.js",
+      "sha256": "81dd2c9e0f4b256e060c3510015c2dd0b977ae7b3d45e70c2c874d919618cfee",
+      "bytes": 11063
+    },
+    {
+      "name": "gm_fx_sci_fi",
+      "file": "1030_FluidR3_GM_sf2_file.js",
+      "sha256": "5798143c43eca950a4e37fbcdc605d4cdd600856a907d39ea35ec70179157521",
+      "bytes": 256826
+    },
+    {
+      "name": "gm_fx_soundtrack",
+      "file": "0970_FluidR3_GM_sf2_file.js",
+      "sha256": "e690a382f0b9555777da564ff9797099d425e0c563abdbd74072004ae296a2fc",
+      "bytes": 28401
+    },
+    {
+      "name": "gm_glockenspiel",
+      "file": "0090_JCLive_sf2_file.js",
+      "sha256": "86b17eb2a709f9c983954f039638d37ac1fad4d0225e4a68f6dda293d351c3ac",
+      "bytes": 146097
+    },
+    {
+      "name": "gm_guitar_fret_noise",
+      "file": "1200_JCLive_sf2_file.js",
+      "sha256": "650d0cffef960d1402fbbfabea348bb5e98df7e3281726d908a061d5b3d74cbf",
+      "bytes": 5926
+    },
+    {
+      "name": "gm_guitar_harmonics",
+      "file": "0310_Aspirin_sf2_file.js",
+      "sha256": "c34f6c6501efa950fa84f49348af0563401afb1407f667f2a0c2554d8af563bc",
+      "bytes": 5085
+    },
+    {
+      "name": "gm_gunshot",
+      "file": "1270_JCLive_sf2_file.js",
+      "sha256": "ec90bb9d389e2ea49eca183d387fb8ea6d1a3b82b06a66556720e1e07ad2ce3e",
+      "bytes": 7175
+    },
+    {
+      "name": "gm_harmonica",
+      "file": "0220_FluidR3_GM_sf2_file.js",
+      "sha256": "feb3454ee2407cf0ee08eae4b16314404a7d58a1fc0de6d8f6d2c0e7d0edc519",
+      "bytes": 82262
+    },
+    {
+      "name": "gm_harpsichord",
+      "file": "0060_JCLive_sf2_file.js",
+      "sha256": "5b8cad1cfd8fa552a7a84b2a5c61d2497e012f34740c1b3ec6f3e7cbf27a48ab",
+      "bytes": 1337739
+    },
+    {
+      "name": "gm_helicopter",
+      "file": "1250_JCLive_sf2_file.js",
+      "sha256": "a0b57523202042f033b6581095dc3d3137c08568c12d085c9df7579acf93d4fc",
+      "bytes": 4960
+    },
+    {
+      "name": "gm_kalimba",
+      "file": "1080_JCLive_sf2_file.js",
+      "sha256": "8fdb4e98f9661fa1080d77c033987fc78078cc89a1b7f5f69a83bd2d261c94da",
+      "bytes": 6133
+    },
+    {
+      "name": "gm_koto",
+      "file": "1070_FluidR3_GM_sf2_file.js",
+      "sha256": "bef0bf18fd98a1e48fc44b25e78031d8df5a8cfb59cba8b3f8ae8865b44d77c7",
+      "bytes": 23167
+    },
+    {
+      "name": "gm_lead_1_square",
+      "file": "0800_Aspirin_sf2_file.js",
+      "sha256": "a5f166d1a9ec40e8418571ed5fc6a4b6db84a0c03610ed8bbd4c6e8b079fd431",
+      "bytes": 4397
+    },
+    {
+      "name": "gm_lead_2_sawtooth",
+      "file": "0810_JCLive_sf2_file.js",
+      "sha256": "6636f0ee42d8e3aedc21339c8220bf78ecf865211150d68f7bd48e1d176ad0e0",
+      "bytes": 10902
+    },
+    {
+      "name": "gm_lead_3_calliope",
+      "file": "0820_JCLive_sf2_file.js",
+      "sha256": "0817e09cc33c2238b0979bd4512103df408e7572e5282b16c8ece32efce70ad4",
+      "bytes": 16582
+    },
+    {
+      "name": "gm_lead_4_chiff",
+      "file": "0830_JCLive_sf2_file.js",
+      "sha256": "b7d692b7d4dda00e94bae1dd31a96f7bddc245131cacac7f8778bfb420ee0ec4",
+      "bytes": 272788
+    },
+    {
+      "name": "gm_lead_5_charang",
+      "file": "0840_JCLive_sf2_file.js",
+      "sha256": "d2b72aa2ccbefbc8c6adbd007d543cceb2676e27403371dc4b16a7aaf0df9c04",
+      "bytes": 17027
+    },
+    {
+      "name": "gm_lead_6_voice",
+      "file": "0850_JCLive_sf2_file.js",
+      "sha256": "23e057661dd8b2a0492c1051437bff0e2500031e0a6db04cc6f52306b242d7aa",
+      "bytes": 103561
+    },
+    {
+      "name": "gm_lead_7_fifths",
+      "file": "0860_JCLive_sf2_file.js",
+      "sha256": "79bda9898a21b81d5cf92de9b8612ad3225d20a60653a38560b2042dc51d736c",
+      "bytes": 67748
+    },
+    {
+      "name": "gm_lead_8_bass_lead",
+      "file": "0870_JCLive_sf2_file.js",
+      "sha256": "107767c1de91e50eb3d1b65dcc754c7f420323f58cc571dd8dd923601d37ac6e",
+      "bytes": 21444
+    },
+    {
+      "name": "gm_marimba",
+      "file": "0120_JCLive_sf2_file.js",
+      "sha256": "313e0dd8dc1310326a5483ace60378719aaedb976565ee802dc1bb5d539cff43",
+      "bytes": 119722
+    },
+    {
+      "name": "gm_melodic_tom",
+      "file": "1170_JCLive_sf2_file.js",
+      "sha256": "5456c0e7fa4023813af70ce4e87f2bb195c01b73398019ffc00eafaa7de676aa",
+      "bytes": 21653
+    },
+    {
+      "name": "gm_music_box",
+      "file": "0100_JCLive_sf2_file.js",
+      "sha256": "db2787d00aff9ea42236b5f99a576b4247deaf1c936d1d1fdd2db0dbf49981b8",
+      "bytes": 27681
+    },
+    {
+      "name": "gm_muted_trumpet",
+      "file": "0590_JCLive_sf2_file.js",
+      "sha256": "29f95633252832db97c6bd917335708f866a14648f1232d9c39422f0e7330c97",
+      "bytes": 70263
+    },
+    {
+      "name": "gm_oboe",
+      "file": "0680_JCLive_sf2_file.js",
+      "sha256": "7511cf792933cd3f7f96af22934b08d88e2dfd007233c3fe495ee2c4eb9b6a74",
+      "bytes": 111598
+    },
+    {
+      "name": "gm_ocarina",
+      "file": "0790_FluidR3_GM_sf2_file.js",
+      "sha256": "17a965373047d438b156e3cbd41e402f007a9e654203e0d2c977ab43a8789955",
+      "bytes": 111119
+    },
+    {
+      "name": "gm_orchestra_hit",
+      "file": "0550_Aspirin_sf2_file.js",
+      "sha256": "34d08ce0574257aabf489ac9d316e422b8ddaa48385d59fdc77bb851f0441977",
+      "bytes": 53552
+    },
+    {
+      "name": "gm_orchestral_harp",
+      "file": "0460_Aspirin_sf2_file.js",
+      "sha256": "04262f3e11bef5afd8f6b98258ebaf9bbbb1f2e7a0c8ee0caf482424b5aab0fc",
+      "bytes": 24117
+    },
+    {
+      "name": "gm_overdriven_guitar",
+      "file": "0290_FluidR3_GM_sf2_file.js",
+      "sha256": "31e4313d80838b4430255e021061d5f5a236322db50245ce63585bb4f5da03a6",
+      "bytes": 848062
+    },
+    {
+      "name": "gm_pad_bowed",
+      "file": "0920_JCLive_sf2_file.js",
+      "sha256": "0f2133e7bbc7cf2bfebb8c34770f5ce61d29107a13700b670cfffa537a8ede08",
+      "bytes": 115032
+    },
+    {
+      "name": "gm_pad_choir",
+      "file": "0910_FluidR3_GM_sf2_file.js",
+      "sha256": "8bb5970d08732ee8a3a9ca05e55e3c096d2f665f25730650c211ef2b7c1ada0a",
+      "bytes": 277521
+    },
+    {
+      "name": "gm_pad_halo",
+      "file": "0940_Chaos_sf2_file.js",
+      "sha256": "e244f912d4750969724ad04de349743be2816d5424258f4687dd7b5563f7fdca",
+      "bytes": 37695
+    },
+    {
+      "name": "gm_pad_metallic",
+      "file": "0930_Aspirin_sf2_file.js",
+      "sha256": "ed68bf21af976a3f73d4dad486ed0354b021c2aab61144fba1e322cf5d87b9ae",
+      "bytes": 211970
+    },
+    {
+      "name": "gm_pad_new_age",
+      "file": "0880_JCLive_sf2_file.js",
+      "sha256": "a4a0c9fc88f144054665bd9918cc9633989c83cdd48789876831085c9c000eff",
+      "bytes": 436153
+    },
+    {
+      "name": "gm_pad_poly",
+      "file": "0900_JCLive_sf2_file.js",
+      "sha256": "b731c24b691935b7f8a18e853e35df27f176ac7a02bfe0453abbff49132147f8",
+      "bytes": 93540
+    },
+    {
+      "name": "gm_pad_sweep",
+      "file": "0950_Aspirin_sf2_file.js",
+      "sha256": "255ca6920783b22341197bd71cd3e712a5dd5860dd6ed30e708cfed3ac0952d2",
+      "bytes": 211970
+    },
+    {
+      "name": "gm_pad_warm",
+      "file": "0890_JCLive_sf2_file.js",
+      "sha256": "e1abc04c4e2df3132ab1032c321b7e76057b2c59b25fdedc7a40047810b1cd19",
+      "bytes": 62735
+    },
+    {
+      "name": "gm_pan_flute",
+      "file": "0750_JCLive_sf2_file.js",
+      "sha256": "ef3286d25ad2564a9707100307cb5052b49819011a18d47c80773586e59ccab2",
+      "bytes": 91040
+    },
+    {
+      "name": "gm_percussive_organ",
+      "file": "0170_JCLive_sf2_file.js",
+      "sha256": "e1836d19a6116d5ea6ff2d15f1b4ca3ec8d1691b9493890475425209b77820fa",
+      "bytes": 32063
+    },
+    {
+      "name": "gm_piano",
+      "file": "0000_JCLive_sf2_file.js",
+      "sha256": "201b5e975e6dfd30937c2c153f226e2ca5e0c413b778b5a4a22318d24381765a",
+      "bytes": 861149
+    },
+    {
+      "name": "gm_piccolo",
+      "file": "0720_JCLive_sf2_file.js",
+      "sha256": "886f1ae1c198ad7835888d9c1b5348fd43b4e4eafb4d182b99afaad908bb68cb",
+      "bytes": 536230
+    },
+    {
+      "name": "gm_pizzicato_strings",
+      "file": "0450_Aspirin_sf2_file.js",
+      "sha256": "7018599b50add9a341a6e7bf948504d504ab530d5af071d73e258a8d25450167",
+      "bytes": 10443
+    },
+    {
+      "name": "gm_recorder",
+      "file": "0740_JCLive_sf2_file.js",
+      "sha256": "957554b1e355f88f8d5035ae850ff36a5b0798da2b87dbd072292e9442adc04c",
+      "bytes": 88791
+    },
+    {
+      "name": "gm_reed_organ",
+      "file": "0200_JCLive_sf2_file.js",
+      "sha256": "57d2222cf0b0d924f417b24b3e5b0e534039f014ef618539035917d6d8d621b7",
+      "bytes": 95665
+    },
+    {
+      "name": "gm_reverse_cymbal",
+      "file": "1190_JCLive_sf2_file.js",
+      "sha256": "71e590e27d2a266d2c50fe335cf4a9102d92cb72d92248166d64442b13532c4c",
+      "bytes": 26832
+    },
+    {
+      "name": "gm_rock_organ",
+      "file": "0180_JCLive_sf2_file.js",
+      "sha256": "720ccc2e83b340e1bb4ea91ef09aca5f7ebc879c23e3ea215a60a3864c9cf105",
+      "bytes": 935902
+    },
+    {
+      "name": "gm_seashore",
+      "file": "1220_JCLive_sf2_file.js",
+      "sha256": "ab41733fb49f8ec9009731500a7ffb6a7350473772f4e77bab002e2c3fc0b7ce",
+      "bytes": 71875
+    },
+    {
+      "name": "gm_shakuhachi",
+      "file": "0770_JCLive_sf2_file.js",
+      "sha256": "cb6da60c6342e93bd235d220a07ea4e357115bfedf433dd1133aa0f3ee2c0f48",
+      "bytes": 52286
+    },
+    {
+      "name": "gm_shamisen",
+      "file": "1060_JCLive_sf2_file.js",
+      "sha256": "e614cd1f2cfed13bc12901eebf62a28cb0683d1b24ac02c6f1dea5e7c6d31331",
+      "bytes": 22375
+    },
+    {
+      "name": "gm_shanai",
+      "file": "1110_Aspirin_sf2_file.js",
+      "sha256": "5f3318dd026d9a007daa9177ab6197ab772d8e0128ab3cc74642003bd8b73a26",
+      "bytes": 46274
+    },
+    {
+      "name": "gm_sitar",
+      "file": "1040_Aspirin_sf2_file.js",
+      "sha256": "fecfd1d44e0c8f00654901a4deda3f4863e42f6100ffc9dbb07a35486c48fc37",
+      "bytes": 60180
+    },
+    {
+      "name": "gm_slap_bass_1",
+      "file": "0360_Aspirin_sf2_file.js",
+      "sha256": "abd660928853ab4a6888bdd661626f58dafe24d1b6ce007d03ed3a6b280ae247",
+      "bytes": 19546
+    },
+    {
+      "name": "gm_slap_bass_2",
+      "file": "0370_Aspirin_sf2_file.js",
+      "sha256": "2f221329ac3a01d46b9f25e7c83b3f42abf6f3be0d3a4163d54e14f1c0ecb42f",
+      "bytes": 17395
+    },
+    {
+      "name": "gm_soprano_sax",
+      "file": "0640_JCLive_sf2_file.js",
+      "sha256": "00cdfefac62b844341ce43e1a00016d8d26e598b7f0bf2a9c5ccd49f5ec350fd",
+      "bytes": 239424
+    },
+    {
+      "name": "gm_steel_drums",
+      "file": "1140_FluidR3_GM_sf2_file.js",
+      "sha256": "8d92ddc86a7a7518b93dea55a2e291c4712e1ac333e27a7cf3db4e65a8d20f77",
+      "bytes": 35647
+    },
+    {
+      "name": "gm_string_ensemble_1",
+      "file": "0480_Aspirin_sf2_file.js",
+      "sha256": "f236044492ee88fae3e5b515b12777d5e464fcd0345f1f9d3e9c6b8b55d5c44d",
+      "bytes": 211970
+    },
+    {
+      "name": "gm_string_ensemble_2",
+      "file": "0490_Aspirin_sf2_file.js",
+      "sha256": "f5836a037427f6f04124320e962ffe533ad403954594eeff934f487cb2f890ad",
+      "bytes": 211970
+    },
+    {
+      "name": "gm_synth_bass_1",
+      "file": "0380_Chaos_sf2_file.js",
+      "sha256": "6f797497c9b4f2ba5be443f54e49b0fc1684019bca71ce26bf3082c64582f1ba",
+      "bytes": 32552
+    },
+    {
+      "name": "gm_synth_bass_2",
+      "file": "0390_Aspirin_sf2_file.js",
+      "sha256": "687e41565065eedf91c8bde33df47ce228005381e457220d8abef8df30a7c048",
+      "bytes": 23229
+    },
+    {
+      "name": "gm_synth_brass_1",
+      "file": "0620_Aspirin_sf2_file.js",
+      "sha256": "84f523d373731e57c89f0755a0ffc83ce1ed754c4713a3e892ae344135d6b7d1",
+      "bytes": 28194
+    },
+    {
+      "name": "gm_synth_brass_2",
+      "file": "0630_Aspirin_sf2_file.js",
+      "sha256": "5957844add5050895a9600519280b5cc6157fdec32d41f6bf560362022fbe742",
+      "bytes": 15519
+    },
+    {
+      "name": "gm_synth_choir",
+      "file": "0540_Aspirin_sf2_file.js",
+      "sha256": "674412676fb0d1ffa1e291c493b4ca46c5232ca619a530bd8e7416740554665c",
+      "bytes": 21225
+    },
+    {
+      "name": "gm_synth_drum",
+      "file": "1180_JCLive_sf2_file.js",
+      "sha256": "81293128739863dd2238915447d0ddefa063070a16a1d506788dfb86861e34d0",
+      "bytes": 2739
+    },
+    {
+      "name": "gm_synth_strings_1",
+      "file": "0500_Aspirin_sf2_file.js",
+      "sha256": "c547c1073e946f3ad2093f4e3ed3eb292820cbb60ff0a8e236d0ff63ca293b22",
+      "bytes": 43834
+    },
+    {
+      "name": "gm_synth_strings_2",
+      "file": "0510_Aspirin_sf2_file.js",
+      "sha256": "d3ec8b722a0ab6d4197d632c56e21851aee0c3aaf74ce2cb581e4b8aaaa10c83",
+      "bytes": 16671
+    },
+    {
+      "name": "gm_taiko_drum",
+      "file": "1160_JCLive_sf2_file.js",
+      "sha256": "efd7bf88946762aca7bc88c1ae0d3da46ceb752afd2c6967d3646b26efe4f075",
+      "bytes": 32666
+    },
+    {
+      "name": "gm_telephone",
+      "file": "1240_JCLive_sf2_file.js",
+      "sha256": "78ae9b7630abeaf173dcaf191b42f1355258122343cb4334a47eca707c71db2e",
+      "bytes": 4050
+    },
+    {
+      "name": "gm_tenor_sax",
+      "file": "0660_JCLive_sf2_file.js",
+      "sha256": "0e83e5ebc8661284ed0d5cf90ca8f691ee92808b8c2780e61866ad18ed630096",
+      "bytes": 121670
+    },
+    {
+      "name": "gm_timpani",
+      "file": "0470_Aspirin_sf2_file.js",
+      "sha256": "a24446fb385d17607feb20da25db755fe56245e7d6da3bf99d17e6f73c99cffb",
+      "bytes": 81809
+    },
+    {
+      "name": "gm_tinkle_bell",
+      "file": "1120_Aspirin_sf2_file.js",
+      "sha256": "c35fa1eb806716c536401ad39023acd860e9146e8418f02da1172035087f261d",
+      "bytes": 5936
+    },
+    {
+      "name": "gm_tremolo_strings",
+      "file": "0440_Aspirin_sf2_file.js",
+      "sha256": "a8286e814a62dda732554b002d00109f3696d507749dcefed2b0daca106503f8",
+      "bytes": 211970
+    },
+    {
+      "name": "gm_trombone",
+      "file": "0570_Aspirin_sf2_file.js",
+      "sha256": "bf2c649cee9ef0ea74581b20e8b8cb7fb67ff149cb8ab1d9af3dfc7f3f0fd737",
+      "bytes": 101565
+    },
+    {
+      "name": "gm_trumpet",
+      "file": "0560_FluidR3_GM_sf2_file.js",
+      "sha256": "907ec49e3b3596484fc4a9fc8e521389d5634d64425e7ebab34b6abe2ed4eb97",
+      "bytes": 71558
+    },
+    {
+      "name": "gm_tuba",
+      "file": "0580_FluidR3_GM_sf2_file.js",
+      "sha256": "ef842246cd18101a3daa725ad926e755caf8329bbb4915e158be207616db3948",
+      "bytes": 74668
+    },
+    {
+      "name": "gm_tubular_bells",
+      "file": "0140_JCLive_sf2_file.js",
+      "sha256": "5ff3cb18b7db40325edf1deb705ceaff190b1b4441464d36dc5b8fe4f2d03329",
+      "bytes": 181583
+    },
+    {
+      "name": "gm_vibraphone",
+      "file": "0110_JCLive_sf2_file.js",
+      "sha256": "1af2189ac227b5a261ebc4984d4c7085d75b19a5b3a821338f001d3d7729eaf1",
+      "bytes": 37672
+    },
+    {
+      "name": "gm_viola",
+      "file": "0410_Aspirin_sf2_file.js",
+      "sha256": "e9de1edab6d0e14128a58b280666c5febf34c60642e56f3b658810d9c08a3b95",
+      "bytes": 96947
+    },
+    {
+      "name": "gm_violin",
+      "file": "0400_Aspirin_sf2_file.js",
+      "sha256": "57cbaca1a09aebc27743bbeec31642e7e0e6f8c2c65e6d47cf1288652e13ba0b",
+      "bytes": 164652
+    },
+    {
+      "name": "gm_voice_oohs",
+      "file": "0530_Aspirin_sf2_file.js",
+      "sha256": "8c9d739764df83d487024471fc08c9b0b95a30ea2ab054843915e359fd69fb53",
+      "bytes": 20622
+    },
+    {
+      "name": "gm_whistle",
+      "file": "0780_FluidR3_GM_sf2_file.js",
+      "sha256": "88b4e605a19dbebb45810274b78128f27d2b9b7989da7cb18dd264bf8fae1751",
+      "bytes": 10068
+    },
+    {
+      "name": "gm_woodblock",
+      "file": "1150_JCLive_sf2_file.js",
+      "sha256": "d23242d83933e6cfd522bf92c20212cd2dbb2e9eecef06d08067067bc1d8a786",
+      "bytes": 12855
+    },
+    {
+      "name": "gm_xylophone",
+      "file": "0130_JCLive_sf2_file.js",
+      "sha256": "2761b3bd85e9d5a6e21c0cca5bcafb102a0ef1cabd873692a2691b97eed58bec",
+      "bytes": 24501
+    }
+  ],
+  "license": {
+    "file": "LICENSE",
+    "sha256": "8fbf2c4fdb4aa665343f1ab08a1c4243e7c33a1c992ea746b27519fcedfa1d8f",
+    "bytes": 1067
+  }
+}

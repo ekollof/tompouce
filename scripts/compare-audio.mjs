@@ -149,6 +149,9 @@ try {
     { name: 'saw-440', code: `note(69).s('sawtooth').gain(.5)`, sound: 'sawtooth', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'square-440', code: `note(69).s('square').gain(.5)`, sound: 'square', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'triangle-440', code: `note(69).s('triangle').gain(.5)`, sound: 'triangle', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'gm-epiano1', code: `note(60).s('gm_epiano1').gain(.5).clip(.5)`, sound: 'gm_epiano1', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'gm-acoustic-bass', code: `note(36).s('gm_acoustic_bass').gain(.5).clip(.5)`, sound: 'gm_acoustic_bass', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'gm-violin', code: `note(69).s('gm_violin').gain(.5).clip(.5)`, sound: 'gm_violin', cycles: 1, cps: .5, window: 2, correlation: .99 },
     // Different reverb algorithms and randomized browser impulses: record
     // evidence, without inventing a universal acceptance threshold.
     { name: 'arpoon-opening', code: arpoon.code, sound: 'piano', cycles: 4, cps: .5, window: .6, correlation: null },

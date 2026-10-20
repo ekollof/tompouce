@@ -543,6 +543,7 @@ the required attribution for the CC-BY / CC-BY-SA banks.
 | `vsco2-ce` | Chamber orchestra (SFZ) | CC0 (`LICENSE` in tree) | Recorded by Sam Gossner & Simon Dalzell, <https://github.com/sgossner/VSCO-2-CE> |
 | `salamander-grand` | Yamaha C5 grand (SFZ) | CC-BY 3.0 (`LICENSE` in tree) | Alexander Holm |
 | `fluidr3` | General MIDI SoundFont (SF2 + SF3) | MIT (`original-files/COPYING` in tree) | © 2000-2002, 2008 Frank Wen |
+| `gm-webaudiofont` | Pinned per-instrument packs behind every `gm_*` sound (same files the Strudel web REPL plays; fetched on first play when not preinstalled) | MIT (`licenses/webaudiofontdata/LICENSE` in tree) | Srgy Surkv / Felix Roos, <https://github.com/surikov/webaudiofontdata> |
 
 Notes:
 - CC0 / MIT / public-domain banks need no permission and are credited above anyway.

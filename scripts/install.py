@@ -301,6 +301,83 @@ class BankInstaller:
             self.save()
 
 
+def install_gm_webaudiofont(banks_root, jobs=8):
+    """Prefetch the pinned gm_* webaudiofont packs so gm sounds play offline
+    (about 17 MiB). Without these the engine fetches packs on first play and
+    falls back to the local SoundFont offline."""
+    banks_root = Path(banks_root)
+    path = SOURCE / 'scripts/gm-webaudiofont.lock.json'
+    if path.is_symlink():
+        raise ValueError('linked gm pack lock refused')
+    gm_lock = json.loads(path.read_text())
+    if (not isinstance(gm_lock, dict) or gm_lock.get('version') != 1 or
+            not isinstance(gm_lock.get('source'), dict) or not isinstance(gm_lock.get('packs'), list)):
+        raise ValueError('invalid gm pack lock file')
+    source = gm_lock['source']
+    for key in ('repo', 'branch', 'commit', 'license'):
+        if not isinstance(source.get(key), str) or not source[key]:
+            raise ValueError('invalid gm pack lock source')
+    if not re.fullmatch(r'[0-9a-f]{40}', source['commit']):
+        raise ValueError('invalid gm pack lock commit')
+    if not gm_lock['packs'] or len(gm_lock['packs']) > 256:
+        raise ValueError('invalid gm pack list')
+    base = f"https://raw.githubusercontent.com/{source['repo']}/{source['commit']}/sound"
+    installer = BankInstaller(banks_root, jobs)
+    total = 0
+    for pack in gm_lock['packs']:
+        if (not isinstance(pack, dict) or not re.fullmatch(r'gm_[a-z0-9_]+', pack.get('name', '')) or
+                not re.fullmatch(r'[A-Za-z0-9_-]+_sf2_file\.js', pack.get('file', '')) or
+                not re.fullmatch(r'[0-9a-f]{64}', pack.get('sha256', '')) or
+                not isinstance(pack.get('bytes'), int) or not 1 <= pack['bytes'] <= 2 * 1024 * 1024):
+            raise ValueError('invalid gm pack lock entry')
+        total += pack['bytes']
+    if total > 128 * 1024 * 1024:
+        raise ValueError('gm pack lock too large')
+    print(f'Installing gm webaudiofont packs ({len(gm_lock["packs"])} packs)…', flush=True)
+    tasks = {}
+    for pack in gm_lock['packs']:
+        relative = f"gm-webaudiofont/{pack['file']}"
+        url = f"{base}/{quote(pack['file'], safe='/')}"
+        local = banks_root / relative
+        record = installer.receipt.get(relative)
+        if (local.is_file() and not local.is_symlink() and isinstance(record, dict) and
+                record.get('url') == url and record.get('sha256') == digest(local)):
+            continue
+        tasks[relative] = url
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {pool.submit(fetch, url, 2 * 1024 * 1024): (relative, url)
+                   for relative, url in tasks.items()}
+        try:
+            for count, future in enumerate(as_completed(futures), 1):
+                relative, url = futures[future]
+                data = future.result()
+                path, record = installer.download(relative, url, False, data)
+                if record['sha256'] != next(p['sha256'] for p in gm_lock['packs']
+                                            if f"gm-webaudiofont/{p['file']}" == relative):
+                    local = banks_root / relative
+                    local.unlink(missing_ok=True)
+                    raise ValueError(f'pinned gm pack checksum mismatch: {relative}')
+                installer.receipt[path] = record
+                if count % 25 == 0 or count == len(tasks):
+                    installer.save()
+                    print(f'  {count}/{len(tasks)} gm packs verified', flush=True)
+        finally:
+            for future in futures:
+                future.cancel()
+            installer.save()
+    credit = gm_lock.get('license', {})
+    if (not isinstance(credit, dict) or not re.fullmatch(r'[A-Za-z0-9_.-]+', credit.get('file', '')) or
+            not re.fullmatch(r'[0-9a-f]{64}', credit.get('sha256', ''))):
+        raise ValueError('invalid gm pack license entry')
+    license_url = f"https://raw.githubusercontent.com/{source['repo']}/{source['commit']}/{quote(credit['file'], safe='/')}"
+    path, record = installer.download(f"licenses/webaudiofontdata/{credit['file']}", license_url)
+    if record['sha256'] != credit['sha256']:
+        (banks_root / path).unlink(missing_ok=True)
+        raise ValueError('pinned gm pack license checksum mismatch')
+    installer.receipt[path] = record
+    installer.save()
+
+
 def distro():
     release = platform.freedesktop_os_release()
     names = (release.get('ID', '') + ' ' + release.get('ID_LIKE', '')).split()
@@ -393,7 +470,7 @@ def main(argv=None):
         parser.error('unsafe Csound prefix')
     lock = json.loads((SOURCE / 'scripts/banks.lock.json').read_text())
     print(f'Install location: {application}\nCommand: {prefix / "bin/tompouce"}', flush=True)
-    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all (~3 GiB)' if args.all_banks else 'core drums, piano, drum machines and AKWF wavetables (~456 MiB)'))
+    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all (~3 GiB)' if args.all_banks else 'core drums, piano, drum machines, AKWF wavetables and gm webaudiofont packs (~473 MiB)'))
     if family:
         print('System packages: ' + ' '.join(dependency_command(family, release, not args.no_browser)))
     if args.dry_run:
@@ -401,6 +478,8 @@ def main(argv=None):
         for item in lock['catalogs']:
             if not args.skip_banks and (item['profile'] == 'core' or args.all_banks):
                 print('  bank: ' + item['name'])
+        if not args.skip_banks:
+            print('  bank: gm webaudiofont packs')
         return 0
     launcher = prefix / 'bin/tompouce'
     if launcher.exists() and not launcher.is_symlink():
@@ -467,6 +546,7 @@ def main(argv=None):
                 if available < minimum:
                     raise ValueError('not enough free disk space for the selected sound banks')
                 BankInstaller(application / 'assets/banks',args.jobs).install(lock,args.all_banks)
+                install_gm_webaudiofont(application / 'assets/banks',args.jobs)
             check_home = directory(build / 'check-home')
             check_env = dict(environment, HOME=str(check_home), XDG_CONFIG_HOME=str(check_home), XDG_CACHE_HOME=str(check_home),
                              TOMPOUCE_BANKS=str(application / 'assets/banks'), https_proxy='http://127.0.0.1:9',

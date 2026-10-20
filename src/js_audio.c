@@ -368,7 +368,12 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
     ev->smp = websamp_acquire(token,midi);
     /* Explicit sample maps must not silently change instrument on failure. */
     if (mapped && ev->smp < 0) return 0;
-    if (!mapped && ev->smp<0 && !*bank && gm_synth_program(sound)>=0) return gm_synth_prepare(ev);
+    if (!mapped && ev->smp<0 && !*bank && gm_synth_program(sound)>=0) {
+        /* WebAudioFont pack path: on success fall through to the shared sample
+           epilogue below so ADSR defaults, gating and stretch match plain
+           pitched samples; otherwise keep the FluidSynth fallback. */
+        if (!gm_synth_prepare_sample(ev,value,midi)) return gm_synth_prepare(ev);
+    }
     if (ev->smp < 0 && *bank) {
         char dir[1024];
         if (bank_find_dir(bank,dir,sizeof(dir))) {
@@ -391,8 +396,10 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
     if (ev->smp >= 0) {
         if (ev->smp_speed == 0) return 0;
         int wavetable=!strncmp(sound,"wt_",3);
+        /* gm_* packs are always note-gated like the web's soundfont trigger,
+           which stops every voice at note end. */
         ev->smp_gate = wavetable || cJSON_HasObjectItem(value,"clip") || cJSON_HasObjectItem(value,"loop") ||
-            cJSON_HasObjectItem(value,"release");
+            cJSON_HasObjectItem(value,"release") || gm_synth_program(sound) >= 0;
         if (midi < 0) ev->freq = 0;
         const char *names[4] = {"attack","decay","sustain","release"};
         const double defaults[4] = {.001,.001,1,.01};

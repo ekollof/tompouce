@@ -402,7 +402,7 @@ Standing non-goals unless explicitly re-scoped: full-song waveform parity,
 complete decoder/synthesis equivalence, remote-download deadline behavior,
 Hydra/browser input-device APIs and arbitrary npm module resolution.
 
-The maintained audio matrix has 40 passing gates and two diagnostic cases (42
+The maintained audio matrix has 43 passing gates and two diagnostic cases (45
 cases total), including eight independently
 decoded downward-stretched MP3 piano cases, two shared-PCM stretch cases, four
 fractional sample-onset cases, four shared delay-automation cases and two

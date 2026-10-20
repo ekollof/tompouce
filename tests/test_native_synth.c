@@ -39,7 +39,10 @@ static AudioEvent prepare_gm(const char *code) {
     cJSON *haps=javascript_query_cps(program,0,1,.5); assert(cJSON_GetArraySize(haps)==1);
     const cJSON *hap=cJSON_GetArrayItem(haps,0), *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
     AudioEvent event; assert(js_audio_event(hap,0,2,&event) && js_audio_resolve_sample(&event,value));
-    assert(event.stretch_buffer && !event.native_synth && !event.is_drum);
+    /* Online the webaudiofont pack path resolves to a pitched sample; offline
+       the FluidSynth fallback resolves to prepared PCM. Either is valid. */
+    assert((event.smp >= 0 || event.stretch_buffer) && !event.native_synth && !event.is_drum);
+    if (event.smp >= 0) assert(event.smp_gate);
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); return event;
 }
 
@@ -82,16 +85,29 @@ static void test_gm(void) {
     websamp_load_code("");
     AudioEvent flute=prepare_gm("note(60.5).s('gm_flute').release(.05)");
     AudioEvent again=prepare_gm("note(60.5).s('gm_flute').release(.05).gain(.2).lpf(1200).pan(.8)");
-    assert(flute.stretch_buffer==again.stretch_buffer && stretch_age_offset(flute.stretch_buffer)==0);
-    const float *pcm=stretch_pcm(flute.stretch_buffer); double energy=0;
-    for (int i=0;i<stretch_frames(flute.stretch_buffer)*2;i++) { assert(isfinite(pcm[i])); energy+=pcm[i]*pcm[i]; }
-    assert(energy>1 && stretch_frames(flute.stretch_buffer)==(int)ceil(2.05*SR));
-    render(&again);
+    if (flute.smp >= 0 && again.smp >= 0) {
+        /* Pack path: gain/lpf/pan select the same zone sample. */
+        assert(flute.smp == again.smp && flute.stretch_buffer == NULL && again.stretch_buffer == NULL);
+        float *pcm; int frames, channels;
+        smp_get_stereo(flute.smp,&pcm,&frames,&channels);
+        assert(pcm && frames > 0 && (channels == 1 || channels == 2));
+        render(&again);
+    } else {
+        assert(flute.stretch_buffer && again.stretch_buffer);
+        assert(flute.stretch_buffer==again.stretch_buffer && stretch_age_offset(flute.stretch_buffer)==0);
+        const float *pcm=stretch_pcm(flute.stretch_buffer); double energy=0;
+        for (int i=0;i<stretch_frames(flute.stretch_buffer)*2;i++) { assert(isfinite(pcm[i])); energy+=pcm[i]*pcm[i]; }
+        assert(energy>1 && stretch_frames(flute.stretch_buffer)==(int)ceil(2.05*SR));
+        render(&again);
+    }
     AudioEvent piano=prepare_gm("note(60.5).s('gm_piano').release(.05)");
-    assert(piano.stretch_buffer!=flute.stretch_buffer);
-    const float *other=stretch_pcm(piano.stretch_buffer); double difference=0;
-    for (int i=0;i<44100;i++) difference+=fabs(pcm[i]-other[i]);
-    assert(difference>1);
+    if (piano.smp >= 0 && flute.smp >= 0) assert(piano.smp != flute.smp);
+    else {
+        assert(piano.stretch_buffer!=flute.stretch_buffer);
+        const float *other=stretch_pcm(piano.stretch_buffer); double difference=0;
+        for (int i=0;i<44100;i++) difference+=fabs(stretch_pcm(flute.stretch_buffer)[i]-other[i]);
+        assert(difference>1);
+    }
     stretch_release(piano.stretch_buffer); stretch_release(again.stretch_buffer); stretch_release(flute.stretch_buffer);
     /* Exercise every registered program and cache eviction without a device. */
     for (int i=0;i<gm_synth_count();i++) {

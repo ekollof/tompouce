@@ -21,5 +21,10 @@ project license does not replace their notices. See:
 - web/dist/licenses.txt for companion editor dependency notices;
 - README.md, "Sample banks", and the installed banks' licenses/ directory
   for sample attribution and license terms.
+- gm_* sounds: at play time Tompouce fetches the same MIT-licensed
+  WebAudioFont instrument packs the Strudel web REPL uses
+  (https://github.com/surikov/webaudiofontdata, via the
+  felixroos/webaudiofontdata mirror). The packs are runtime-fetched, never
+  bundled; without network access gm_* falls back to the local SoundFont.
 
 Project source: https://github.com/ekollof/tompouce

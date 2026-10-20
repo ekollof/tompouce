@@ -18,13 +18,21 @@ Array indices follow manifest order. `.n()` selects variants; pitched maps choos
 
 Built-in sources include sine, triangle, sawtooth, square, supersaw and noise, plus native ZzFX, bytebeat and a bounded Kabelsalat host. Basic synths need no sample downloads.
 
-With optional FluidSynth and a GM soundfont, the synth category includes 125 `gm_` names:
+The synth category includes 125 `gm_` names (General MIDI, no FluidSynth required):
 
 ```js
 note("c4 e4 g4").s('gm_flute').gain(0.4)
 ```
 
-GM playback is local; no external MIDI connection is required. The installer includes FluidR3 GM. `TOMPOUCE_SOUNDFONT` selects another supported SF2/SF3 file at startup. Native GM provides one soundfont voice per name; the browser's additional `.n()` soundfont variants are not replicated.
+`gm_` names play the same per-instrument sample packs as the Strudel web REPL
+(MIT-licensed WebAudioFont data, preinstalled by the installer under
+`assets/banks/gm-webaudiofont/`; fetched on first play when missing).
+GM playback is local; no external MIDI connection is required. Without the
+packs and without network access, `gm_` sounds fall back to FluidSynth when
+available: the installer includes FluidR3 GM, and `TOMPOUCE_SOUNDFONT`
+selects another supported SF2/SF3 file at startup. Native GM plays the web's
+default (first) soundfont variant per name; the browser's additional `.n()`
+soundfont variants are not replicated.
 
 ## Wavetables
 

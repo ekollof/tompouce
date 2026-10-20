@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound
-        audio audio_performance prep_profile prep_deadlines prep_cpu room duck_onset terminal_graphics audio_output native_synth live_sliders midi mcp_security websamp_security)
+        audio audio_performance prep_profile prep_deadlines prep_cpu room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
@@ -130,7 +130,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance room duck_onset native_synth editor terminal_render live_sliders csound midi mcp_security websamp_security)
+foreach(name audio audio_performance room duck_onset native_synth editor terminal_render live_sliders csound midi gm_webaudiofont mcp_security websamp_security)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
         AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security")
@@ -189,7 +189,8 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_live_sliders_sanitize>
     COMMAND $<TARGET_FILE:test_csound_sanitize>
     COMMAND $<TARGET_FILE:test_midi_sanitize>
-    DEPENDS test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize
+    COMMAND $<TARGET_FILE:test_gm_webaudiofont_sanitize>
+    DEPENDS test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

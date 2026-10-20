@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
         if (getenv("TOMPOUCE_RENDER_DEBUG") && cJSON_IsNumber(begin))
             fprintf(stderr,"render hap onset=%.6f target=%.6f duration=%.6f token=%s\n",
                 begin->valuedouble,begin->valuedouble/cps->valuedouble,event.duration,event.token);
-        if (!js_audio_resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0 && !event.native_synth)) {
+        if (!js_audio_resolve_sample(&event,value) || (oscillator(text_control(value,"s")) < 0 && event.smp < 0 && !event.native_synth && !event.stretch_buffer)) {
             fprintf(stderr,"sample resolution failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
         }
         events[used++] = event;

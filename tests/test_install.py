@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import tarfile
@@ -168,6 +169,50 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue((Path(root) / 'kit/a name.wav').is_file())
             self.assertEqual(json.loads((Path(root) / 'kit/strudel.json').read_text()), manifest)
             self.assertEqual((Path(root) / 'licenses/kit/LICENSE').read_text(), 'license text')
+
+    def test_gm_webaudiofont_lock_matches_native_table(self):
+        """The pinned installer lock and the native first-font table agree (no network)."""
+        source = Path(__file__).resolve().parents[1]
+        gm_lock = json.loads((source / 'scripts/gm-webaudiofont.lock.json').read_text())
+        self.assertEqual(gm_lock.get('version'), 1)
+        self.assertTrue(re.fullmatch(r'[0-9a-f]{40}', gm_lock['source']['commit']))
+        files = {}
+        for pack in gm_lock['packs']:
+            self.assertTrue(re.fullmatch(r'gm_[a-z0-9_]+', pack['name']))
+            self.assertTrue(re.fullmatch(r'[A-Za-z0-9_-]+_sf2_file\.js', pack['file']))
+            self.assertTrue(re.fullmatch(r'[0-9a-f]{64}', pack['sha256']))
+            files[pack['name']] = pack['file']
+        native = dict(re.findall(r'\{"(gm_[a-z0-9_]+)","([A-Za-z0-9_-]+)"\}',
+                                 (source / 'src/gm_synth.c').read_text()))
+        self.assertEqual({name: font + '.js' for name, font in native.items()}, files)
+
+    def test_gm_webaudiofont_install_verifies_pins(self):
+        pack, license_text = b'pack-bytes', b'license-bytes'
+        def fetched(url, maximum=0):
+            if url.endswith('/LICENSE'):
+                return license_text
+            return pack
+        with tempfile.TemporaryDirectory() as root, patch.object(installer, 'fetch', side_effect=fetched):
+            with patch.object(installer, 'SOURCE', Path(root)):
+                lock_path = Path(root) / 'scripts'
+                lock_path.mkdir()
+                (lock_path / 'gm-webaudiofont.lock.json').write_text(json.dumps({
+                    'version': 1,
+                    'source': {'repo': 'owner/fonts', 'branch': 'main', 'commit': 'b' * 40, 'license': 'MIT'},
+                    'packs': [{'name': 'gm_epiano1', 'file': '0040_X_sf2_file.js',
+                               'sha256': hashlib.sha256(pack).hexdigest(), 'bytes': len(pack)}],
+                    'license': {'file': 'LICENSE', 'sha256': hashlib.sha256(license_text).hexdigest()}}))
+                installer.install_gm_webaudiofont(Path(root) / 'banks', 2)
+                self.assertEqual((Path(root) / 'banks/gm-webaudiofont/0040_X_sf2_file.js').read_bytes(), pack)
+                self.assertEqual((Path(root) / 'banks/licenses/webaudiofontdata/LICENSE').read_bytes(), license_text)
+                receipt = json.loads((Path(root) / 'banks/.install-receipt.json').read_text())
+                self.assertIn('gm-webaudiofont/0040_X_sf2_file.js', receipt)
+                # A corrupted pack fails closed against the pinned checksum.
+                (Path(root) / 'banks/gm-webaudiofont/0040_X_sf2_file.js').unlink()
+                with patch.object(installer, 'fetch', return_value=b'tampered'):
+                    with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                        installer.install_gm_webaudiofont(Path(root) / 'banks', 2)
+                self.assertFalse((Path(root) / 'banks/gm-webaudiofont/0040_X_sf2_file.js').exists())
 
 
 if __name__ == '__main__':

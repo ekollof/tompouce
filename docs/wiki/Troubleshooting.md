@@ -27,7 +27,7 @@ For a semitone shift after scale resolution, use `.transpose(7)` instead.
 
 ## Missing sounds
 
-F6 lists the loaded catalog. Banks skipped during installation are unavailable offline until installed. `gm_` sounds require FluidSynth and a usable GM soundfont. `wt_` banks require their installed AKWF catalog/audio; procedural `wt:` oscillators are separate.
+F6 lists the loaded catalog. Banks skipped during installation are unavailable offline until installed. `gm_` sounds use the installed `gm-webaudiofont` packs (or fetch them on first play); only when packs are unreachable do they need FluidSynth and a usable GM soundfont. `wt_` banks require their installed AKWF catalog/audio; procedural `wt:` oscillators are separate.
 
 Explicit `samples()` maps override defaults; a failed explicit map is not silently replaced with another instrument. Review the console, installed bank paths and [Sounds and samples](Sounds-and-Samples.md).
 

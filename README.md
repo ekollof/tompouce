@@ -209,6 +209,15 @@ accept 44.1 kHz is skipped. F4 and MCP `music_health` show the selected backend;
 the console records startup failures. With no usable output, editing and MCP
 remain available with `stream=down backend=none`. Selection occurs at startup.
 
+Convolution automatically selects a spectrum kernel in the order AVX2, AVX,
+SSE2, then portable C, according to CPU/OS support. The rest of the engine retains
+its normal build settings. `TOMPOUCE_SIMD=c` forces the portable path;
+`TOMPOUCE_SIMD=sse2`, `avx` or `avx2` requests that specific kernel with safe C
+fallback when unavailable. `TOMPOUCE_SIMD=auto` is the default.
+Selection happens before rendering, never
+through feature detection in the audio callback. See the
+[benchmark and verification notes](docs/simd-benchmark.md).
+
 `cmake --build build --target test-audio-backends` checks fallback and cleanup with temporary null ALSA
 devices and disposable silent server streams. Native daemon checks skip when
 their sockets are absent; `TOMPOUCE_TEST_JACK=1 cmake --build build --target test-audio-backends` also

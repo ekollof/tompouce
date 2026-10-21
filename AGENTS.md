@@ -52,6 +52,7 @@ Useful focused checks:
 
 - `cmake --build build --target test-tui`
 - `cmake --build build --target test-sanitize`
+- `cmake --build build --target test-simd-sanitize`
 - `cmake --build build --target test-terminal-sanitize`
 - `cmake --build build --target test-security`
 - `cmake --build build --target test-security-sanitize`
@@ -92,6 +93,10 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   JavaScript, perform FFT preparation or make blocking syscalls. Prepare immutable
   samples, stretch PCM, synth programs and IR kernels outside it; preserve their
   queued/voice references and bounded caches. Keep existing lock windows short.
+  Convolution selects its CPU kernel before rendering; retain the portable C
+  fallback, per-kernel target flags and `TOMPOUCE_SIMD` verification override.
+  Preserve floating-point operation order and test forced C/SSE2/AVX/AVX2 PCM
+  equivalence; lower-ISA kernels must not emit newer instructions.
 - Accepted notes, shared-effect tails and duck callbacks survive live slider,
   tempo and program changes. Duck callbacks use a bounded independent timeline;
   control-only events reserve no voice and emit no MIDI or note history. Preserve

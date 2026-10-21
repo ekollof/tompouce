@@ -9,6 +9,22 @@
 
 Startup tries PipeWire, PulseAudio, PortAudio JACK, then PortAudio ALSA. Failed attempts clean up before fallback. With no usable backend, editing and MCP remain available; external MIDI/OSC may still schedule. Runtime disconnects report an inactive backend rather than silently restarting playback.
 
+## CPU optimizations
+
+The convolution engine automatically chooses AVX2, AVX, SSE2 or portable C at
+startup. An older CPU does not need AVX2 to run Tompouce. To compare against the
+portable implementation, start a new session with:
+
+```sh
+TOMPOUCE_SIMD=c tompouce
+```
+
+`TOMPOUCE_SIMD=sse2`, `avx` and `avx2` request a specific kernel; unavailable
+requests fall back to C with a console diagnostic. Invalid values also use C.
+Changing the variable does not affect an already running process. When reporting
+an audio regression, include the CPU model and whether forcing C changes it.
+See [Development](Development.md#cpu-dispatch-and-benchmarks) for verification.
+
 ## My edit has no effect
 
 Music changes require F5; adding a supported visual call can activate immediately. Failed evaluation retains the previous playable pattern. Check the console and F4's pending-evaluation state. If you installed a new executable, close/reopen Tompouce normally: a running process keeps its previous executable.

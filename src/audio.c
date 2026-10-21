@@ -15,6 +15,7 @@
 #include "scheduler.h"
 #include "prep_pool.h"
 #include "prep_profile.h"
+#include "convolution_mix.h"
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the Notcurses
@@ -1855,6 +1856,7 @@ static void render_output(float *output, unsigned long frames) {
 }
 
 void audio_init(void) {
+    convolution_simd_init();
     wt_init();
 #ifdef __linux__
     snd_lib_error_set_handler(alsa_silent);

@@ -160,11 +160,14 @@ add_library(tompouce_core STATIC
     src/common.c src/audio.c src/slider.c
     src/track.c src/scheduler.c src/ai.c src/tui.c src/mcp.c src/wavetable.c
     src/banks.c src/sampler.c src/websamp.c src/midi.c src/songfile.c src/javascript.c
-    src/js_audio.c src/dsp.c src/csound_host.c src/convolution.c src/companion.c
+    src/js_audio.c src/dsp.c src/csound_host.c src/convolution.c src/convolution_mix.c src/companion.c
     src/sounds.c src/sound_store.c src/terminal_graphics.c src/visual.c src/visual_render.c
     src/audio_output.c src/native_synth.c src/osc_output.c src/reverb_impulse.c src/duck_onset.c
     src/stretch.c src/gm_synth.c src/prep_profile.c src/prep_pool.c src/prep_cpu.c)
 add_dependencies(tompouce_core embedded_resources)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(src/convolution_mix.c PROPERTIES COMPILE_OPTIONS "-O3;-ffp-contract=off")
+endif()
 target_link_libraries(tompouce_core PUBLIC tompouce_options quickjs tree_sitter_javascript)
 add_executable(tompouce src/main.c)
 target_link_libraries(tompouce PRIVATE tompouce_core)

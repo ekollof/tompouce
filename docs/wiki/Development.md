@@ -21,11 +21,42 @@ Focused commands:
 ctest --test-dir build -R javascript --output-on-failure
 ctest --test-dir build -R examples --output-on-failure
 cmake --build build --target test-sanitize
+cmake --build build --target test-simd-sanitize
 cmake --build build --target test-terminal-sanitize
 cmake --build build --target test-audio-backends
 ```
 
 CTest covers native behavior, 31 published examples/1,207 stored reference events, Csound, installer/import/companion checks and terminal PTYs. Device tests use owned silent streams rather than changing a live composition. See [audio comparisons](https://github.com/ekollof/tompouce/blob/master/docs/audio-comparison.md) for maintained regression gates and remaining diagnostic differences.
+
+## CPU dispatch and benchmarks
+
+Convolution spectrum accumulation selects AVX2, AVX, SSE2, then portable C
+according to CPU/OS support. Selection happens once before rendering; the audio
+callback does no feature detection. Only the kernel module uses targeted
+optimization, without global AVX requirements, fused operations or relaxed math.
+
+`TOMPOUCE_SIMD=auto` is the default. Set `c`, `sse2`, `avx` or `avx2` to test a
+specific implementation; unsupported explicit requests fall back to C. Exact
+kernel/streaming PCM comparisons, simulated older feature sets and a
+SIMD-disabled build cover fallback behavior. `test-simd-sanitize` forces all
+four implementations under ASan/UBSan (unavailable ones safely use C).
+
+For device-free measurements:
+
+```sh
+cmake --build build --target bench_simd --parallel 4
+TOMPOUCE_SIMD=c ./build/tests/bench_simd --convolution
+TOMPOUCE_SIMD=sse2 ./build/tests/bench_simd --convolution
+TOMPOUCE_SIMD=avx ./build/tests/bench_simd --convolution
+TOMPOUCE_SIMD=avx2 ./build/tests/bench_simd --convolution
+```
+
+Run serially and compare repeated runs. AVX and AVX2 were roughly 1.9x faster
+than C for one long-convolution workload on a Ryzen 5800X3D; SSE2 performed like
+the compiler-vectorized C path. This is not an engine-wide speedup or a latency
+guarantee for other CPUs. See the [benchmark report](https://github.com/ekollof/tompouce/blob/master/docs/simd-benchmark.md)
+for workloads, PCM validation and backend checks. MMX has no suitable
+floating-point implementation for this kernel.
 
 ## Code map
 
@@ -35,6 +66,7 @@ CTest covers native behavior, 31 published examples/1,207 stored reference event
 | Pattern runtime | `js/runtime.mjs`, `src/javascript.c`, `src/js_audio.c` |
 | Scheduling | `src/track.c`, `src/scheduler.c` |
 | Native audio | `src/audio.c`, `src/dsp.c`, `src/audio_output.c` |
+| Convolution and CPU dispatch | `src/convolution.c`, `src/convolution_mix.c` |
 | Sources | `src/sampler.c`, `src/websamp.c`, `src/native_synth.c`, `src/gm_synth.c` |
 | Browsing/imports | `src/sounds.c`, `src/sound_store.c`, `scripts/sound_import.py` |
 | Visuals | `src/visual.c`, `src/visual_render.c`, `src/terminal_graphics.c` |

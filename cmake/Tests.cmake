@@ -16,6 +16,30 @@ endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 
+foreach(variant simd simd_portable simd_sanitize)
+    add_executable(test_convolution_${variant} EXCLUDE_FROM_ALL tests/test_convolution_simd.c)
+    target_compile_options(test_convolution_${variant} PRIVATE -UNDEBUG -O3 -ffp-contract=off)
+    target_link_libraries(test_convolution_${variant} PRIVATE tompouce_core)
+    set_target_properties(test_convolution_${variant} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+endforeach()
+set_target_properties(test_convolution_simd test_convolution_simd_portable PROPERTIES EXCLUDE_FROM_ALL FALSE)
+target_compile_definitions(test_convolution_simd_portable PRIVATE TOMPOUCE_DISABLE_SIMD)
+target_compile_options(test_convolution_simd_sanitize PRIVATE -g -fsanitize=address,undefined -fno-omit-frame-pointer)
+target_link_options(test_convolution_simd_sanitize PRIVATE -fsanitize=address,undefined)
+foreach(mode auto c sse2 avx avx2 invalid)
+    add_test(NAME convolution_${mode} COMMAND test_convolution_simd)
+    set_tests_properties(convolution_${mode} PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=${mode}" TIMEOUT 120)
+endforeach()
+add_test(NAME convolution_portable COMMAND test_convolution_simd_portable)
+set_tests_properties(convolution_portable PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=avx2" TIMEOUT 120)
+add_custom_target(test-simd-sanitize
+    COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=c $<TARGET_FILE:test_convolution_simd_sanitize>
+    COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=sse2 $<TARGET_FILE:test_convolution_simd_sanitize>
+    COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=avx $<TARGET_FILE:test_convolution_simd_sanitize>
+    COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=avx2 $<TARGET_FILE:test_convolution_simd_sanitize>
+    DEPENDS test_convolution_simd_sanitize WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 set(test_environment "TOMPOUCE_TEST_BINARY=$<TARGET_FILE:tompouce>")
 foreach(name terminal_render_pty install sound_import sounds companion osc tui_pty)
     add_test(NAME ${name} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${name}.py")
@@ -95,6 +119,30 @@ add_custom_target(test-live-reference-web
         node scripts/live-change-reference-qa.mjs
     DEPENDS test_live_sliders WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
+
+add_executable(bench_simd EXCLUDE_FROM_ALL tests/bench_simd.c)
+target_compile_options(bench_simd PRIVATE -UNDEBUG)
+target_link_libraries(bench_simd PRIVATE tompouce_core)
+set_target_properties(bench_simd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    # Only benchmark translation units change; linked DSP/dependencies stay at
+    # the normal build settings. Never enable these flags on the main engine.
+    foreach(variant o3 profile)
+        add_executable(bench_simd_${variant} EXCLUDE_FROM_ALL tests/bench_simd.c)
+        target_compile_options(bench_simd_${variant} PRIVATE -UNDEBUG)
+        target_link_libraries(bench_simd_${variant} PRIVATE tompouce_core)
+        set_target_properties(bench_simd_${variant} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    endforeach()
+    target_compile_options(bench_simd_o3 PRIVATE -O3 -ffp-contract=off)
+    target_compile_options(bench_simd_profile PRIVATE -O2 -pg -fno-inline -fno-ipa-cp -fno-ipa-sra)
+    target_link_options(bench_simd_profile PRIVATE -pg)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+        add_executable(bench_simd_avx2 EXCLUDE_FROM_ALL tests/bench_simd.c)
+        target_compile_options(bench_simd_avx2 PRIVATE -UNDEBUG -O3 -mavx2 -ffp-contract=off)
+        target_link_libraries(bench_simd_avx2 PRIVATE tompouce_core)
+        set_target_properties(bench_simd_avx2 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    endif()
+endif()
 
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)
 set_target_properties(render_audio PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")

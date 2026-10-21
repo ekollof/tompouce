@@ -2,6 +2,7 @@
 #include "sampler.h"
 #include "common.h"
 #include "prep_profile.h"
+#include "convolution_mix.h"
 
 static void transform(ConvComplex *data, int inverse) {
     for (unsigned i = 1, j = 0; i < CONV_FFT; i++) {
@@ -32,6 +33,7 @@ void convolution_kernel_free(ConvKernel *kernel) {
 }
 
 static ConvKernel *build_kernel(const float *stereo, int frames, int channels, int normalize, int normal_frames) {
+    convolution_simd_init();
     if (!stereo || frames < 1 || frames > CONV_PARTS*CONV_BLOCK || (channels != 1 && channels != 2)) return NULL;
     ConvKernel *kernel = calloc(1,sizeof(*kernel));
     if (!kernel) return NULL;
@@ -138,6 +140,7 @@ void convolution_set(ConvState *state, const ConvKernel *kernel) {
 
 static void process_block(ConvState *state) {
     const ConvKernel *kernel = state->kernel;
+    ConvolutionAccumulate accumulate=convolution_accumulator();
     unsigned slot = state->block%CONV_PARTS;
     for (int ch = 0; ch < 2; ch++) {
         ConvComplex *spectrum = state->history[ch][slot];
@@ -150,10 +153,7 @@ static void process_block(ConvState *state) {
         for (unsigned part = 0; part < parts; part++) {
             const ConvComplex *x = state->history[ch][(slot+CONV_PARTS-part)%CONV_PARTS];
             const ConvComplex *h = kernel->tail+((size_t)ch*kernel->parts+part)*CONV_FFT;
-            for (unsigned i = 0; i < CONV_FFT; i++) {
-                sum[i].re += x[i].re*h[i].re-x[i].im*h[i].im;
-                sum[i].im += x[i].re*h[i].im+x[i].im*h[i].re;
-            }
+            accumulate(sum,x,h,CONV_FFT);
         }
         transform(sum,1);
         for (unsigned i = 0; i < CONV_BLOCK; i++) {

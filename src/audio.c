@@ -1334,6 +1334,11 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     }
     /* A WebAudio convolver with no completed buffer has no wet output. */
     if (atomic_load(&prepared_rooms)&(1u<<orbit)) return;
+    /* Never-used orbit: no room send has ever reached it and no size was set,
+       so the fallback network has only ever seen zero input and its buffers
+       are still exactly zero. Skipping is bit-identical and avoids running
+       twelve idle reverbs. */
+    if (mix->room_size < 0 && size[orbit] == 0 && mix->room_l == 0 && mix->room_r == 0) return;
     if (mix->room_size >= 0) size[orbit] = mix->room_size;
     else if (size[orbit] == 0) size[orbit] = 1;
     for (int ch = 0; ch < 2; ch++) {
@@ -1363,7 +1368,16 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     static int dpos[N_ORBITS];
     static float feedback_quantum[N_ORBITS][2][128];
     static unsigned feedback_pos[N_ORBITS];
+    static int used[N_ORBITS];
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
+    /* An orbit that has never carried a delay send has an all-zero line and
+       an all-zero feedback quantum, so its echo is exactly zero. Skipping is
+       bit-identical; the first non-zero send starts normal processing, whose
+       silent history is zeros either way. */
+    if (!used[orbit]) {
+        if (mix->delay_l == 0 && mix->delay_r == 0) return;
+        used[orbit] = 1;
+    }
     double b = effect_bpm;
     double dt = orbit_dt[orbit] >= 0 ? orbit_dt[orbit] : (0.75 * 60.0 / b);
     double fb = orbit_fb[orbit] >= 0 ? orbit_fb[orbit] : 0.5;

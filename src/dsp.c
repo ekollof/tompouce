@@ -291,11 +291,28 @@ void dsp_init(DspState *s, const DspParams *p) {
             s->formant[i].z1 = s->formant[i].z2 = 0;
             s->formant_gain[i] = gains[vowel][i];
         }
+    /* Cache which per-sample paths can change the signal. The controls are a
+       copy fixed for the voice's lifetime, so this is computed once here. */
+    s->pitch_active = p->p[DSP_PENV] != 0 || p->p[DSP_VIB] > 0;
+    s->fm_active = 0;
+    for (int i = 0; i < 8; i++)
+        if (p->p[DSP_FMBASE + i*8] != 0) { s->fm_active = 1; break; }
+    int active = 0;
+    for (int type = 0; type < 3 && !active; type++)
+        if (p->p[type*7] > 0) active = 1;
+    if (p->p[DSP_VOWEL] >= 0 || (int)p->p[DSP_COARSE] > 1 || p->p[DSP_CRUSH] < 16 ||
+        p->p[DSP_SHAPE] > 0 || p->p[DSP_DISTORT] > 0 || p->p[DSP_TREM] > 0 ||
+        p->p[DSP_COMP] < 0 || p->p[DSP_PHASER] > 0 || p->p[DSP_CHORUS] > 0 ||
+        p->p[DSP_POST] != 1) active = 1;
+    s->effects_active = active;
 }
 
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
     if (!params->enabled) return 1;
     const double *p = params->p;
+    /* Neither branch below can change the ratio; skip the envelope and the
+       transcendental work entirely. */
+    if (p[DSP_PENV] == 0 && p[DSP_VIB] <= 0) return 1;
     double ratio = 1;
     if (p[DSP_PENV] != 0) {
         double env = dsp_envelope(age, gate, p[DSP_PATT], p[DSP_PDEC], p[DSP_PSUS], p[DSP_PREL]);
@@ -309,7 +326,12 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
 double dsp_frequency(DspState *s, double freq, double age, double gate) {
     if (!s->control.enabled) return freq;
     const double *p = s->control.p;
-    freq *= dsp_pitch_multiplier(&s->control,age,gate);
+    /* No pitch envelope/vibrato and no FM operator: the modulation sum is
+       exactly zero, so the result is freq unchanged (freq is bounded well
+       inside the clamp range by the event layer). */
+    if (!s->pitch_active && !s->fm_active) return freq;
+    if (s->pitch_active) freq *= dsp_pitch_multiplier(&s->control,age,gate);
+    if (!s->fm_active) return freq;
     double modulation[8];
     for (int i = 0; i < 8; i++) {
         const double *op = p + DSP_FMBASE + i * 8;
@@ -351,6 +373,9 @@ double dsp_process(DspState *s, double x, double age, double gate) {
     if (!s->control.enabled) return x;
     const double *p = s->control.p;
     int update = (s->tick++ & 31) == 0;
+    /* Nothing configured: the full path reduces to the post gain (1) and the
+       output guard. Keep tick advancing so state evolution is unchanged. */
+    if (!s->effects_active) return isfinite(x) ? clamp(x, -64, 64) : 0;
     for (int type = 0; type < 3; type++) {
         int base = type * 7;
         if (p[base] <= 0) continue;

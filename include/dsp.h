@@ -51,6 +51,12 @@ typedef struct {
     unsigned noise_seed;
     double held;
     unsigned tick;
+    /* Derived once in dsp_init. Controls are immutable per voice, so these
+       cannot change during playback; they let the per-sample paths skip work
+       that is provably identity (see dsp_frequency/dsp_process). */
+    int pitch_active;   /* pitch envelope or vibrato configured */
+    int fm_active;      /* at least one FM operator has non-zero index */
+    int effects_active; /* dsp_process would change the sample */
 } DspState;
 
 void dsp_params_init(DspParams *p);

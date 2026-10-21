@@ -76,6 +76,34 @@ static void convolution_case(int frames) {
     free(s); convolution_kernel_free(k);
 }
 
+/* Simultaneous long convolvers: the per-effect cost measured in isolation is
+   not the same as several orbits running at once, because the accumulation
+   kernels contend for cache and execution ports. Reports CPU per 128-frame
+   block for 1..N independent 3-second kernels. */
+static void convolution_multi_case(int orbits, int frames) {
+    float *pcm=calloc((size_t)frames*2,sizeof(*pcm)); assert(pcm);
+    for (int i=0;i<frames;i++) {
+        pcm[i*2]=(float)(sin(i*.173)*exp(-6.0*i/frames)*.01);
+        pcm[i*2+1]=(float)(cos(i*.137)*exp(-6.0*i/frames)*.01);
+    }
+    ConvKernel *k=convolution_kernel(pcm,frames,2,0); assert(k); free(pcm);
+    ConvState *states=calloc((size_t)orbits,sizeof(*states)); assert(states);
+    for (int i=0;i<orbits;i++) convolution_set(&states[i],k);
+    double l,r,sum=0;
+    for (int i=0;i<frames+256;i++)
+        for (int o=0;o<orbits;o++) convolution_process(&states[o],.01,-.02,&l,&r);
+    double begin=cpu_seconds();
+    for (int b=0;b<1000;b++) {
+        for (int f=0;f<128;f++)
+            for (int o=0;o<orbits;o++) {
+                convolution_process(&states[o],.01,-.02,&l,&r);
+                sum+=l+r;
+            }
+    }
+    report("convolution-simultaneous",orbits,cpu_seconds()-begin,0,sum);
+    free(states);
+}
+
 static void fft_case(void) {
     ConvComplex input[CONV_FFT],data[CONV_FFT]; double sum=0;
     for (int i=0;i<CONV_FFT;i++) input[i]=(ConvComplex){(float)sin(i*.1),0};
@@ -118,6 +146,10 @@ int main(int argc, char **argv) {
     if (argc==2 && !strcmp(argv[1],"--long-rooms")) {
         convolution_case(264600); convolution_case(CONV_MAX_FRAMES); return 0;
     }
+    if (argc==2 && !strcmp(argv[1],"--simultaneous")) {
+        for (int orbits=1;orbits<=8;orbits*=2) convolution_multi_case(orbits,132300);
+        return 0;
+    }
     if (argc==2 && !strcmp(argv[1],"--samples")) {
         int sample=owned_sample();
         callback_case(1,0,sample); callback_case(32,0,sample); callback_case(128,0,sample);
@@ -125,6 +157,7 @@ int main(int argc, char **argv) {
     }
     callback_case(1,0,-1); callback_case(32,0,-1); callback_case(128,0,-1);
     callback_case(32,1,-1); callback_case(128,1,-1);
+    callback_case(0,0,-1);
     convolution_case(128); convolution_case(4410); convolution_case(44100);
     convolution_case(132300); fft_case();
     return 0;

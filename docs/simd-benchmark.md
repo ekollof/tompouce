@@ -180,6 +180,69 @@ tested on the current host; policy simulation is not an old-CPU hardware test.
 The extension is installed; companion startup/cleanup checks against the
 installed executable passed with both `TOMPOUCE_SIMD=avx` and `sse2`.
 
+## Inactive-path fast paths
+
+The controls a voice is created with are immutable for its lifetime, so
+`dsp_init` now caches three derived facts: whether a pitch envelope or vibrato
+is configured, whether any FM operator has a non-zero index, and whether
+`dsp_process` would change the sample at all (filters, vowel, coarse, crush,
+shape, distortion, tremolo, compressor, phaser, chorus or a non-unity post
+gain). The per-sample paths then skip work that is provably identity:
+
+- `dsp_frequency` returns the frequency unchanged when neither pitch
+  modulation nor FM is configured, instead of running the eight-operator loop
+  and the modulation sum.
+- `dsp_pitch_multiplier` returns 1 before touching envelopes or transcendentals
+  when no pitch envelope or vibrato exists.
+- `dsp_process` reduces to the output guard (post gain 1) when no effect is
+  configured, still advancing its tick so state evolution is unchanged.
+
+Two idle-orbit costs were also removed. `native_reverb`'s fallback network now
+returns for an orbit that has never received a room send and never had a size
+set: its comb/allpass buffers can only ever have seen zero input, so the
+skipped work contributed exactly zero. `orbit_delay` similarly returns for an
+orbit that has never carried a non-zero delay send, whose line and feedback
+quantum are still all zeros. Both gates open permanently on first real input,
+so tails and live automation are unaffected.
+
+Three-run medians on the same host, 1,500 blocks of 128 stereo frames:
+
+| Workload | Before (ms) | After (ms) | Speedup |
+| --- | ---: | ---: | ---: |
+| Idle engine, 12 orbits | 0.445 | 0.071 | 6.3x |
+| 32 sine voices | 0.769 | 0.268 | 2.9x |
+| 128 sine voices | 1.812 | 0.827 | 2.2x |
+| 128 voices, filter + phaser | 2.916 | 2.034 | 1.4x |
+
+The printed checksums are identical before and after for every case, and
+`test_dsp` compares the fast paths against manually forced slow-path flags
+sample by sample. `test_audio` asserts that a fresh engine emits exact zeros
+across twelve orbits. These are callback CPU measurements, not backend
+deadline or web-parity guarantees; the web comparison matrix and the
+multi-orbit backend workloads are the gates for those.
+
+## Simultaneous long convolvers
+
+Per-effect measurements understate contention when several orbits run long
+rooms at once. `./build/tests/bench_simd --simultaneous` runs 1, 2, 4 and 8
+independent three-second kernels over the same 128-frame blocks (1,000 blocks
+after filling history). Three-run medians of CPU per block, with the 2.902 ms
+real-time budget for reference:
+
+| Convolvers | C (ms/block) | AVX2 (ms/block) | AVX2 speedup | Share of one core |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.365 | 0.190 | 1.92x | 6.5% |
+| 2 | 0.721 | 0.377 | 1.91x | 13.0% |
+| 4 | 1.458 | 0.761 | 1.92x | 26.2% |
+| 8 | 3.267 | 1.845 | 1.77x | 63.6% |
+
+Scaling is close to linear up to four simultaneous kernels and degrades at
+eight (1.77x rather than 1.92x over C), consistent with cache and port
+contention. Eight three-second rooms fit in roughly two-thirds of one core;
+this is a CPU measurement on one machine, not a deadline or underrun result.
+Backend deadline behavior stays covered by `profile-long-room-backend`, and
+the dispatch policy still defaults to AVX2 with C as the portable fallback.
+
 ## Further optimization
 
 Generated rooms now support size 10 (15-second IRs). The kernel-length history

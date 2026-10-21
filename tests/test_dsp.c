@@ -89,6 +89,40 @@ static void test_filter_envelopes(void) {
     }
 }
 
+/* The cached-activity fast paths must be bit-identical to the full paths.
+   controls are immutable per voice, so forcing the flags reproduces what the
+   slow path would have computed. */
+static void test_inactive_fast_paths(void) {
+    DspParams params;
+    dsp_params_init(&params);
+    params.enabled = 1;
+    DspState fast, slow;
+    dsp_init(&fast, &params);
+    dsp_init(&slow, &params);
+    assert(!fast.effects_active && !fast.pitch_active && !fast.fm_active);
+    slow.effects_active = 1; slow.pitch_active = 1; slow.fm_active = 1;
+    for (int i = 0; i < 4096; i++) {
+        double age = i / SR;
+        double x = sin(i * .37) * (i % 7 ? .3 : 90);
+        assert(dsp_process(&fast, x, age, 1) == dsp_process(&slow, x, age, 1));
+        assert(dsp_frequency(&fast, 440, age, 1) == dsp_frequency(&slow, 440, age, 1));
+        assert(dsp_frequency(&fast, 1234.5, age, 1) == 1234.5);
+        assert(dsp_pitch_multiplier(&params, age, 1) == 1);
+    }
+    /* Guard rails: post gain and any filter/pitch control must take the full
+       path, and the derived flags must notice them. */
+    DspParams post; dsp_params_init(&post); post.enabled = 1; post.p[DSP_POST] = 2;
+    DspState post_state; dsp_init(&post_state, &post);
+    assert(post_state.effects_active);
+    DspParams pitch; dsp_params_init(&pitch); pitch.enabled = 1; pitch.p[DSP_PENV] = 12;
+    DspState pitch_state; dsp_init(&pitch_state, &pitch);
+    assert(pitch_state.pitch_active && !pitch_state.effects_active);
+    DspParams fm; dsp_params_init(&fm); fm.enabled = 1; fm.p[DSP_FMBASE] = 2;
+    DspState fm_state; dsp_init(&fm_state, &fm);
+    assert(fm_state.fm_active);
+    puts("inactive DSP fast paths are bit-identical");
+}
+
 int main(void) {
     /* Public Superdough .room(1) supplies no duration override: the first
        shared room uses generate()'s two-second default. */
@@ -204,5 +238,6 @@ int main(void) {
     assert(event_queue_depth() == 1);
     event_queue_clear();
     puts("native DSP/Strudel audio controls ok");
+    test_inactive_fast_paths();
     return 0;
 }

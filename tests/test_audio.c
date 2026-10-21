@@ -315,6 +315,17 @@ static void test_live_scope_attachment(void) {
 }
 
 int main(void) {
+    /* Never-used orbits must stay bit-exactly silent: the reverb and delay
+       gates skip work only when their state is provably zero. Runs first so
+       no later test has dirtied a delay line or reverb network. */
+    {
+        float idle[512];
+        for (int block = 0; block < 8; block++) {
+            pa_callback(NULL,idle,256,NULL,0,NULL);
+            for (int i = 0; i < 512; i++) assert(idle[i] == 0.0f);
+        }
+        audio_time = 0; /* restore the timing baseline later tests assume */
+    }
     /* Exercise the actual callback with opposite-polarity stereo channels.
        Averaging to mono would cancel this signal. No audio device is needed. */
     float stereo[] = {.25f,-.5f,.125f,.375f};

@@ -5,22 +5,23 @@
 #include <assert.h>
 #include <sched.h>
 #include <time.h>
-static const ConvKernel *controlled_reverb(double,double,double,double);
-#define convolution_prepare_reverb controlled_reverb
+static const ConvKernel *controlled_reverb(double,double,double,double,const char **);
+#define convolution_prepare_reverb_ex controlled_reverb
 #include "../src/audio.c"
-#undef convolution_prepare_reverb
+#undef convolution_prepare_reverb_ex
 
 static pthread_mutex_t preparation_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t preparation_wake=PTHREAD_COND_INITIALIZER;
 static int held,entered,fail;
 static const ConvKernel *replacement;
-static const ConvKernel *controlled_reverb(double size,double fade,double lp,double dim) {
+static const ConvKernel *controlled_reverb(double size,double fade,double lp,double dim,const char **error) {
     pthread_mutex_lock(&preparation_lock);
     entered=1; pthread_cond_broadcast(&preparation_wake);
     while (held) pthread_cond_wait(&preparation_wake,&preparation_lock);
     int reject=fail; const ConvKernel *kernel=replacement;
     pthread_mutex_unlock(&preparation_lock);
-    return reject?NULL:kernel?kernel:convolution_prepare_reverb(size,fade,lp,dim);
+    if (error) *error=reject?"test generation failure":NULL;
+    return reject?NULL:kernel?kernel:convolution_prepare_reverb_ex(size,fade,lp,dim,error);
 }
 static void hold_preparation(int reject,const ConvKernel *kernel) {
     pthread_mutex_lock(&preparation_lock);
@@ -70,6 +71,61 @@ static void test_generation_guard(void) {
     assert(pthread_join(thread,NULL)==0);
     assert(atomic_load(&transition.done));
     assert(event_queue_generation()!=generation);
+}
+static void test_diagnostics(void) {
+    const char *error=NULL;
+    const ConvKernel *coastline=convolution_prepare_reverb_ex(4,.1,15000,1000,&error);
+    assert(coastline && !error && coastline->parts==(264600u-1)/CONV_BLOCK);
+    const ConvKernel *maximum=convolution_prepare_reverb_ex(10,.1,15000,1000,&error);
+    assert(maximum && !error && maximum->parts==(CONV_MAX_FRAMES-1u)/CONV_BLOCK);
+    ConvState *history=calloc(1,sizeof(*history)); assert(history);
+    convolution_set(history,maximum);
+    double tail=0;
+    for (int i=0;i<CONV_MAX_FRAMES+CONV_BLOCK*2;i++) {
+        double l,r; convolution_process(history,i==0?1:0,i==0?-.5:0,&l,&r);
+        assert(isfinite(l) && isfinite(r));
+        if (i>10*44100) tail+=l*l+r*r;
+    }
+    assert(tail>0 && !history->remaining);
+    assert(history->filled==maximum->parts+1);
+    free(history);
+    assert(!convolution_prepare_reverb_ex(10.001,.1,15000,1000,&error) && error);
+    assert(!convolution_prepare_reverb_ex(1e-9,.1,15000,1000,&error));
+    assert(error && !strcmp(error,"IR duration outside native capacity"));
+    assert(!convolution_prepare_reverb_ex(NAN,.1,15000,1000,&error));
+    assert(error && strstr(error,"invalid"));
+    const ConvKernel *small=convolution_prepare_reverb_ex(.051,.01,4000,700,&error);
+    assert(small && !error);
+    assert(convolution_prepare_reverb_ex(.051,.01,4000,700,&error)==small && !error);
+    int full=0;
+    for (int i=0;i<17;i++) {
+        if (!convolution_prepare_reverb_ex(.06+i*.0001,.01,4000,700,&error)) {
+            assert(error && strstr(error,"cache full")); full=1; break;
+        }
+        assert(!error);
+    }
+    assert(full);
+    /* A full cache must not prevent hits, or change failure classification. */
+    assert(convolution_prepare_reverb_ex(.051,.01,4000,700,&error)==small && !error);
+    audio_report_errors();
+    AudioEvent supported=room(6,4); audio_prepare_room(&supported); audio_wait_room_preparation();
+    assert(!room_failures && atomic_load(&requested_ir[6])==coastline);
+    AudioEvent event=room(7,1e-9); audio_prepare_room(&event); audio_wait_room_preparation();
+    assert(room_failures==1 && room_error_count==1);
+    assert(room_errors[0].orbit==7 && !room_errors[0].previous && room_errors[0].parameters[0]==1e-9);
+    assert(!strcmp(room_errors[0].reason,"IR duration outside native capacity"));
+    audio_report_errors();
+    assert(strstr(console_line(console_count_get()-2),"no previous room; wet output silent"));
+    assert(strstr(console_line(console_count_get()-1),"roomsize/size maximum"));
+    int head=console_head_get(); audio_report_errors(); assert(head==console_head_get());
+    double p[4]={.1,.01,4000,700};
+    pthread_mutex_lock(&voice_lock);
+    for (int i=0;i<ROOM_ERRORS+3;i++) record_room_failure(6,p,"test failure");
+    pthread_mutex_unlock(&voice_lock);
+    assert(room_error_count==ROOM_ERRORS && room_failures==ROOM_ERRORS+3);
+    audio_report_errors();
+    assert(strstr(console_line(console_count_get()-1),"3 additional IR failures omitted"));
+    stop_room_worker(); prep_pool_stop();
 }
 int main(void) {
     float pcm[2048]; for (unsigned i=0;i<2048;i++) pcm[i]=.1;
@@ -135,7 +191,7 @@ int main(void) {
     stop_room_worker(); assert(!room_worker_started && !room_count && !room_worker_busy);
     /* Production generator rejects an unsupported duration without publishing. */
     replacement=NULL; fail=0;
-    event=room(3,3); audio_prepare_room(&event); audio_wait_room_preparation();
+    event=room(3,0); audio_prepare_room(&event); audio_wait_room_preparation();
     assert(atomic_load(&requested_ir[3])==second && room_failures==1);
     /* A completion from an obsolete generation is discarded, not published. */
     unsigned failures=room_failures;
@@ -145,6 +201,7 @@ int main(void) {
     stop_room_worker();
     prep_pool_stop();
     test_generation_guard();
+    test_diagnostics();
     convolution_set(&convolvers[3],NULL);
     convolution_kernel_free(first); convolution_kernel_free(second); free(history);
     puts("Room worker preserves pending/failure tails, publishes completion, bounds requests and shuts down cleanly");

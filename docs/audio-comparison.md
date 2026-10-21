@@ -454,4 +454,62 @@ dispatch order without overflow, and rendering must be bit-identical across
 stealing; it does not establish live timer-jitter parity under preparation
 load or timer-creation failure side effects.
 
+## Long generated rooms
+
+Generated rooms now accept the web REPL's maximum size 10, including the full
+15-second IR (661,500 frames). Size 4 prepares a six-second IR (264,600 frames).
+`test_room` checks both boundaries, rejection above 10, the full late tail,
+history wrap, cache behavior and failure retention. Its sanitizer build also
+instruments convolution, SIMD kernels and impulse generation.
+
+```sh
+cmake --build build --target test-room-reference-web
+cmake --build build --target profile-long-room-backend
+TOMPOUCE_SIMD=c node scripts/prep-backend-qa.mjs /tmp/tompouce-long-room-c --long-rooms
+```
+
+The web check waits for the deployed REPL to generate sizes 4 and 10, then
+shares each actual stereo IR with the native convolver. It compares every output
+sample through the full tail: unit-gain convolution uses a 3e-5 maximum error
+gate, while normalized output uses the maintained audio matrix's .99 correlation
+and .85–1.15 RMS-ratio gates. These are separate checks: the existing small
+normalization-gain difference must not mask convolution precision errors.
+Forced C and automatic SIMD must produce byte-identical PCM in both modes, and
+late-tail energy must remain nonzero. This establishes capacity and convolution
+behavior, not identical independent random room generation or full-song parity.
+The captured size-4/size-10 run measured maximum unit-gain errors of 3.28e-7
+and 4.77e-7, respectively, with normalized correlations above .999999999999 and
+RMS ratios about .9929. All 43 existing browser audio gates also passed, with
+the two existing randomized-room diagnostic cases retained as diagnostics.
+The implementation pass also passed all 37 CTests, the full-size room
+ASan/UBSan test and all four forced SIMD sanitizer paths. The installed
+executable's owned PTY check confirms the new maximum in its diagnostics.
+
+History is statically bounded at about 20.2 MiB per orbit (242.3 MiB across 12
+orbits); only kernel-length slots are touched. The existing 16-entry generated
+cache has a worst-case spectral bound of about 323 MiB at size 10, and the
+16-entry custom-IR cache about 216 MiB at its ten-second input limit. These are
+ceilings, not startup resident-memory requirements. No history allocation or
+kernel preparation is added to the audio callback.
+
+The dedicated backend workload runs for 18 seconds, verifying the size-10
+kernel is published and its complete history is filled before accepting a
+result. It retains the existing zero-overrun/zero-missed-cycle gate and owned
+silent-sink routing checks; a separate injected 100 ms stall proves the missed
+cycle counter fires. Long IRs cost more CPU, so measurements remain scoped to
+the selected backend, machine and workload rather than promising every orbit
+can run the maximum room simultaneously.
+
+On the Ryzen 5800X3D, the final loop-unrolled build completed the 18-second
+workload with zero render/CPU overruns, late publications/reservations or missed
+device cycles in both forced C and automatic AVX2. Mean/max callback wall times
+were 1.228/2.625 ms for C and .939/2.370 ms for AVX2; corresponding mean/max CPU
+times were 1.215/2.617 ms and .926/2.316 ms. Both stall controls recorded one
+roughly 102.7 ms gap. Before loop unrolling, isolated C recorded small deadline
+overruns, and a run overlapping compilation recorded seven missed cycles;
+those failed reports are retained rather than counted as passes. Reproduction
+artifacts for the final runs are `/tmp/tompouce-long-room-backend-c-unrolled`
+and `/tmp/tompouce-long-room-backend-auto-unrolled`. They are evidence from one
+machine, not permanent baselines or guarantees under arbitrary host contention.
+
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

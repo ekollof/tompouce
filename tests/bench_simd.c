@@ -115,6 +115,9 @@ int main(int argc, char **argv) {
         convolution_case(128); convolution_case(4410); convolution_case(44100);
         convolution_case(132300); return 0;
     }
+    if (argc==2 && !strcmp(argv[1],"--long-rooms")) {
+        convolution_case(264600); convolution_case(CONV_MAX_FRAMES); return 0;
+    }
     if (argc==2 && !strcmp(argv[1],"--samples")) {
         int sample=owned_sample();
         callback_case(1,0,sample); callback_case(32,0,sample); callback_case(128,0,sample);

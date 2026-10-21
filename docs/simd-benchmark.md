@@ -104,7 +104,7 @@ convolution prototype; decode measurements do not justify replacing decoders.
 ## Implemented convolution dispatch
 
 `src/convolution_mix.c` now supplies portable C, SSE2, AVX and AVX2 accumulation
-kernels. Only that translation unit uses O3 with FP contraction disabled; each
+kernels. Only that translation unit uses O3 and loop unrolling with FP contraction disabled; each
 targeted function is restricted to its declared ISA. Production settings for the rest
 of the engine are unchanged. Compiler runtime detection checks usable CPU/OS
 features once, before audio startup or offline kernel preparation. An atomic
@@ -181,6 +181,13 @@ The extension is installed; companion startup/cleanup checks against the
 installed executable passed with both `TOMPOUCE_SIMD=avx` and `sse2`.
 
 ## Further optimization
+
+Generated rooms now support size 10 (15-second IRs). The kernel-length history
+ring avoids touching unused slots for shorter effects, and loop unrolling is
+restricted to the accumulation module to improve long-room C headroom. See
+[long-room validation](audio-comparison.md#long-generated-rooms) for full-tail
+web comparisons, memory bounds and measured backend deadlines. The earlier
+tables above remain records of the original SIMD experiments.
 
 The compiler already finds useful vectorization in the narrow accumulation
 kernel; handwritten intrinsics are not needed for this improvement. Keep

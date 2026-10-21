@@ -18,7 +18,7 @@ target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 
 foreach(variant simd simd_portable simd_sanitize)
     add_executable(test_convolution_${variant} EXCLUDE_FROM_ALL tests/test_convolution_simd.c)
-    target_compile_options(test_convolution_${variant} PRIVATE -UNDEBUG -O3 -ffp-contract=off)
+    target_compile_options(test_convolution_${variant} PRIVATE -UNDEBUG -O3 -ffp-contract=off -funroll-loops)
     target_link_libraries(test_convolution_${variant} PRIVATE tompouce_core)
     set_target_properties(test_convolution_${variant} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 endforeach()
@@ -102,6 +102,13 @@ add_custom_target(profile-prep-backend
     DEPENDS test_prep_deadlines probe_audio_output WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(profile-long-room-backend
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_PREP_DEADLINE_BINARY=$<TARGET_FILE:test_prep_deadlines>"
+        "TOMPOUCE_AUDIO_PROBE=$<TARGET_FILE:probe_audio_output>"
+        node scripts/prep-backend-qa.mjs /tmp/tompouce-long-room-backend --long-rooms
+    DEPENDS test_prep_deadlines probe_audio_output WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_custom_target(test-midi-reference-web
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_MIDI_BINARY=$<TARGET_FILE:test_midi>"
         node scripts/midi-reference-qa.mjs
@@ -145,6 +152,14 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 endif()
 
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)
+add_executable(render_convolution EXCLUDE_FROM_ALL tests/render_convolution.c)
+target_link_libraries(render_convolution PRIVATE tompouce_core)
+set_target_properties(render_convolution PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+add_custom_target(test-room-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_RENDER_CONVOLUTION=$<TARGET_FILE:render_convolution>"
+        node scripts/room-reference-qa.mjs
+    DEPENDS render_convolution WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
 set_target_properties(render_audio PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 target_compile_options(render_audio PRIVATE -UNDEBUG)
 target_link_libraries(render_audio PRIVATE tompouce_core)
@@ -186,6 +201,9 @@ foreach(name audio audio_performance room duck_onset native_synth editor termina
     endif()
     if(name STREQUAL "native_synth")
         list(APPEND sources src/native_synth.c src/gm_synth.c)
+    endif()
+    if(name STREQUAL "room")
+        list(APPEND sources src/convolution.c src/convolution_mix.c src/reverb_impulse.c)
     endif()
     if(name STREQUAL "live_sliders")
         list(APPEND sources src/slider.c src/javascript.c src/js_audio.c src/duck_onset.c)

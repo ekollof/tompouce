@@ -221,6 +221,10 @@ F4 shows the active convolution kernel, startup selection mode, usable SIMD
 capabilities and any fallback to C, for example
 `SIMD conv=avx2 mode=auto cpu=sse2/avx/avx2`.
 
+Generated reverb supports `.roomsize(10)` / `.size(10)`, matching the web REPL's
+maximum. This prepares up to a 15-second IR; `.size(4)` songs work without
+shortening their room. See [room limits and behavior](docs/javascript.md).
+
 `cmake --build build --target test-audio-backends` checks fallback and cleanup with temporary null ALSA
 devices and disposable silent server streams. Native daemon checks skip when
 their sockets are absent; `TOMPOUCE_TEST_JACK=1 cmake --build build --target test-audio-backends` also

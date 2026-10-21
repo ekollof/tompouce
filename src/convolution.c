@@ -34,7 +34,7 @@ void convolution_kernel_free(ConvKernel *kernel) {
 
 static ConvKernel *build_kernel(const float *stereo, int frames, int channels, int normalize, int normal_frames) {
     convolution_simd_init();
-    if (!stereo || frames < 1 || frames > CONV_PARTS*CONV_BLOCK || (channels != 1 && channels != 2)) return NULL;
+    if (!stereo || frames < 1 || frames > CONV_MAX_FRAMES || (channels != 1 && channels != 2)) return NULL;
     ConvKernel *kernel = calloc(1,sizeof(*kernel));
     if (!kernel) return NULL;
     kernel->parts = (unsigned)(frames-1)/CONV_BLOCK;
@@ -90,7 +90,7 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     float *buffer; int length, channels;
     smp_get_stereo(sample,&buffer,&length,&channels);
     int frames = length > 0 ? (int)fmin(length,ceil(size*SR)) : 0;
-    if (!buffer || frames < 1 || frames > CONV_PARTS*CONV_BLOCK) {
+    if (!buffer || frames < 1 || frames > CONV_MAX_FRAMES) {
         prep_lock(&lock, PREP_LOCK_CONV);
         cache[slot].reserved = 0;
         prep_unlock(&lock, PREP_LOCK_CONV);
@@ -141,7 +141,8 @@ void convolution_set(ConvState *state, const ConvKernel *kernel) {
 static void process_block(ConvState *state) {
     const ConvKernel *kernel = state->kernel;
     ConvolutionAccumulate accumulate=convolution_accumulator();
-    unsigned slot = state->block%CONV_PARTS;
+    unsigned slots=kernel->parts+1;
+    unsigned slot = state->block;
     for (int ch = 0; ch < 2; ch++) {
         ConvComplex *spectrum = state->history[ch][slot];
         memset(spectrum,0,CONV_FFT*sizeof(*spectrum));
@@ -150,10 +151,12 @@ static void process_block(ConvState *state) {
         ConvComplex sum[CONV_FFT] = {{0}};
         unsigned parts = kernel->parts;
         if (parts > state->filled+1) parts = state->filled+1;
+        unsigned read=slot;
         for (unsigned part = 0; part < parts; part++) {
-            const ConvComplex *x = state->history[ch][(slot+CONV_PARTS-part)%CONV_PARTS];
+            const ConvComplex *x = state->history[ch][read];
             const ConvComplex *h = kernel->tail+((size_t)ch*kernel->parts+part)*CONV_FFT;
             accumulate(sum,x,h,CONV_FFT);
+            read=read?read-1:slots-1;
         }
         transform(sum,1);
         for (unsigned i = 0; i < CONV_BLOCK; i++) {
@@ -161,8 +164,8 @@ static void process_block(ConvState *state) {
             state->overlap[ch][i] = sum[i+CONV_BLOCK].re;
         }
     }
-    state->block = (state->block+1)%CONV_PARTS;
-    if (state->filled < CONV_PARTS) state->filled++;
+    state->block = slot+1==slots?0:slot+1;
+    if (state->filled < slots) state->filled++;
 }
 
 void convolution_process(ConvState *state, double left, double right, double *wet_left, double *wet_right) {

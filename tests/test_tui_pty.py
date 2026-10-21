@@ -512,6 +512,9 @@ check("F4 SIMD policy", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'mode=auto cpu=', simd='auto')
 check("F4 SIMD fallback", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=invalid fallback cpu=', simd='not-a-backend')
+check("room duration diagnostic", "note(60).s('sine').room(.5).size(.000000001).gain(0)",
+      expected="note(60).s('sine').room(.5).size(.000000001).gain(0)",
+      observed=b'roomsize/size maximum 10 s')
 check("Tab indentation", "", b'\tX', expected='  X')
 check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')

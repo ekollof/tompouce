@@ -418,8 +418,9 @@ Stereo channels remain separate. Prepared impulse changes select the shared
 convolver immediately and reset that orbit's tail on the next audio frame;
 an earlier accepted note does not restore its old impulse at onset.
 
-Limits: 139,264 active IR frames (about 3.16 seconds at 44.1 kHz) and 16 cached
-IR/size/speed/offset combinations per process. Excess limits or failed IR
+Sample IR limits: `roomsize` up to 10 seconds (441,000 active frames at 44.1 kHz)
+and 16 cached IR/size/speed/offset combinations per process. The convolver's
+15-second capacity additionally accommodates generated-room tails. Excess limits or failed IR
 resolution reject the event and report a console warning; audio is not
 silently truncated or replaced by another reverb. Kernels are immutable and
 retained for the process lifetime.
@@ -460,10 +461,19 @@ order; arbitrary browser worker completion races are not reproduced.
 The generated impulse follows the upstream
 exponential decay, fade-in and gradual low-pass. `roomfade` defaults to .1,
 `roomlp` to 15000 and `roomdim` to 1000. A fixed random seed makes native rooms
-reproducible. These generated impulses have a separate 16-entry cache and fit
-up to about 2.10 seconds of decay (the IR lasts 1.5 times the decay). Longer
-rooms, zero size, exhausted caches, a full request queue or worker startup failure
-retain the previous room and report a console diagnostic. Failed initial generation
+reproducible. Generated rooms support `roomsize` / `size` up to **10 seconds**,
+matching the web REPL's documented maximum. The IR lasts 1.5 times the decay,
+so size 10 prepares a 15-second, 661,500-frame stereo IR at 44.1 kHz. Coastline's
+final `.size(4)` now works directly, preparing a six-second IR. Zero size,
+exhausted caches, a full request queue or worker startup failure
+retain the previous room and report the orbit, requested size/fade/filter settings
+and specific failure reason. Duration failures also print the native size limit;
+queue and cache exhaustion are distinguished. These generated impulses retain
+a separate 16-entry cache. Convolution history has a fixed bound of 5,168 slots
+per channel, but a short kernel uses only its own ring slots rather than touching
+the full history. Kernel building, allocation and generation stay outside the
+callback; switching kernels retains the existing publication and failure rules.
+Failed initial generation
 leaves the wet output silent. Parameter equality guards retain the requested
 settings even after failure; change a parameter to request another generation.
 Explicit `ir` failures still

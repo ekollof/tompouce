@@ -13,6 +13,7 @@ const probe=process.env.TOMPOUCE_AUDIO_PROBE??'./build/tests/probe_audio_output'
 const directory=path.resolve(process.argv[2]??'/tmp/tompouce-prep-backend');
 const runtime=process.env.XDG_RUNTIME_DIR??`/run/user/${process.getuid?.()??1000}`;
 const sink=`tompouce_prep_qa_${process.pid}`;
+const longRoom=process.argv[3]==='--long-rooms';
 
 function haveServer() {
   try {
@@ -113,8 +114,8 @@ async function measure(sink) {
   cases.push([max,2]);
   cases.push([max,3]);
   const results=[];
-  for (const [count,workload] of cases) {
-    const run=spawnSync(binary,[String(count),String(workload),'128','backend'],{
+  for (const [count,workload] of (longRoom?[[max,0]]:cases)) {
+    const run=spawnSync(binary,[String(count),String(workload),'128',longRoom?'backend-long':'backend'],{
       env:{...process.env,TOMPOUCE_OUTPUT_TARGET:sink},
       encoding:'utf8',timeout:90000,maxBuffer:1024*1024});
     assert.equal(run.status,0,run.stderr||run.stdout||String(run.error));
@@ -127,7 +128,8 @@ async function measure(sink) {
        process cycles. The voice burst must additionally prove saturation via
        retiring graphs. */
     result.backendHold=result.status==='measured'&&result.backend==='PipeWire'&&
-      result.backend_drops===0&&result.rendered_s>=1.75&&result.render_overruns===0&&
+      result.backend_drops===0&&result.rendered_s>=(longRoom?17.75:1.75)&&result.render_overruns===0&&
+      (!longRoom||result.long_room===1)&&
       result.xrun_gaps===0&&result.published_late===0&&result.reserved_late===0&&
       (workload>=2||result.skipped_late===0)&&
       (workload!==3||(result.peak_retiring>0&&result.controls>0));

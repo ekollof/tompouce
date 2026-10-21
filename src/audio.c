@@ -104,6 +104,19 @@ static int room_worker_started,room_worker_busy,room_worker_stop;
 static pthread_mutex_t room_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t room_wake=PTHREAD_COND_INITIALIZER;
 static unsigned room_failures;
+enum { ROOM_ERRORS=16 };
+typedef struct { int orbit,previous; double parameters[4]; const char *reason; } RoomError;
+static RoomError room_errors[ROOM_ERRORS];
+static unsigned room_error_count;
+/* Called with voice_lock held; reporting stays outside callback/shared locks. */
+static void record_room_failure(int orbit,const double *parameters,const char *reason) {
+    if (room_failures<UINT_MAX) room_failures++;
+    if (room_error_count>=ROOM_ERRORS) return;
+    RoomError *error=&room_errors[room_error_count++];
+    error->orbit=orbit; error->previous=atomic_load(&requested_ir[orbit])!=NULL;
+    error->reason=reason?reason:"IR generation failed";
+    memcpy(error->parameters,parameters,sizeof(error->parameters));
+}
 static _Atomic unsigned created_orbits;
 
 unsigned audio_register_orbit(int orbit) {
@@ -129,12 +142,13 @@ static void room_job_run(PrepJob *base) {
     pthread_cond_broadcast(&room_wake);
     pthread_mutex_unlock(&room_lock);
     const double *p=job->parameters;
-    const ConvKernel *kernel=convolution_prepare_reverb(p[0],p[1],p[2],p[3]);
+    const char *error=NULL;
+    const ConvKernel *kernel=convolution_prepare_reverb_ex(p[0],p[1],p[2],p[3],&error);
     unsigned generation=event_queue_generation_guard_begin();
     int current=!job->generation || job->generation==generation;
     pthread_mutex_lock(&voice_lock);
     if (kernel && current) publish_room(job->orbit,kernel,1);
-    else if (!kernel && current && room_failures<UINT_MAX) room_failures++;
+    else if (!kernel && current) record_room_failure(job->orbit,p,error);
     pthread_mutex_unlock(&voice_lock);
     event_queue_generation_guard_end();
     pthread_mutex_lock(&room_lock);
@@ -160,13 +174,14 @@ static int start_room_worker(void) {
 
 /* Producer only, with voice_lock held. The pool never holds room_lock while
    acquiring voice_lock. Requests own scalar parameters and process-lived IRs. */
-static int request_room(const AudioEvent *event) {
+static const char *request_room(const AudioEvent *event) {
     pthread_mutex_lock(&room_lock);
     if (!room_worker_started || room_count>=ROOM_REQUESTS || room_worker_stop) {
-        pthread_mutex_unlock(&room_lock); return 0;
+        const char *reason=room_count>=ROOM_REQUESTS?"IR request queue full (32 pending)":"room worker stopped";
+        pthread_mutex_unlock(&room_lock); return reason;
     }
     RoomJob *job=calloc(1,sizeof(*job));
-    if (!job) { pthread_mutex_unlock(&room_lock); return 0; }
+    if (!job) { pthread_mutex_unlock(&room_lock); return "IR job allocation failed"; }
     prep_job_init(&job->job,room_job_run,room_job_destroy);
     job->orbit=event->orbit;
     job->generation=event->generation;
@@ -179,10 +194,10 @@ static int request_room(const AudioEvent *event) {
         pthread_cond_broadcast(&room_wake);
         pthread_mutex_unlock(&room_lock);
         prep_job_release(&job->job);
-        return 0;
+        return "preparation pool stopped or serial queue full";
     }
     prep_job_release(&job->job);
-    return 1;
+    return NULL;
 }
 
 /* Offline tools only. Live scheduling and rendering never wait for IR work. */
@@ -264,11 +279,14 @@ static void record_duck_error(int orbit, int stage) {
 
 void audio_report_errors(void) {
     DuckError errors[DUCK_ERROR_CAPACITY];
+    RoomError failed[ROOM_ERRORS];
     pthread_mutex_lock(&voice_lock);
     unsigned count=duck_error_count;
     int overflow=duck_error_overflow;
     unsigned lost_tails=retirement_overflow; retirement_overflow=0;
     unsigned failed_rooms=room_failures; room_failures=0;
+    unsigned room_count_snapshot=room_error_count; room_error_count=0;
+    memcpy(failed,room_errors,room_count_snapshot*sizeof(*failed));
     memcpy(errors,duck_errors,count*sizeof(*errors));
     duck_error_count=0; duck_error_overflow=0;
     pthread_mutex_unlock(&voice_lock);
@@ -280,7 +298,16 @@ void audio_report_errors(void) {
     }
     if (overflow) log_console("duck: additional automation errors omitted");
     if (lost_tails) log_console("voices: retirement capacity exceeded; %u fading graphs replaced early",lost_tails);
-    if (failed_rooms) log_console("room: %u IR preparations failed or exceeded queue/cache limits; previous room retained",failed_rooms);
+    for (unsigned i=0;i<room_count_snapshot;i++) {
+        RoomError *e=&failed[i]; const double *p=e->parameters;
+        log_console("room: orbit %d %s (roomsize=%.6g fade=%.6g lp=%.6g dim=%.6g); %s",
+            e->orbit,e->reason,p[0],p[1],p[2],p[3],e->previous?"previous room retained":"no previous room; wet output silent");
+        if (!strcmp(e->reason,"IR duration outside native capacity"))
+            log_console("room: roomsize/size maximum %d s; duration must produce at least one frame (IR maximum %d frames at %.0f Hz)",
+                CONV_MAX_ROOM_SIZE,CONV_MAX_FRAMES,SR);
+    }
+    if (failed_rooms>room_count_snapshot)
+        log_console("room: %u additional IR failures omitted",failed_rooms-room_count_snapshot);
 }
 
 int audio_prepare_duck_timer(int orbit,double time) {
@@ -630,7 +657,13 @@ void audio_prepare_room(AudioEvent *event) {
         }
         atomic_fetch_or(&prepared_rooms,1u<<event->orbit);
         if (generated) {
-            if (event->room_rebuild && (!ready || !request_room(event)) && room_failures<UINT_MAX) room_failures++;
+            if (event->room_rebuild) {
+                const char *reason=ready?request_room(event):"preparation worker startup failed";
+                if (reason) {
+                    double p[4]; for (int i=0;i<4;i++) p[i]=event->dsp.p[room_fields[i]];
+                    record_room_failure(event->orbit,p,reason);
+                }
+            }
         } else publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
         pthread_mutex_unlock(&voice_lock);
     }
@@ -1871,6 +1904,7 @@ void audio_init(void) {
     memset(room_created,0,sizeof(room_created));
     atomic_store(&prepared_rooms,0);
     room_failures=0;
+    room_error_count=0;
     atomic_store(&created_orbits,0);
     memset(web_duck,0,sizeof(web_duck));
     playing = 1;

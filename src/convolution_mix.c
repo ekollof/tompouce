@@ -2,7 +2,7 @@
 #include "common.h"
 #include <stdatomic.h>
 
-/* This translation unit alone uses -O3 and disables FP contraction. The
+/* This translation unit alone uses -O3, loop unrolling and no FP contraction. The
    baseline remains portable; only targeted functions may emit newer SIMD. */
 #if (defined(__x86_64__) || defined(__i386__)) && \
     (defined(__GNUC__) || defined(__clang__)) && !defined(TOMPOUCE_DISABLE_SIMD)

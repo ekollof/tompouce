@@ -125,10 +125,22 @@ static void build_workload_source(char *source, size_t size, int workload) {
 /* Real-backend render wrapper. Times the actual DSP path on the output
    thread; statistics use atomics because the backend owns this thread. */
 static _Atomic unsigned long long backend_render_ns, backend_render_max_ns;
+static _Atomic unsigned long long backend_cpu_ns,backend_cpu_max_ns;
+static _Atomic unsigned backend_cpu_overruns;
 static _Atomic unsigned backend_render_calls, backend_render_overruns;
 static void backend_render(float *out, unsigned long frames) {
     double begin=monotonic();
+    struct timespec cpu_begin,cpu_end;
+    assert(!clock_gettime(CLOCK_THREAD_CPUTIME_ID,&cpu_begin));
     render_output(out,frames);
+    assert(!clock_gettime(CLOCK_THREAD_CPUTIME_ID,&cpu_end));
+    uint64_t cpu=(uint64_t)(cpu_end.tv_sec-cpu_begin.tv_sec)*1000000000ULL;
+    if (cpu_end.tv_nsec>=cpu_begin.tv_nsec) cpu+=(uint64_t)(cpu_end.tv_nsec-cpu_begin.tv_nsec);
+    else cpu-=(uint64_t)(cpu_begin.tv_nsec-cpu_end.tv_nsec);
+    atomic_fetch_add(&backend_cpu_ns,cpu);
+    if (cpu>frames/SR*1e9) atomic_fetch_add(&backend_cpu_overruns,1);
+    uint64_t previous=atomic_load(&backend_cpu_max_ns);
+    while (cpu>previous && !atomic_compare_exchange_weak(&backend_cpu_max_ns,&previous,cpu)) ;
     double elapsed=monotonic()-begin;
     uint64_t ns=elapsed>0?(uint64_t)(elapsed*1e9):0;
     atomic_fetch_add(&backend_render_ns,ns);
@@ -143,16 +155,23 @@ static void backend_render(float *out, unsigned long frames) {
    audio_time through render_output. Requires TOMPOUCE_OUTPUT_TARGET (or the
    default sink) to be an owned silent sink; verified by the QA script before
    nonzero gain reaches any device. */
-static void run_backend_workload(unsigned workers, int workload) {
+static void run_backend_workload(unsigned workers, int workload,int long_room) {
     char root[64]="/tmp/tompouce-deadline-XXXXXX",names[5][69];
     fixture_store(root,names);
     assert(!setenv("TOMPOUCE_BANKS",root,1) && !chdir(root));
     log_console_stderr(0);
     assert(prep_pool_start(workers,0));
     char source[8192]; build_workload_source(source,sizeof(source),workload);
+    if (long_room) {
+        size_t used=strlen(source);
+        int added=snprintf(source+used,sizeof(source)-used,".roomsize(10)");
+        assert(added>0 && (size_t)added<sizeof(source)-used);
+    }
+    double seconds=long_room?18:2;
     audio_time=0; audio_toggle_play(1); audio_set_reference_mode(1);
     atomic_store(&backend_render_ns,0); atomic_store(&backend_render_max_ns,0);
     atomic_store(&backend_render_calls,0); atomic_store(&backend_render_overruns,0);
+    atomic_store(&backend_cpu_ns,0); atomic_store(&backend_cpu_max_ns,0); atomic_store(&backend_cpu_overruns,0);
     int started=audio_output_start(backend_render,256);
     const char *backend=audio_output_name();
     if (!started || !audio_output_active()) {
@@ -169,7 +188,7 @@ static void run_backend_workload(unsigned workers, int workload) {
     double begin=monotonic();
     unsigned drops=0,polls=0;
     int was_active=1,changed=0,peak_voices=0,peak_retiring=0;
-    while (monotonic()-begin<2.0) {
+    while (monotonic()-begin<seconds) {
         struct timespec pause={.tv_nsec=5000000}; nanosleep(&pause,NULL);
         int active=audio_output_active();
         if (was_active && !active) drops++;
@@ -187,6 +206,11 @@ static void run_backend_workload(unsigned workers, int workload) {
     int remaining=event_queue_depth();
     audio_output_stop();
     scheduler_shutdown(); audio_wait_room_preparation(); stop_room_worker();
+    if (long_room) {
+        const ConvKernel *kernel=atomic_load(&requested_ir[3]);
+        assert(kernel && kernel->parts==(CONV_MAX_FRAMES-1u)/CONV_BLOCK);
+        assert(convolvers[3].filled>=kernel->parts && !room_failures);
+    }
     PrepLockStat final_locks[PREP_LOCK_COUNT]; PrepWorkStat final_works[PREP_WORK_COUNT];
     prep_profile_snapshot(final_locks,final_works);
     assert(final_works[PREP_DECODE].calls>=5 && final_works[PREP_STRETCH].calls>=1);
@@ -202,16 +226,19 @@ static void run_backend_workload(unsigned workers, int workload) {
     unsigned long long xrun_calls=0,xrun_gaps=0,xrun_max_ns=0,xrun_empty=0;
     audio_output_xrun_stats(&xrun_calls,&xrun_gaps,&xrun_max_ns,&xrun_empty);
     printf("backend workload=%s workers=%u budget=%d status=measured backend=%s "
-        "backend_drops=%u backend_polls=%u rendered_s=%.3f expected_s=2.000 "
+        "backend_drops=%u backend_polls=%u rendered_s=%.3f expected_s=%.3f long_room=%d "
         "render_calls=%llu render_mean_ms=%.3f render_max_ms=%.3f render_overruns=%u "
+        "render_cpu_mean_ms=%.3f render_cpu_max_ms=%.3f render_cpu_overruns=%u "
         "xrun_calls=%llu xrun_gaps=%llu xrun_max_ms=%.3f xrun_empty=%llu "
         "submitted=%llu jobs=%llu published=%llu reserved=%llu controls=%llu "
         "skipped_late=%llu published_late=%llu reserved_late=%llu "
         "reserve_late_max_ms=%.3f queued_at_stop=%d peak_voices=%d peak_retiring=%d\n",
         workload==0?"cold":workload==1?"live":workload==2?"burst":"voiceburst",workers,prep_pool_cpu_budget(),backend,
-        drops,polls,rendered,calls,
+        drops,polls,rendered,seconds,long_room,calls,
         calls?atomic_load(&backend_render_ns)/1e6/calls:0,
         atomic_load(&backend_render_max_ns)/1e6,atomic_load(&backend_render_overruns),
+        calls?atomic_load(&backend_cpu_ns)/1e6/calls:0,
+        atomic_load(&backend_cpu_max_ns)/1e6,atomic_load(&backend_cpu_overruns),
         xrun_calls,xrun_gaps,xrun_max_ns/1e6,xrun_empty,
         (unsigned long long)stats.submitted,(unsigned long long)stats.jobs,
         (unsigned long long)stats.sources_published,(unsigned long long)stats.sources_reserved,
@@ -313,12 +340,12 @@ int main(int argc, char **argv) {
         assert(workers>=1 && workers<=8 && workload>=0 && workload<=3 && block>=1 && block<=8192);
         run_workload(workers,workload,block); return 0;
     }
-    if (argc==5 && !strcmp(argv[4],"backend")) {
+    if (argc==5 && (!strcmp(argv[4],"backend") || !strcmp(argv[4],"backend-long"))) {
         unsigned workers=(unsigned)strtoul(argv[1],NULL,10);
         int workload=atoi(argv[2]); unsigned long block=strtoul(argv[3],NULL,10);
         assert(workers>=1 && workers<=8 && workload>=0 && workload<=3 && block>=1 && block<=8192);
         (void)block;
-        run_backend_workload(workers,workload); return 0;
+        run_backend_workload(workers,workload,!strcmp(argv[4],"backend-long")); return 0;
     }
     assert(argc==1);
     /* Fresh child processes prevent earlier workers/workloads warming later

@@ -53,6 +53,8 @@ Useful focused checks:
 - `cmake --build build --target test-tui`
 - `cmake --build build --target test-sanitize`
 - `cmake --build build --target test-simd-sanitize`
+- `cmake --build build --target test-room-reference-web`
+- `cmake --build build --target profile-long-room-backend`
 - `cmake --build build --target test-terminal-sanitize`
 - `cmake --build build --target test-security`
 - `cmake --build build --target test-security-sanitize`

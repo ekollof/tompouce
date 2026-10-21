@@ -365,6 +365,13 @@ static void test_tutorial(void) {
 }
 
 int main(void) {
+    /* Coastline's final .size(4) is a room duration, not an unrelated size. */
+    JsProgram *room_alias_program;
+    cJSON *room_alias_haps=query("note(60).s('sine').room(.5).size(4)",&room_alias_program);
+    cJSON *room_alias_value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(room_alias_haps,0),"value");
+    cJSON *room_alias_size=cJSON_GetObjectItemCaseSensitive(room_alias_value,"roomsize");
+    assert(cJSON_IsNumber(room_alias_size) && room_alias_size->valuedouble==4);
+    cJSON_Delete(room_alias_haps); javascript_free(room_alias_program);
     test_control_aliases();
     test_tutorial();
     test_live_visuals(); test_scope_defaults();

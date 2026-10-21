@@ -12,6 +12,11 @@
 static uint32_t reverb_stream=0xc0ffeeu;
 
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim) {
+    return convolution_prepare_reverb_ex(size,fade,lp,dim,NULL);
+}
+
+const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double lp,double dim,const char **error) {
+    if (error) *error=NULL;
     enum { CACHE=16 };
     static struct { double size,fade,lp,dim; ConvKernel *kernel; int reserved; } cache[CACHE];
     static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -25,10 +30,16 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
        unknowable (one chain-ID draw per trigger plus fresh room draws), and
        the eager comparison renderer bounds per-hap capture, so sequences
        stay diagnostic. */
-    if (!isfinite(size) || !isfinite(fade) || !isfinite(lp) || !isfinite(dim) || size<=0 || size>10 ||
-        fade<0 || fade>10 || lp<0 || lp>SR/2 || dim<0 || dim>SR/2) return NULL;
+    if (!isfinite(size) || !isfinite(fade) || !isfinite(lp) || !isfinite(dim) || size<=0 || size>CONV_MAX_ROOM_SIZE ||
+        fade<0 || fade>10 || lp<0 || lp>SR/2 || dim<0 || dim>SR/2) {
+        if (error) *error="invalid size/fade/filter parameters";
+        return NULL;
+    }
     long frames=lround(size*1.5*SR), decay=lround(size*SR), fade_frames=lround(fade*SR);
-    if (frames<1 || frames>CONV_PARTS*CONV_BLOCK || decay<1) return NULL;
+    if (frames<1 || frames>CONV_MAX_FRAMES || decay<1) {
+        if (error) *error="IR duration outside native capacity";
+        return NULL;
+    }
     prep_lock(&lock, PREP_LOCK_REVERB);
     for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
         cache[i].lp==lp && cache[i].dim==dim) {
@@ -38,11 +49,16 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
     }
     int slot=-1;
     for (unsigned i=0;i<CACHE;i++) if (!cache[i].kernel && !cache[i].reserved) { slot=(int)i; break; }
-    if (slot<0) { prep_unlock(&lock, PREP_LOCK_REVERB); return NULL; }
+    if (slot<0) {
+        prep_unlock(&lock, PREP_LOCK_REVERB);
+        if (error) *error="generated IR cache full (16 distinct rooms)";
+        return NULL;
+    }
     cache[slot].reserved=1;
     prep_unlock(&lock, PREP_LOCK_REVERB);
     float *impulse=calloc((size_t)frames*2,sizeof(*impulse));
     if (!impulse) {
+        if (error) *error="impulse allocation failed";
         prep_lock(&lock, PREP_LOCK_REVERB);
         cache[slot].reserved=0;
         prep_unlock(&lock, PREP_LOCK_REVERB);
@@ -73,6 +89,7 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
     }
     prep_work_end(PREP_REVERB);
     ConvKernel *kernel=convolution_kernel(impulse,(int)frames,2,1); free(impulse);
+    if (!kernel && error) *error="IR kernel allocation/build failed";
     prep_lock(&lock, PREP_LOCK_REVERB);
     for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
         cache[i].lp==lp && cache[i].dim==dim) {
@@ -80,6 +97,7 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
         cache[slot].reserved=0;
         prep_unlock(&lock, PREP_LOCK_REVERB);
         convolution_kernel_free(kernel);
+        if (error) *error=NULL;
         return result;
     }
     if (kernel) {

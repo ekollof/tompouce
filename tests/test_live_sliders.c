@@ -1278,12 +1278,12 @@ static void test_generated_room_race(void) {
     assert(convolvers[0].kernel==generated && !convolvers[0].remaining);
     assert(atomic_load(&requested_ir[2]) && atomic_load(&requested_ir[2])!=generated);
     /* Failed generation keeps the voice on the previous room and retains
-       its equality guards, matching the web failure handoff. Size 3 exceeds
-       the kernel frame bound, so the failure is deterministic. */
+       its equality guards, matching the web failure handoff. A zero-length
+       room is invalid, so the failure is deterministic. */
     event_queue_clear();
     assert(!room_created[1] && !atomic_load(&requested_ir[1]));
     unsigned failures=room_failures;
-    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(3).orbit(1)"));
+    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(0).orbit(1)"));
     assert(js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation()));
     assert(qhead && qhead->ev.room_prepared);
     audio_wait_room_preparation();
@@ -1296,7 +1296,7 @@ static void test_generated_room_race(void) {
     for (int i=0;i<256;i++) assert(isfinite(output[i]));
     assert(!atomic_load(&requested_ir[1]));
     event_queue_clear();
-    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(3).orbit(1)"));
+    assert(track_load_from_code("s('sine').gain(0).room(.2).roomsize(0).orbit(1)"));
     assert(js_audio_schedule(tracks[0].javascript,1,0,event_queue_generation()));
     assert(qhead && !qhead->ev.room_rebuild);
     audio_wait_room_preparation();

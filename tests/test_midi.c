@@ -14,6 +14,23 @@ static double monotonic(void) {
     return now.tv_sec+now.tv_nsec/1e9;
 }
 
+/* Advance the synthetic audio clock at (approximately) real time.
+
+   The scheduler threads fill query windows against `audio_time`, and
+   `event_queue_push` drops events whose time has already passed. Pumping the
+   callback as fast as the CPU allows moves `audio_time` far ahead of the
+   generator, so window fills arrive "late" and are discarded — an artifact of
+   the harness, since production paces the callback from the audio device.
+   Sleeping for the block duration keeps the two clocks aligned and makes
+   delivery deterministic without relaxing any assertion. */
+static void pump_realtime(int frames) {
+    static float output[256*2];
+    assert(frames > 0 && frames <= 256);
+    pa_callback(NULL,output,frames,NULL,0,NULL);
+    struct timespec nap = {0,(long)((double)frames/SR*1e9)};
+    while (nanosleep(&nap,&nap) != 0 && errno == EINTR) {}
+}
+
 static void *capture_writer(void *argument) {
     int channel = *(int *)argument;
     for (int i = 0; i < 200; i++) midi_cc(channel, 74, i % 128);
@@ -145,11 +162,10 @@ static void test_commit_routing(void) {
 }
 
 static int wait_captured(int want_ons, double timeout_s, int *peak_voices) {
-    static float spin[256*2];
     double end=monotonic()+timeout_s;
     static MidiCapturedNote seen[512];
     for (;;) {
-        pa_callback(NULL,spin,128,NULL,0,NULL);
+        pump_realtime(128);
         if (peak_voices) {
             int live=audio_active_voices();
             if (live>*peak_voices) *peak_voices=live;
@@ -168,11 +184,10 @@ static void test_threaded_delivery(void) {
     scheduler_init();
     audio_toggle_play(1);
     int peak_voices=0;
-    static float pump[256*2];
     assert(track_load_from_code("note(\"60 62 64\").gain(1).velocity(.5).midi()"));
     assert(wait_captured(6,30,&peak_voices));
     for (int i=0;i<500;i++) {
-        pa_callback(NULL,pump,128,NULL,0,NULL);
+        pump_realtime(128);
         int live=audio_active_voices();
         if (live>peak_voices) peak_voices=live;
     }
@@ -207,7 +222,7 @@ static void test_threaded_delivery(void) {
     double end67=monotonic()+30;
     static MidiCapturedNote seen67[512];
     for (;;) {
-        pa_callback(NULL,pump,128,NULL,0,NULL);
+        pump_realtime(128);
         unsigned total67=midi_captured_notes(seen67,512);
         for (unsigned i=0;i<total67 && i<512;i++)
             if (seen67[i].on && seen67[i].chan==1 && seen67[i].note==67) found67=1;
@@ -216,7 +231,7 @@ static void test_threaded_delivery(void) {
     }
     int sounded=0;
     for (int i=0;i<2000 && !sounded;i++) {
-        pa_callback(NULL,pump,128,NULL,0,NULL);
+        pump_realtime(128);
         if (audio_active_voices()>0) sounded=1;
     }
     assert(sounded);
@@ -454,7 +469,15 @@ static void test_midi_restore_loopback(void) {
         nanosleep(&pause, NULL);
     }
     assert(fabs(midi_cc_value(21, 0) - 80 / 127.0) < 1e-12);
-    assert(midi_state_load("tompouce-midi-restore") == 4);
+    /* Persistence is written after the store update on the input path, so
+       wait for the file to settle before asserting its exact contents. */
+    double persisted = monotonic() + 5;
+    int restored = 0;
+    while ((restored = midi_state_load("tompouce-midi-restore")) != 4 && monotonic() < persisted) {
+        struct timespec pause = {.tv_nsec = 5000000};
+        nanosleep(&pause, NULL);
+    }
+    assert(restored == 4);
     /* A normal output subscriber must never receive another device's
        restored controls. Find only this test's engine through our source
        subscription, so a running user engine is never involved. */

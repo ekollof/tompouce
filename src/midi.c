@@ -781,6 +781,7 @@ static int midi_state_snapshot(const char *name, MidiRestoreEntry *out, int cap)
    earlier tests cannot leak in. Zero is a real entry, like the web store.
    Keys follow the web convention: merged "all" plus 1-based channels. */
 static void midi_state_write(const char *name, int chan, int cc) {
+    static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
     char path[1152];
     if (!midi_state_path(name, path, sizeof(path))) return;
     { char root[1024], *slash = strrchr(path, '/');
@@ -792,6 +793,10 @@ static void midi_state_write(const char *name, int chan, int cc) {
     pthread_mutex_lock(&midi_in_lock);
     value = midi_cc_chan[chan][cc];
     pthread_mutex_unlock(&midi_in_lock);
+    /* Serialize the read-modify-write and publish atomically: a concurrent
+       or interrupted writer must never leave a truncated state file, which
+       would silently drop every sender's saved controllers. */
+    pthread_mutex_lock(&state_lock);
     FILE *read = fopen(path, "r");
     cJSON *doc = NULL;
     if (read) {
@@ -799,7 +804,7 @@ static void midi_state_write(const char *name, int chan, int cc) {
         fclose(read); text[len] = 0;
         doc = cJSON_Parse(text);
     }
-    if (!doc) { doc = cJSON_CreateObject(); if (!doc) return; }
+    if (!doc) { doc = cJSON_CreateObject(); if (!doc) { pthread_mutex_unlock(&state_lock); return; } }
     char key[8]; snprintf(key, sizeof(key), "%d", cc);
     char scope[8]; snprintf(scope, sizeof(scope), "%d", chan + 1);
     const char *scopes[] = {"all", scope};
@@ -807,18 +812,24 @@ static void midi_state_write(const char *name, int chan, int cc) {
         cJSON *obj = cJSON_GetObjectItemCaseSensitive(doc, scopes[s]);
         if (!cJSON_IsObject(obj)) {
             obj = cJSON_CreateObject();
-            if (!obj) { cJSON_Delete(doc); return; }
+            if (!obj) { cJSON_Delete(doc); pthread_mutex_unlock(&state_lock); return; }
             cJSON_AddItemToObject(doc, scopes[s], obj);
         }
         cJSON_DeleteItemFromObject(obj, key);
-        if (cJSON_AddNumberToObject(obj, key, value) == NULL) { cJSON_Delete(doc); return; }
+        if (cJSON_AddNumberToObject(obj, key, value) == NULL) {
+            cJSON_Delete(doc); pthread_mutex_unlock(&state_lock); return;
+        }
     }
     char *text = cJSON_PrintUnformatted(doc);
     cJSON_Delete(doc);
-    if (!text) return;
-    FILE *file = fopen(path, "w");
-    if (file) { fputs(text, file); fclose(file); }
+    if (!text) { pthread_mutex_unlock(&state_lock); return; }
+    char temporary[1200];
+    int temp_ok = snprintf(temporary, sizeof(temporary), "%s.tmp", path) > 0;
+    FILE *file = temp_ok ? fopen(temporary, "w") : NULL;
+    int ok = file && fputs(text, file) >= 0 && fclose(file) == 0 && rename(temporary, path) == 0;
+    if (!ok && temp_ok) unlink(temporary);
     free(text);
+    pthread_mutex_unlock(&state_lock);
 }
 
 void midi_state_saved_cc(int client, int port, int chan, int cc, double value) {

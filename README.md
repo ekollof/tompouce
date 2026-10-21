@@ -217,6 +217,9 @@ fallback when unavailable. `TOMPOUCE_SIMD=auto` is the default.
 Selection happens before rendering, never
 through feature detection in the audio callback. See the
 [benchmark and verification notes](docs/simd-benchmark.md).
+F4 shows the active convolution kernel, startup selection mode, usable SIMD
+capabilities and any fallback to C, for example
+`SIMD conv=avx2 mode=auto cpu=sse2/avx/avx2`.
 
 `cmake --build build --target test-audio-backends` checks fallback and cleanup with temporary null ALSA
 devices and disposable silent server streams. Native daemon checks skip when

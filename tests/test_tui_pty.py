@@ -53,7 +53,7 @@ def gm_supported():
     return GM_SUPPORTED
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None, simd=None):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     if name.startswith('GM synth') and not gm_supported():
@@ -74,6 +74,8 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
         original = termios.tcgetattr(slave)
         env = dict(os.environ, TERM="xterm-256color", XDG_CONFIG_HOME=root,
                    XDG_CACHE_HOME=root, XDG_STATE_HOME=root, TOMPOUCE_BANKS=root)
+        if simd is not None:
+            env['TOMPOUCE_SIMD'] = simd
         env.pop('TMUX', None)
         env.pop('STY', None)
         if theme:
@@ -504,6 +506,12 @@ check("hide console in vi mode", 'note(60).gain(0)', b'\x0c',
       expected='note(60).gain(0)', observed=b'console hidden', vi=True)
 check("F4 state diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", vi=True, observed=b'mode=VI:N')
+check("F4 SIMD diagnostics", "note('c4').gain(0)", b'\x1bOS',
+      expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=c cpu=', simd='c')
+check("F4 SIMD policy", "note('c4').gain(0)", b'\x1bOS',
+      expected="note('c4').gain(0)", observed=b'mode=auto cpu=', simd='auto')
+check("F4 SIMD fallback", "note('c4').gain(0)", b'\x1bOS',
+      expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=invalid fallback cpu=', simd='not-a-backend')
 check("Tab indentation", "", b'\tX', expected='  X')
 check("Shift Tab unindent", "  note('c4')", b'\x1b[Z', expected="note('c4')")
 check("Tab selected lines", "one\ntwo", b'\x01\t', expected='  one\n  two')

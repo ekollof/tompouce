@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "slider.h"
 #include "audio.h"
+#include "convolution_mix.h"
 #include "common.h"
 #include "ai.h"
 #include "mcp.h"
@@ -3618,6 +3619,9 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         row++;
     }
     char mcpst[32];
+    ConvolutionSimdStats simd=convolution_simd_stats();
+    state_line(&row,maxrow,c0+1,w-2,"SIMD conv=%s mode=%s%s cpu=%s",simd.kernel,
+        simd.policy,simd.fallback?" fallback":"",simd.available);
     mcp_status(mcpst, sizeof(mcpst));
     if (slider_count() > 0 && row < maxrow) {
         char sb[256];

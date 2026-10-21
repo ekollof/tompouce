@@ -94,10 +94,22 @@ int main(void) {
     /* Callback accessor has a safe fallback without running initialization. */
     assert(!strcmp(convolution_simd_name(),"c"));
     assert(convolution_accumulator()==accumulate_c);
+    ConvolutionSimdStats before=convolution_simd_stats();
+    assert(!strcmp(before.policy,"pending") && !strcmp(before.available,"none") && !before.fallback);
     pthread_t threads[8];
     for (unsigned i=0;i<8;i++) assert(!pthread_create(&threads[i],NULL,initialize_thread,NULL));
     for (unsigned i=0;i<8;i++) assert(!pthread_join(threads[i],NULL));
     const char *request=getenv("TOMPOUCE_SIMD");
+    ConvolutionSimdStats stats=convolution_simd_stats();
+    const char *policy=!request?"auto":request;
+    if (strcmp(policy,"auto") && strcmp(policy,"c") && strcmp(policy,"sse2") &&
+        strcmp(policy,"avx") && strcmp(policy,"avx2")) policy="invalid";
+    assert(!strcmp(stats.policy,policy));
+    assert(!strcmp(stats.kernel,convolution_simd_name()));
+    assert((strstr(stats.available,"sse2")!=NULL)==!!(usable_features()&MIX_SSE2));
+    assert((strstr(stats.available,"avx2")!=NULL)==!!(usable_features()&MIX_AVX2));
+    assert(stats.fallback==(!strcmp(policy,"invalid") ||
+        (strcmp(policy,"auto") && strcmp(policy,"c") && !strcmp(stats.kernel,"c"))));
     assert(!strcmp(convolution_simd_name(),choose_backend(request,usable_features())->name));
     ConvolutionAccumulate chosen=convolution_accumulator();
     convolution_simd_init(); assert(chosen==convolution_accumulator());

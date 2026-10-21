@@ -119,6 +119,12 @@ baseline and may perform like the compiler-vectorized C path.
 [MMX provides integer SIMD](https://www.intel.com/content/www/us/en/support/articles/000005779/processors.html)
 and has no suitable floating-point kernel here.
 
+F4's state pane shows `SIMD conv=KERNEL mode=POLICY cpu=CAPABILITIES`, adding
+`fallback` when an invalid or unavailable explicit request selected C. Capability
+and policy information is captured once at startup, including when C is forced;
+redraws do not execute CPU detection. These are selection diagnostics, not
+per-kernel execution counters or inferred speedup percentages.
+
 Three-run median CPU times for the actual dispatched implementation, with the
 rest of the production build at O2 and 1,000 blocks as above:
 

@@ -50,4 +50,39 @@ In F6 choose import-sounds, paste a folder path and press Enter. The companion o
 
 Import limits are 8 MiB per file, 256 MiB/2,048 files in total and 256 sound names. Reimporting the same filename replaces its slot. Imported content retains its original licensing obligations.
 
+### Banks with strudel.json
+
+A folder whose root holds a `strudel.json` manifest imports as a bank instead
+of a flat file walk: sound names, array order and pitch regions follow the
+manifest, like Strudel's `samples()` maps. Supported value forms are single
+files, flat arrays and one-level pitch-keyed maps (`{"c2": "low.wav"}`), with
+top-level and per-entry `_base` subdirectories; audio references stay inside
+the folder (relative subdirectories allowed). Nested JSON objects, remote
+bases/URLs, empty groups and unparseable pitch keys are rejected, and an
+invalid manifest fails the import instead of falling back to the file walk.
+Extension matching ignores case, unlike the browser.
+Three deliberate divergences from upstream's `processSampleMap`, verified with
+`scripts/samplemap-upstream-check.mjs`: a malformed value aborts the whole
+upstream map (order-dependent partial registration) while native skips
+just that entry; upstream registers `_`-prefixed keys (including `_base`
+itself) as broken sounds while native drops them at import; both sides agree
+on forms, base prefixing, nearest-key first-wins selection and `n` wrapping.
+
+Manifest imports own the names they define: reimporting replaces the bank's
+slots, drops names the manifest no longer defines, and collects unreferenced
+audio. Loose file imports into manifest-owned names are refused. Manifests
+are capped at 2 MiB / 8,192 references; the stored index stays schema
+versioned (currently 2) so older builds ignore newer stores rather than
+misreading them.
+
+### GitHub banks for offline use
+
+Typing `github:user/repo[/branch][/path]` (or `--github`) in the import box
+fetches that repo's `strudel.json` plus every referenced file over HTTPS and
+stores the bank exactly like a local manifest import, for offline playback.
+Only `raw.githubusercontent.com` is ever contacted (HTTPS, pinned-host
+redirects, 45 s timeout); specs mirror the web `samples('github:…')` form
+with the same user/repo defaults. A local folder literally named `github:*`
+is unreachable through folder import; rename it.
+
 See the [native audio reference](https://github.com/ekollof/tompouce/blob/master/docs/javascript.md) for sample-map syntax, cache bounds, supported effects and decoder behavior.

@@ -3190,7 +3190,7 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     int list_row = info_row+1;
     int visible = r0+h-1-list_row;
     char info[256];
-    if (search_category == SOUND_IMPORT) snprintf(info,sizeof(info),"folder path; WAV/MP3/FLAC, 8 MiB/file");
+    if (search_category == SOUND_IMPORT) snprintf(info,sizeof(info),"folder path or github:user/repo bank; WAV/MP3/FLAC, 8 MiB/file; strudel.json banks ok");
     else if (search_category != SOUND_CATEGORIES) snprintf(info,sizeof(info),"%d sounds; Left/Right: category",search_ndirs_total);
     else if (banks_failed()) snprintf(info, sizeof(info), "no banks dir (TOMPOUCE_BANKS?)");
     else if (!banks_ready()) snprintf(info, sizeof(info), "indexing... %d files", banks_count());

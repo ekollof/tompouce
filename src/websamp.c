@@ -1622,7 +1622,7 @@ int websamp_acquire(const char *token, double midi) {
     WebName *w = find_name(name, 0);
     if (!w || w->nslots <= 0) {
         pthread_mutex_unlock(&web_lock);
-        int imported = user_sounds_acquire(name,index);
+        int imported = user_sounds_acquire(name,index,midi);
         if (imported != -2) return imported;
         return acquire_default(name, index, midi);
     }

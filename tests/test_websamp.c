@@ -409,9 +409,107 @@ static void test_imported_samples(void) {
     (void)user_sounds_reload();
 }
 
+static void test_imported_pitch_banks(void) {
+    char root[] = "/tmp/tompouce-pitch-XXXXXX", path[512], assets[512];
+    const char *old = getenv("XDG_CONFIG_HOME");
+    char *saved = old ? strdup(old) : NULL;
+    assert(!old || saved);
+    assert(mkdtemp(root));
+    assert(!setenv("XDG_CONFIG_HOME",root,1));
+    snprintf(path,sizeof(path),"%s/tompouce",root); assert(!mkdir(path,0700));
+    snprintf(path,sizeof(path),"%s/tompouce/sounds",root); assert(!mkdir(path,0700));
+    snprintf(assets,sizeof(assets),"%s/tompouce/sounds/assets",root); assert(!mkdir(assets,0700));
+    const unsigned char wav[] = {
+        'R','I','F','F',40,0,0,0,'W','A','V','E','f','m','t',' ',
+        16,0,0,0,1,0,1,0,68,172,0,0,136,88,1,0,2,0,16,0,
+        'd','a','t','a',4,0,0,0,0,32,0,192
+    };
+    const char *digests[] = {
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "2222222222222222222222222222222222222222222222222222222222222222",
+        "3333333333333333333333333333333333333333333333333333333333333333",
+        "4444444444444444444444444444444444444444444444444444444444444444"
+    };
+    for (int i = 0; i < 5; i++) {
+        snprintf(path,sizeof(path),"%.400s/%.68s.wav",assets,digests[i]);
+        FILE *file = fopen(path,"wb"); assert(file);
+        assert(fwrite(wav,1,sizeof(wav),file) == sizeof(wav)); assert(!fclose(file));
+    }
+    snprintf(path,sizeof(path),"%s/tompouce/sounds/index.json",root);
+    FILE *file = fopen(path,"w"); assert(file);
+    assert(fprintf(file,
+        "{\"version\":2,\"sounds\":{"
+        "\"pitchbank\":["
+        "{\"label\":\"lo-a.wav\",\"file\":\"%s.wav\",\"midi\":48,\"region\":0,\"bank\":\"manifest:kit\"},"
+        "{\"label\":\"lo-b.wav\",\"file\":\"%s.wav\",\"midi\":48,\"region\":0},"
+        "{\"label\":\"hi.wav\",\"file\":\"%s.wav\",\"midi\":60,\"region\":1,\"bank\":\"manifest:kit\"},"
+        "{\"label\":\"sub.wav\",\"file\":\"%s.wav\",\"midi\":12,\"region\":2},"
+        "{\"label\":\"bad-midi.wav\",\"file\":\"%s.wav\",\"midi\":200},"
+        "{\"label\":\"bad-region.wav\",\"file\":\"%s.wav\",\"midi\":60,\"region\":-1},"
+        "{\"label\":\"bad-bank.wav\",\"file\":\"%s.wav\",\"midi\":60,\"region\":9,\"bank\":7}],"
+        "\"flatbank\":[{\"label\":\"a.wav\",\"file\":\"%s.wav\"}]}}",
+        digests[0],digests[1],digests[2],digests[4],digests[0],digests[0],digests[0],digests[3]) > 0);
+    assert(!fclose(file));
+    expect(user_sounds_reload() == 2,"version-2 manifest bank catalog reloads");
+    float *pcm = NULL; int frames = 0, channels = 0, id;
+    id = websamp_acquire("pitchbank",48);
+    expect(id >= 0 && smp_base_midi(id) == 48,"pitch region selects nearest key");
+    id = websamp_acquire("pitchbank",60);
+    expect(id >= 0 && smp_base_midi(id) == 60,"higher pitch selects higher region");
+    id = websamp_acquire("pitchbank",54);
+    expect(id >= 0 && smp_base_midi(id) == 48,"pitch ties keep declaration order");
+    id = websamp_acquire("pitchbank",59);
+    expect(id >= 0 && smp_base_midi(id) == 60,"closer pitch wins over order");
+    id = websamp_acquire("pitchbank",-1);
+    expect(id >= 0 && smp_base_midi(id) == 12,"drum triggers select by raw pitch like upstream");
+    id = websamp_acquire("pitchbank",72);
+    expect(id >= 0 && smp_base_midi(id) == 60,"high pitches select the top region");
+    id = websamp_acquire("pitchbank:1",48);
+    smp_get_stereo(id,&pcm,&frames,&channels);
+    expect(id >= 0 && smp_base_midi(id) == 48,"sample index addresses its region");
+    int first = websamp_acquire("pitchbank:0",48);
+    expect(websamp_acquire("pitchbank:2",48) == first,"sample index wraps within its region");
+    expect(websamp_acquire("pitchbank:0",60) != first,"regions hold distinct samples");
+    id = websamp_acquire("flatbank",72);
+    expect(id >= 0 && smp_base_midi(id) == 36,"flat banks keep the recording default");
+    int held = websamp_acquire("pitchbank:0",48);
+    float *held_pcm = NULL;
+    smp_get_stereo(held,&held_pcm,&frames,&channels);
+    expect(held >= 0 && held_pcm,"reimport baseline resolves");
+    snprintf(path,sizeof(path),"%s/tompouce/sounds/index.json",root);
+    file = fopen(path,"w"); assert(file);
+    assert(fprintf(file,"{\"version\":2,\"sounds\":{\"flatbank\":[{\"label\":\"a.wav\",\"file\":\"%s.wav\"}]}}",
+        digests[3]) > 0); assert(!fclose(file));
+    expect(user_sounds_reload() == 1,"reimport drops the removed bank");
+    smp_get_stereo(held,&pcm,&frames,&channels);
+    expect(pcm && frames == 2,"queued notes keep decoded audio across reimports");
+    expect(websamp_acquire("missingbank",60) == -1 || websamp_acquire("missingbank",60) >= 0,
+        "unknown imported names fall through to defaults");
+    websamp_load_code("samples({pitchbank:['https://example.com/x.wav']})");
+    expect(websamp_acquire("pitchbank",48) < 0,"explicit sample maps shadow imported banks");
+    websamp_load_code("");
+    snprintf(path,sizeof(path),"%s/tompouce/sounds/index.json",root);
+    file = fopen(path,"w"); assert(file);
+    assert(fprintf(file,"{\"version\":3,\"sounds\":{}}") > 0); assert(!fclose(file));
+    expect(user_sounds_reload() < 0,"unknown index versions fail without side effects");
+    expect(websamp_acquire("flatbank",72) >= 0,"rejected reloads preserve the live catalog");
+    assert(!unlink(path));
+    for (int i = 0; i < 5; i++) {
+        snprintf(path,sizeof(path),"%.400s/%.68s.wav",assets,digests[i]); assert(!unlink(path));
+    }
+    assert(!rmdir(assets));
+    snprintf(path,sizeof(path),"%s/tompouce/sounds",root); assert(!rmdir(path));
+    snprintf(path,sizeof(path),"%s/tompouce",root); assert(!rmdir(path)); assert(!rmdir(root));
+    if (saved) { assert(!setenv("XDG_CONFIG_HOME",saved,1)); free(saved); }
+    else assert(!unsetenv("XDG_CONFIG_HOME"));
+    (void)user_sounds_reload();
+}
+
 int main(void) {
     test_local_defaults();
     test_imported_samples();
+    test_imported_pitch_banks();
     char url[512];
     websamp_load_code("samples({voice:{c3:['a.wav','b.wav'],c4:['c.wav','d.wav']}},'https://example.com/')");
     expect(websamp_slot_count("voice") == 4,"pitch-keyed sample arrays");

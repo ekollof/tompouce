@@ -205,7 +205,9 @@ Aliases registered by upstream Strudel map to the same controls.
 Native WAV, MP3 and FLAC sampling preserves stereo channels and recorded
 levels. Pitch-keyed maps accept arrays within each region; sample indices
 round and wrap with JavaScript semantics, including negative indices.
-Region selection preserves fractional pitches. Arrays allow up to 1,024
+Region selection preserves fractional pitches. Imported manifest banks
+(`strudel.json` folder imports) use the same nearest-region selection, with
+each recording played at its own pitch. Arrays allow up to 1,024
 slots per name, with an overall 8,192-slot map guard. Decoded samples have a
 120-second duration guard and a 256 MiB/256-sample cache guard; exceeding a
 decode/cache guard reports an error rather than silently truncating audio.

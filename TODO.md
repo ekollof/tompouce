@@ -8,76 +8,66 @@ live in [JavaScript/native audio](docs/javascript.md),
 [architecture](docs/architecture.md). Follow [AGENTS.md](AGENTS.md) for security,
 verification, installation and upstream terminal constraints.
 
-## Local sample banks with Strudel manifests
-
-Import a local bank containing `strudel.json`, preserving sound names, array
-order and pitch regions instead of treating it as an alphabetical audio folder.
-Public URL/GitHub manifests already work through `samples()`; this feature adds
-persistent offline imports through the existing sound store.
-
-- [ ] Require compatibility with Strudel's **import-sounds** workflow. Inspect
-      its actual implementation and test the same bank fixtures through both
-      importers before finalizing the contract. Preserve compatible folder and
-      manifest layouts, sound names, variant ordering and resulting pattern
-      usage without requiring Tompouce-specific bank edits. Resolve conflicting
-      assumptions in the provisional steps below against that behavior; document
-      unavoidable security/platform restrictions and test them explicitly.
-- [ ] Define supported manifest forms against the existing loader and actual
-      Strudel behavior: arrays, single-file entries, pitch-keyed maps, nested
-      directories and `_base`. Report unsupported forms explicitly. Preserve
-      precedence: explicit `samples()` maps, imported sounds, then defaults.
-- [ ] Detect `strudel.json` at the selected root in the shared F6, companion and
-      MCP import service. Keep existing audio-folder behavior when no manifest
-      exists; invalid manifests must fail rather than silently fall back.
-      Recursive discovery of multiple banks is outside the initial scope.
-- [ ] Resolve referenced audio through confined filesystem operations inside
-      the selected root. Support relative subdirectories and a confined local
-      `_base`; reject absolute paths, traversal, symlinks, special files and
-      remote references in local-import mode. Preserve public-fetch SSRF checks
-      and the restriction against filesystem paths in `samples()`.
-- [ ] Persist normalized mappings and referenced audio in the owned sound store,
-      retaining variant order, pitch metadata and shared-file references across
-      restart. Version the schema if needed and retain existing imports. Reuse
-      audio/import limits; also bound manifest bytes, nesting, entries, path
-      lengths and total work.
-- [ ] Validate and stage the complete bank before publication. Missing or
-      unsupported audio, invalid mappings, quota failures and interrupted writes
-      must preserve the previous bank and clean up staging. Define bank identity,
-      collision/replacement policy and obsolete-file cleanup. Reimports must
-      preserve queued notes and active voices.
-- [ ] Expose manifest banks consistently in F6 and companion with correct variant
-      counts and source snippets. Use existing UI/MCP diagnostics for failures;
-      avoid unnecessary disclosure of local paths to browser clients.
-- [ ] Add owned fixtures for non-alphabetical variant order, nearest-pitch
-      selection, `_base`, nested/shared files, precedence, restart persistence,
-      reimport and legacy folder imports. Independently compare supported map
-      interpretation with Strudel; native-only tests do not prove web parity.
-- [ ] Test rejection and absence of side effects for traversal, escaping symlinks,
-      malformed/deep/oversized JSON, URLs, missing/unsupported assets, collisions,
-      quota exhaustion and partial writes. Verify all import frontends share
-      validation. Run security tests/sanitizers and relevant catalog/import/audio
-      checks with owned fixtures and isolated resources.
-- [ ] Document supported manifests, `_base`, offline use, limits and replacement
-      behavior. Sync edited wiki pages per AGENTS.md. Install verified runtime
-      changes and check the installed import flow without touching the user's
-      running session.
-
 ## CPU optimization follow-up
 
-Convolution now selects AVX2, AVX or SSE2 accumulation at initialization
-according to CPU/OS support, with portable C fallback and `TOMPOUCE_SIMD`
-overrides. The [benchmark and validation report](docs/simd-benchmark.md) records
-a 1.84x full three-second convolution speedup on a Ryzen 5800X3D, exact C/AVX2
-PCM comparisons, sanitizers, web gates and selected real-backend workloads.
+Convolution selects AVX2, AVX or SSE2 accumulation at initialization according
+to CPU/OS support, with portable C fallback and `TOMPOUCE_SIMD` overrides.
+Per-sample voice paths skip provably-identity work through activity flags
+cached in `dsp_init`, and never-used orbits skip their fallback reverb and
+delay work. The [benchmark report](docs/simd-benchmark.md) records the
+convolution speedups, simultaneous long-convolver scaling, idle/synth gains
+and verification.
 
-- [ ] Broaden simultaneous long-convolver scaling measurements beyond the
-      selected orbit/preparation workloads. Preserve real-backend deadline
-      checks, audio parity, portable fallback and per-kernel targeting; do not
-      enable global AVX2 or relaxed math flags based on microbenchmarks.
-- [ ] Profile per-voice frequency/FM work and inactive orbit room/delay overhead
-      for portable fast paths that retain tails and automation. Stretch
-      preparation and FFTs are secondary candidates; AVX2 did not beat portable
-      O3 for the looping-sample callback cases.
+- [ ] Profile stretch preparation and decode latency for preparation-stage
+      fast paths, after the callback work above. Preserve measured decode
+      accuracy and the existing preparation budgets.
+
+## Plugin hosting
+
+LV2 instruments/effects first, headless (generic parameter sliders, no
+`suil`/X11 editor embedding in the terminal UI). Run plugin DSP in a confined
+worker process on the `csound_host` pattern: arbitrary plugin code never runs
+in the engine process, preparation stays outside the audio callback, and
+notices/attribution are preserved per plugin license.
+
+In-between, use Carla instead of building format support: it already hosts
+LADSPA/DSSI/LV2/VST2/VST3/SF2/SFZ plus Wine bridges (GPL-2.0-or-later, so no
+license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
+
+- [ ] Document the zero-code path: Tompouce JACK out into a Carla patchbay
+      hosting anything (including Wine VSTs), manual patching, no pattern
+      params. Verify on a configured box and record latency notes.
+- [ ] `out` control for named PipeWire targets (exact node-name match):
+      `s('saw').out('carla')` routes those voices to a dedicated stream
+      targeting that node; unknown names fall back to the default stream with
+      a console warning (never silence). Lazily create streams per distinct
+      name under a small cap; reuse the `TOMPOUCE_OUTPUT_TARGET` mechanism
+      per stream. List candidate targets at startup/construction for
+      discoverability; keep the default stream behavior byte-identical.
+      Sources (capture) stay out of scope until an input path exists.
+- [ ] Drive a managed Carla instance from patterns: project files for plugin
+      graphs, notes/CC through existing MIDI output for params, instance
+      lifecycle owned by the engine without stalling playback on failure.
+- [ ] LV2 discovery/instantiation via `lilv` (installer dependency): scan
+      standard paths plus a user dir, allowlist audio/MIDI plugin classes,
+      refuse shell-y plugin metadata (executable paths, FDI downloads).
+- [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
+      params/presets through LV2 state mapped to existing sliders; per-plugin
+      crash isolation must not take down or stall playback.
+- [ ] One instrument and one effect behind compare gates (rendered output vs
+      a pinned reference render), plus failure tests (missing/broken plugin,
+      dead worker, preset rejection) and sanitizer coverage of the host glue.
+- [ ] Document supported classes, the no-UI ceiling, per-user plugin setup
+      (licenses/installs stay with the user) and the rtkit/Wine notes below.
+
+VST3 is optional and strictly after LV2: it needs the GPLv3 SDK vendored
+under `thirdparty/` with notices intact plus a C++ bridge for the COM-style
+API, on top of the same worker model. VST2 is out (deprecated, hostile
+licensing). Wine-bridged plugins (yabridge) need a VST3 host first and stay
+user-side (per-user prefixes, licenses and realtime setup such as
+rtkit/wine-rt cannot be regression-tested here); measure round-trip
+MIDI-to-audio latency under load on a configured box before claiming
+live-coding suitability.
 
 ## Remaining parity work (optional)
 

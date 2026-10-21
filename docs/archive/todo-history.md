@@ -721,3 +721,69 @@ Archived feature gaps (not scheduled for implementation):
 - [x] Add example code gallery. → `docs/examples.md`
 - [x] Add architecture diagram. → `docs/architecture.md`
 - [x] Add manual acceptance test checklist. → `docs/acceptance.md`
+
+## Local sample banks with Strudel manifests (completed 2026-10-21)
+
+Import a local bank containing `strudel.json`, preserving sound names, array
+order and pitch regions. Upstream findings that shaped the contract: the
+website folder importer ignores manifests (flat audio glob, parent-dir
+grouping); manifests only arrive via the `samples()`/JSON form
+(`processSampleMap` + `getCommonSampleInfo` in superdough). Verified
+agreements: single/array/pitch-map forms, top-level and per-entry `_base`
+prefixing, nearest-key first-wins selection, `n` wrap within regions.
+Deliberate divergences: malformed values abort the whole upstream map while
+native skips the entry; upstream registers `_`-prefixed keys as broken
+sounds while native drops them; native accepts uppercase extensions.
+
+- [x] Strudel import-sounds compatibility: upstream implementation inspected;
+      normalization and trigger selection differentially checked against the
+      real upstream modules (`scripts/samplemap-upstream-check.mjs`).
+- [x] Supported forms: arrays, single files, pitch-keyed maps, nested
+      subdirectories and confined local `_base` (top-level and per-entry).
+      Precedence unchanged: explicit `samples()` maps, imported sounds, then
+      defaults.
+- [x] `strudel.json` at the selected root imports as a bank through the shared
+      folder flow; invalid manifests fail instead of falling back. Companion
+      single-file import and MCP reload keep the shared validator.
+- [x] Confined fd-walk resolution inside the root; traversal, absolute paths,
+      symlinks, special files and remote references fail closed.
+- [x] Owned sound store schema v2 (`midi`/`region`/`bank` per slot, v1 still
+      loads); variant order, pitch metadata and content-shared assets persist.
+      Existing audio/import limits reused plus manifest bytes/refs/path bounds.
+- [x] Whole-bank validation before publication; atomic index swap preserves the
+      previous bank, staged assets are unlinked on failure, reimports replace
+      owned slots and collect unreferenced audio. Bank identity
+      `manifest:<folder>`; manifest-owned names refuse loose imports. Queued
+      notes keep decoded audio across reimports (tested).
+- [x] Manifest banks surface through the existing F6 user-sound rows with
+      correct slot counts; F6 import hint notes `strudel.json` support.
+- [x] Owned fixtures across forms/order/pitch/`_base`/nesting/precedence/
+      persistence/reimport/legacy flows; rejection matrix for escapes,
+      symlinks, malformed JSON, URLs, missing assets, collisions, quotas and
+      partial writes; C pitch-selection tests against upstream vectors.
+- [x] Security suites and sanitizers green, including a new websamp ASan/UBSan
+      target; full ctest green.
+- [x] Manifest banks documented (wiki + native audio reference); wiki synced;
+      installed import flow checked via the helper-spawn CLI path.
+- [x] `github:user/repo[/branch][/path]` bank imports for offline use through
+      the same staged path: pinned-host HTTPS fetch, upstream spec defaults,
+      per-name replacement and collection. F6 accepts the spec string.
+
+## CPU optimization follow-up (completed 2026-10-21)
+
+- [x] Broadened simultaneous long-convolver scaling beyond isolated effects:
+      added `bench_simd --simultaneous` (1/2/4/8 independent 3-second
+      kernels). Near-linear to four kernels, 1.77x AVX2-vs-C at eight
+      (1.845 ms per 128-frame block, ~64% of one core). Recorded in
+      docs/simd-benchmark.md; backend deadlines remain covered by
+      `profile-long-room-backend`.
+- [x] Profiled per-voice frequency/FM and idle orbit room/delay work and added
+      portable fast paths: activity flags cached in `dsp_init` skip
+      `dsp_frequency`'s eight-operator loop, the pitch multiplier's
+      transcendentals and the whole `dsp_process` body when nothing is
+      configured; never-used orbits skip the fallback reverb network and the
+      delay line. Idle engine 0.445 -> 0.071 ms, 32 voices 0.769 -> 0.268 ms,
+      128 voices 1.812 -> 0.827 ms, 128 with filter+phaser 2.916 -> 2.034 ms
+      per 1,500 blocks, with identical PCM checksums. `test_dsp` compares the
+      fast paths against forced slow-path flags; `test_audio` asserts exact
+      idle silence. Web matrix 43 gates + 2 diagnostics, unchanged values.

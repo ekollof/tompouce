@@ -227,7 +227,7 @@ static void test_custom_room_schedule(void) {
        revision. The callback must render the previous history without
        waiting, then reset exactly once when publication completes. */
     ConvState *during=malloc(sizeof(*during)); assert(during);
-    memcpy(during,&convolvers[11],sizeof(*during));
+    assert(convolution_state_clone(during,&convolvers[11]));
     unsigned long long rendered=rendered_ir_revision[11];
     atomic_fetch_add(&ir_revision[11],1);
     atomic_store(&requested_ir[11],kernel);
@@ -241,7 +241,7 @@ static void test_custom_room_schedule(void) {
     assert(completed.left==0 && completed.right==0);
     assert(convolvers[11].kernel==kernel && !convolvers[11].remaining);
     assert(rendered_ir_revision[11]==atomic_load(&ir_revision[11]));
-    free(during);
+    convolution_state_free(during); free(during);
     event_queue_clear(); assert(!unlink(path));
     for (int i=0;i<2;i++) {
         snprintf(path,sizeof(path),"%s/tompouce/sounds/assets/%s",root,names[i]); assert(!unlink(path));
@@ -337,6 +337,7 @@ static void test_performance_tail(void) {
     audio_toggle_play(1);
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
     orbits_ensure(); orbit_dt[N_ORBITS-1]=32/SR; orbit_fb[N_ORBITS-1]=0;
+    assert(ensure_orbit_delay(N_ORBITS-1)); /* white-box voice setup */
     float impulse[2]={1,1};
     Voice *voice=&voices[0]; memset(voice,0,sizeof(*voice));
     voice->active=1; voice->orbit=N_ORBITS-1; voice->smpbuf=impulse; voice->smplen=1;
@@ -357,6 +358,7 @@ static void test_disabled_delay_keeps_tail(void) {
     audio_time=0; audio_toggle_play(1); event_queue_clear();
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
     orbits_ensure(); orbit_dt[10]=32/SR; orbit_fb[10]=.5;
+    assert(ensure_orbit_delay(10)); /* white-box voice setup */
     float impulse[2]={1,1},output[256];
     Voice *voice=&voices[0]; memset(voice,0,sizeof(*voice));
     voice->active=1; voice->orbit=10; voice->smpbuf=impulse; voice->smplen=1;
@@ -1107,7 +1109,7 @@ static void test_room_preparation(void) {
     }
     assert(old_energy>0 && convolvers[10].remaining>0);
     ConvState *pending_history=malloc(sizeof(*pending_history)); assert(pending_history);
-    memcpy(pending_history,&convolvers[10],sizeof(*pending_history));
+    assert(convolution_state_clone(pending_history,&convolvers[10]));
     const ConvKernel *pending=convolution_prepare_reverb(.15,.01,9000,500);
     assert(pending && pending!=first && atomic_load(&requested_ir[10])==first);
     double pending_energy=0;
@@ -1118,7 +1120,7 @@ static void test_room_preparation(void) {
         assert(mix.left==left && mix.right==right);
         pending_energy+=left*left+right*right;
     }
-    assert(pending_energy>0); free(pending_history);
+    assert(pending_energy>0); convolution_state_free(pending_history); free(pending_history);
     AudioEvent future=qhead->ev;
     event_queue_clear();
     assert(track_load_from_code("note(60).gain(0).room(1).roomsize(.1).orbit(10)"));
@@ -1142,7 +1144,7 @@ static void test_room_preparation(void) {
         native_reverb(10,&mix);
     }
     ConvState *unchanged=malloc(sizeof(*unchanged)); assert(unchanged);
-    memcpy(unchanged,&convolvers[10],sizeof(*unchanged));
+    assert(convolution_state_clone(unchanged,&convolvers[10]));
     event_queue_clear();
     audio_toggle_play(0);
     assert(track_load_from_code("note(64).gain(0).room(1).orbit(10)"));
@@ -1158,7 +1160,7 @@ static void test_room_preparation(void) {
         assert(mix.left==left && mix.right==right);
         retained_energy+=left*left+right*right;
     }
-    assert(retained_energy>0); free(unchanged);
+    assert(retained_energy>0); convolution_state_free(unchanged); free(unchanged);
     event_queue_clear();
     /* The earlier accepted voice must not restore its room at onset. */
     audio_trigger_event(&future);
@@ -1416,6 +1418,7 @@ static void test_web_delay_pcm(void) {
         {.375,.125,.140625,.09375,.015625,.052734375}};
     for (int trial=0;trial<6;trial++) {
         int orbit=4+trial,found=0;
+        assert(ensure_orbit_delay(orbit)); /* white-box delay-math harness */
         web_delay_created[orbit]=1; orbit_dt[orbit]=(float)(frames[trial]/SR); orbit_fb[orbit]=.5;
         for (int frame=0;frame<9000 && found<6;frame++) {
             VoiceMix mix={.delay_l=frame==0?.5:0,.delay_r=frame==0?-.5:0};

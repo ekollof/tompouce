@@ -79,6 +79,7 @@ static void test_diagnostics(void) {
     const ConvKernel *maximum=convolution_prepare_reverb_ex(10,.1,15000,1000,&error);
     assert(maximum && !error && maximum->parts==(CONV_MAX_FRAMES-1u)/CONV_BLOCK);
     ConvState *history=calloc(1,sizeof(*history)); assert(history);
+    assert(convolution_state_reserve(history,maximum->parts));
     convolution_set(history,maximum);
     double tail=0;
     for (int i=0;i<CONV_MAX_FRAMES+CONV_BLOCK*2;i++) {
@@ -88,7 +89,7 @@ static void test_diagnostics(void) {
     }
     assert(tail>0 && !history->remaining);
     assert(history->filled==maximum->parts+1);
-    free(history);
+    convolution_state_free(history); free(history);
     assert(!convolution_prepare_reverb_ex(10.001,.1,15000,1000,&error) && error);
     assert(!convolution_prepare_reverb_ex(1e-9,.1,15000,1000,&error));
     assert(error && !strcmp(error,"IR duration outside native capacity"));
@@ -203,7 +204,7 @@ int main(void) {
     test_generation_guard();
     test_diagnostics();
     convolution_set(&convolvers[3],NULL);
-    convolution_kernel_free(first); convolution_kernel_free(second); free(history);
+    convolution_kernel_free(first); convolution_kernel_free(second); convolution_state_free(history); free(history);
     puts("Room worker preserves pending/failure tails, publishes completion, bounds requests and shuts down cleanly");
     return 0;
 }

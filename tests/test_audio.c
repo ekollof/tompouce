@@ -118,6 +118,7 @@ static void test_convolution(void) {
     ConvKernel *kernel = convolution_kernel(impulse,FRAMES,2,0);
     ConvState *state = calloc(1,sizeof(*state));
     assert(kernel && state);
+    assert(convolution_state_reserve(state,kernel->parts));
     convolution_set(state,kernel);
     for (int frame = 0; frame < INPUT+FRAMES; frame++) {
         double left, right;
@@ -143,7 +144,7 @@ static void test_convolution(void) {
     convolution_set(state,kernel);
     convolution_process(state,1,-2,&left,&right);
     assert(fabs(left-.00125) < 1e-9 && fabs(right+.0025) < 1e-9);
-    convolution_kernel_free(kernel); free(state);
+    convolution_kernel_free(kernel); convolution_state_free(state); free(state);
 }
 
 static void test_stretch(void) {
@@ -374,6 +375,7 @@ int main(void) {
     memset(voices,0,sizeof(voices));
     orbits_ensure();
     orbit_dt[4] = 32 / SR; orbit_fb[4] = 0;
+    assert(ensure_orbit_delay(4)); /* white-box voice setup bypasses triggering */
     float impulse[2] = {1,1};
     voices[0].active = 1; voices[0].orbit = 4;
     voices[0].smpbuf = impulse; voices[0].smplen = 1; voices[0].smp_channels = 1;

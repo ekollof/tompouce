@@ -40,6 +40,7 @@ static void streaming_equivalence(ConvolutionAccumulate accumulate) {
     for (int i=0;i<frames*2;i++) pcm[i]=random_value()*.02f;
     ConvKernel *k=convolution_kernel(pcm,frames,2,0); assert(k); free(pcm);
     ConvState *a=calloc(1,sizeof(*a)),*b=calloc(1,sizeof(*b)); assert(a && b);
+    assert(convolution_state_reserve(a,k->parts) && convolution_state_reserve(b,k->parts));
     convolution_set(a,k); convolution_set(b,k);
     MixBackend backend={accumulate,"test"};
     /* The override is private to this single-threaded test, never product API. */
@@ -57,7 +58,56 @@ static void streaming_equivalence(ConvolutionAccumulate accumulate) {
     }
     assert(!a->remaining && !b->remaining);
     atomic_store(&selected_backend,&portable_backend);
-    convolution_kernel_free(k); free(a); free(b);
+    convolution_kernel_free(k); convolution_state_free(a); convolution_state_free(b); free(a); free(b);
+}
+
+/* Demand-sized histories: a state that was never reserved must stay silent
+   rather than write past a smaller buffer, and reserve must size exactly to
+   the attached kernel so unused CONV_MAX_FRAMES slots are never allocated. */
+static void demand_sized_history(void) {
+    enum { frames=3000 };
+    float *pcm=calloc((size_t)frames*2,sizeof(*pcm));
+    assert(pcm);
+    for (int i=0;i<frames*2;i++) pcm[i]=(float)(sin(i*.011)*.05);
+    ConvKernel *k=convolution_kernel(pcm,frames,1,0); assert(k); free(pcm);
+    ConvState silent={0};
+    double l=1, r=1;
+    convolution_set(&silent,k);
+    assert(!silent.kernel); /* unreserved: refused, not truncated */
+    convolution_process(&silent,1,1,&l,&r);
+    assert(l==0 && r==0);
+    assert(convolution_state_reserve(&silent,k->parts));
+    assert(silent.slots==k->parts+1);
+    convolution_set(&silent,k);
+    double energy=0;
+    for (int i=0;i<frames+4*CONV_BLOCK;i++) {
+        convolution_process(&silent,i==0?1:0,i==0?1:0,&l,&r);
+        energy+=l*l+r*r;
+    }
+    assert(energy>0 && !silent.remaining);
+    /* A clone must own its history: advancing it cannot disturb the source. */
+    ConvState clone={0};
+    assert(convolution_state_clone(&clone,&silent));
+    assert(clone.history && clone.history!=silent.history && clone.slots==silent.slots);
+    double sl, sr, cl, cr;
+    convolution_set(&silent,k); convolution_set(&clone,k);
+    for (int i=0;i<256;i++) {
+        convolution_process(&silent,i==0?1:0,0,&sl,&sr);
+        convolution_process(&clone,0,0,&cl,&cr);
+        assert(cl==0 && cr==0);
+    }
+    /* A smaller kernel keeps the larger allocation but still matches. */
+    float delta[2]={1,1};
+    ConvKernel *small=convolution_kernel(delta,1,1,1); assert(small);
+    unsigned slots=silent.slots;
+    assert(convolution_state_reserve(&silent,small->parts));
+    assert(silent.slots==slots);
+    convolution_set(&silent,small);
+    convolution_process(&silent,1,-2,&l,&r);
+    assert(fabs(l-.00125)<1e-9 && fabs(r+.0025)<1e-9);
+    convolution_kernel_free(small); convolution_kernel_free(k);
+    convolution_state_free(&clone); convolution_state_free(&silent);
+    puts("demand-sized convolution histories and clones passed");
 }
 
 static void *initialize_thread(void *unused) {
@@ -116,5 +166,6 @@ int main(void) {
     printf("Convolution backend: %s\n",convolution_simd_name());
     kernel_equivalence(chosen); streaming_equivalence(chosen);
     puts("Exact kernel/streaming PCM parity, ring wrap, tails, replacement and vector bounds passed");
+    demand_sized_history();
     return 0;
 }

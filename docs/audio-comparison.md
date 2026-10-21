@@ -485,12 +485,14 @@ The implementation pass also passed all 37 CTests, the full-size room
 ASan/UBSan test and all four forced SIMD sanitizer paths. The installed
 executable's owned PTY check confirms the new maximum in its diagnostics.
 
-History is statically bounded at about 20.2 MiB per orbit (242.3 MiB across 12
-orbits); only kernel-length slots are touched. The existing 16-entry generated
-cache has a worst-case spectral bound of about 323 MiB at size 10, and the
-16-entry custom-IR cache about 216 MiB at its ten-second input limit. These are
-ceilings, not startup resident-memory requirements. No history allocation or
-kernel preparation is added to the audio callback.
+History is sized to the attached kernel: a maximum-size (10 s) kernel
+allocates about 20.2 MiB for its orbit, while shorter kernels allocate
+proportionally less and orbits without a convolution allocate nothing.
+`convolution_state_reserve` runs on the room/IR preparation path. The existing
+16-entry generated cache has a worst-case spectral bound of about 323 MiB at
+size 10, and the 16-entry custom-IR cache about 216 MiB at its ten-second
+input limit. These are ceilings, not startup resident-memory requirements. No
+history allocation or kernel preparation is added to the audio callback.
 
 The dedicated backend workload runs for 18 seconds, verifying the size-10
 kernel is published and its complete history is filled before accepting a

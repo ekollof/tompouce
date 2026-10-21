@@ -456,12 +456,17 @@ double dsp_process(DspState *s, double x, double age, double gate) {
     }
     if (p[DSP_CHORUS] > 0) {
         double delay = SR*(.02+.005*sin(2*M_PI*age*.8));
-        double read = (double)(s->chorus_pos&2047)-delay;
-        while (read < 0) read += 2048;
-        unsigned a = (unsigned)read&2047, b = (a+1)&2047;
+        /* chorus_pos and delay are both below DSP_CHORUS_LEN, so one wrap
+           correction is enough and no modulo is needed in the callback. */
+        double read = (double)s->chorus_pos-delay;
+        if (read < 0) read += DSP_CHORUS_LEN;
+        unsigned a = (unsigned)read;
+        if (a >= DSP_CHORUS_LEN) a -= DSP_CHORUS_LEN;
+        unsigned b = a+1 < DSP_CHORUS_LEN ? a+1 : 0;
         double f = read-floor(read);
         double wet = s->chorus[a]*(1-f)+s->chorus[b]*f;
-        s->chorus[s->chorus_pos++&2047] = (float)x;
+        s->chorus[s->chorus_pos] = (float)x;
+        if (++s->chorus_pos >= DSP_CHORUS_LEN) s->chorus_pos = 0;
         x = x*(1-p[DSP_CHORUS]*.5)+wet*p[DSP_CHORUS]*.5;
     }
     x *= p[DSP_POST];

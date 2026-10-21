@@ -1,6 +1,10 @@
 #ifndef DSP_H
 #define DSP_H
 #include <cjson/cJSON.h>
+/* Maximum chorus delay is SR*0.025 (1102.5 frames at 44.1 kHz); the ring is
+   one power-of-two-free size that still exceeds it, so reads stay in range
+   without masking. */
+#define DSP_CHORUS_LEN 1152
 double dsp_periodic_gain(int waveform);
 
 /* Resolved event controls. No JS, allocation, or locks in these algorithms. */
@@ -46,7 +50,10 @@ typedef struct {
     double phaser_z[6], phaser_feedback;
     double saw_phase[16], noise[8], compressor_gain;
     double supersaw_l, supersaw_r;
-    float chorus[2048];
+    /* Ring just long enough for the maximum chorus delay (SR * 0.025 at
+       44.1 kHz), rounded up; the extra 1024 samples of the old 2048 ring
+       were never readable and cost 2 MiB across the voice pool. */
+    float chorus[DSP_CHORUS_LEN];
     unsigned chorus_pos;
     unsigned noise_seed;
     double held;

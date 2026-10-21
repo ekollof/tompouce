@@ -8,15 +8,18 @@ live in [JavaScript/native audio](docs/javascript.md),
 [architecture](docs/architecture.md). Follow [AGENTS.md](AGENTS.md) for security,
 verification, installation and upstream terminal constraints.
 
-## CPU optimization follow-up
+## CPU and memory follow-up
 
 Convolution selects AVX2, AVX or SSE2 accumulation at initialization according
 to CPU/OS support, with portable C fallback and `TOMPOUCE_SIMD` overrides.
 Per-sample voice paths skip provably-identity work through activity flags
 cached in `dsp_init`, and never-used orbits skip their fallback reverb and
-delay work. The [benchmark report](docs/simd-benchmark.md) records the
-convolution speedups, simultaneous long-convolver scaling, idle/synth gains
-and verification.
+delay work. Convolution histories, orbit delay lines, the fallback reverb
+network, pending duck controls, the visual feedback caches and the per-voice
+chorus ring are demand-sized or right-sized, cutting BSS from 321 MiB to
+23 MiB. The [benchmark report](docs/simd-benchmark.md) records the speedups,
+simultaneous long-convolver scaling, idle/synth gains and memory
+measurements.
 
 - [ ] Profile stretch preparation and decode latency for preparation-stage
       fast paths, after the callback work above. Preserve measured decode

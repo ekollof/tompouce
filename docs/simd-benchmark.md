@@ -221,6 +221,39 @@ across twelve orbits. These are callback CPU measurements, not backend
 deadline or web-parity guarantees; the web comparison matrix and the
 multi-orbit backend workloads are the gates for those.
 
+## Memory
+
+Static storage was dominated by tables sized for the worst case. They now
+grow only when a session actually needs them: BSS drops from 321 MiB to
+23 MiB, and a max-room workload peaked at 76 MiB resident instead of 105 MiB.
+
+| Allocation | Before | After |
+| --- | ---: | ---: |
+| `convolvers[12]` history | 242 MiB (BSS, `CONV_MAX_FRAMES` per orbit) | 0 MiB idle; `(parts+1)` slots per attached kernel |
+| Pending duck controls | 15.3 MiB (8,192 slots) | 128 KiB at rest, doubling on demand to the same bound |
+| Orbit delay lines | 8.1 MiB (12 × 2 × 88,200 floats) | ~0.7 MiB per orbit that actually carries a delay |
+| Fallback reverb networks | 6.4 MiB (4 combs + 2 allpasses × 12 orbits) | ~0.5 MiB per orbit only when an IR is missing |
+| Inline visual feedback caches | 12.6 MiB (32 panes) | 3.5 MiB (8, bounded by displayable inline images) |
+| Per-voice chorus rings | 4.0 MiB (2,048-sample ring × 2 channels × 256 voices) | 2.3 MiB (1,152-sample ring, sized to the 1102.5-frame maximum delay) |
+| Process BSS | 321 MiB | 23 MiB |
+
+The delay line and fallback network are sized on the publishing path
+(`audio_trigger_event`, the room worker, the delay/room preparation) the first
+time an orbit needs them; the per-sample code only checks for the buffer and
+never grows it. A failed allocation leaves that orbit dry rather than silent
+mid-tail.
+
+`ConvState.history` is now allocated by `convolution_state_reserve` from the
+room/IR preparation path, never from the callback, and only for orbits that
+actually have a convolution. A state that was not reserved refuses the kernel
+and stays silent rather than writing past a smaller buffer. Because a plain
+struct assignment would alias that history, `convolution_state_clone` performs
+the deep copy used by the tests that need an independent state.
+
+What remains is the voice pool itself (3.8 MiB), which is per-active-voice
+state rather than a table, plus the audio buffers each voice needs while it
+sounds.
+
 ## Simultaneous long convolvers
 
 Per-effect measurements understate contention when several orbits run long

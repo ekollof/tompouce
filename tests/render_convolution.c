@@ -21,6 +21,7 @@ int main(int argc,char **argv) {
     ConvState *state=calloc(1,sizeof(*state));
     FILE *output=state?fopen(argv[2],"wb"):NULL;
     if (!output) { free(state); convolution_kernel_free(kernel); return 2; }
+    if (!convolution_state_reserve(state,kernel->parts)) { free(state); convolution_kernel_free(kernel); return 2; }
     convolution_set(state,kernel);
     for (int i=0;i<frames+CONV_BLOCK*2 && ok;i++) {
         double l,r;
@@ -29,6 +30,6 @@ int main(int argc,char **argv) {
         ok=fwrite(pair,sizeof(float),2,output)==2;
     }
     if (fclose(output)) ok=0;
-    free(state); convolution_kernel_free(kernel);
+    convolution_state_free(state); free(state); convolution_kernel_free(kernel);
     return ok?0:2;
 }

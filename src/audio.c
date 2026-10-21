@@ -46,9 +46,19 @@ static double fx_delay = 0.0;
 static double fx_verb = 0.0;
 /* Per-orbit delay. <0 keeps Strudel's defaults: 3/16 of a cycle, feedback 0.5.
    Ducking drops that orbit on a trigger and releases over duck_atk seconds. */
+/* Per-sample work must never allocate, so the orbit tables are sized on the
+   publishing path the first time an orbit needs them and then reused. The
+   gate inside each processing function therefore only checks for the buffer,
+   never grows it. */
+static float *dbuf[N_ORBITS];
+static float *feedback_quantum[N_ORBITS];
+static float *comb[N_ORBITS];
+static float *allpass[N_ORBITS];
+static int ensure_orbit_delay(int orbit);
+static int ensure_orbit_reverb(int orbit);
+
 #define ORBIT_DELAY 88200
-static double orbit_dt[N_ORBITS];
-static double orbit_fb[N_ORBITS];
+static double orbit_dt[N_ORBITS];static double orbit_fb[N_ORBITS];
 static double duck_depth[N_ORBITS];
 static double duck_atk[N_ORBITS];
 static double duck_t[N_ORBITS];
@@ -58,7 +68,9 @@ static struct {
     double initial, target, begin, minimum, end;
 } web_duck[N_ORBITS];
 /* Accepted timer callbacks outlive source voices and program replacements.
-   Match the event queue's capacity; all access is under voice_lock. */
+   The capacity bound matches the event queue, but the table grows on demand
+   under voice_lock from the publishing path, so an idle engine does not
+   reserve 8,192 slots up front. All access is under voice_lock. */
 typedef struct {
     double time, source_time;
     unsigned long long serial;
@@ -66,8 +78,8 @@ typedef struct {
     DuckControl controls[N_ORBITS];
 } PendingDuck;
 #define MAX_PENDING_DUCKS 8192
-static PendingDuck pending_ducks[MAX_PENDING_DUCKS];
-static int pending_duck_count;
+static PendingDuck *pending_ducks;
+static int pending_duck_count, pending_duck_capacity;
 static unsigned long long pending_duck_serial;
 typedef struct {
     double time, delay, feedback;
@@ -144,6 +156,14 @@ static void room_job_run(PrepJob *base) {
     const double *p=job->parameters;
     const char *error=NULL;
     const ConvKernel *kernel=convolution_prepare_reverb_ex(p[0],p[1],p[2],p[3],&error);
+    /* Size this orbit's history for the kernel outside the callback and
+       before it becomes visible; convolvers are demand-sized, not
+       CONV_MAX_FRAMES-sized. */
+    int reserved = !kernel || convolution_state_reserve(&convolvers[job->orbit],kernel->parts);
+    if (!reserved) { kernel=NULL; error="room convolution memory limit"; }
+    /* A failed generation falls back to the native reverb network; size it
+       here, before the callback can reach it. */
+    if (!kernel) ensure_orbit_reverb(job->orbit);
     unsigned generation=event_queue_generation_guard_begin();
     int current=!job->generation || job->generation==generation;
     pthread_mutex_lock(&voice_lock);
@@ -534,10 +554,24 @@ static void dispatch_ducks_locked(void) {
     }
 }
 
+/* voice_lock held, publishing path only: grow the pending table on demand.
+   Never called from the audio callback, which only reads existing entries. */
+static int grow_pending_ducks_locked(void) {
+    if (pending_duck_count < pending_duck_capacity) return 1;
+    if (pending_duck_capacity >= MAX_PENDING_DUCKS) return 0;
+    int next = pending_duck_capacity ? pending_duck_capacity * 2 : 64;
+    if (next > MAX_PENDING_DUCKS) next = MAX_PENDING_DUCKS;
+    PendingDuck *grown = realloc(pending_ducks,(size_t)next*sizeof(*grown));
+    if (!grown) return 0;
+    pending_ducks = grown;
+    pending_duck_capacity = next;
+    return 1;
+}
+
 static int schedule_duck_locked(const AudioEvent *event) {
     if (!event->dsp.enabled || !event->duck_mask) return 1;
     dispatch_ducks_locked();
-    if (pending_duck_count==MAX_PENDING_DUCKS) return 0;
+    if (!grow_pending_ducks_locked()) return 0;
     PendingDuck pending={.time=fmax(audio_time,event->time-.01),.source_time=event->time,
         .serial=++pending_duck_serial,.mask=event->duck_mask};
     for (int o=0;o<N_ORBITS;o++) if (event->duck_mask&(1u<<o))
@@ -584,6 +618,9 @@ int audio_prepare_delay(AudioEvent *event) {
     int orbit=event->orbit;
     if (orbit<0 || orbit>=N_ORBITS) return 0;
     double delay=(float)fmin(1,event->delay_time),feedback=(float)fmin(.98,event->delay_fb);
+    /* Size the orbit's line before it can be heard; the callback never
+       allocates. A failure leaves the orbit dry rather than silent-mute. */
+    ensure_orbit_delay(orbit);
     pthread_mutex_lock(&voice_lock);
     if (silent_clock) audio_time=audio_time_now();
     orbits_ensure(); dispatch_delays_locked();
@@ -662,8 +699,22 @@ void audio_prepare_room(AudioEvent *event) {
                 if (reason) {
                     double p[4]; for (int i=0;i<4;i++) p[i]=event->dsp.p[room_fields[i]];
                     record_room_failure(event->orbit,p,reason);
+                    ensure_orbit_reverb(event->orbit);
                 }
             }
+        } else if (!event->ir_kernel) {
+            /* No prepared IR: the native fallback network serves this orbit. */
+            ensure_orbit_reverb(event->orbit);
+        } else if (event->ir_kernel &&
+                   /* Sizing happens under voice_lock so the callback can never
+                      read a half-swapped history. It runs once per orbit (or
+                      when a larger IR arrives), not per event, and the room
+                      preparation beside it is already heavier. */
+                   !convolution_state_reserve(&convolvers[event->orbit],event->ir_kernel->parts)) {
+            /* A custom IR that cannot be sized leaves the orbit dry rather
+               than writing past a smaller history. */
+            atomic_fetch_or(&prepared_rooms,1u<<event->orbit);
+            log_console("room: convolution memory limit for this impulse");
         } else publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
         pthread_mutex_unlock(&voice_lock);
     }
@@ -1187,6 +1238,13 @@ void audio_trigger_event(AudioEvent *ev) {
         return;
     }
     if (!ev->control_only) audio_register_orbit(ev->orbit);
+    /* Size an orbit's delay line / fallback room network on this (non-callback)
+       thread the first time the event needs them, so the per-sample code only
+       ever reads buffers that already exist. */
+    if (ev->orbit>=0 && ev->orbit<N_ORBITS && ev->dsp.enabled) {
+        if (ev->delay_send>0) ensure_orbit_delay(ev->orbit);
+        if (ev->dsp.p[DSP_ROOM]>0 && !ev->ir_kernel) ensure_orbit_reverb(ev->orbit);
+    }
     if (ev->dsp.enabled && ev->duck_mask) for (int o=0;o<N_ORBITS;o++) if (ev->duck_mask&(1u<<o)) {
         if (!audio_prepare_duck_timer(o,ev->time)) return;
         break;
@@ -1312,8 +1370,33 @@ static int voice_has_effect_tail(const Voice *v) {
         p[DSP_PHASER]>0 || p[DSP_CHORUS]>0 || p[DSP_COARSE]>1);
 }
 
+static int ensure_orbit_delay(int orbit) {
+    if (orbit < 0 || orbit >= N_ORBITS) return 0;
+    if (!dbuf[orbit]) {
+        dbuf[orbit] = calloc(2*ORBIT_DELAY,sizeof(*dbuf[orbit]));
+        if (!dbuf[orbit]) return 0;
+    }
+    if (!feedback_quantum[orbit]) {
+        feedback_quantum[orbit] = calloc(2*128,sizeof(*feedback_quantum[orbit]));
+        if (!feedback_quantum[orbit]) return 0;
+    }
+    return 1;
+}
+
+static int ensure_orbit_reverb(int orbit) {
+    if (orbit < 0 || orbit >= N_ORBITS) return 0;
+    if (!comb[orbit]) {
+        comb[orbit] = calloc(2*4*16384,sizeof(*comb[orbit]));
+        if (!comb[orbit]) return 0;
+    }
+    if (!allpass[orbit]) {
+        allpass[orbit] = calloc(2*2*2048,sizeof(*allpass[orbit]));
+        if (!allpass[orbit]) return 0;
+    }
+    return 1;
+}
+
 static void native_reverb(int orbit, VoiceMix *mix) {
-    static float comb[N_ORBITS][2][4][16384], allpass[N_ORBITS][2][2][2048];
     static unsigned pos[N_ORBITS], ap_pos[N_ORBITS];
     static double size[N_ORBITS];
     const int lengths[] = {1116,1188,1277,1356};
@@ -1339,6 +1422,8 @@ static void native_reverb(int orbit, VoiceMix *mix) {
        are still exactly zero. Skipping is bit-identical and avoids running
        twelve idle reverbs. */
     if (mix->room_size < 0 && size[orbit] == 0 && mix->room_l == 0 && mix->room_r == 0) return;
+    /* Sized on the preparation path; never grown here. */
+    if (!comb[orbit] || !allpass[orbit]) return;
     if (mix->room_size >= 0) size[orbit] = mix->room_size;
     else if (size[orbit] == 0) size[orbit] = 1;
     for (int ch = 0; ch < 2; ch++) {
@@ -1347,14 +1432,16 @@ static void native_reverb(int orbit, VoiceMix *mix) {
             int delay = (int)(lengths[k]*(.25+size[orbit]*.75)) + ch*23;
             if (delay > 16383) delay = 16383;
             unsigned read = (pos[orbit]-(unsigned)delay)&16383;
-            double sample = comb[orbit][ch][k][read];
-            comb[orbit][ch][k][pos[orbit]&16383] = (float)tanh(input+sample*.84);
+            float *line = comb[orbit]+((size_t)ch*4+k)*16384;
+            double sample = line[read];
+            line[pos[orbit]&16383] = (float)tanh(input+sample*.84);
             wet += sample*.25;
         }
         for (int k = 0; k < 2; k++) {
             unsigned read = (ap_pos[orbit]-(unsigned)(k ? 441 : 556))&2047;
-            double sample = allpass[orbit][ch][k][read];
-            allpass[orbit][ch][k][ap_pos[orbit]&2047] = (float)(wet+sample*.5);
+            float *line = allpass[orbit]+((size_t)ch*2+k)*2048;
+            double sample = line[read];
+            line[ap_pos[orbit]&2047] = (float)(wet+sample*.5);
             wet = sample-wet*.5;
         }
         if (ch) mix->right += wet*.4; else mix->left += wet*.4;
@@ -1364,9 +1451,7 @@ static void native_reverb(int orbit, VoiceMix *mix) {
 
 /* Event sends stay on their orbit. The TUI fx delay is a separate master line. */
 static void orbit_delay(int orbit, VoiceMix *mix) {
-    static float dbuf[N_ORBITS][2][ORBIT_DELAY];
     static int dpos[N_ORBITS];
-    static float feedback_quantum[N_ORBITS][2][128];
     static unsigned feedback_pos[N_ORBITS];
     static int used[N_ORBITS];
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
@@ -1378,6 +1463,7 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
         if (mix->delay_l == 0 && mix->delay_r == 0) return;
         used[orbit] = 1;
     }
+    if (!dbuf[orbit] || !feedback_quantum[orbit]) return;
     double b = effect_bpm;
     double dt = orbit_dt[orbit] >= 0 ? orbit_dt[orbit] : (0.75 * 60.0 / b);
     double fb = orbit_fb[orbit] >= 0 ? orbit_fb[orbit] : 0.5;
@@ -1392,24 +1478,24 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     if (dl >= ORBIT_DELAY) dl = ORBIT_DELAY - 1;
     unsigned fp=feedback_pos[orbit];
     if (web_delay_created[orbit]) {
-        dbuf[orbit][0][dpos[orbit]]=(float)(mix->delay_l+feedback_quantum[orbit][0][fp]);
-        dbuf[orbit][1][dpos[orbit]]=(float)(mix->delay_r+feedback_quantum[orbit][1][fp]);
+        dbuf[orbit][dpos[orbit]]=(float)(mix->delay_l+feedback_quantum[orbit][fp]);
+        dbuf[orbit][ORBIT_DELAY+dpos[orbit]]=(float)(mix->delay_r+feedback_quantum[orbit][128+fp]);
     }
     int rp = dpos[orbit] - dl;
     if (rp < 0) rp += ORBIT_DELAY;
-    float de_l = dbuf[orbit][0][rp], de_r = dbuf[orbit][1][rp];
+    float de_l = dbuf[orbit][rp], de_r = dbuf[orbit][ORBIT_DELAY+rp];
     if (web_delay_created[orbit]) {
         float fraction=(float)(frames-dl);
         int previous=rp?rp-1:ORBIT_DELAY-1;
-        de_l=de_l*(1-fraction)+dbuf[orbit][0][previous]*fraction;
-        de_r=de_r*(1-fraction)+dbuf[orbit][1][previous]*fraction;
+        de_l=de_l*(1-fraction)+dbuf[orbit][previous]*fraction;
+        de_r=de_r*(1-fraction)+dbuf[orbit][ORBIT_DELAY+previous]*fraction;
     }
-    feedback_quantum[orbit][0][fp]=web_delay_created[orbit]?(float)(de_l*fb):0;
-    feedback_quantum[orbit][1][fp]=web_delay_created[orbit]?(float)(de_r*fb):0;
+    feedback_quantum[orbit][fp]=web_delay_created[orbit]?(float)(de_l*fb):0;
+    feedback_quantum[orbit][128+fp]=web_delay_created[orbit]?(float)(de_r*fb):0;
     feedback_pos[orbit]=(fp+1)&127;
     if (!web_delay_created[orbit]) {
-        dbuf[orbit][0][dpos[orbit]] = (float)(mix->delay_l + de_l*fb);
-        dbuf[orbit][1][dpos[orbit]] = (float)(mix->delay_r + de_r*fb);
+        dbuf[orbit][dpos[orbit]] = (float)(mix->delay_l + de_l*fb);
+        dbuf[orbit][ORBIT_DELAY+dpos[orbit]] = (float)(mix->delay_r + de_r*fb);
     }
     if (++dpos[orbit] >= ORBIT_DELAY) dpos[orbit] = 0;
     mix->left += de_l;

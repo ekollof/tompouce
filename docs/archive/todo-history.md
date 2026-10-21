@@ -787,3 +787,24 @@ sounds while native drops them; native accepts uppercase extensions.
       per 1,500 blocks, with identical PCM checksums. `test_dsp` compares the
       fast paths against forced slow-path flags; `test_audio` asserts exact
       idle silence. Web matrix 43 gates + 2 diagnostics, unchanged values.
+
+## Memory usage (completed 2026-10-22)
+
+- [x] Demand-sized convolution histories: `ConvState.history` is allocated by
+      `convolution_state_reserve` from the room/IR preparation path, sized to
+      the attached kernel instead of `CONV_MAX_FRAMES`. Unreserved states stay
+      silent rather than overrun; `convolution_state_clone` replaces the
+      aliasing struct copies in tests.
+- [x] Pending duck controls grow on demand under voice_lock from the
+      publishing path (cap unchanged at 8,192) instead of reserving 8,192
+      entries up front.
+- [x] Visual feedback caches bounded by `GRAPHICS_IMAGES` (8) with the
+      existing LRU replacement, instead of 32 panes.
+- [x] Orbit delay lines and fallback reverb networks are sized on the
+      publishing path (event trigger, room worker, preparation) the first time
+      an orbit needs them; the callback only checks for the buffer.
+- [x] Per-voice chorus ring reduced to 1,152 samples (the maximum 1102.5-frame
+      delay) with explicit wrapping instead of a 2,048-sample mask.
+- [x] Process BSS 321 -> 23 MiB; max-room workload peak RSS 105 -> 76 MiB.
+      ctest 37/37, security and sanitizers green, exact PCM parity retained
+      (test_convolution_simd exercises reservations, clones and refusals).

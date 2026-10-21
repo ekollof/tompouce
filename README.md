@@ -16,9 +16,12 @@ Writing Strudel shouldn't require running a full browser or Electron app.
 Tompouce embeds Strudel's JavaScript runtime in QuickJS and generates audio in C,
 bringing the editor, sound engine and live visualizations into your terminal.
 
-- **A small memory footprint.** More RAM stays available for samples, effects and
-  other music tools. One measured live session used about 96 MiB of resident RAM;
-  usage varies with the composition and loaded samples.
+- **A small memory footprint.** More RAM stays available for samples, effects
+  and other music tools. Effect, room and orbit buffers are allocated only when
+  a session actually uses them: a measured live session (piano plus drums with
+  room and delay, playing) peaked around 66 MiB of resident RAM, and the whole
+  binary reserves 23 MiB of static storage. Usage varies with the composition
+  and loaded samples.
 - **A keyboard-driven workflow.** Write, evaluate, browse sounds and watch patterns
   in one place, with vi editing and your terminal's colors.
 - **Local, offline music making.** Installed sound banks work without a network

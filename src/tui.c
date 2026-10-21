@@ -2492,9 +2492,12 @@ static void inline_graphics_clear(void) {
     graphics_redraw = 1;
 }
 
-/* Fixed foreground caches, one per compiled attachment; never touched by audio. */
-static TerminalFeedbackState feedback_states[32];
-static struct { unsigned feed, generation, palette, revision, used; int kind; } feedback_keys[32];
+/* Fixed foreground caches, one per compiled attachment; never touched by audio.
+   Bounded by the number of inline images that can be displayed at once, with
+   LRU replacement, so the 393 KiB previous-frame buffer is not multiplied by
+   panes that cannot coexist. */
+static TerminalFeedbackState feedback_states[GRAPHICS_IMAGES];
+static struct { unsigned feed, generation, palette, revision, used; int kind; } feedback_keys[GRAPHICS_IMAGES];
 static unsigned feedback_clock;
 static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed, unsigned generation) {
     VisualOptions options; VisualNote notes[GRAPHICS_NOTES]; float samples[4096];
@@ -2515,7 +2518,7 @@ static void render_inline_feedback(TerminalImage *image, int kind, unsigned feed
     }
     if (visual_audio_kind(kind)) n=audio_pattern_scope_copy(feed,generation,samples,4096);
     int slot=0, found=0;
-    for (int i=0;i<32;i++) {
+    for (int i=0;i<GRAPHICS_IMAGES;i++) {
         if (feedback_keys[i].used && feedback_keys[i].feed==feed && feedback_keys[i].kind==kind) { slot=i; found=1; break; }
         if (feedback_keys[i].used<feedback_keys[slot].used) slot=i;
     }

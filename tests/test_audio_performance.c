@@ -486,7 +486,8 @@ static void render_duck_flood(float *pcm, unsigned long block) {
     memset(voices,0,sizeof(voices)); memset(web_duck,0,sizeof(web_duck));
     memset(duck_depth,0,sizeof(duck_depth)); memset(duck_atk,0,sizeof(duck_atk));
     memset(duck_t,0,sizeof(duck_t));
-    memset(pending_ducks,0,sizeof(pending_ducks));
+    if (pending_ducks && pending_duck_capacity)
+        memset(pending_ducks,0,(size_t)pending_duck_capacity*sizeof(*pending_ducks));
     memset(duck_errors,0,sizeof(duck_errors));
     pending_duck_count=0; pending_duck_serial=0;
     duck_error_count=0; duck_error_overflow=0;

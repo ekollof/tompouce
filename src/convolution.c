@@ -129,8 +129,47 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     return kernel;
 }
 
+int convolution_state_reserve(ConvState *state, unsigned parts) {
+    if (!state) return 0;
+    unsigned slots = parts ? parts + 1 : 1;
+    if (slots <= state->slots) return 1;
+    size_t bins = (size_t)slots*2*CONV_FFT;
+    if (bins > SIZE_MAX/sizeof(*state->history)) return 0;
+    ConvComplex *next = calloc(bins,sizeof(*next));
+    if (!next) return 0;
+    free(state->history);
+    state->history = next;
+    state->slots = slots;
+    return 1;
+}
+
+void convolution_state_free(ConvState *state) {
+    if (!state) return;
+    free(state->history);
+    state->history = NULL;
+    state->slots = 0;
+    state->kernel = NULL;
+}
+
+int convolution_state_clone(ConvState *dst, const ConvState *src) {
+    if (!dst || !src) return 0;
+    ConvState copy = *src;
+    copy.history = NULL;
+    if (src->history && src->slots) {
+        size_t bins = (size_t)src->slots*2*CONV_FFT;
+        copy.history = malloc(bins*sizeof(*copy.history));
+        if (!copy.history) return 0;
+        memcpy(copy.history,src->history,bins*sizeof(*copy.history));
+    }
+    *dst = copy;
+    return 1;
+}
+
 void convolution_set(ConvState *state, const ConvKernel *kernel) {
     if (state->kernel == kernel) return;
+    /* Never touch a history that was not sized for this kernel; a state that
+       was not reserved stays silent instead of writing out of bounds. */
+    if (kernel && (!state->history || kernel->parts + 1 > state->slots)) kernel = NULL;
     /* History slots become valid only after process_block rewrites them. */
     memset(state->input,0,sizeof(state->input));
     memset(state->wet,0,sizeof(state->wet));
@@ -143,8 +182,9 @@ static void process_block(ConvState *state) {
     ConvolutionAccumulate accumulate=convolution_accumulator();
     unsigned slots=kernel->parts+1;
     unsigned slot = state->block;
+    ConvComplex *base = state->history;
     for (int ch = 0; ch < 2; ch++) {
-        ConvComplex *spectrum = state->history[ch][slot];
+        ConvComplex *spectrum = base + ((size_t)ch*slots + slot)*CONV_FFT;
         memset(spectrum,0,CONV_FFT*sizeof(*spectrum));
         for (unsigned i = 0; i < CONV_BLOCK; i++) spectrum[i].re = state->input[ch][i];
         transform(spectrum,0);
@@ -153,7 +193,7 @@ static void process_block(ConvState *state) {
         if (parts > state->filled+1) parts = state->filled+1;
         unsigned read=slot;
         for (unsigned part = 0; part < parts; part++) {
-            const ConvComplex *x = state->history[ch][read];
+            const ConvComplex *x = base + ((size_t)ch*slots + read)*CONV_FFT;
             const ConvComplex *h = kernel->tail+((size_t)ch*kernel->parts+part)*CONV_FFT;
             accumulate(sum,x,h,CONV_FFT);
             read=read?read-1:slots-1;

@@ -16,9 +16,22 @@ typedef struct ConvKernel {
 typedef struct {
     const ConvKernel *kernel;
     float input[2][CONV_BLOCK], wet[2][CONV_BLOCK], overlap[2][CONV_BLOCK];
-    ConvComplex history[2][CONV_PARTS][CONV_FFT];
+    /* [2][slots][CONV_FFT], sized to the attached kernel by
+       convolution_state_reserve (preparation only; never the callback).
+       Only kernel->parts+1 slots are ever touched, so allocating the
+       10-second maximum per orbit would reserve ~20 MiB of unused memory. */
+    ConvComplex *history;
+    unsigned slots;
     unsigned position, block, filled, remaining;
 } ConvState;
+/* Generator/worker only: size the history for a kernel with `parts` tail
+   blocks. Returns 0 on allocation failure, leaving the state unchanged. */
+int convolution_state_reserve(ConvState *state, unsigned parts);
+/* Release a state's history. Not for callback use. */
+void convolution_state_free(ConvState *state);
+/* Deep-copy a state, including its history, into dst. dst must be zeroed or
+   previously freed; a plain struct assignment would alias the history. */
+int convolution_state_clone(ConvState *dst, const ConvState *src);
 /* Generator thread only. Immutable cached kernels live for the process. */
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin);
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim);

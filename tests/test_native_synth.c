@@ -240,7 +240,8 @@ int main(void) {
     assert(room && room==convolution_prepare_reverb(.2,.01,15000,1000));
     assert(convolution_prepare_reverb(10,.1,15000,1000));
     assert(!convolution_prepare_reverb(10.001,.1,15000,1000));
-    static ConvState conv; convolution_set(&conv,room); double wet_energy=0;
+    static ConvState conv; assert(convolution_state_reserve(&conv,room->parts));
+    convolution_set(&conv,room); double wet_energy=0;
     for (int i=0;i<15000;i++) {
         convolution_process(&conv,i==0?1:0,i==0?1:0,&left,&right);
         assert(isfinite(left) && isfinite(right)); wet_energy+=left*left+right*right;

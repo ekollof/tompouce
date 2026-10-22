@@ -22,13 +22,13 @@ typedef struct Voice {
     int has_pan;
     double waveform_gain;
     double start_time;
+    double source_begin; /* pulse worklet's first active render quantum */
     unsigned long long onset_serial;
-    int onset_pending, onset_room;
+    int onset_pending;
     int sampled_source, cut_pending;
     double cut_time;
     int retiring;
     double retire_end, retire_anchor, retire_level;
-    const ConvKernel *onset_ir;
     double onset_delay_time, onset_delay_feedback;
     unsigned onset_duck_mask;
     double onset_duck_depth, onset_duck_attack;

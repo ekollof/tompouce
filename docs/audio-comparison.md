@@ -46,7 +46,7 @@ must also match the requested duration.
 The hosted web player can change; a failure is evidence to inspect, not a reason
 to update packages or loosen a threshold automatically.
 
-Forty regression gates compare at zero lag (no capture shifts or gain
+Regression gates compare at zero lag (no capture shifts or gain
 normalization). The original piano windows remain 0.6 seconds; the new synth,
 generated-room and live-change cases check the full two-second capture:
 
@@ -59,6 +59,7 @@ generated-room and live-change cases check the full two-second capture:
 | Sine with fractional shared delay | 0.99 | 0.85–1.15 |
 | Sine with shared delay automation: feedback/time/zero-gain changes and return to baseline (4 cases) | 0.99 | 0.85–1.15 |
 | Saw, square and triangle at 440 Hz (3 cases) | 0.99 | 0.85–1.15 |
+| Pulse/PWM/panning/onsets, harmonic counts/custom phases, noise blend and looping noise sources (36 cases) | 0.99 | 0.85–1.15 |
 | ZzFX sine and bytebeat (2 cases) | 0.99 | 0.85–1.15 |
 | Piano with seeded generated convolution room | 0.99 | 0.85–1.15 |
 | Stretched piano: half/fractional speed, upward shift, reverse, loop, envelope/filter (6 cases) | 0.99 | 0.85–1.15 |
@@ -77,6 +78,33 @@ normalization hides timing/level differences.
 The new comparisons exposed and fixed default mono panning attenuation,
 stock periodic-wave normalization and bytebeat quantum startup. Measured
 ZzFX/bytebeat correlations exceed 0.999999; saw/square/triangle exceed 0.999.
+
+The `source-` cases exercise the complete callback against the deployed web
+renderer, including ADSR, stereo routing and fractional onsets. Run
+`TOMPOUCE_COMPARE_FILTER=source- node scripts/compare-audio.mjs /tmp/tompouce-source-parity`
+after building `render_audio`. They cover pulse defaults, width and LFO defaults,
+explicit panning, numeric harmonics from 1 through 2,047, custom coefficient
+phases, `.noise()` dry/wet levels, and white/pink/brown sources. Noise cases seed
+the actual web noise-buffer generator, including its two-second loop; comparison
+does not depend on unrelated chain-ID random draws. They retain the existing
+correlation and gain thresholds. These selected source gates do not establish
+arbitrary modulation/effects or full-song parity.
+
+`cmake --build build --target test-supersaw-reference-web` separately compares
+the production supersaw source with the actual deployed AudioWorklet. It seeds
+the worklet's random phases and checks stereo PCM for defaults, single/100
+voices, fractional unison, zero/wide spread, detune and `n` fallback, and high
+frequencies. The largest observed sample error across nine cases was below
+`2e-7`. This is a raw-source gate, including the worklet's first silent render
+quantum; it does not establish full ADSR, effects or native onset parity.
+Reports and PCM go to `/tmp/tompouce-supersaw-reference` by default.
+
+Supersaw uses independently seeded phases for each live voice, five oscillators
+by default, spread `.6` and total detuning width `.18` semitones. Its `detune`
+control (or `n` fallback) sets that width rather than transposing the note in
+cents. Oscillators alternate equal-power stereo positions and use the web's
+`1/sqrt(unison)` gain. Unison is bounded to the web's 100 voices; ratios and
+phases are prepared before rendering.
 
 Generated native rooms now use convolution with the reference decay, fade and
 gradual low-pass algorithm. The generated-room gate uses an explicit LCG seed

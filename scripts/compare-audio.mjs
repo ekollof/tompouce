@@ -106,6 +106,29 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    ...['sawtooth','square','triangle'].flatMap(sound=>[1,8,32,64].map(n=>({
+      name:`source-${sound}-n${n}`,code:`note(69).s('${sound}').n(${n}).gain(.5)`,sound,
+      cycles:1,cps:.5,window:2,correlation:.99}))),
+    ...[
+      {name:'source-user-partials',code:`note(69).s('user').partials([1,.5,0,.2]).gain(.5)`,sound:'user'},
+      {name:'source-triangle-phases',code:`note(69).s('triangle').partials([1,0,.5,0,.2]).phases([.25,0,.125,0,.5]).gain(.5)`,sound:'triangle'},
+      {name:'source-sine-partials-ignored',code:`note(69).s('sine').partials([0,0,1]).gain(.5)`,sound:'sine'},
+      {name:'source-pulse-fractional',code:`note(69).s('pulse').gain(.5).pwrate(3).late(.137)`,sound:'pulse'},
+      {name:'source-pulse-quantum-boundary',code:`note(69).s('pulse').gain(.5).late(64/44100)`,sound:'pulse'},
+      ...[0,.5,1].map(pan=>({name:`source-pulse-pan${pan}`,code:`note(69).s('pulse').gain(.5).pan(${pan})`,sound:'pulse'})),
+      {name:'source-n-high-pitch',code:`note(100).s('sawtooth').n(128).gain(.5)`,sound:'sawtooth'},
+      {name:'source-n-maximum',code:`note(48).s('square').n(2047).gain(.5)`,sound:'square'},
+      {name:'source-noise-fractional',code:`note(69).s('sine').noise(1).gain(.5).late(.137)`,sound:'sine',seedNoise:true},
+      {name:'source-noise-partials',code:`note(69).s('square').n(8).noise(.5).gain(.5)`,sound:'square',seedNoise:true},
+      {name:'source-pink-loop',code:`note(69).s('pink').gain(.5)`,sound:'pink',seedNoise:true,cps:.25,window:4},
+      ...[{}, {pw:.2}, {pwrate:3}, {pwsweep:.4}, {pw:.7,pwrate:2,pwsweep:.3}].map((controls,i)=>({
+        name:`source-pulse-${i}`,sound:'pulse',code:`note(69).s('pulse').gain(.5)`+
+          Object.entries(controls).map(([key,value])=>`.${key}(${value})`).join('')})),
+      ...[.25,.5,1].map(wet=>({name:`source-noise-mix-${wet}`,sound:'sawtooth',
+        code:`note(69).s('sawtooth').noise(${wet}).gain(.5)`,seedNoise:true})),
+      ...['white','pink','brown'].map(sound=>({name:`source-${sound}`,sound,
+        code:`note(69).s('${sound}').gain(.5)`,seedNoise:true})),
+    ].map(spec=>({cycles:1,cps:.5,window:2,correlation:.99,...spec})),
     { name: 'sine-440', code: `note(69).s('sine').gain(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-fractional-delay', code: `note(69).s('sine').gain(.5).clip(.025).dry(0).delay(1).delaytime(128.5/44100).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: .3, correlation: .99 },
     { name: 'sine-delay-auto-feedback', code: `note("c4 c4").s('sine').gain(.5).clip(.05).dry(0).delay(1).delaytime(.05).delayfeedback("0.5 0.75")`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -195,6 +218,14 @@ try {
       // Use the renderer's supported eager path. Its suspend/resume path
       // races completion for short offline clips in current Chromium.
       const suspend=OfflineAudioContext.prototype.suspend;
+      const createBuffer=BaseAudioContext.prototype.createBuffer;
+      const random=Math.random;
+      if(spec.seedNoise)BaseAudioContext.prototype.createBuffer=function(channels,length,rate){
+        if(channels===1 && length===88200 && rate===44100){
+          let seed=0xc0ffee;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+        }
+        return createBuffer.call(this,channels,length,rate);
+      };
       OfflineAudioContext.prototype.suspend=undefined;
       try {
         await renderPatternAudio(selected,spec.cps,0,spec.cycles,44100,128,false,'comparison');
@@ -202,7 +233,7 @@ try {
         const bytes=new Uint8Array(await blob.arrayBuffer());
         let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
         return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value}))};
-      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend}
+      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
     await fs.writeFile(path.join(out, `${spec.name}-browser.wav`), wav);

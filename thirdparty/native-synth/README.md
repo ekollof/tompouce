@@ -19,6 +19,12 @@ JavaScript in the audio callback.
 The native node set and resource bounds are documented in `docs/javascript.md`.
 The Strudel package versions are unchanged.
 
+Pulse synthesis in `src/dsp.c` follows Superdough's `PulseOscillatorProcessor`
+in `worklets.mjs`. Periodic coefficients/phase rotation and cached noise buffers
+in `src/periodic.c` follow `synth.mjs` and `noise.mjs`, under the Strudel license
+above. The Fourier table builder is an independent implementation of the
+WebAudio periodic-wave normalization and frequency-band definitions.
+
 Generated convolution rooms follow `superdough` 1.2.6 `reverbGen.mjs`,
 Copyright 2014 Alan deLespinasse, Apache-2.0 (`LICENSE-Apache-2.0`). Its
 Strudel wrapper uses the license above. The native generator uses a fixed

@@ -153,6 +153,15 @@ endif()
 
 add_executable(render_audio EXCLUDE_FROM_ALL tests/render_audio.c)
 add_executable(render_convolution EXCLUDE_FROM_ALL tests/render_convolution.c)
+add_executable(render_supersaw EXCLUDE_FROM_ALL tests/render_supersaw.c)
+target_link_libraries(render_supersaw PRIVATE tompouce_core)
+set_target_properties(render_supersaw PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+target_compile_options(render_supersaw PRIVATE -UNDEBUG)
+add_custom_target(test-supersaw-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_RENDER_SUPERSAW=$<TARGET_FILE:render_supersaw>"
+        node scripts/supersaw-reference-qa.mjs
+    DEPENDS render_supersaw WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
 target_link_libraries(render_convolution PRIVATE tompouce_core)
 set_target_properties(render_convolution PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 add_custom_target(test-room-reference-web
@@ -193,7 +202,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance room duck_onset native_synth editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security)
+foreach(name audio audio_performance room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
         AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security")
@@ -204,6 +213,9 @@ foreach(name audio audio_performance room duck_onset native_synth editor termina
     endif()
     if(name STREQUAL "room")
         list(APPEND sources src/convolution.c src/convolution_mix.c src/reverb_impulse.c)
+    endif()
+    if(name STREQUAL "dsp")
+        list(APPEND sources src/dsp.c src/periodic.c)
     endif()
     if(name STREQUAL "live_sliders")
         list(APPEND sources src/slider.c src/javascript.c src/js_audio.c src/duck_onset.c)
@@ -246,6 +258,7 @@ add_custom_target(test-security-sanitize
     DEPENDS test_mcp_security_sanitize test_websamp_security_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-sanitize
+    COMMAND $<TARGET_FILE:test_dsp_sanitize>
     COMMAND $<TARGET_FILE:test_audio_sanitize>
     COMMAND $<TARGET_FILE:test_audio_performance_sanitize>
     COMMAND $<TARGET_FILE:test_room_sanitize>
@@ -257,7 +270,7 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_midi_sanitize>
     COMMAND $<TARGET_FILE:test_gm_webaudiofont_sanitize>
     COMMAND $<TARGET_FILE:test_websamp_sanitize>
-    DEPENDS test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize
+    DEPENDS test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

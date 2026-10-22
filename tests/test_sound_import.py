@@ -181,6 +181,51 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(assets, live)
         self.assertTrue(old_files - live, "removed slots leave collected assets")
 
+    def test_manifest_sync_failure_preserves_published_assets(self):
+        for failure in ('root', 'assets_after_commit'):
+            with self.subTest(failure=failure), SoundStore() as store:
+                real_sync = os.fsync
+                asset_syncs = 0
+
+                def fail_sync(fd):
+                    nonlocal asset_syncs
+                    if fd == store.assets:
+                        asset_syncs += 1
+                    if ((failure == 'root' and fd == store.root) or
+                            (failure == 'assets_after_commit' and fd == store.assets and asset_syncs == 2)):
+                        raise OSError('injected post-publication sync failure')
+                    return real_sync(fd)
+
+                data = audio(12 if failure == 'root' else 13)
+                with patch('sound_import.os.fsync', side_effect=fail_sync):
+                    with self.assertRaises(OSError):
+                        store.import_manifest_bank('manifest:sync', ['bd'],
+                                                   {'bd': [('a.wav', None, None, data, '.wav')]})
+                index = store._index()
+                asset = index['sounds']['bd'][0]['file']
+                path = self.root / 'config/tompouce/sounds/assets' / asset
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_manifest_publication_failure_keeps_previous_bank(self):
+        with SoundStore() as store:
+            store.import_manifest_bank('manifest:sync', ['bd'],
+                                       {'bd': [('a.wav', None, None, audio(1), '.wav')]})
+            previous = store._index()
+            assets = set(os.listdir(store.assets))
+            real_replace = os.replace
+
+            def fail_replace(src, dst, **kwargs):
+                if dst == 'index.json':
+                    raise OSError('injected index publication failure')
+                return real_replace(src, dst, **kwargs)
+
+            with patch('sound_import.os.replace', side_effect=fail_replace):
+                with self.assertRaises(OSError):
+                    store.import_manifest_bank('manifest:sync', ['sd'],
+                                               {'sd': [('b.wav', None, None, audio(2), '.wav')]})
+            self.assertEqual(store._index(), previous)
+            self.assertEqual(set(os.listdir(store.assets)), assets)
+
     def test_manifest_owned_names_refuse_loose_imports(self):
         from sound_import import import_folder
         folder = self.bank({'a.wav': audio()}, {'bd': 'a.wav'})

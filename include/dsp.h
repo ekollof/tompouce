@@ -5,6 +5,8 @@
    one power-of-two-free size that still exceeds it, so reads stay in range
    without masking. */
 #define DSP_CHORUS_LEN 1152
+#define DSP_SUPERSAW_VOICES 100
+typedef struct DspPeriodic DspPeriodic;
 double dsp_periodic_gain(int waveform);
 
 /* Resolved event controls. No JS, allocation, or locks in these algorithms. */
@@ -34,6 +36,11 @@ typedef struct {
     double p[DSP_COUNT];
     double matrix[8][8];
     double partials[32], phases[32];
+    double supersaw_detune; /* total unison width in semitones, not pitch cents */
+    double noise_mix;
+    const float *source_noise;
+    const DspPeriodic *periodic;
+    int periodic_kind, periodic_numeric;
     int n_partials;
 } DspParams;
 
@@ -48,7 +55,15 @@ typedef struct {
     double ladder[4], ladder_g, ladder_k;
     double fm_phase[8], fm_last[8];
     double phaser_z[6], phaser_feedback;
-    double saw_phase[16], noise[8], compressor_gain;
+    double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
+    double noise[8], compressor_gain;
+    double supersaw_pan_l, supersaw_pan_r, supersaw_gain;
+    unsigned supersaw_voices;
+    double pulse[6], pulse_lfo_phase;
+    unsigned pulse_frame;
+    double source_noise_position;
+    float periodic_frequency, periodic_blend;
+    unsigned periodic_range;
     double supersaw_l, supersaw_r;
     /* Ring just long enough for the maximum chorus delay (SR * 0.025 at
        44.1 kHz), rounded up; the extra 1024 samples of the old 2048 ring
@@ -76,9 +91,16 @@ double dsp_frequency(DspState *state, double freq, double age, double gate);
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate);
 double dsp_envelope(double age, double gate, double attack, double decay, double sustain, double release);
 double dsp_noise(DspState *state, int color);
+/* Voice preparation only. Independent phases avoid a coherent onset burst. */
+void dsp_supersaw_init(DspState *state, unsigned seed);
 double dsp_supersaw(DspState *state, double frequency);
 /* waveform 0=saw, 1=pulse, 2=triangle; phase in radians. */
 double dsp_oscillator(int waveform, double phase, double frequency, double width);
-double dsp_additive(const DspParams *params, double phase, double frequency);
+/* Preparation only; immutable, bounded process-lifetime caches. */
+int dsp_prepare_periodic(DspParams *params);
+const float *dsp_prepare_noise(int color);
+double dsp_additive(DspState *state, double phase, double frequency);
+double dsp_source_noise(DspState *state);
+double dsp_pulse(DspState *state, double frequency);
 int dsp_supports_control(const char *name);
 #endif

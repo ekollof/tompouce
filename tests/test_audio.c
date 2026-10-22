@@ -315,6 +315,40 @@ static void test_live_scope_attachment(void) {
     cJSON_Delete(haps); javascript_free(program); memset(voices,0,sizeof(voices));
 }
 
+static void test_supersaw_callback(void) {
+    memset(voices,0,sizeof(voices)); playing=1;
+    AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
+        .time=audio_time,.duration=1,.att=.001,.dec=.05,.sus=.6,.rel=.01};
+    dsp_params_init(&event.dsp); event.dsp.enabled=1;
+    audio_trigger_event(&event); audio_trigger_event(&event);
+    assert(voices[0].dsp.supersaw_voices==5 && voices[1].dsp.supersaw_voices==5);
+    for (unsigned i=0;i<5;i++)
+        assert(voices[0].dsp.saw_phase[i]!=voices[1].dsp.saw_phase[i]);
+    double phase=voices[0].dsp.saw_phase[0],energy=0,stereo=0;
+    float pcm[512]; pa_callback(NULL,pcm,256,NULL,0,NULL);
+    for (int i=0;i<256;i++) {
+        assert(isfinite(pcm[i*2]) && isfinite(pcm[i*2+1]));
+        energy+=pcm[i*2]*pcm[i*2]+pcm[i*2+1]*pcm[i*2+1];
+        stereo+=fabs(pcm[i*2]-pcm[i*2+1]);
+    }
+    assert(energy>0 && stereo>0 && voices[0].dsp.saw_phase[0]!=phase);
+    memset(voices,0,sizeof(voices));
+}
+
+static void test_pulse_quantum_boundary(void) {
+    double previous=audio_time;audio_time=0;playing=1;
+    memset(voices,0,sizeof(voices));
+    AudioEvent event={.inst=INST_PULSE,.smp=-1,.freq=440,.gain=.2,
+        .time=128.0/SR,.duration=1,.att=.001,.dec=.05,.sus=.6,.rel=.01};
+    dsp_params_init(&event.dsp);event.dsp.enabled=1;
+    audio_trigger_event(&event);
+    /* Float32 begin rounds down, so the web starts at frame 128, not 256. */
+    assert(voices[0].source_begin==128.0/SR);
+    float pcm[514];pa_callback(NULL,pcm,257,NULL,0,NULL);
+    assert(voices[0].dsp.pulse_frame==129);
+    memset(voices,0,sizeof(voices));audio_time=previous;
+}
+
 int main(void) {
     /* Never-used orbits must stay bit-exactly silent: the reverb and delay
        gates skip work only when their state is provably zero. Runs first so
@@ -482,6 +516,8 @@ int main(void) {
     test_stretch();
     test_pattern_scopes();
     test_live_scope_attachment();
+    test_supersaw_callback();
+    test_pulse_quantum_boundary();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");
     return 0;

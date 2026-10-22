@@ -54,6 +54,7 @@ Useful focused checks:
 - `cmake --build build --target test-sanitize`
 - `cmake --build build --target test-simd-sanitize`
 - `cmake --build build --target test-room-reference-web`
+- `cmake --build build --target test-supersaw-reference-web`
 - `cmake --build build --target profile-long-room-backend`
 - `cmake --build build --target test-terminal-sanitize`
 - `cmake --build build --target test-security`
@@ -97,6 +98,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   queued/voice references and bounded caches. Keep existing lock windows short.
   Convolution selects its CPU kernel before rendering; retain the portable C
   fallback, per-kernel target flags and `TOMPOUCE_SIMD` verification override.
+  `src/periodic.c` prepares immutable periodic waves and looping noise buffers;
+  never build or evict their tables in rendering. Keep pulse's source gain,
+  render-quantum startup and stereo routing separate from square synthesis.
   Preserve floating-point operation order and test forced C/SSE2/AVX/AVX2 PCM
   equivalence; lower-ISA kernels must not emit newer instructions.
 - Accepted notes, shared-effect tails and duck callbacks survive live slider,

@@ -25,7 +25,9 @@ typedef struct {
     unsigned position, block, filled, remaining;
 } ConvState;
 /* Generator/worker only: size the history for a kernel with `parts` tail
-   blocks. Returns 0 on allocation failure, leaving the state unchanged. */
+   blocks, retaining its existing history. The caller must exclusively own
+   the state: never resize a live rendering state. Returns 0 on allocation
+   failure, leaving the state unchanged. */
 int convolution_state_reserve(ConvState *state, unsigned parts);
 /* Release a state's history. Not for callback use. */
 void convolution_state_free(ConvState *state);

@@ -97,6 +97,19 @@ static ConvState convolvers[N_ORBITS];
 static _Atomic(const ConvKernel *) requested_ir[N_ORBITS];
 static _Atomic unsigned long long ir_revision[N_ORBITS];
 static unsigned long long rendered_ir_revision[N_ORBITS];
+typedef struct RoomState {
+    ConvState state;
+    unsigned long long revision;
+    struct RoomState *next;
+} RoomState;
+static _Atomic(RoomState *) pending_room_state[N_ORBITS];
+/* Serialized publishers consume this SPSC retirement ring; only the callback
+   produces. Detaching pending work before draining bounds outstanding returns
+   to one in-flight swap plus the newly published swap (two entries). */
+static struct {
+    RoomState *slots[2];
+    _Atomic unsigned read, write;
+} retired_rooms[N_ORBITS];
 static const int room_fields[]={DSP_SIZE,DSP_ROOMFADE,DSP_ROOMLP,DSP_ROOMDIM};
 static double room_parameters[N_ORBITS][6];
 static int room_samples[N_ORBITS];
@@ -137,13 +150,50 @@ unsigned audio_register_orbit(int orbit) {
     return atomic_fetch_or(&created_orbits,bit)|bit;
 }
 
-/* Writers hold voice_lock. The callback takes one bounded atomic snapshot;
-   an interrupted publication keeps the previous convolver for this frame. */
-static void publish_room(int orbit, const ConvKernel *kernel, int rebuild) {
-    if (!rebuild && atomic_load(&requested_ir[orbit])==kernel) return;
+static void free_room_state(RoomState *room) {
+    if (!room) return;
+    convolution_state_free(&room->state);
+    free(room);
+}
+
+static void free_room_states(RoomState *room) {
+    while (room) {
+        RoomState *next=room->next;
+        free_room_state(room); room=next;
+    }
+}
+
+/* Preparation only: never inspect or resize the callback's active state. */
+static RoomState *prepare_room_state(const ConvKernel *kernel) {
+    RoomState *room=calloc(1,sizeof(*room));
+    if (!room) return NULL;
+    if (!convolution_state_reserve(&room->state,kernel->parts)) {
+        free(room); return NULL;
+    }
+    convolution_set(&room->state,kernel);
+    return room;
+}
+
+/* Writers hold voice_lock. Return owned garbage for freeing after unlocking;
+   neither rendering nor the callback-shared lock performs history cleanup. */
+static RoomState *publish_room(int orbit, RoomState *room, int rebuild) {
+    const ConvKernel *kernel=room->state.kernel;
+    if (!rebuild && atomic_load(&requested_ir[orbit])==kernel) {
+        return room;
+    }
+    RoomState *garbage=atomic_exchange(&pending_room_state[orbit],NULL);
+    unsigned read=atomic_load(&retired_rooms[orbit].read);
+    unsigned write=atomic_load(&retired_rooms[orbit].write);
+    while (read!=write) {
+        RoomState *retired=retired_rooms[orbit].slots[read%2];
+        retired->next=garbage; garbage=retired;
+        atomic_store(&retired_rooms[orbit].read,++read);
+    }
     atomic_fetch_add(&ir_revision[orbit],1);
     atomic_store(&requested_ir[orbit],kernel);
-    atomic_fetch_add(&ir_revision[orbit],1);
+    room->revision=atomic_fetch_add(&ir_revision[orbit],1)+1;
+    atomic_store(&pending_room_state[orbit],room);
+    return garbage;
 }
 
 static void room_job_run(PrepJob *base) {
@@ -156,21 +206,18 @@ static void room_job_run(PrepJob *base) {
     const double *p=job->parameters;
     const char *error=NULL;
     const ConvKernel *kernel=convolution_prepare_reverb_ex(p[0],p[1],p[2],p[3],&error);
-    /* Size this orbit's history for the kernel outside the callback and
-       before it becomes visible; convolvers are demand-sized, not
-       CONV_MAX_FRAMES-sized. */
-    int reserved = !kernel || convolution_state_reserve(&convolvers[job->orbit],kernel->parts);
-    if (!reserved) { kernel=NULL; error="room convolution memory limit"; }
-    /* A failed generation falls back to the native reverb network; size it
-       here, before the callback can reach it. */
-    if (!kernel) ensure_orbit_reverb(job->orbit);
+    RoomState *room=kernel?prepare_room_state(kernel):NULL;
+    RoomState *garbage=NULL;
+    if (kernel && !room) { kernel=NULL; error="room convolution memory limit"; }
     unsigned generation=event_queue_generation_guard_begin();
     int current=!job->generation || job->generation==generation;
     pthread_mutex_lock(&voice_lock);
-    if (kernel && current) publish_room(job->orbit,kernel,1);
+    if (kernel && current) { garbage=publish_room(job->orbit,room,1); room=NULL; }
     else if (!kernel && current) record_room_failure(job->orbit,p,error);
     pthread_mutex_unlock(&voice_lock);
     event_queue_generation_guard_end();
+    free_room_states(garbage);
+    free_room_state(room);
     pthread_mutex_lock(&room_lock);
     room_worker_busy=0;
     pthread_cond_broadcast(&room_wake);
@@ -683,6 +730,13 @@ void audio_prepare_room(AudioEvent *event) {
         event->orbit>=0 && event->orbit<N_ORBITS) {
         int generated=event->room_params_valid && event->room_sample<0 && !event->ir_kernel;
         int ready=!generated || !event->room_rebuild || start_room_worker();
+        /* A cached custom IR on an unchanged event is already published.
+           Linearize this no-op at the snapshot; avoid allocating a full
+           history for every note that uses the same room. */
+        int reuse=event->ir_kernel && !event->room_rebuild &&
+            atomic_load(&requested_ir[event->orbit])==event->ir_kernel;
+        RoomState *room=event->ir_kernel && !reuse?prepare_room_state(event->ir_kernel):NULL;
+        RoomState *garbage=NULL;
         pthread_mutex_lock(&voice_lock);
         if (event->room_params_valid) {
             for (int i=0;i<4;i++) room_parameters[event->orbit][i]=event->dsp.p[room_fields[i]];
@@ -705,24 +759,24 @@ void audio_prepare_room(AudioEvent *event) {
         } else if (!event->ir_kernel) {
             /* No prepared IR: the native fallback network serves this orbit. */
             ensure_orbit_reverb(event->orbit);
-        } else if (event->ir_kernel &&
-                   /* Sizing happens under voice_lock so the callback can never
-                      read a half-swapped history. It runs once per orbit (or
-                      when a larger IR arrives), not per event, and the room
-                      preparation beside it is already heavier. */
-                   !convolution_state_reserve(&convolvers[event->orbit],event->ir_kernel->parts)) {
-            /* A custom IR that cannot be sized leaves the orbit dry rather
-               than writing past a smaller history. */
+        } else if (reuse) {
+            /* The earlier publication owns its pending or active history. */
+        } else if (!room) {
+            /* A failed preparation retains the previous room. */
             atomic_fetch_or(&prepared_rooms,1u<<event->orbit);
             log_console("room: convolution memory limit for this impulse");
-        } else publish_room(event->orbit,event->ir_kernel,event->room_rebuild);
+        } else { garbage=publish_room(event->orbit,room,event->room_rebuild); room=NULL; }
         pthread_mutex_unlock(&voice_lock);
+        free_room_states(garbage);
+        free_room_state(room);
     }
     event->room_prepared=1;
 }
 
 static void voice_onset(Voice *v) {
     v->onset_pending=0;
+    if (v->dsp.control.source_noise)
+        v->dsp.source_noise_position=fmod(fmax(0,audio_time-v->start_time)*SR,88200);
     /* BufferSource starts on the next render frame but retains the fractional
        source position and envelope time. Apply this once, after preparation;
        stretched PCM already includes its own alignment to the playback grid. */
@@ -734,7 +788,6 @@ static void voice_onset(Voice *v) {
     }
     for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
         pattern_scope_generation[i]=v->scope_generation;
-    if (v->onset_room) publish_room(v->orbit,v->onset_ir,0);
     if (!v->dsp.control.enabled && v->delay_send>0) {
         if (v->onset_delay_time>=0) orbit_dt[v->orbit]=v->onset_delay_time;
         if (v->onset_delay_feedback>=0) orbit_fb[v->orbit]=v->onset_delay_feedback;
@@ -848,10 +901,18 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     if (v->orbit < 0 || v->orbit >= N_ORBITS) v->orbit = 0;
     orbits_ensure();
     v->onset_serial=++voice_onset_serial;
+    if (v->inst==INST_PULSE) {
+        /* Worklet begin/time parameters are Float32. At an exact quantum
+           boundary their rounding decides which block is first active. */
+        double begin=(float)v->start_time;
+        v->source_begin=(floor(begin*SR/128)+1)*128/SR;
+        double lfo=begin*v->dsp.control.p[DSP_PWRATE];
+        v->dsp.pulse_lfo_phase=lfo-floor(lfo);
+    }
+    if (v->inst==INST_SUPERSAW)
+        dsp_supersaw_init(&v->dsp,v->dsp.noise_seed ^ (unsigned)v->onset_serial*0x9e3779b9u);
     v->sampled_source=ev->smp>=0 || ev->stretch_buffer!=NULL;
     v->onset_pending=1;
-    v->onset_room=!ev->room_prepared && ev->dsp.enabled && ev->dsp.p[DSP_ROOM]>0;
-    v->onset_ir=ev->ir_kernel;
     v->onset_delay_time=ev->delay_time; v->onset_delay_feedback=ev->delay_fb;
     v->onset_duck_mask=ev->duck_mask; v->onset_duck_depth=ev->duck_depth; v->onset_duck_attack=ev->duck_attack;
     v->lfo_tgt = ev->lfo_tgt;
@@ -1261,6 +1322,17 @@ void audio_trigger_event(AudioEvent *ev) {
     pthread_mutex_unlock(&voice_lock);
     if (!controls_ready) log_console("duck: pending control capacity exceeded");
     if (ev->control_only) return;
+    if (ev->inst==INST_ADDITIVE && !ev->dsp.periodic && !dsp_prepare_periodic(&ev->dsp)) {
+        log_console("oscillator: periodic-wave preparation/cache limit exceeded"); return;
+    }
+    if (!ev->dsp.source_noise) {
+        int color=ev->inst==INST_NOISE?0:ev->inst==INST_PINK?1:ev->inst==INST_BROWN?2:-1;
+        if (color<0 && ev->dsp.noise_mix>0 && (ev->inst==INST_SINE || ev->inst==INST_SAW ||
+            ev->inst==INST_TRI || ev->inst==INST_SQUARE || ev->inst==INST_ADDITIVE)) color=1;
+        if (color>=0 && !(ev->dsp.source_noise=dsp_prepare_noise(color))) {
+            log_console("oscillator: noise-buffer allocation failed"); return;
+        }
+    }
     NativeSynthState *prepared=ev->native_synth?native_synth_state_new(ev->native_synth):NULL;
     NativeSynthState *prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
     if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
@@ -1324,7 +1396,7 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
     double left = v->pan <= 0 ? 1 : 1-v->pan;
     double right = v->pan >= 0 ? 1 : 1+v->pan;
     if (v->dsp.control.enabled) {
-        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW || native_synth_stereo(v->native_program);
+        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW || v->inst == INST_PULSE || native_synth_stereo(v->native_program);
         double pan = fmax(-1,fmin(1,v->pan));
         if (!v->has_pan) {
             /* With no pan control, WebAudio upmixes mono at unity. */
@@ -1402,13 +1474,19 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     const int lengths[] = {1116,1188,1277,1356};
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
     unsigned long long revision=atomic_load(&ir_revision[orbit]);
-    const ConvKernel *kernel=atomic_load(&requested_ir[orbit]);
-    if ((revision&1) || revision!=atomic_load(&ir_revision[orbit])) kernel=convolvers[orbit].kernel;
-    else if (revision!=rendered_ir_revision[orbit]) {
-        convolution_set(&convolvers[orbit],NULL);
-        rendered_ir_revision[orbit]=revision;
+    if (!(revision&1) && atomic_load(&pending_room_state[orbit])) {
+        RoomState *room=atomic_exchange(&pending_room_state[orbit],NULL);
+        if (room) {
+            ConvState previous=convolvers[orbit];
+            convolvers[orbit]=room->state;
+            room->state=previous;
+            rendered_ir_revision[orbit]=room->revision;
+            unsigned write=atomic_load(&retired_rooms[orbit].write);
+            retired_rooms[orbit].slots[write%2]=room;
+            atomic_store(&retired_rooms[orbit].write,write+1);
+        }
     }
-    convolution_set(&convolvers[orbit],kernel);
+    const ConvKernel *kernel=convolvers[orbit].kernel;
     if (kernel) {
         double left, right;
         convolution_process(&convolvers[orbit],mix->room_l,mix->room_r,&left,&right);
@@ -1831,11 +1909,15 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                             double t = V->phase/(2*M_PI); t -= floor(t);
                             sample = 4.0*fabs(t-0.5)-1.0; break;
                         }
-                        case INST_NOISE: sample = V->dsp.control.enabled ? dsp_noise(&V->dsp,0) : ((double)rand()/RAND_MAX)*2-1; break;
-                        case INST_PINK: sample = dsp_noise(&V->dsp,1); break;
-                        case INST_BROWN: sample = dsp_noise(&V->dsp,2); break;
+                        case INST_NOISE:
+                            sample=V->dsp.control.enabled?dsp_source_noise(&V->dsp):((double)rand()/RAND_MAX)*2-1; break;
+                        case INST_PINK: case INST_BROWN:
+                            sample=V->dsp.control.enabled?dsp_source_noise(&V->dsp):dsp_noise(&V->dsp,w==INST_PINK?1:2); break;
                         case INST_SUPERSAW: sample = dsp_supersaw(&V->dsp,freq); break;
-                        case INST_ADDITIVE: sample = dsp_additive(&V->dsp.control,V->phase,freq); break;
+                        case INST_PULSE:
+                            if (audio_time+1e-10>=V->source_begin) sample=dsp_pulse(&V->dsp,(float)freq);
+                            break;
+                        case INST_ADDITIVE: sample = dsp_additive(&V->dsp,V->phase,freq); break;
                         default: sample = sin(V->phase); break;
                     }
                     if (V->dsp.control.enabled) {
@@ -1847,13 +1929,21 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double base = (V->lfo_tgt == 3) ? fc : V->lpf_hz;
                         sample = apply_lpf(V, sample, voice_fc(V, base));
                     }
+                    sample *= V->waveform_gain>0?V->waveform_gain:1;
+                    if (V->dsp.control.noise_mix>0 && (w==INST_SINE || w==INST_SAW ||
+                        w==INST_SQUARE || w==INST_TRI || w==INST_ADDITIVE)) {
+                        double wet=V->dsp.control.noise_mix;
+                        double dry_gain=wet<.5?1:2-2*wet;
+                        double wet_gain=wet>.5?1:2*wet;
+                        sample=sample*dry_gain+dsp_source_noise(&V->dsp)*wet_gain;
+                    }
                     V->phase += phaseinc;
                     if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
                     V->age += dt;
-                    double smp = sample * env * amp * (V->waveform_gain>0?V->waveform_gain:1);
+                    double smp = sample * env * amp;
                     /* Superdough oscillator sources have a fixed 0.3 gain
                        before the amplitude envelope and effects. */
-                    if (V->dsp.control.enabled) { smp *= .3; amp *= .3; }
+                    if (V->dsp.control.enabled && w!=INST_PULSE) { smp *= .3; amp *= .3; }
                     if (V->inst == INST_SUPERSAW) mix_supersaw(V,env*amp,vm);
                     else mix_voice(V,smp,vm);
                     (void)age;
@@ -2044,6 +2134,7 @@ const char *audio_inst_name(int inst) {
         case INST_TOM: return "tom";
         case INST_WT: return "wt";
         case INST_SUPERSAW: return "supersaw";
+        case INST_PULSE: return "pulse";
         case INST_PINK: return "pink";
         case INST_BROWN: return "brown";
         case INST_ADDITIVE: return "additive";

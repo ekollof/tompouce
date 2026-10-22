@@ -10,6 +10,115 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+static int source_event(const char *text,AudioEvent *event) {
+    cJSON *hap=cJSON_CreateObject(); assert(hap);
+    cJSON_AddNumberToObject(hap,"begin",0);cJSON_AddNumberToObject(hap,"end",1);
+    cJSON *value=cJSON_Parse(text); assert(value);
+    cJSON_AddItemToObject(hap,"value",value);
+    int result=js_audio_event(hap,0,1,event);
+    if (result) result=js_audio_resolve_sample(event,value);
+    cJSON_Delete(hap);return result;
+}
+
+static void test_source_controls(void) {
+    AudioEvent event;
+    assert(source_event("{\"s\":\"pulse\",\"note\":69,\"pwrate\":3}",&event));
+    assert(event.inst==INST_PULSE && event.dsp.p[DSP_PWSWEEP]==.3);
+    assert(source_event("{\"s\":\"pulse\",\"pwsweep\":0.4}",&event));
+    assert(event.dsp.p[DSP_PWRATE]==1);
+    assert(source_event("{\"s\":\"sawtooth\",\"n\":1}",&event));
+    assert(event.inst==INST_ADDITIVE && event.dsp.periodic && event.dsp.n_partials==1);
+    DspState state;dsp_init(&state,&event.dsp);
+    assert(fabs(dsp_additive(&state,M_PI/2,440)+1)<1e-6);
+    const DspPeriodic *first=event.dsp.periodic;
+    assert(source_event("{\"s\":\"sawtooth\",\"n\":1,\"cutoff\":1000}",&event));
+    assert(event.dsp.periodic==first); /* Effects do not duplicate source assets. */
+    assert(source_event("{\"s\":\"triangle\",\"n\":1}",&event));
+    dsp_init(&state,&event.dsp);assert(fabs(dsp_additive(&state,0,440)-1)<1e-6);
+    assert(source_event("{\"s\":\"user\",\"partials\":[1],\"phases\":[0.25]}",&event));
+    dsp_init(&state,&event.dsp);assert(fabs(dsp_additive(&state,0,440)+1)<1e-6);
+    assert(source_event("{\"s\":\"sine\",\"partials\":[0,0,1]}",&event));
+    assert(event.inst==INST_SINE && !event.dsp.periodic);
+    assert(source_event("{\"s\":\"sawtooth\",\"n\":0}",&event) && event.inst==INST_SAW);
+    assert(!source_event("{\"s\":\"sawtooth\",\"n\":-1}",&event));
+    assert(source_event("{\"s\":\"square\",\"n\":2047}",&event));
+    dsp_init(&state,&event.dsp);
+    for (int i=0;i<2048;i++) assert(isfinite(dsp_additive(&state,i*.01,20+i*12)));
+    assert(source_event("{\"s\":\"sawtooth\",\"noise\":1}",&event));
+    assert(event.dsp.noise_mix==1 && event.dsp.source_noise);
+    const float *pink=event.dsp.source_noise;
+    assert(source_event("{\"s\":\"pink\"}",&event) && event.dsp.source_noise==pink);
+    dsp_init(&state,&event.dsp);
+    double initial=dsp_source_noise(&state);
+    for (int i=1;i<88200;i++) assert(isfinite(dsp_source_noise(&state)));
+    assert(dsp_source_noise(&state)==initial); /* Same two-second web loop. */
+    state.source_noise_position=88200-.5;
+    assert(fabs(dsp_source_noise(&state)-(pink[88199]+pink[0])*.5)<1e-8);
+    assert(state.source_noise_position==.5);
+}
+
+static void test_periodic_limits(void) {
+    pid_t child=fork();assert(child>=0);
+    if (!child) {
+        DspParams p;dsp_params_init(&p);p.periodic_kind=4;p.n_partials=1;p.partials[0]=3.14159;
+        assert(dsp_prepare_periodic(&p));const DspPeriodic *retained=p.periodic;
+        int full=0;
+        for (int i=0;i<257;i++) {
+            p.periodic=NULL;p.partials[0]=i+10;
+            if (!dsp_prepare_periodic(&p)) {full=1;break;}
+        }
+        assert(full);
+        p.partials[0]=3.14159;assert(dsp_prepare_periodic(&p) && p.periodic==retained);
+        p.periodic_numeric=0;p.n_partials=33;assert(!dsp_prepare_periodic(&p));
+        p.periodic_numeric=1;p.n_partials=2048;assert(!dsp_prepare_periodic(&p));
+        _exit(0);
+    }
+    int status;assert(waitpid(child,&status,0)==child && WIFEXITED(status) && !WEXITSTATUS(status));
+}
+
+static void test_supersaw(void) {
+    DspParams params; dsp_params_init(&params);
+    assert(params.p[DSP_UNISON]==5 && params.p[DSP_SPREAD]==.6 && params.supersaw_detune==.18);
+    params.enabled=1;
+    DspState first,second; dsp_init(&first,&params); dsp_init(&second,&params);
+    dsp_supersaw_init(&first,1); dsp_supersaw_init(&second,2);
+    assert(first.supersaw_voices==5 && first.supersaw_gain==1/sqrt(5));
+    assert(fabs(first.supersaw_pan_l-sqrt(.2))<1e-15);
+    assert(fabs(first.supersaw_pan_r-sqrt(.8))<1e-15);
+    for (unsigned i=0;i<5;i++) {
+        assert(first.saw_phase[i]>0 && first.saw_phase[i]<1);
+        assert(first.saw_phase[i]!=second.saw_phase[i]);
+        if (i) assert(first.saw_phase[i]!=first.saw_phase[i-1]);
+    }
+    assert(fabs(first.saw_ratio[0]*first.saw_ratio[4]-1)<1e-15);
+    params.p[DSP_UNISON]=1; params.p[DSP_SPREAD]=1;
+    dsp_init(&first,&params); dsp_supersaw_init(&first,1);
+    double phase=first.saw_phase[0];
+    assert(first.saw_ratio[0]==1);
+    dsp_supersaw(&first,440);
+    assert(fabs(first.supersaw_l-(2*phase-1)*sqrt(.5))<1e-15);
+    assert(first.supersaw_l==first.supersaw_r);
+    params.p[DSP_UNISON]=100;
+    dsp_init(&first,&params); dsp_supersaw_init(&first,1);
+    assert(first.supersaw_voices==100);
+    for (int i=0;i<4096;i++) assert(isfinite(dsp_supersaw(&first,12000)));
+    params.p[DSP_UNISON]=1.000001; params.supersaw_detune=9600;
+    dsp_init(&first,&params); dsp_supersaw_init(&first,1);
+    for (int i=0;i<512;i++) assert(isfinite(dsp_supersaw(&first,12000)));
+    for (unsigned i=0;i<first.supersaw_voices;i++) assert(isfinite(first.saw_phase[i]));
+    cJSON *hap=cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"supersaw\",\"note\":69,\"n\":0.5,\"detune\":12}}");
+    assert(hap); AudioEvent event;
+    assert(js_audio_event(hap,0,1,&event));
+    assert(event.freq==440 && event.dsp.supersaw_detune==12);
+    cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+    cJSON_DeleteItemFromObjectCaseSensitive(value,"detune");
+    assert(js_audio_event(hap,0,1,&event) && event.dsp.supersaw_detune==.5);
+    cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(value,"s"),"sawtooth");
+    cJSON_AddNumberToObject(value,"detune",1200);
+    assert(js_audio_event(hap,0,1,&event) && event.freq==880);
+    cJSON_Delete(hap);
+}
+
 static void test_standalone_file_event(void) {
     pid_t child=fork(); assert(child>=0);
     if (!child) {
@@ -239,5 +348,8 @@ int main(void) {
     event_queue_clear();
     puts("native DSP/Strudel audio controls ok");
     test_inactive_fast_paths();
+    test_supersaw();
+    test_source_controls();
+    test_periodic_limits();
     return 0;
 }

@@ -21,7 +21,7 @@ static const Parameter parameters[] = {
     {"roomsize",2,0,10}, {"dry",1,0,1}, {"begin",0,0,1}, {"end",1,0,1},
     {"loop",0,0,1}, {"loopBegin",0,0,1}, {"loopEnd",1,0,1},
     {"cut",0,0,65535}, {"clip",1,0,64}, {"pw",.5,.01,.99},
-    {"pwrate",0,0,20000}, {"pwsweep",0,0,1}, {"unison",7,1,16}, {"spread",1,0,1},
+    {"pwrate",0,0,20000}, {"pwsweep",0,0,1}, {"unison",5,1,DSP_SUPERSAW_VOICES}, {"spread",.6,0,1},
     {"distorttype",0,0,6}, {"distortvol",1,0,16},
     {"compressor",0,-100,0}, {"compressorRatio",12,1,20}, {"compressorKnee",30,0,40},
     {"compressorAttack",.003,0,1}, {"compressorRelease",.25,0,1}, {"pcurve",0,0,1},
@@ -62,6 +62,7 @@ void dsp_read_adsr(const cJSON *value, const char *const names[4], const double 
 
 void dsp_params_init(DspParams *p) {
     memset(p, 0, sizeof(*p));
+    p->supersaw_detune = .18;
     for (int i = 0; i < DSP_FMBASE; i++) p->p[i] = parameters[i].initial;
     for (int i = 0; i < 8; i++) {
         double *op = p->p + DSP_FMBASE + i * 8;
@@ -78,6 +79,10 @@ static int symbol(const cJSON *obj, const char *key, const char *const *names, i
 
 void dsp_params_read(DspParams *p, const cJSON *value) {
     dsp_params_init(p); p->enabled = 1;
+    /* Superdough's supersaw uses detune ?? n ?? .18 as total frequency
+       spread in semitones; other oscillators use detune as pitch cents. */
+    p->supersaw_detune = number(value,"detune",number(value,"n",.18,-9600,9600),-9600,9600);
+    p->noise_mix=number(value,"noise",0,0,1);
     for (int i = 0; i < DSP_FMBASE; i++)
         p->p[i] = number(value, parameters[i].name, p->p[i], parameters[i].min, parameters[i].max);
     /* Superdough getADSRValues: specifying any segment changes the
@@ -121,26 +126,36 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     p->p[DSP_SIZE] = number(value,"size",p->p[DSP_SIZE],0,10);
     const cJSON *partials = cJSON_GetObjectItemCaseSensitive(value,"partials");
     const cJSON *phases = cJSON_GetObjectItemCaseSensitive(value,"phases");
-    if (cJSON_IsArray(partials) || cJSON_IsArray(phases)) {
-        p->n_partials = cJSON_IsArray(partials) ? cJSON_GetArraySize(partials) : cJSON_GetArraySize(phases);
-        if (p->n_partials > 32) p->n_partials = 32;
-        const cJSON *sound = cJSON_GetObjectItemCaseSensitive(value,"s");
-        const char *s = cJSON_IsString(sound) ? sound->valuestring : "user";
+    const cJSON *sound = cJSON_GetObjectItemCaseSensitive(value,"s");
+    const char *s = cJSON_IsString(sound) ? sound->valuestring : "triangle";
+    int basic=!strcmp(s,"saw") || !strcmp(s,"sawtooth") || !strcmp(s,"square") ||
+        !strcmp(s,"triangle") || !strcmp(s,"tri") || !strcmp(s,"user");
+    if (basic) {
+        p->periodic_kind=(!strcmp(s,"saw") || !strcmp(s,"sawtooth"))?1:
+            !strcmp(s,"square")?2:!strcmp(s,"user")?4:3;
+        if (!partials || cJSON_IsNull(partials)) partials=cJSON_GetObjectItemCaseSensitive(value,"n");
+    }
+    if (basic && cJSON_IsNumber(partials) && isfinite(partials->valuedouble) && partials->valuedouble!=0) {
+        p->periodic_numeric=1;
+        p->n_partials=partials->valuedouble<1?-1:(int)fmin(2047,floor(partials->valuedouble));
+        for (int i=0;i<32;i++) {
+            const cJSON *phase=cJSON_GetArrayItem(phases,i);
+            if (cJSON_IsNumber(phase) && isfinite(phase->valuedouble)) p->phases[i]=phase->valuedouble-floor(phase->valuedouble);
+        }
+    } else if (basic && cJSON_IsArray(partials) && cJSON_GetArraySize(partials)) {
+        p->n_partials = cJSON_GetArraySize(partials);
+        if (p->n_partials > 32) p->n_partials = -1;
         for (int i = 0; i < p->n_partials; i++) {
             const cJSON *x = cJSON_GetArrayItem(partials,i);
             const cJSON *y = cJSON_GetArrayItem(phases,i);
-            double base = 1;
-            int harmonic = i+1;
-            if (!strcmp(s,"sine")) base = i == 0;
-            else if (!strcmp(s,"saw") || !strcmp(s,"sawtooth")) base = 1.0/harmonic;
-            else if (!strcmp(s,"square") || !strcmp(s,"pulse")) base = harmonic%2 ? 1.0/harmonic : 0;
-            else if (!strcmp(s,"tri") || !strcmp(s,"triangle"))
-                base = harmonic%2 ? (harmonic%4 == 1 ? 1.0 : -1.0)/(harmonic*harmonic) : 0;
-            p->partials[i] = base;
-            if (cJSON_IsArray(partials))
-                p->partials[i] *= cJSON_IsNumber(x) && isfinite(x->valuedouble) ? clamp(x->valuedouble,0,1) : 0;
+            p->partials[i] = cJSON_IsNumber(x) && isfinite(x->valuedouble) ? clamp(x->valuedouble,-1000000,1000000) : 0;
             if (cJSON_IsNumber(y) && isfinite(y->valuedouble)) p->phases[i] = y->valuedouble-floor(y->valuedouble);
         }
+    }
+    if (!strcmp(s,"pulse")) {
+        p->p[DSP_PW]=number(value,"pw",.5,-.99,.99);
+        if (cJSON_HasObjectItem(value,"pwrate") && !cJSON_HasObjectItem(value,"pwsweep")) p->p[DSP_PWSWEEP]=.3;
+        if (cJSON_HasObjectItem(value,"pwsweep") && !cJSON_HasObjectItem(value,"pwrate")) p->p[DSP_PWRATE]=1;
     }
     const char *fields[] = {"fmi", "fmh", "fmattack", "fmdecay", "fmsustain", "fmrelease", "fmenv", "fmwave"};
     const double maximum[] = {64,64,30,30,1,30,1,6};
@@ -163,7 +178,7 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
             }
         }
         for (int j = 0; j < 8; j++) {
-            char name[24];
+            char name[32];
             snprintf(name, sizeof(name), "fmi%d%d", i + 1, j + 1);
             p->matrix[i][j] = number(value, name, 0, -64, 64);
         }
@@ -255,6 +270,7 @@ void dsp_init(DspState *s, const DspParams *p) {
     s->control = *p;
     s->noise_seed = 0x1234567u;
     s->compressor_gain = 1;
+    s->pulse[0]=-M_PI;
     /* Web vowel topology: five parallel bandpasses with per-formant gains
        and a makeup gain of 8 (packages/superdough/vowel.mjs). Q reaches 140,
        past the user-facing resonance clamp, so formants use unclamped RBJ
@@ -525,26 +541,45 @@ double dsp_oscillator(int waveform, double phase, double frequency, double width
     return 2/M_PI*asin(sin(phase));
 }
 
-double dsp_supersaw(DspState *s, double frequency) {
-    int n = (int)s->control.p[DSP_UNISON];
-    if (n < 1) n = 1;
-    if (n > 16) n = 16;
-    double left = 0, right = 0;
-    for (int i = 0; i < n; i++) {
-        double detune = n > 1 ? (2.0*i/(n-1)-1)*.025 : 0;
-        double rate = frequency*(1+detune)/SR;
-        s->saw_phase[i] += rate;
-        s->saw_phase[i] -= floor(s->saw_phase[i]);
-        double phase = s->saw_phase[i], x = 2*phase-1;
-        double dt = fmin(.49,fabs(rate));
-        if (dt > 0 && phase < dt) { double t = phase/dt; x -= t+t-t*t-1; }
-        else if (dt > 0 && phase > 1-dt) { double t = (phase-1)/dt; x -= t*t+t+t+1; }
-        double pan = n > 1 ? (2.0*i/(n-1)-1)*s->control.p[DSP_SPREAD] : 0;
-        left += x*(pan <= 0 ? 1 : 1-pan);
-        right += x*(pan >= 0 ? 1 : 1+pan);
+void dsp_supersaw_init(DspState *s, unsigned seed) {
+    double voices=clamp(s->control.p[DSP_UNISON],1,DSP_SUPERSAW_VOICES);
+    s->supersaw_voices=(unsigned)ceil((float)voices);
+    double spread=voices>1?clamp(s->control.p[DSP_SPREAD],0,1):0;
+    s->supersaw_pan_l=sqrt((1-spread)*.5);
+    s->supersaw_pan_r=sqrt((1+spread)*.5);
+    s->supersaw_gain=1/sqrt(voices);
+    /* AudioWorklet parameters are Float32, including fractional voice counts. */
+    double count=(float)voices, width=(float)s->control.supersaw_detune;
+    for (unsigned i=0;i<s->supersaw_voices;i++) {
+        seed=seed*1664525u+1013904223u;
+        s->saw_phase[i]=(double)seed/4294967296.0;
+        double offset=count>1?i*width/(count-1)-width*.5:0;
+        s->saw_ratio[i]=pow(2,offset/12);
+        if (!isfinite(s->saw_ratio[i])) s->saw_ratio[i]=0;
     }
-    s->supersaw_l = left/n; s->supersaw_r = right/n;
-    return (left+right)/(2*n);
+}
+
+double dsp_supersaw(DspState *s, double frequency) {
+    double left = 0, right = 0;
+    double pan_l=s->supersaw_pan_l,pan_r=s->supersaw_pan_r;
+    for (unsigned i = 0; i < s->supersaw_voices; i++) {
+        double rate=frequency*s->saw_ratio[i]/SR, x=0;
+        /* Near-one fractional unison and extreme spreads can overflow the
+           exponential. Keep invalid oscillators silent and state finite. */
+        if (s->saw_ratio[i]>0 && isfinite(rate)) {
+            rate-=floor(rate);
+            double phase=s->saw_phase[i];
+            x=2*phase-1-poly_blep(phase,fmin(rate,1-rate));
+            phase+=rate;
+            if (phase>=1) phase-=1;
+            s->saw_phase[i]=phase;
+        }
+        left += x*pan_l; right += x*pan_r;
+        double swap=pan_l; pan_l=pan_r; pan_r=swap;
+    }
+    s->supersaw_l = left*s->supersaw_gain;
+    s->supersaw_r = right*s->supersaw_gain;
+    return (s->supersaw_l+s->supersaw_r)*.5;
 }
 
 int dsp_supports_control(const char *name) {
@@ -558,16 +593,29 @@ int dsp_supports_control(const char *name) {
         if (!*p || (p[0] >= '1' && p[0] <= '8' && !p[1])) return 1;
         if (i == 0 && p[0] >= '1' && p[0] <= '8' && p[1] >= '1' && p[1] <= '8' && !p[2]) return 1;
     }
-    return !strcmp(name,"size") || !strcmp(name,"partials") || !strcmp(name,"phases");
+    return !strcmp(name,"size") || !strcmp(name,"partials") || !strcmp(name,"phases") || !strcmp(name,"noise");
 }
 
-double dsp_additive(const DspParams *p, double phase, double frequency) {
-    double sample = 0, total = 0;
-    for (int i = 0; i < p->n_partials; i++) {
-        int harmonic = i+1;
-        if (fabs(frequency)*harmonic >= SR*.5) break;
-        sample += p->partials[i]*sin(phase*harmonic + 2*M_PI*p->phases[i]);
-        total += fabs(p->partials[i]);
+double dsp_pulse(DspState *s,double frequency) {
+    double *m=s->pulse;
+    double width=s->control.p[DSP_PW];
+    if (s->control.p[DSP_PWSWEEP]!=0) {
+        double phase=s->pulse_lfo_phase;
+        double tri=phase<.5?phase*2:2-phase*2;
+        width=(float)((float)width+(float)((tri-.5)*s->control.p[DSP_PWSWEEP]));
+        phase+=s->control.p[DSP_PWRATE]/SR;
+        s->pulse_lfo_phase=phase-floor(phase);
     }
-    return total > 0 ? sample/fmax(1,total) : 0;
+    unsigned frame=s->pulse_frame++%128;
+    if (!frame) m[5]=1;
+    m[5]*=.9998;
+    m[3]+=.1*(frequency*2*M_PI/SR-m[3]);
+    m[4]+=.1*(m[5]-m[4]);
+    m[0]+=m[3];
+    if (m[0]>=M_PI) m[0]-=2*M_PI;
+    double feedback=fmax(0,2.3*(1-.0001*frequency));
+    double first=cos(m[0]+feedback*m[1]);
+    double second=cos(m[0]+feedback*m[2]+(1-clamp(width,-.99,.99))*M_PI);
+    m[1]=.5*(first+m[1]); m[2]=.5*(second+m[2]);
+    return .15*(first-second)*m[4];
 }

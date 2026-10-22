@@ -72,6 +72,43 @@ static void test_generation_guard(void) {
     assert(atomic_load(&transition.done));
     assert(event_queue_generation()!=generation);
 }
+
+typedef struct { _Atomic int done; } RoomRace;
+static void *render_room_thread(void *argument) {
+    RoomRace *race=argument;
+    unsigned frames=0;
+    do {
+        VoiceMix mix={.room_l=(frames%137==0)?.1:0,.room_r=.01};
+        native_reverb(9,&mix);
+        assert(isfinite(mix.left) && isfinite(mix.right));
+        frames++;
+    } while (!atomic_load(&race->done));
+    return NULL;
+}
+
+static void test_room_handoff(const ConvKernel *small,const ConvKernel *large) {
+    /* Exercise retirement/reclamation and concurrent preparation/rendering
+       with differently sized histories and replacement before consumption. */
+    for (int i=0;i<2;i++) {
+        RoomState *room=prepare_room_state(small); assert(room);
+        free_room_states(publish_room(9,room,1));
+        VoiceMix mix={0}; native_reverb(9,&mix);
+    }
+    assert(atomic_load(&retired_rooms[9].write)-atomic_load(&retired_rooms[9].read)==1);
+    RoomRace race={0}; pthread_t thread;
+    assert(!pthread_create(&thread,NULL,render_room_thread,&race));
+    for (int i=0;i<1000;i++) {
+        RoomState *room=prepare_room_state(i%2?large:small); assert(room);
+        pthread_mutex_lock(&voice_lock);
+        RoomState *garbage=publish_room(9,room,1);
+        pthread_mutex_unlock(&voice_lock);
+        free_room_states(garbage);
+    }
+    atomic_store(&race.done,1); assert(!pthread_join(thread,NULL));
+    VoiceMix mix={0}; native_reverb(9,&mix);
+    assert(convolvers[9].kernel==large);
+    assert(rendered_ir_revision[9]==atomic_load(&ir_revision[9]));
+}
 static void test_diagnostics(void) {
     const char *error=NULL;
     const ConvKernel *coastline=convolution_prepare_reverb_ex(4,.1,15000,1000,&error);
@@ -134,10 +171,11 @@ int main(void) {
     memset(pcm,0,sizeof(pcm));
     ConvKernel *second=convolution_kernel(pcm,1024,2,0);
     assert(first && second);
-    publish_room(3,first,1);
+    RoomState *initial=prepare_room_state(first); assert(initial);
+    free_room_states(publish_room(3,initial,1));
     VoiceMix seed={.room_l=1,.room_r=-1}; native_reverb(3,&seed);
     ConvState *history=malloc(sizeof(*history)); assert(history);
-    memcpy(history,&convolvers[3],sizeof(*history));
+    assert(convolution_state_clone(history,&convolvers[3]));
     hold_preparation(0,second);
     AudioEvent event=room(3,.1); audio_prepare_room(&event); wait_entered();
     assert(event.room_prepared && atomic_load(&requested_ir[3])==first);
@@ -199,6 +237,28 @@ int main(void) {
     event=room(5,.3); event.generation=event_queue_generation()+1;
     audio_prepare_room(&event); audio_wait_room_preparation();
     assert(!atomic_load(&requested_ir[5]) && room_failures==failures);
+    /* An obsolete larger result must not grow/erase an active history. */
+    float larger_pcm[8192];
+    for (unsigned i=0;i<8192;i++) larger_pcm[i]=.05f;
+    ConvKernel *larger=convolution_kernel(larger_pcm,4096,2,0); assert(larger);
+    initial=prepare_room_state(first); assert(initial);
+    free_room_states(publish_room(3,initial,1));
+    seed=(VoiceMix){.room_l=1,.room_r=-1}; native_reverb(3,&seed);
+    ConvState retained={0}; assert(convolution_state_clone(&retained,&convolvers[3]));
+    replacement=larger;
+    event=room(3,.4); event.generation=event_queue_generation()+1;
+    audio_prepare_room(&event); audio_wait_room_preparation();
+    assert(atomic_load(&requested_ir[3])==first);
+    for (int i=0;i<1200;i++) {
+        VoiceMix mix={0}; double left,right;
+        native_reverb(3,&mix); convolution_process(&retained,0,0,&left,&right);
+        assert(mix.left==left && mix.right==right);
+    }
+    convolution_state_free(&retained);
+    test_room_handoff(first,larger);
+    replacement=NULL;
+    convolution_set(&convolvers[9],NULL);
+    convolution_kernel_free(larger);
     stop_room_worker();
     prep_pool_stop();
     test_generation_guard();

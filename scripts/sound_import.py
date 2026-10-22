@@ -602,6 +602,7 @@ class SoundStore:
         fcntl.flock(self.lock, fcntl.LOCK_EX)
         created = []
         temporary = None
+        published = False
         try:
             index = self._index()
             groups = index["sounds"]
@@ -672,6 +673,7 @@ class SoundStore:
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, "index.json", src_dir_fd=self.root, dst_dir_fd=self.root)
+            published = True
             temporary = None
             os.fsync(self.root)
             referenced = set()
@@ -688,7 +690,9 @@ class SoundStore:
             os.fsync(self.assets)
             return {"bank": bank_id, "names": len(staged), "slots": sum(len(v) for v in staged.values())}
         except BaseException:
-            for filename in created:
+            # After publication these assets belong to the live index, even
+            # if a subsequent durability sync or garbage collection fails.
+            for filename in (() if published else created):
                 try:
                     os.unlink(filename, dir_fd=self.assets)
                 except OSError:

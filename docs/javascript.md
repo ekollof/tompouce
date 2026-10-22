@@ -189,8 +189,8 @@ Aliases registered by upstream Strudel map to the same controls.
 
 | Area | Implemented in C |
 | --- | --- |
-| Sources | sine, triangle, sawtooth, square/pulse, supersaw/unison/stereo spread, white/pink/brown noise, procedural `wt:` tables, local and remote samples, ZzFX, bytebeat, bounded Kabelsalat graphs |
-| Harmonics | `partials`, `phases` (32 harmonics, with a Nyquist cutoff) |
+| Sources | sine, triangle, sawtooth, square, pulse, supersaw/unison/stereo spread, white/pink/brown noise, procedural `wt:` tables, local and remote samples, ZzFX, bytebeat, bounded Kabelsalat graphs |
+| Harmonics | numeric `n` (up to 2,047 represented harmonics); `partials` and `phases` (32 explicit entries), normalized and bandlimited |
 | Amplitude | gain, velocity, amp, busgain, overgain, ADSR, clip/legato, duration, postgain, pan, dry |
 | Filters | low/high/band-pass, their Q values and ADSR/depth envelopes, fanchor, 12 dB / 24 dB filters and nonlinear low-pass ladder, vowel/formant filtering |
 | Filter LFOs | lp/hp/bp rate, sync, depth, depthfrequency, shape, dc, skew |
@@ -223,10 +223,31 @@ zero and is displaced by one source frame. This applies before stretching too.
 Native oscillators now use direct ADSR automation without the legacy
 envelope smoothing stage. Explicit panning follows equal-power mono and stereo
 folding conventions; omitted panning preserves unity upmix. Stock saw/square
-levels match the browser periodic-wave normalization. Saw and pulse discontinuities
-use polyBLEP corrections, and triangle starts at the sine phase. The maintained
+levels match the browser periodic-wave normalization. Stock saw and square
+discontinuities use polyBLEP corrections, and triangle starts at the sine phase. The maintained
 browser comparison covers representative waveforms and effects; broader parameter
 and full-song parity remains unverified.
+
+`pulse` uses the REPL's feedback oscillator, including its startup smoothing,
+128-frame render-quantum behavior, stereo panning and pulse-width triangle LFO.
+Setting only `pwrate` supplies the web's `.3` sweep default; setting only
+`pwsweep` supplies a 1 Hz rate. Pulse is distinct from `square`.
+
+On basic waveforms, numeric `n` selects the number of harmonic coefficients;
+zero retains the stock oscillator. `partials` overrides `n`. Custom waves use
+the web's coefficient signs, phase rotation, peak normalization and frequency
+bands. The existing 32-entry bound for explicit arrays is enforced with a
+diagnostic rather than silently truncating a waveform. Invalid counts and
+preparation failures reject the affected source, retaining accepted voices.
+Prepared waves share a process-lifetime cache bounded to 256 entries / 64 MiB;
+the callback only reads those immutable tables.
+
+`.noise(amount)` blends pink noise into basic oscillators using the REPL's
+dry/wet curve, before amplitude envelopes and effects. Standalone white, pink
+and brown sources and oscillator noise share prepared two-second looping
+buffers, including fractional starts. Noise buffers use a deterministic random
+stream; the REPL chooses its buffer randomly on first use. Comparisons seed
+the web buffer to isolate algorithm, gain and timing differences.
 
 Zero-gain events remain silent but still prepare their sources and apply shared
 effect controls. Sample `cut` groups fade the previous sampled sources over

@@ -79,6 +79,17 @@ static void demand_sized_history(void) {
     assert(convolution_state_reserve(&silent,k->parts));
     assert(silent.slots==k->parts+1);
     convolution_set(&silent,k);
+    for (int i=0;i<CONV_BLOCK;i++) convolution_process(&silent,i==0,i==0,&l,&r);
+    ConvState retained={0}; assert(convolution_state_clone(&retained,&silent));
+    assert(convolution_state_reserve(&silent,k->parts+10));
+    for (int i=0;i<frames;i++) {
+        double left,right;
+        convolution_process(&silent,0,0,&l,&r);
+        convolution_process(&retained,0,0,&left,&right);
+        assert(l==left && r==right);
+    }
+    convolution_state_free(&retained);
+    convolution_set(&silent,NULL); convolution_set(&silent,k);
     double energy=0;
     for (int i=0;i<frames+4*CONV_BLOCK;i++) {
         convolution_process(&silent,i==0?1:0,i==0?1:0,&l,&r);

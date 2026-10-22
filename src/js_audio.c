@@ -100,8 +100,10 @@ static int oscillator(const char *s) {
     if (native_synth_sound(s)) return INST_NATIVE;
     if (!strcmp(s,"sine")) return INST_SINE;
     if (!strcmp(s,"saw") || !strcmp(s,"sawtooth")) return INST_SAW;
-    if (!strcmp(s,"square") || !strcmp(s,"pulse")) return INST_SQUARE;
+    if (!strcmp(s,"square")) return INST_SQUARE;
+    if (!strcmp(s,"pulse")) return INST_PULSE;
     if (!strcmp(s,"tri") || !strcmp(s,"triangle")) return INST_TRI;
+    if (!strcmp(s,"user")) return INST_TRI; /* web fallback without partials */
     if (!strcmp(s,"noise") || !strcmp(s,"white")) return INST_NOISE;
     if (!strcmp(s,"pink")) return INST_PINK;
     if (!strcmp(s,"brown")) return INST_BROWN;
@@ -289,7 +291,8 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         ev->inst=INST_NATIVE; ev->is_drum=0;
     }
     ev->freq = control(v,"freq",440*pow(2,(midi-69)/12),.01,SR*.45);
-    ev->freq *= pow(2,control(v,"detune",0,-9600,9600)/1200);
+    if (ev->inst!=INST_SUPERSAW)
+        ev->freq *= pow(2,control(v,"detune",0,-9600,9600)/1200);
     if (ev->is_drum) ev->freq = 0;
     snprintf(ev->token,sizeof(ev->token),"%.63s",*sound ? sound : native?"kabelsalat":"triangle");
     if (ev->inst == INST_WT) ev->wt = wt_find(sound+3);
@@ -335,6 +338,18 @@ static unsigned room_explicit_fields(const cJSON *value) {
 /* Worker-safe: resolves immutable source data and leaves shared orbit state,
    including inherited room controls and custom-IR FFTs, to the publisher. */
 static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
+    if (ev->dsp.n_partials<0) {
+        log_console("oscillator: invalid harmonic count or more than 32 explicit partials"); return 0;
+    }
+    if (ev->inst==INST_ADDITIVE && !dsp_prepare_periodic(&ev->dsp)) {
+        log_console("oscillator: periodic-wave preparation/cache limit exceeded"); return 0;
+    }
+    int noise_color=ev->inst==INST_NOISE?0:ev->inst==INST_PINK?1:ev->inst==INST_BROWN?2:-1;
+    if (noise_color<0 && ev->dsp.noise_mix>0 && (ev->inst==INST_SINE || ev->inst==INST_SAW ||
+        ev->inst==INST_TRI || ev->inst==INST_SQUARE || ev->inst==INST_ADDITIVE)) noise_color=1;
+    if (noise_color>=0 && !(ev->dsp.source_noise=dsp_prepare_noise(noise_color))) {
+        log_console("oscillator: noise-buffer allocation failed"); return 0;
+    }
     if (ev->inst==INST_NATIVE || cJSON_HasObjectItem(value,"_nativeProgram")) {
         ev->native_synth=native_synth_prepare(value,ev->freq,ev->duration);
         if (!ev->native_synth) { log_console("native synth: unsupported program or preparation limit exceeded"); return 0; }

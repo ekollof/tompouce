@@ -137,6 +137,9 @@ int convolution_state_reserve(ConvState *state, unsigned parts) {
     if (bins > SIZE_MAX/sizeof(*state->history)) return 0;
     ConvComplex *next = calloc(bins,sizeof(*next));
     if (!next) return 0;
+    /* The active kernel still determines the channel stride. Preserve its
+       entire history when reserving capacity without changing kernels. */
+    if (state->history) memcpy(next,state->history,(size_t)state->slots*2*CONV_FFT*sizeof(*next));
     free(state->history);
     state->history = next;
     state->slots = slots;

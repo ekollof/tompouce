@@ -33,6 +33,7 @@ typedef struct {
 #define INST_BROWN 13
 #define INST_ADDITIVE 14
 #define INST_NATIVE 15
+#define INST_PULSE 16
 
 /* Strudel effect buses. Orbit 1 is the JS default. Legacy events use 0. */
 #define N_ORBITS 12

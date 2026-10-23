@@ -58,6 +58,9 @@ static int undo_n, undo_cap, redo_n, redo_cap;
 static int undo_group, undo_suspend, undo_pushed;
 static unsigned undo_tick, undo_group_tick;
 static double undo_group_time;
+enum { EDITOR_PAIR_LIMIT=1024 };
+static struct { int at; unsigned char close; } editor_pairs[EDITOR_PAIR_LIMIT];
+static int editor_pair_count,editor_pair_editing;
 static int vi_mode = 0; /* 0 = insert, 1 = vi-ish normal */
 static int vi_normal = 0;
 static int vi_pending = 0;  /* for dd/yy */
@@ -369,6 +372,22 @@ static char *editor_flatten(void) {
     return out;
 }
 
+/* Map only editor-created closers. Replaced text loses its markers. */
+static void editor_pairs_map(int from,int to,int inserted) {
+    int count=0;
+    for(int i=0;i<editor_pair_count;i++) {
+        int at=editor_pairs[i].at;
+        if(at>=from && at<to) continue;
+        if(at>=to) {
+            long long mapped=(long long)at-(to-from)+inserted;
+            if(mapped>INT_MAX) continue;
+            at=(int)mapped;
+        }
+        editor_pairs[count]=editor_pairs[i];editor_pairs[count++].at=at;
+    }
+    editor_pair_count=count;
+}
+
 static void undo_hist_clear(struct undo_snap **a, int *n) {
     for (int i = 0; i < *n; i++) free((*a)[i].text);
     *n = 0;
@@ -397,6 +416,7 @@ static int undo_hist_push(struct undo_snap **a, int *n, int *cap) {
 /* Snapshot the buffer before a change. A typing run inside two seconds,
    with no other key in between, keeps the first snapshot. */
 static void undo_begin(int group) {
+    if(!editor_pair_editing) editor_pair_count=0;
     undo_pushed = 0;
     if (undo_suspend) return;
     if (group && group == undo_group && undo_tick == undo_group_tick + 1 &&
@@ -512,7 +532,7 @@ static void editor_copy_range(char *dst, size_t from, size_t n) {
 }
 
 /* Build the whole edit before touching the buffer. Failure leaves it unchanged. */
-static int editor_replace(int a, int b, const char *text) {
+static int editor_replace_grouped(int a, int b, const char *text,int group) {
     if (!text) text = "";
     if (!lines_ready()) {
         snprintf(status_msg, sizeof(status_msg), "out of memory");
@@ -535,7 +555,8 @@ static int editor_replace(int a, int b, const char *text) {
     }
     size_t removed = (size_t)(b - a);
     if (add > SOURCE_MAX || len - removed > SOURCE_MAX - add) goto big;
-    undo_begin(0);
+    editor_pair_editing++;
+    undo_begin(group);
     size_t nlen = len - removed + add;
     char *next = malloc(nlen + 1);
     if (!next) goto oom;
@@ -585,14 +606,20 @@ static int editor_replace(int a, int b, const char *text) {
     cur_col = cc;
     sel_active = 0;
     undo_commit();
+    editor_pairs_map(a,b,(int)add);editor_pair_editing--;
     return 1;
 big:
     snprintf(status_msg, sizeof(status_msg), "edit exceeds the 2 GiB offset limit");
     return 0;
 oom:
     undo_abort();
+    editor_pair_editing--;
     snprintf(status_msg, sizeof(status_msg), "out of memory");
     return 0;
+}
+
+static int editor_replace(int a,int b,const char *text) {
+    return editor_replace_grouped(a,b,text,0);
 }
 
 static void selection_copy(int cut) {
@@ -703,6 +730,7 @@ static int rows_add(char ***rows, int *n, int *cap, char *s) {
 }
 
 static int replace_code_with(const char *txt) {
+    editor_pair_count=0;
     vi_reset();
     const char *p = txt ? txt : "";
     undo_begin(0);
@@ -2960,6 +2988,7 @@ static void editor_indent(int backwards) {
 /* ---- bank search ---- */
 
 #include "tui_completion.h"
+#include "tui_pairs.h"
 
 static void search_use_bank(const char *dirfrag);
 static void search_refresh(void) {
@@ -3396,6 +3425,9 @@ static const DocLine cheat[] = {
     {3, "Ctrl+V            Paste internal clipboard"},
     {3, "Ctrl+D            Duplicate current line"},
     {3, "Ctrl+Z / Ctrl+Y   Undo / redo"},
+    {3, "Quotes / brackets Auto-pair while typing; wrap selections"},
+    {3, "Backspace         Delete an empty matching pair"},
+    {3, "Enter             Syntax-aware indentation (two spaces)"},
     {3, "Ctrl+R            Evaluate (vi normal: redo)"},
     {3, "Esc               Clear selection / return to editor"},
     {0, ""},
@@ -4854,6 +4886,7 @@ void tui_run(void) {
         if (vi_mode && vi_normal && (ch == 'p' || ch == 'P')) {
             editor_paste(ch == 'P'); vi_pending = 0; continue;
         }
+        if(!(vi_mode && vi_normal) && editor_pair_key(ch)) continue;
         if (sel_active && (!vi_mode || !vi_normal) &&
             (ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8 || ch == (int)NCKEY_DEL ||
              ch == '\r' || ch == '\n' || (ch >= 32 && ch <= 255 && ch != 127))) {
@@ -5077,30 +5110,9 @@ void tui_run(void) {
             if (ch == 'a') { cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line])); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
             if (ch == 'I') { cur_col = vi_first_nonblank(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
             if (ch == 'A') { cur_col = strlen(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'o') {
-                undo_begin(UNDO_TYPE);
-                if (line_insert(cur_line + 1, "")) {
-                    cur_line++;
-                    cur_col = 0;
-                    vi_normal = 0;
-                    undo_commit();
-                    snprintf(status_msg, 256, "vi insert");
-                } else {
-                    undo_abort();
-                    snprintf(status_msg, 256, "out of memory");
-                }
-                vi_pending=0; continue;
-            }
-            if (ch == 'O') {
-                undo_begin(UNDO_TYPE);
-                if (line_insert(cur_line, "")) {
-                    cur_col = 0;
-                    vi_normal = 0;
-                    undo_commit();
-                    snprintf(status_msg, 256, "vi insert");
-                } else {
-                    undo_abort();
-                    snprintf(status_msg, 256, "out of memory");
+            if (ch == 'o' || ch == 'O') {
+                if(editor_smart_open_line(ch=='O')) {
+                    vi_normal=0;snprintf(status_msg,sizeof(status_msg),"vi insert");
                 }
                 vi_pending=0; continue;
             }

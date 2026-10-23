@@ -441,7 +441,8 @@ check("pixel mouse selection", "one\ntwo\nthree",
 check("pixel mouse wheel", "zero\none\ntwo\nthree\nfour", b"\x1b[<65;10;5MX",
       "zero\none\ntwo\nXthree\nfour", mouse_pixels=True)
 check("slider incomplete call typing", '',
-      b's("sawtooth").lpf(200).lpenv(slider(', 's("sawtooth").lpf(200).lpenv(slider(')
+      # Delete the generated closers to retain the incomplete-syntax regression.
+      b's("sawtooth").lpf(200).lpenv(slider(\x1b[3~\x1b[3~', 's("sawtooth").lpf(200).lpenv(slider(')
 check("slider empty call typing", '',
       b's("sawtooth").lpf(200).lpenv(slider())', 's("sawtooth").lpf(200).lpenv(slider())')
 check("slider expression typing", '',
@@ -512,6 +513,29 @@ check("Strudel shortcut previous label wraps", '$: note(60).gain(0)\n$: note(72)
 check("Strudel shortcut next label wraps", '$: note(60).gain(0)\n$: note(72).gain(0)',
       b'\x1bw\x1bw_', expected='_$: note(60).gain(0)\n$: note(72).gain(0)')
 check("Strudel shortcut ordinary Enter", 'one', b'\rX', expected='\nXone')
+for opener, closer in [('(', ')'), ('[', ']'), ('{', '}'), ("'", "'"), ('"', '"'), ('`', '`')]:
+    check("auto pair opener " + opener, '', opener.encode(), expected=opener+closer)
+check("auto pair complete expression", '', b'note("c4 e4").s(\'sine\').gain(0)',
+      expected='note("c4 e4").s(\'sine\').gain(0)')
+check("auto pair nested closers", '', b'([{x}])', expected='([{x}])')
+check("auto pair escaped quote", '', b'"a\\"b"', expected='"a\\"b"')
+check("auto pair empty backspace", '', b'(\x7f', expected='')
+check("auto pair selected expression", 'note(60).gain(0)', b'\x01(', expected='(note(60).gain(0))')
+check("auto pair paste stays literal", '', b'\x1b[200~([\x1b[201~', expected='([')
+check("auto pair existing closer stays literal", ')', b')', expected='))')
+check("auto pair vi insert", '', b'i"\x1b', vi=True, expected='""')
+check("auto pair newline keeps closer", '', b'(\rx\x1b[B\x1b[D)', expected='(\n  x\n)')
+check("auto pair undo", '', b'(\x1a', expected='')
+check("smart indent preserves indentation", '  note(60).gain(0)', b'\x1b[F\rX',
+      expected='  note(60).gain(0)\n  X')
+check("smart indent block", '', b'{\rX', expected='{\n  X\n}')
+check("smart indent generated closer", '', b'{\r}', expected='{\n}')
+check("smart indent populated block closer", '', b'{\rX\r}', expected='{\n  X\n}')
+check("smart indent nested", '', b'{\r{\rX', expected='{\n  {\n    X\n  }\n}')
+check("smart indent closing brace", '{\n    ', b'\x1b[B\x1b[F}', expected='{\n}')
+check("smart indent vi open below", 'if (ready) {', b'oX\x1b', vi=True, expected='if (ready) {\n  X')
+check("smart indent vi open above", '  one', b'OX\x1b', vi=True, expected='  X\n  one')
+check("smart indent paste stays literal", '', b'\x1b[200~{\nX\n}\x1b[201~', expected='{\nX\n}')
 check("Strudel shortcut explicit Escape is separate", '$: note(60).gain(0)\n$: note(72).gain(0)',
       b'\x1b[27uw', expected='w$: note(60).gain(0)\n$: note(72).gain(0)')
 check("Strudel reference search", 'note(60).gain(0)', b'\x1bhslow',
@@ -641,8 +665,9 @@ if not CASE_FILTER or 'tutor' in CASE_FILTER or CASE_FILTER in 'tutor shortcut':
           expected=tutor_intro, command_files=True, observed=b'song=off')
     assert tutorial.read_bytes() == tutorial_before, 'tutor shortcut changed the bundled save'
 check("Notcurses CSI-u completion", "", b'setcp\x1b[32;5u', expected='setcpm')
-check("Notcurses shifted associated text", "", b'\x1b[97;2;65u\x1b[49;2;33u\x1b[57;2;40u', expected='A!(')
-check("Notcurses shifted plain text", "", b'A!(){}_+"', expected='A!(){}_+"')
+# Remove auto-generated trailing closers to keep these decoder checks literal.
+check("Notcurses shifted associated text", "", b'\x1b[97;2;65u\x1b[49;2;33u\x1b[57;2;40u\x1b[3~', expected='A!(')
+check("Notcurses shifted plain text", "", b'A!(){}_+"\x1b[3~', expected='A!(){}_+"')
 check("Notcurses associated Unicode text", "", b'\x1b[101;1;101;769u\x1b[50;2;233u', expected='e\u0301é')
 check("Notcurses shifted repeat and release", "", b'\x1b[49;2:1;33u\x1b[49;2:2;33u\x1b[49;2:3;33u', expected='!!')
 check("Notcurses key release ignored", "", b'\x1b[88;1:3u\x1b[120;1:1u', expected='x')

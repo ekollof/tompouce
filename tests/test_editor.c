@@ -112,6 +112,89 @@ static void vi_expect(const char *expected) {
     assert(strlen(flat)==n+1 && !memcmp(flat,expected,n) && flat[n]=='\n'); free(flat);
 }
 
+static void pair_setup(const char *text) {
+    vi_setup(text);vi_mode=vi_normal=0;undo_group=0;
+}
+
+static void pair_keys(const char *keys) {
+    for(const unsigned char *p=(const unsigned char *)keys;*p;p++) {
+        undo_tick++;assert(editor_pair_key(*p));
+    }
+}
+
+static void test_auto_pairs(void) {
+    JsProgram *program=tracks[0].javascript;
+    unsigned generation=event_queue_generation();
+    const char *opens="([{\'\"`",*closes=")]}'\"`";
+    for(int i=0;opens[i];i++) {
+        pair_setup("");undo_tick++;assert(editor_pair_key(opens[i]));
+        char expected[3]={opens[i],closes[i],0};vi_expect(expected);assert(cur_col==1);
+        undo_tick++;assert(editor_pair_key(closes[i]));vi_expect(expected);assert(cur_col==2);
+        pair_setup("");pair_keys(expected);vi_expect(expected);
+        cur_col=1;undo_tick++;assert(editor_pair_key(127));vi_expect("");
+    }
+    pair_setup("");pair_keys("note(\"c4 e4\").s('sine')");
+    vi_expect("note(\"c4 e4\").s('sine')");assert(!editor_pair_count);
+    pair_setup("");pair_keys("([{x}])");vi_expect("([{x}])");
+    pair_setup("");pair_keys("\"a\\\"b\"");vi_expect("\"a\\\"b\"");
+    pair_setup("");pair_keys("don't");vi_expect("don't");
+    pair_setup("\"hello ");cur_col=7;pair_keys("'");vi_expect("\"hello ''");
+    pair_setup("\"hello ");cur_col=7;pair_keys("\"");vi_expect("\"hello \"");
+    pair_setup("word");pair_keys("(");vi_expect("(word");
+    pair_setup(")");pair_keys(")");vi_expect("))"); /* Existing text is not a generated closer. */
+    pair_setup("");pair_keys("<");vi_expect("<");
+    pair_setup("");pair_keys("(");assert(editor_undo());vi_expect("");
+    assert(editor_redo());vi_expect("()");
+    pair_setup("");pair_keys("(abc");pair_keys("\177");pair_keys(")");vi_expect("(ab)");
+    pair_setup("");pair_keys("(\nxyz");cur_line=2;cur_col=0;pair_keys(")");vi_expect("(\n  xyz\n)");
+    pair_setup("");pair_keys("(x\n");assert(editor_pair_key(127));pair_keys(")");vi_expect("(x)");
+    pair_setup("");pair_keys("(x\n");cur_line=0;cur_col=2;
+    assert(editor_pair_key((int)NCKEY_DEL));pair_keys(")");vi_expect("(x)");
+    pair_setup("");pair_keys("(é");assert(editor_pair_key(127));pair_keys(")");vi_expect("()");
+    pair_setup("");pair_keys("(é");cur_col=1;assert(editor_pair_key((int)NCKEY_DEL));pair_keys(")");vi_expect("()");
+    pair_setup("");pair_keys("(");assert(editor_replace(1,1,"abc"));cur_col=4;
+    pair_keys(")");vi_expect("(abc)"); /* Completion/paste edits map live markers. */
+    pair_setup("one\ntwo");selection_start(0);cur_line=1;cur_col=3;
+    pair_keys("(");vi_expect("(one\ntwo)");assert(sel_active && cur_line==1 && cur_col==3);
+    int a,b;selection_bounds(&a,&b);assert(a==1 && b==8);
+    assert(editor_undo());vi_expect("one\ntwo");
+    pair_setup("écho");cur_col=5;selection_start(0);cur_col=0;
+    pair_keys("\"");vi_expect("\"écho\"");selection_bounds(&a,&b);assert(a==1 && b==6 && cur_col==1);
+    pair_setup("");pair_keys("(");assert(replace_code_with(")"));cur_col=0;
+    pair_keys(")");vi_expect("))");
+    pair_setup("");
+    for(int i=0;i<EDITOR_PAIR_LIMIT+8;i++) {undo_tick++;assert(editor_pair_key('('));}
+    assert(editor_pair_count==EDITOR_PAIR_LIMIT);
+    assert(tracks[0].javascript==program && event_queue_generation()==generation);
+}
+
+static void test_smart_indent(void) {
+    pair_setup("  note(60)");cur_col=(int)strlen(code_lines[0]);pair_keys("\n");
+    vi_expect("  note(60)\n  ");assert(cur_line==1 && cur_col==2);
+    pair_setup("if (ready) {");cur_col=(int)strlen(code_lines[0]);pair_keys("\n");
+    vi_expect("if (ready) {\n  ");
+    pair_setup("");pair_keys("{\n");vi_expect("{\n  \n}");assert(cur_line==1 && cur_col==2);
+    assert(editor_undo());vi_expect("");
+    pair_setup("if (ready) {\n  if (other) {");cur_line=1;cur_col=(int)strlen(code_lines[1]);
+    pair_keys("\n");vi_expect("if (ready) {\n  if (other) {\n    ");
+    pair_setup("{\n    ");cur_line=1;cur_col=4;pair_keys("}");vi_expect("{\n}");
+    pair_setup("");pair_keys("{\n}");vi_expect("{\n}");
+    pair_setup("");pair_keys("(\nvalue\n)");vi_expect("(\n  value\n)");
+    pair_setup("");pair_keys("{\n");cur_line=2;cur_col=0;
+    int at=editor_offset(2,0);assert(editor_replace(at,at,"    "));
+    pair_keys("}");vi_expect("{\n  \n}");assert(cur_col==1);
+    pair_setup("const re = /[({]/;");cur_col=(int)strlen(code_lines[0]);pair_keys("\n");
+    vi_expect("const re = /[({]/;\n");
+    pair_setup("// text {");cur_col=(int)strlen(code_lines[0]);pair_keys("\n");vi_expect("// text {\n");
+    pair_setup("note(\"(\")");cur_col=(int)strlen(code_lines[0]);pair_keys("\n");vi_expect("note(\"(\")\n");
+    pair_setup("`raw ( text`");cur_col=6;pair_keys("\n");vi_expect("`raw (\n text`");
+    pair_setup("`x${}`");cur_col=4;pair_keys("\n");vi_expect("`x${\n  \n}`");
+    pair_setup("if (ready) {");undo_tick++;assert(editor_smart_open_line(0));pair_keys("x");
+    vi_expect("if (ready) {\n  x");assert(editor_undo());vi_expect("if (ready) {");assert(cur_col==0);
+    pair_setup("  one");assert(editor_smart_open_line(1));vi_expect("  \n  one");assert(cur_line==0 && cur_col==2);
+    pair_setup("{\n}");cur_line=1;assert(editor_smart_open_line(1));vi_expect("{\n  \n}");
+}
+
 static void test_incomplete_slider_source(void) {
     const char text[]="s(\"sawtooth\").lpf(200).lpenv(slider(2.28,0,8))";
     assert(track_load_from_code("note(60).gain(0)"));
@@ -606,6 +689,8 @@ int main(void) {
     test_retired_language(); test_performance_activation();
     test_slider_source();
     test_incomplete_slider_source();
+    test_auto_pairs();
+    test_smart_indent();
     puts("editor, vi motions and inline braille layout ok");
     return 0;
 }

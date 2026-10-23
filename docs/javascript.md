@@ -129,6 +129,27 @@ Ctrl+Enter and Ctrl+. require a terminal that reports modified keys distinctly;
 Alt+Enter and Alt+. also accept traditional Escape-prefixed encoding. Plain
 Enter continues to insert a newline. F5 and Ctrl+P remain available.
 
+The source editor automatically pairs parentheses, square brackets, braces,
+single/double quotes and backticks while typing, including in vi insert mode.
+Typing a closer the editor inserted moves over it; manually loaded or pasted
+closers remain ordinary text. Backspace between an empty matching pair removes
+both characters. Typing an opener around a selection wraps it and keeps its
+contents selected. Quote handling respects escapes and avoids adding pairs
+inside words or when closing the same kind of string. Brackets pair at the end
+of a line or before whitespace or `)]}:;>`; angle brackets retain
+their JavaScript comparison meaning. Paste, completion snippets, prompts and
+reference searches remain literal. Pair edits use the normal undo history and
+never evaluate the musical source.
+
+Enter preserves the current indentation and adds a two-space level inside
+JavaScript blocks, arrays and calls. Between empty matching brackets it opens
+an indented line and puts the closing bracket on a separate line. Typing a
+closer on a whitespace-only line aligns it with its opener; a generated closer
+on the following line is reused. Vi `o` and `O` also open indented lines.
+Indentation reads bounded Tree-sitter syntax, ignoring brackets in strings,
+comments and regular expressions; very large or deep input falls back to the
+current line's indentation. Pasted text retains its original indentation.
+
 Alt+H or Shift+F1 opens the offline Strudel reference in the right pane.
 `/reference slow` in the F2 prompt (or `:reference slow` in vi mode) opens a
 search directly. Type to filter function names, aliases and descriptions;

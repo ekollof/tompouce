@@ -8,6 +8,48 @@
 static int scheduler_starts;
 void editor_test_scheduler_start(void) { scheduler_starts++; }
 
+static void test_reference_browser(void) {
+    assert(replace_code_with("note(60).gain(0)"));
+    assert(track_load_from_code("note(60).gain(0)"));
+    JsProgram *program=tracks[0].javascript;
+    unsigned generation=event_queue_generation();
+    cur_line=0;cur_col=4;show_docs=1;
+    reference_open("CuToFf");
+    assert(show_reference && reference_focus && !show_docs && reference_count>0);
+    assert(!strcmp(strudel_reference[reference_matches[0]].name,"lpf"));
+    assert(strstr(strudel_reference[reference_matches[0]].body,"Parameters:"));
+    assert(reference_key(21) && !*reference_query && reference_count>400);
+    const char *query="slow";for(const char *p=query;*p;p++) assert(reference_key(*p));
+    assert(!strcmp(strudel_reference[reference_matches[0]].name,"slow"));
+    assert(strstr(strudel_reference[reference_matches[0]].body,"Examples:"));
+    assert(reference_key((int)NCKEY_DOWN) && reference_selected==1);
+    assert(reference_key((int)NCKEY_UP) && reference_selected==0);
+    assert(reference_key((int)NCKEY_PGDOWN) && reference_scroll>0);
+    assert(reference_key((int)NCKEY_PGUP) && reference_scroll==0);
+    const char *native_queries[]={"slider","_scope","loadCSound","csoundm","midin","K","S","sGate","bbexpr","oschost"};
+    const char *native_names[]={"slider","scope","loadCsound","csoundm","midin","K","S","sGate","bbexpr","oschost"};
+    for(size_t i=0;i<sizeof(native_queries)/sizeof(native_queries[0]);i++) {
+        reference_open(native_queries[i]);assert(reference_count>0);
+        const StrudelReference *entry=&strudel_reference[reference_matches[0]];
+        assert(!strcmp(entry->name,native_names[i]));
+        assert(strstr(entry->origin,"Tompouce embedded runtime"));
+        assert(strstr(entry->body,"Examples:") && !strstr(entry->body,"No authored documentation"));
+        if(!strcmp(entry->name,"midin")) assert(strstr(entry->body,"Returns:"));
+    }
+    reference_open("s");assert(!strcmp(strudel_reference[reference_matches[0]].name,"s"));
+    reference_open("S");assert(!strcmp(strudel_reference[reference_matches[0]].name,"S"));
+    reference_open("__not_a_reference_function__");assert(!reference_count);
+    assert(reference_key(21));
+    for(int i=0;i<256;i++) assert(reference_key('x'));
+    assert(strlen(reference_query)==sizeof(reference_query)-1 && !reference_count);
+    assert(reference_query_start(30)==107);
+    assert(reference_key(27) && !reference_focus && show_reference);
+    assert(!reference_key('x'));
+    assert(cur_line==0 && cur_col==4 && tracks[0].javascript==program && event_queue_generation()==generation);
+    char *source=editor_flatten();assert(source && !strcmp(source,"note(60).gain(0)\n"));free(source);
+    show_reference=0;
+}
+
 static void test_retired_language(void) {
     assert(track_load_from_code("note(60).gain(slider(.3))"));
     JsProgram *program=tracks[0].javascript;
@@ -559,6 +601,7 @@ int main(void) {
     test_vi_motions();
     test_completion();
     test_commands();
+    test_reference_browser();
     test_tutor_copy();
     test_retired_language(); test_performance_activation();
     test_slider_source();

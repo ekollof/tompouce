@@ -3,6 +3,41 @@ import { parse } from 'acorn';
 import * as kabelCore from '@kabelsalat/core';
 import * as kabel from '@kabelsalat/lib';
 
+/**
+ * Build a native Kabelsalat source or effect using Strudel's K(...) source
+ * transform. sFreq is the event frequency and sGate follows its note gate.
+ * Include audioin() for an effect on the existing sound; otherwise the graph
+ * is the sound source. Feedback needs a delay. Device input, custom UGens,
+ * MIDI/mouse graph nodes and arbitrary JavaScript nodes are unavailable.
+ * @name K
+ * @param {expression | function} graph Kabelsalat graph, at most 256 native operations
+ * @example
+ * note("c3 e3 g3").K(sine(sFreq).mul(sGate.adsr(.001,.1,.5,.1)).out())
+ * @example
+ * note(48).s('sawtooth').K(audioin().fold(.5).out())
+ */
+/**
+ * Bridge a Strudel pattern into a K(...) graph input. This is a source
+ * transform inside K, rather than an ordinary standalone runtime call.
+ * @name S
+ * @param {Pattern} pattern values to supply to the graph per event
+ * @example
+ * note("c3 e3").K(sine(sFreq).mul(S(rand.range(.1,.5))).out())
+ */
+/**
+ * Event frequency in hertz inside K(...). Use it as a graph input, not as a
+ * function. Each accepted note keeps the frequency prepared for that event.
+ * @name sFreq
+ * @example
+ * note("c3 e3").K(sine(sFreq).out())
+ */
+/**
+ * Note gate inside K(...). Combine it with a graph envelope to control the
+ * source's attack, decay, sustain and release.
+ * @name sGate
+ * @example
+ * note(60).K(sine(sFreq).mul(sGate.adsr(.01,.1,.6,.2)).out())
+ */
 const LIMIT = 256;
 const graphTypes = new Set(('n time nativeGate audioin exit poly output src thru '+
   'add sub mul div mod pow exp log sin cos tan asin acos atan abs round floor ceil sign min max '+
@@ -110,6 +145,18 @@ export function prepareNative(value, frequency=440) {
   return {...value,_nativeProgram:{...program,...(offset===undefined?{}:{offset:Math.floor(offset)})}};
 }
 export function installNative(core) {
+  /**
+   * Supply a custom bytebeat expression, compiled to native operations before
+   * playback. Select s('bytebeat') to use it. The variable t is bytebeat time;
+   * arithmetic, bitwise operators and supported numeric Math calls are allowed.
+   * Expressions are at most 4096 characters. Loops, assignments, arbitrary
+   * object access and arbitrary JavaScript function calls are rejected.
+   * @name bbexpr
+   * @synonyms byteBeatExpression
+   * @param {string} code bytebeat expression, in single quotes
+   * @example
+   * note("c3 e3").s('bytebeat').bbexpr('t*(t>>5|t>>8)')
+   */
   for (const name of ['bbexpr','byteBeatExpression']) {
     const method=core.Pattern.prototype[name];
     core.Pattern.prototype[name]=function(code) {
@@ -117,6 +164,16 @@ export function installNative(core) {
       return method.call(this,code);
     };
   }
+  /**
+   * Supply a supported Kabelsalat graph source string and optional per-event
+   * inputs. K(...) normally constructs this automatically. Native execution
+   * compiles a bounded graph; it does not execute JavaScript in the callback.
+   * @name worklet
+   * @param {string} code supported Kabelsalat graph source, at most 16384 characters
+   * @param {...number | Pattern} inputs optional graph inputs
+   * @example
+   * note(60).worklet('sine(440).out()')
+   */
   const original=core.Pattern.prototype.worklet;
   core.Pattern.prototype.worklet=function(code,...inputs) {
     // Reject unsupported graph syntax before replacing a playable program.

@@ -129,6 +129,35 @@ Ctrl+Enter and Ctrl+. require a terminal that reports modified keys distinctly;
 Alt+Enter and Alt+. also accept traditional Escape-prefixed encoding. Plain
 Enter continues to insert a newline. F5 and Ctrl+P remain available.
 
+Alt+H or Shift+F1 opens the offline Strudel reference in the right pane.
+`/reference slow` in the F2 prompt (or `:reference slow` in vi mode) opens a
+search directly. Type to filter function names, aliases and descriptions;
+exact names and aliases come first. Up/Down selects a result, PgUp/PgDn or
+the mouse wheel scrolls its description, parameters and examples, Backspace
+edits the query and Ctrl+U clears it. Click a result to select it.
+Tab or Escape returns to editing while leaving the reference visible; click
+the reference pane to resume searching. Alt+H/Shift+F1 closes it, and F1 switches
+to the existing keyboard help. Searching and viewing examples never change or
+evaluate the editor source.
+
+Reference prose comes from the installed, lockfile-pinned Strudel 1.2.6 source
+documentation and JSDoc alongside Tompouce's embedded runtime implementations
+(442 documented entries, including 37 runtime entries). Runtime documentation
+covers sliders, visualizations and their underscored aliases, pattern branches,
+MIDI/OSC routing, sample maps, tempo helpers, Csound and native synthesis.
+It includes parameters, return values and examples. Native descriptions take
+precedence over upstream descriptions of the same API, including aliases.
+The K/S source transforms and sFreq/sGate graph symbols are searchable too.
+Case-matching exact names rank first, so `s` and `S` select their own entries.
+Names without authored documentation remain listed and say so explicitly.
+The compiled catalog works offline; it does not fetch documentation while
+performing. It describes upstream APIs, rather than certifying native audio
+parity for every control. Regenerate it with `node js/reference.mjs` after
+installing the pinned JavaScript dependencies; `--check` verifies the committed
+catalog. `npm --prefix js run build` also refreshes it. New public helpers in
+`js/runtime.mjs` and `js/native-synth.mjs` can supply `@name`, `@synonyms`,
+`@param`, `@returns` and `@example` JSDoc for the same generator.
+
 Native voices are prepared ahead of playback and wait for their scheduled
 timestamp. Their source position and envelope remain frozen until onset;
 cut groups, ducking and orbit delay settings take effect at that timestamp.

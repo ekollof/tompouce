@@ -1,7 +1,7 @@
 /* Native Ex subset. UI thread only; no shell commands or AI fallback. */
 static const char *const command_words[]={
     "w","write","wq","x","xit","q","quit","e","edit","u","undo","redo","help","set",
-    "evaluate",NULL
+    "evaluate","reference",NULL
 };
 static const char *const native_command_words[]={"bpm","play","stop","companion","clear","rescan",
     "save","load","song","inline","graphics","theme","scope","wrap","tutor",NULL};
@@ -121,8 +121,10 @@ static void command_execute(const char *text) {
         if (cmd[0]=='u') editor_undo(); else editor_redo(); return;
     }
     if (command_abbrev(cmd,"help",1)) {
+        show_reference=reference_focus=0;
         show_docs=1; docs_scroll=0; snprintf(status_msg,sizeof(status_msg),"cheatsheet on"); return;
     }
+    if(!strcmp(cmd,"reference")) {reference_open(args);return;}
     if (!strcmp(cmd,"evaluate") || !strcmp(cmd,"eval")) { do_perform(); return; }
     for (int i=0;native_command_words[i];i++) if (!strcmp(cmd,native_command_words[i])) {
         char native[sizeof(input_buf)];

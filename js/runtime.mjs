@@ -44,6 +44,68 @@ let visualTiles = new Map();
 let visualProbes = [], compiledVisualSites = [], nextProbe = 0, compiledHighlightAst;
 const visualAliases = new Set();
 const liveSliderReaders = new Map();
+/**
+ * Show a waveform for this pattern beneath its source line. Only this branch's
+ * audio feeds the scope. Both spellings attach an inline terminal view.
+ * _scope defaults to scale 1, pos .5; scope defaults to scale .25, pos .75.
+ * @name scope
+ * @synonyms _scope tscope _tscope
+ * @param {object} options scale, pos (vertical center), trigger and styling options
+ * @example
+ * note("c3 e3 g3").s('sine')._scope({scale:1,pos:.5})
+ */
+/**
+ * Show the notes of this pattern on a piano roll. Visual-only edits do not
+ * reevaluate the playing music. Inline views follow the branch's transformations.
+ * @name pianoroll
+ * @synonyms _pianoroll
+ * @param {object} options cycles, playhead, minMidi, maxMidi, vertical and labels
+ * @example
+ * note("c3 e3 g3 b3").pianoroll({cycles:4,minMidi:48,maxMidi:84})
+ */
+/**
+ * Show a pattern's event timing as a punchcard beneath its source line.
+ * @name punchcard
+ * @synonyms _punchcard
+ * @param {object} options cycles, playhead, vertical, labels and color options
+ * @example
+ * s("bd hh sd hh")._punchcard({cycles:2})
+ */
+/**
+ * Display pattern events around a spiral. This is a terminal visualization;
+ * rendering reads prepared visual data and never evaluates the music.
+ * @name spiral
+ * @synonyms _spiral
+ * @param {object} options cycles, playhead and color options
+ * @example
+ * note("c3 e3 g3 b3").spiral()
+ */
+/**
+ * Display the pattern's pitches on a pitch wheel beneath its source line.
+ * @name pitchwheel
+ * @synonyms _pitchwheel
+ * @param {object} options root, edo and color options
+ * @example
+ * note("c3 e3 g3").pitchwheel({edo:12})
+ */
+/**
+ * Display the frequency spectrum of this pattern's audio. FFT work belongs
+ * to foreground visualization preparation, not the audio callback.
+ * @name spectrum
+ * @synonyms _spectrum
+ * @param {object} options visualization styling options
+ * @example
+ * note("c2 e2").s('sawtooth')._spectrum()
+ */
+/**
+ * Display falling pattern events with labels beneath the source line.
+ * Defaults to a vertical view with labels enabled.
+ * @name wordfall
+ * @synonyms _wordfall
+ * @param {object} options cycles, vertical, labels, flipTime and flipValues
+ * @example
+ * s("bd hh sd hh").wordfall({cycles:2,labels:1})
+ */
 const visualKinds = {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7};
 const visualKind = name => visualKinds[name?.replace(/^_/, '')] ?? 0;
 const visualDefaults = (kind, inline) => kind===7 ? {vertical:1,labels:1} :
@@ -263,6 +325,16 @@ globalThis.performance = { now: () => Date.now() };
 globalThis.console = Object.fromEntries(['log', 'warn', 'error', 'info', 'debug'].map(
   (name) => [name, (...values) => __hostLog(values.map(String).join(' '))],
 ));
+/**
+ * Register a named pattern branch for playback. Branches are stacked together.
+ * An id beginning or ending with an underscore mutes that branch; '$' ids
+ * receive unique suffixes. Dollar-label syntax uses this helper automatically.
+ * @name p
+ * @param {string | number} id branch identifier, default '$'
+ * @example
+ * s('bd*4').p('drums')
+ * note("c3 e3 g3").p('melody')
+ */
 core.Pattern.prototype.p = function (id = '$') {
   id = String(id);
   if (id.startsWith('_') || id.endsWith('_')) return core.silence;
@@ -270,6 +342,12 @@ core.Pattern.prototype.p = function (id = '$') {
   collecting.set(id, this);
   return this;
 };
+/**
+ * Replace this pattern with silence.
+ * @name q
+ * @example
+ * s('bd*4').q()
+ */
 core.Pattern.prototype.q = function () { return core.silence; };
 for (const [name,kind] of Object.entries(visualKinds)) for (const spelling of [name,`_${name}`]) {
   core.Pattern.prototype[spelling] = function (options = {}) {
@@ -277,14 +355,64 @@ for (const [name,kind] of Object.entries(visualKinds)) for (const spelling of [n
   };
   globalThis[spelling] = options => pattern => pattern[spelling](options);
 }
+/**
+ * Style the currently sounding source tokens in the terminal. Native marking
+ * supports underline, bold and italic; arbitrary browser CSS is unavailable.
+ * @name markcss
+ * @param {string | Pattern} style supported text CSS declarations
+ * @example
+ * note("c3 e3 g3").markcss('font-weight:bold')
+ */
 if (!core.Pattern.prototype.markcss) Object.assign(globalThis,core.registerControl(['markcss']));
 for (let i = 1; i <= 9; i++) {
   for (const name of [`p${i}`, `d${i}`])
     Object.defineProperty(core.Pattern.prototype, name, { get() { return this.p(i); }, configurable: true });
   core.Pattern.prototype[`q${i}`] = core.silence;
 }
+/**
+ * Apply a transform to the complete pattern after named branches are combined.
+ * Multiple all() calls compose in source order.
+ * @name all
+ * @param {function} fn transform receiving and returning a Pattern
+ * @example
+ * all(p => p.lpf(1200))
+ * $: s('bd*4')
+ * $: note("c3 e3 g3")
+ */
 globalThis.all = (fn) => { allTransforms.push(fn); return core.silence; };
+/**
+ * Apply a transform separately to each registered named branch before stacking.
+ * The last each() call in an evaluation supplies the transform.
+ * @name each
+ * @param {function} fn transform receiving and returning a Pattern
+ * @example
+ * each(p => p.gain(.5))
+ * $: s('bd*4')
+ * $: s('hh*8')
+ */
 globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
+/**
+ * Select the OSC destination host for a pattern routed with osc(). Native
+ * output accepts localhost or literal IPv4/IPv6 addresses, not DNS names.
+ * @name oschost
+ * @param {string | Pattern} host destination, default '127.0.0.1'
+ * @example
+ * s('bd*4').oschost('127.0.0.1').oscport(57120).osc()
+ */
+/**
+ * Select the UDP OSC destination port for a pattern routed with osc().
+ * @name oscport
+ * @param {number | Pattern} port UDP destination port, default 57120
+ * @example
+ * note("c3 e3").oscport(57120).osc()
+ */
+/**
+ * Route this pattern to the configured OSC output instead of local audio.
+ * OSC address, value and packet limits are checked before sending.
+ * @name osc
+ * @example
+ * note("c3 e3 g3").osc()
+ */
 core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
 globalThis.osc = pattern=>pattern.osc();
 /* MIDI controller input, mirroring the upstream input package: midin opens
@@ -300,11 +428,32 @@ globalThis.osc = pattern=>pattern.osc();
 let midiConsumeKeys = false;
 const midiInputError = (name) => new Error(
   `[midi] Midi input cannot be a pattern. Make sure to pass device name with single quotes.`);
+/**
+ * Open a MIDI controller input and return a live CC reader. Values are
+ * normalized to 0..1, defaulting to zero. Native input merges senders; named
+ * sender CC state persists across restarts. Pass device names in single quotes.
+ * @name midin
+ * @param {string | number} input optional ALSA sender name or client id
+ * @returns {function} reader(cc, channel?) returning a live Pattern
+ * @example
+ * const cc = await midin('My Controller')
+ * s('sawtooth').note(48).lpf(cc(1).range(200,5000))
+ */
 globalThis.midin = async (input) => {
   if (core.isPattern(input)) throw midiInputError('midin');
   __hostMidiOpen(input ?? 0);
   return (cc, chan) => core.ref(() => __hostMidiRead(cc, chan));
 };
+/**
+ * Open a MIDI keyboard and return a live note-pattern function. Notes carry
+ * pitch, velocity and channel. A missing device rejects the evaluation.
+ * @name midikeys
+ * @param {string | number} input optional ALSA sender name or client id
+ * @returns {function} keyboard(noteLength=.5), with lengths in cycles
+ * @example
+ * const keyboard = await midikeys('My Keyboard')
+ * keyboard(.25).s('sine')
+ */
 globalThis.midikeys = async (input) => {
   if (core.isPattern(input)) throw midiInputError('midikeys');
   const open = __hostMidiOpen(input ?? 0);
@@ -336,6 +485,16 @@ globalThis.midikeys = async (input) => {
    channel from midichan defaulting to 1). The port argument only selects a
    web device; native ALSA subscribers receive every note. An options object
    may carry midichannel as a default when the hap sets no midichan. */
+/**
+ * Send MIDI notes instead of local audio. Native ALSA subscribers receive the
+ * notes; the web port selector does not select a separate native output port.
+ * Set the channel with midichan(), defaulting to channel 1.
+ * @name midi
+ * @param {string | object} port optional web device selector or settings object
+ * @param {object} options optional settings, including midichannel
+ * @example
+ * note("c3 e3 g3").midichan(2).midi()
+ */
 core.Pattern.prototype.midi = function (port, options) {
   if (core.isPattern(port)) throw new Error(`.midi does not accept Pattern input for midiport. Make sure to pass device name with single quotes.`);
   const settings = port && typeof port === 'object' ? {...options,...port} : {...options};
@@ -347,18 +506,66 @@ core.Pattern.prototype.midi = function (port, options) {
     return object;
   });
 };
+/**
+ * Set this pattern's rate in cycles per minute relative to the current clock.
+ * Use setcpm() to change the shared transport tempo instead.
+ * @name cpm
+ * @param {number | Pattern} value cycles per minute
+ * @example
+ * s('bd hh sd hh').cpm(30)
+ */
 globalThis.cpm = core.register('cpm', (value, pattern) => pattern._fast(Number(value) / 60 / (queryCps ?? ((tempo ?? initialBpm) / 240))));
 modules['@strudel/core'] = { ...core, cpm: globalThis.cpm };
+/**
+ * Change the shared tempo in cycles per second. Values must be finite and
+ * nonnegative. For four beats per cycle, BPM divided by 240 gives CPS.
+ * @name setcps
+ * @synonyms setCps
+ * @param {number | Pattern} value cycles per second
+ * @example
+ * setcps(120/240)
+ * s('bd hh sd hh')
+ */
 globalThis.setcps = globalThis.setCps = (v) => {
   v = Number(core.isPattern(v) ? v.queryArc(0, 1)[0]?.value : v);
   if (!Number.isFinite(v) || v < 0 || !Number.isFinite(v*240)) throw new Error('setcps requires a nonnegative finite value');
   tempo = v*240;
 };
+/**
+ * Change the shared tempo in cycles per minute. With four beats per cycle,
+ * use BPM divided by four. Accepted notes keep their scheduled timing.
+ * @name setcpm
+ * @synonyms setCpm
+ * @param {number | Pattern} value nonnegative finite cycles per minute
+ * @example
+ * setcpm(120/4)
+ * s('bd hh sd hh')
+ */
 globalThis.setcpm = globalThis.setCpm = (v) => {
   v = core.isPattern(v) ? v.queryArc(0,1)[0]?.value : v;
   setcps(Number(v) / 60);
 };
+/**
+ * Clear the registered branches and select silence for this evaluation.
+ * Already accepted notes and shared effect tails can finish.
+ * @name hush
+ * @example
+ * hush()
+ */
 globalThis.hush = () => { collecting = new Map(); selected = core.silence; };
+/**
+ * Internal source-identity helper used by direct slider() calls. Prefer
+ * slider(value,min,max,step) in artist-written source; the transpiler assigns
+ * the stable identity and the host supplies query-time values.
+ * @name sliderWithID
+ * @param {string} id source identity assigned by the transpiler
+ * @param {number} value initial value
+ * @param {number} min minimum, default 0
+ * @param {number} max maximum, default 1
+ * @param {number} step optional step size
+ * @example
+ * note(60).gain(slider(.5,0,1,.01))
+ */
 globalThis.sliderWithID = (id, value, min = 0, max = 1, step) => {
   const args=[Number(value),Number(min),Number(max),Number(step ?? ((max-min)/1000))];
   // Reference/browser tooling without the native live-control host keeps its
@@ -369,22 +576,67 @@ globalThis.sliderWithID = (id, value, min = 0, max = 1, step) => {
   liveSliderReaders.set(id,read);
   return core.ref(read);
 };
+/**
+ * Create an interactive terminal slider. Evaluate once to activate it, then
+ * drag its chip or use Ctrl+Left/Right at its source to change future queries.
+ * Accepted notes continue. Use a direct slider(...) call: aliases and member
+ * calls retain the web's static fallback. Live tempo still requires evaluation.
+ * @name slider
+ * @param {number} value initial value
+ * @param {number} min minimum, default 0
+ * @param {number} max maximum, default 1
+ * @param {number} step optional step, default (max-min)/1000
+ * @example
+ * note("c3 e3 g3").gain(slider(.5,0,1,.01))
+ */
 globalThis.slider = (value) => {
   // Only direct calls are rewritten to source-bound sliderWithID widgets.
   // Aliases/member calls have the web fallback's ordinary pure-pattern value.
   __hostLog('slider will only work when the transpiler is used... passing value as is');
   return core.pure(value);
 };
+/**
+ * Register sample maps for this evaluation. Explicit maps override imports,
+ * which override defaults. Assets pass through the host's confined sound store;
+ * arbitrary local filesystem paths are not an alternative import mechanism.
+ * @name samples
+ * @param {object | string} source sample-name map or allowed manifest URL
+ * @param {string} base optional base URL for relative map entries
+ * @example
+ * await samples({custom:['https://example.org/audio/hit.wav']})
+ * s('custom')
+ */
 globalThis.samples = async (...args) => {
   if (sampleCalls.length >= 64) throw new Error('Too many sample maps');
   sampleCalls.push(args);
 };
 /* Match @strudel/repl/prebake.mjs, including its pitch-dependent pan. */
+/**
+ * Select the default piano sample map with the REPL helper's clipping,
+ * 0.1-second release and pitch-dependent panning.
+ * @name piano
+ * @example
+ * note("c3 e3 g3 b3").piano()
+ */
 core.Pattern.prototype.piano = function () {
   pianoUsed = true;
   return this.fmap((v) => ({ ...v, clip: v.clip ?? 1 })).s('piano').release(.1)
     .fmap((v) => ({ ...v, pan: (v.pan || 1) * (Math.min(Math.round(core.valueToMidi(v))/core.noteToMidi('C8'),1)*.5+.25) }));
 };
+/**
+ * Load orchestra text into the persistent confined Csound renderer. Existing
+ * definitions and sounding instances survive later evaluations. The renderer
+ * cannot use orchestra code to open files, access the network or run processes.
+ * @name loadCsound
+ * @synonyms loadCSound loadcsound
+ * @param {string | template} code orchestra source, at most 65536 characters per call
+ * @example
+ * await loadCsound`instr Tone
+ * a1 oscili p5,p4
+ * out a1,a1
+ * endin`
+ * note("c3 e3 g3").csound('Tone')
+ */
 globalThis.loadCsound = globalThis.loadCSound = globalThis.loadcsound = async (code = '', ...values) => {
   if (Array.isArray(code) && Object.hasOwn(code,'raw'))
     code = code.reduce((s,part,i) => s+part+(i < values.length ? String(values[i]) : ''),'');
@@ -392,11 +644,30 @@ globalThis.loadCsound = globalThis.loadCSound = globalThis.loadcsound = async (c
     throw new TypeError('loadCsound requires bounded orchestra text');
   orchestraCalls.push({ code }); csoundUsed = true;
 };
+/**
+ * Load a Csound orchestra from an allowed public HTTP(S) or github: URL.
+ * Fetching uses the host's asset policy; orchestra execution stays confined.
+ * Successful and failed URL loads are cached for the Csound session.
+ * @name loadOrc
+ * @param {string} url orchestra URL, at most 480 characters
+ * @example
+ * await loadOrc('github:kunstmusik/csound-live-code/master/livecode.orc')
+ * note("c3 e3").csound('FM1')
+ */
 globalThis.loadOrc = async (url) => {
   if (typeof url !== 'string' || url.length > 480 || orchestraCalls.length >= 16)
     throw new TypeError('loadOrc requires a bounded URL');
   orchestraCalls.push({ url }); csoundUsed = true;
 };
+/**
+ * Route events to a named or numeric Csound instrument instead of local audio.
+ * Named instruments receive frequency, gain and the Strudel control map as
+ * p4/p5/p6. Requires the native Csound renderer and loaded definitions.
+ * @name csound
+ * @param {string | number} instrument name or fractional instance number
+ * @example
+ * note("c3 e3 g3").gain(.2).csound('triangle')
+ */
 globalThis.csound = core.register('csound',(instrument,pattern) => {
   csoundUsed = true;
   return pattern.fmap((value) => ({ ...value, csound: instrument || 'triangle' }));
@@ -408,6 +679,14 @@ core.Pattern.prototype.csound = function (...args) {
 };
 const csoundFunction = globalThis.csound;
 globalThis.csound = (...args) => { csoundUsed = true; return csoundFunction(...args); };
+/**
+ * Route events to Csound using MIDI key and velocity pfields. Fractional note
+ * numbers are preserved. Use csound() for frequency/gain/control-map pfields.
+ * @name csoundm
+ * @param {string | number} instrument loaded Csound instrument or instance
+ * @example
+ * note("60 64 67").csoundm('MidiInstrument')
+ */
 const csoundMidiFunction = core.register('csoundm',(instrument,pattern) =>
   pattern.fmap((value) => ({ ...value, csound: instrument, _csoundMidi: true })));
 const csoundMidiMethod = core.Pattern.prototype.csoundm;
@@ -419,6 +698,17 @@ globalThis.csoundm = (...args) => { csoundUsed = true; return csoundMidiFunction
 modules['@strudel/csound'] = {
   csound, csoundm, loadCsound, loadCSound, loadcsound, loadOrc,
 };
+/**
+ * Register another name for an existing sound during this evaluation.
+ * Both names must be strings of at most 128 characters; up to 256 aliases
+ * can be registered. Define the original sound before using its alias.
+ * @name soundAlias
+ * @param {string} original existing sound name
+ * @param {string} alias new sound name
+ * @example
+ * soundAlias('sine','lead')
+ * note("c3 e3 g3").s('lead')
+ */
 globalThis.soundAlias = (original, alias) => {
   if (typeof original !== 'string' || typeof alias !== 'string' || original.length > 128 || alias.length > 128 || aliases.size >= 256)
     throw new TypeError('soundAlias requires bounded string names');

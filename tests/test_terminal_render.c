@@ -74,6 +74,22 @@ static void theme_fixture(const char *path, int wal, unsigned seed) {
     assert(!fclose(f));
 }
 
+static void check_reference_overlay(void) {
+    char *source=editor_flatten();assert(source);
+    show_console=0;reference_open("slow");
+    int mid,h,w,sh,th;right_geom(&mid,&h,&w,&sh,&th);
+    assert(mid<cols && w>0 && !show_docs);
+    draw_code();draw_slider_chip(5,cols-17,16,0);draw_right_pane();
+    terminal_cell cell;
+    for(int row=2;row<h;row++) for(int col=mid+1;col<cols-1;col++) {
+        terminal_move(row,col);assert(!terminal_cell_at(&cell));assert(cell.color!=8);
+    }
+    reference_scroll=100000;draw_right_pane();assert(reference_scroll<100000);
+    draw_reference_at(1,mid,4,w); /* Tiny panes cannot paint beyond their bounds. */
+    char *after=editor_flatten();assert(after && !strcmp(source,after));
+    free(source);free(after);show_reference=reference_focus=0;show_console=1;
+}
+
 static void check_theme_watch(void) {
     char named[]="background=\"#000001\"\nforeground=\"#000002\"\nred=\"#000003\"\ngreen=\"#000004\"\nyellow=\"#000005\"\nblue=\"#000006\"\nmagenta=\"#000007\"\ncyan=\"#000008\"\ndark_foreground=\"#000009\"\nbright_red=\"#00000a\"\nbright_green=\"#00000b\"\nbright_yellow=\"#00000c\"\nbright_blue=\"#00000d\"\nbright_magenta=\"#00000e\"\nbright_cyan=\"#00000f\"\nbright_foreground=\"#000010\"\n";
     uint32_t colors[18]; assert(theme_parse(named,0,colors));
@@ -416,6 +432,7 @@ int main(void) {
     check_input_readiness();
     check_console_toggle();
     check_help_clears_slider();
+    check_reference_overlay();
     terminal_shutdown();
     puts("terminal highlight cells and indentation ok");
     return 0;

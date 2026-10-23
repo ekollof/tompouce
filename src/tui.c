@@ -82,6 +82,7 @@ static int selected_byte(int line, int col);
 static int do_evaluate(void);
 static void do_perform(void);
 static int show_docs = 0;
+static int show_reference = 0;
 static int show_console = 1;
 static int show_state = 0;
 static int show_tracks = 0;
@@ -3301,7 +3302,7 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
     if (mid < 24) mid = 24;
     if (mid > cols - 20) mid = cols - 20;
     if (mid < 0) mid = 0;
-    if (!show_console && !show_docs && !show_state && !show_tracks && !search_mode && !file_mode)
+    if (!show_console && !show_docs && !show_reference && !show_state && !show_tracks && !search_mode && !file_mode)
         mid = cols;
     int h = rows - 3 - viz_h;
     if (h < 0) h = 0;
@@ -3316,7 +3317,7 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
         if (need > 12) need = 12;
         if (h - sh - need >= 5) th = need;
     }
-    if (!show_console && !show_docs && !search_mode && !file_mode) {
+    if (!show_console && !show_docs && !show_reference && !search_mode && !file_mode) {
         if (sh) sh=h-th;
         else if (th) th=h;
     }
@@ -3363,6 +3364,8 @@ static const DocLine cheat[] = {
     {3, "Ctrl+P            Play / stop"},
     {3, "Ctrl+L            Hide / restore console"},
     {3, "F1                Toggle this keybinding reference"},
+    {3, "Alt+H / Shift+F1  Search offline Strudel function reference"},
+    {3, "/reference NAME   Open reference with a search"},
     {3, "F2                Open AI / application command prompt"},
     {3, "F3                Toggle vi editing mode"},
     {3, "F4                Toggle engine / editor diagnostics"},
@@ -3584,6 +3587,8 @@ static void draw_docs_at(int r0, int c0, int h, int w) {
         if (hl < w - 2) { terminal_move(r0, c0 + w - 1 - hl); terminal_write(hint); }
     }
 }
+
+#include "tui_reference.h"
 
 static void state_line(int *row, int maxrow, int col, int width, const char *format, ...) {
     if (*row>=maxrow) return;
@@ -3884,6 +3889,7 @@ static void draw_right_pane(void) {
     if (search_mode) draw_search_at(1, mid, top_h, w);
     else if (file_mode) draw_file_at(1, mid, top_h, w);
     else if (show_docs) draw_docs_at(1, mid, top_h, w);
+    else if (show_reference) draw_reference_at(1, mid, top_h, w);
     else if (show_console) draw_console_at(1, mid, top_h, w);
     else for (int row=1;row<1+top_h;row++) blank_inner(row,mid,w);
     if (th > 0) draw_tracks_at(1 + top_h, mid, th, w);
@@ -4152,7 +4158,10 @@ static void do_command_or_ai(const char *text) {
         snprintf(tmp, sizeof(tmp), "%s", text+1);
         char *save = NULL;
         char *cmd = strtok_r(tmp, " \t", &save);
-        if (cmd && strcmp(cmd,"bpm")==0) {
+        if (cmd && strcmp(cmd,"reference")==0) {
+            const char *query=save?save:"";while(*query==' ' || *query=='\t') query++;
+            reference_open(query);
+        } else if (cmd && strcmp(cmd,"bpm")==0) {
             char *a = strtok_r(NULL, " \t", &save);
             if (a) {
                 char *end; double bpm=strtod(a,&end);
@@ -4348,6 +4357,10 @@ void tui_frame(void) {
         int mid = (cols * split_ratio < 24) ? 24 : (int)(cols * split_ratio);
         terminal_move(2, mid + 7 + file_len);
         cursor_r = 2; cursor_c = mid + 7 + file_len;
+    } else if (show_reference && reference_focus && !input_mode && !search_mode && !file_mode) {
+        int mid,h,w,sh,th;right_geom(&mid,&h,&w,&sh,&th);
+        cursor_r=2;cursor_c=mid+10+(int)strlen(reference_query)-reference_query_start(w-2);
+        if(cursor_c>=cols-1) cursor_c=cols-2;
     } else if (input_mode == 0 && !pane_focus && editor_cur_on) {
         terminal_move(editor_cur_r, editor_cur_c);
         cursor_r = editor_cur_r;
@@ -4410,7 +4423,9 @@ static void read_mouse(void) {
     if (end == 'm') { mouse_drag = 0; mouse_slider = -1; return; }
     if (b & 64) {
         int dir = (b & 1) ? 1 : -1;
-        if (mouse_x >= mid && show_docs) {
+        if (mouse_x >= mid && mouse_y>=1 && mouse_y<1+h-sh-th && show_reference && !show_docs && !search_mode && !file_mode) {
+            reference_scroll+=dir*3;if(reference_scroll<0) reference_scroll=0;
+        } else if (mouse_x >= mid && show_docs) {
             docs_scroll += dir * 3;
             if (docs_scroll < 0) docs_scroll = 0;
         } else if (mouse_x >= mid && !search_mode && !file_mode) {
@@ -4423,6 +4438,17 @@ static void read_mouse(void) {
     }
     if ((b & 3) != 0) return;
     if (!(b & 32)) {
+        if(show_reference && !show_docs && !search_mode && !file_mode) {
+            reference_focus=mouse_x>=mid && mouse_y>=1 && mouse_y<1+h-sh-th;pane_focus=0;
+            if(reference_focus) {
+                input_mode=0;
+                if(mouse_y>=reference_list_row && mouse_y<reference_list_row+reference_list_visible) {
+                    reference_selected=reference_list_start+mouse_y-reference_list_row;
+                    reference_scroll=0;
+                }
+                return;
+            }
+        }
         pane_focus = mouse_x >= mid;
         snprintf(status_msg, sizeof(status_msg), "%s", pane_focus ? "right pane focused (Esc: editor)" : "editor focused");
         if (mouse_y == rows - 2) { input_mode = 1; pane_focus = 0; return; }
@@ -4772,6 +4798,12 @@ void tui_run(void) {
             }
             continue;
         }
+        if(ch==KEY_REFERENCE) {
+            if(show_reference) {show_reference=reference_focus=0;pane_focus=0;}
+            else reference_open(NULL);
+            continue;
+        }
+        if(reference_key(ch)) continue;
         if (ch == KEY_STRUDEL_EVALUATE) { do_perform(); continue; }
         if (ch == KEY_STRUDEL_STOP) { scheduler_transport_set(0); continue; }
         if (ch == 26) { editor_undo(); continue; }
@@ -4870,6 +4902,7 @@ void tui_run(void) {
             input_buf[0] = 0;
             continue;
         } else if (ch == ((int)NCKEY_F00+(1))) {
+            show_reference=reference_focus=0;
             show_docs = !show_docs;
             docs_scroll = 0;
             snprintf(status_msg, 256, show_docs ? "cheatsheet on" : "cheatsheet off");

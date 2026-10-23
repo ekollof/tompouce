@@ -514,6 +514,35 @@ check("Strudel shortcut next label wraps", '$: note(60).gain(0)\n$: note(72).gai
 check("Strudel shortcut ordinary Enter", 'one', b'\rX', expected='\nXone')
 check("Strudel shortcut explicit Escape is separate", '$: note(60).gain(0)\n$: note(72).gain(0)',
       b'\x1b[27uw', expected='w$: note(60).gain(0)\n$: note(72).gain(0)')
+check("Strudel reference search", 'note(60).gain(0)', b'\x1bhslow',
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference alias search", 'note(60).gain(0)', b'\x1bhcutoff',
+      expected='note(60).gain(0)', observed=b'lpf / cutoff')
+check("Strudel reference command", 'note(60).gain(0)', b'\x1bOQ/reference slow\r',
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference vi command", 'note(60).gain(0)', b':reference slow\r', vi=True,
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference no results", 'note(60).gain(0)', b'\x1bh__not_a_reference_function__',
+      expected='note(60).gain(0)', observed=b'No matching functions')
+check("Strudel reference clear search", 'note(60).gain(0)', b'\x1bhmissing\x15slow',
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference editor focus", 'note(60).gain(0)', b'\x1bhslow\t// ',
+      expected='// note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference hidden console", 'note(60).gain(0)', b'\x0c\x1bhslow',
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference Shift F1", 'note(60).gain(0)', b'\x1b[1;2Pslow',
+      expected='note(60).gain(0)', observed=b'Slow down a pattern')
+check("Strudel reference closes", 'note(60).gain(0)', b'\x1bhslow\x1bh// ',
+      expected='// note(60).gain(0)')
+check("Strudel reference click resumes search", 'note(60).gain(0)',
+      b'\x1bhslow\t\x1bOQpending\x1b[<0;90;3M\x1b[<0;90;3m\x15gain',
+      expected='note(60).gain(0)', observed=b'Controls the gain')
+check("Strudel reference runtime slider docs", 'note(60).gain(0)', b'\x1bhslider',
+      expected='note(60).gain(0)', observed=b'Create an interactive terminal slider')
+check("Strudel reference runtime visual alias docs", 'note(60).gain(0)', b'\x1bh_scope',
+      expected='note(60).gain(0)', observed=b'Show a waveform for this pattern')
+check("Strudel reference runtime source transform docs", 'note(60).gain(0)', b'\x1bhK',
+      expected='note(60).gain(0)', observed=b'Build a native Kabelsalat source')
 check("invalid mouse report", "one", b"\x1b[<999999999999999999999999;7;3M", "one")
 check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)

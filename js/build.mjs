@@ -10,6 +10,7 @@ const result = await build({
 });
 await writeFile('dist/runtime.js', result.outputFiles[0].contents);
 await writeFile('dist/completions.h', await completionHeader(result.outputFiles[0].text));
+await import('./reference.mjs');
 
 const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
 const notices = [];

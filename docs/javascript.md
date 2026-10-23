@@ -107,8 +107,9 @@ delay. Legacy direct-event delay keeps its original timing.
 
 Stop ends new scheduling and resets the next start to cycle zero. Already
 submitted notes and sounding envelopes/effect tails finish, as in the web REPL.
-F5, Ctrl+R in insert mode and `:eval` evaluate the current editor source and start a stopped
-transport only when evaluation succeeds. Ctrl+P and `/play` from stopped also
+F5, Ctrl+Enter, Alt+Enter, Ctrl+R in insert mode and `:eval` evaluate the current
+editor source and start a stopped transport only when evaluation succeeds.
+Ctrl+P and `/play` from stopped also
 evaluate pending editor text before starting, matching web Play. Committed
 notes survive Stop/evaluate/start; failed evaluation retains the prior pattern
 and transport state. Companion Apply, Evaluate and Play from stopped use the
@@ -117,6 +118,16 @@ companion's current source with the same success-only activation. MCP
 default remains false. Cold sound
 preparation that misses its onset is skipped rather than bursting late notes
 into the performance.
+
+The terminal editor accepts the [Strudel REPL shortcuts](https://codeberg.org/uzu/strudel/src/branch/main/packages/codemirror/codemirror.mjs):
+Ctrl+Enter or Alt+Enter evaluates and starts playback; Ctrl+. or Alt+. stops
+without restarting an already stopped transport. Alt+W and Alt+Q jump to the
+next/previous literal `$`, wrapping at either end, just like the web editor
+(including `$` inside strings and comments). Evaluation and stop work in vi
+normal mode too. Prompts and pickers keep their own input handling.
+Ctrl+Enter and Ctrl+. require a terminal that reports modified keys distinctly;
+Alt+Enter and Alt+. also accept traditional Escape-prefixed encoding. Plain
+Enter continues to insert a newline. F5 and Ctrl+P remain available.
 
 Native voices are prepared ahead of playback and wait for their scheduled
 timestamp. Their source position and envelope remain frozen until onset;

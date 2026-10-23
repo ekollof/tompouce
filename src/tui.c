@@ -3357,6 +3357,9 @@ static const DocLine cheat[] = {
     {0, ""},
     {1, "Playback and panels"},
     {3, "F5                Evaluate the editor buffer"},
+    {3, "Ctrl/Alt+Enter    Evaluate / start (Strudel)"},
+    {3, "Ctrl/Alt+.        Stop playback (Strudel)"},
+    {3, "Alt+W / Alt+Q     Next / previous $ label (wraps)"},
     {3, "Ctrl+P            Play / stop"},
     {3, "Ctrl+L            Hide / restore console"},
     {3, "F1                Toggle this keybinding reference"},
@@ -3960,6 +3963,23 @@ static void duplicate_line(void) {
     undo_commit();
     cur_line++;
     snprintf(status_msg, sizeof(status_msg), "line duplicated");
+}
+
+/* Match Strudel's literal '$' search and wrap, including strings/comments. */
+static void jump_pattern_label(int direction) {
+    int first_line=-1,first_col=0,chosen_line=-1,chosen_col=0;
+    for(int line=0;line<code_line_count;line++) {
+        for(int col=0;code_lines[line][col];col++) if(code_lines[line][col]=='$') {
+            if(first_line<0 || direction<0) {first_line=line;first_col=col;}
+            int after=line>cur_line || (line==cur_line && col>cur_col);
+            int before=line<cur_line || (line==cur_line && col<cur_col);
+            if((direction>0 && after && chosen_line<0) || (direction<0 && before)) {
+                chosen_line=line;chosen_col=col;
+            }
+        }
+    }
+    if(chosen_line<0) {chosen_line=first_line;chosen_col=first_col;}
+    if(chosen_line>=0) {vi_reset();sel_active=0;cur_line=chosen_line;cur_col=chosen_col;}
 }
 
 static int project_save(const char *path) {
@@ -4752,6 +4772,8 @@ void tui_run(void) {
             }
             continue;
         }
+        if (ch == KEY_STRUDEL_EVALUATE) { do_perform(); continue; }
+        if (ch == KEY_STRUDEL_STOP) { scheduler_transport_set(0); continue; }
         if (ch == 26) { editor_undo(); continue; }
         if (ch == 25) { editor_redo(); continue; }
         if (ch == 27 && pane_focus) { pane_focus = 0; continue; }
@@ -4759,6 +4781,9 @@ void tui_run(void) {
         if (pane_focus && vi_mode && vi_normal && ch==':' && vi_handle_normal(ch)) continue;
         if (pane_focus && ch != 17 && ch != 16 && ch != (int)NCKEY_PGDOWN && ch != (int)NCKEY_PGUP &&
             !(ch >= ((int)NCKEY_F00+(1)) && ch <= ((int)NCKEY_F00+(12)))) continue;
+        if (ch==KEY_STRUDEL_NEXT || ch==KEY_STRUDEL_PREVIOUS) {
+            jump_pattern_label(ch==KEY_STRUDEL_NEXT?1:-1); continue;
+        }
         if (ch >= 2110 && ch <= 2115) {
             vi_reset();
             if (!sel_active) selection_start(0);

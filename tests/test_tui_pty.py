@@ -491,6 +491,29 @@ check("performance activation failed F5 stays stopped", 'note(60).gain(0)',
 check("performance activation failed Play stays stopped", 'note(60).gain(0)',
       b'\x10\x1b[F;throw Error("bad edit")\x10\x1bOS',
       expected='note(60).gain(0);throw Error("bad edit")',transport=False,source_state=b'pending F5')
+for name, shortcut in [("Ctrl Enter", b'\x1b[13;5u'), ("Alt Enter", b'\x1b[13;3u'),
+                       ("legacy Alt Enter", b'\x1b\r')]:
+    check("Strudel shortcut " + name, 'note(60).gain(0)',
+          b'\x10\x1b[F;note(72).gain(0)'+shortcut+b'\x1bOS',
+          expected='note(60).gain(0);note(72).gain(0)', transport=True, source_state=b'evaluated')
+for name, shortcut in [("Ctrl period", b'\x1b[46;5u'), ("Alt period", b'\x1b[46;3u'),
+                       ("legacy Alt period", b'\x1b.')]:
+    check("Strudel shortcut " + name, 'note(60).gain(0)', shortcut+shortcut+b'\x1bOS',
+          expected='note(60).gain(0)', transport=False)
+check("Strudel shortcut vi evaluate", 'note(60).gain(0)',
+      b'\x10\x1b[13;5u\x1bOS', vi=True, transport=True, source_state=b'evaluated')
+check("Strudel shortcut failed evaluation", 'note(60).gain(0)',
+      b'\x10\x1b[F;throw Error("bad edit")\x1b[13;5u\x1bOS',
+      transport=False, source_state=b'pending F5')
+check("Strudel shortcut next label", '$: note(60).gain(0)\n$: note(72).gain(0)',
+      b'\x1b[119;3u_', expected='$: note(60).gain(0)\n_$: note(72).gain(0)')
+check("Strudel shortcut previous label wraps", '$: note(60).gain(0)\n$: note(72).gain(0)',
+      b'\x1bq_', expected='$: note(60).gain(0)\n_$: note(72).gain(0)')
+check("Strudel shortcut next label wraps", '$: note(60).gain(0)\n$: note(72).gain(0)',
+      b'\x1bw\x1bw_', expected='_$: note(60).gain(0)\n$: note(72).gain(0)')
+check("Strudel shortcut ordinary Enter", 'one', b'\rX', expected='\nXone')
+check("Strudel shortcut explicit Escape is separate", '$: note(60).gain(0)\n$: note(72).gain(0)',
+      b'\x1b[27uw', expected='w$: note(60).gain(0)\n$: note(72).gain(0)')
 check("invalid mouse report", "one", b"\x1b[<999999999999999999999999;7;3M", "one")
 check("shift selection", "one\ntwo", b"\x1b[1;2B\x1b[1;2F\x18", "")
 check("SIGTERM cleanup", "", stop_signal=signal.SIGTERM)

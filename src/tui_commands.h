@@ -4,7 +4,7 @@ static const char *const command_words[]={
     "evaluate","reference",NULL
 };
 static const char *const native_command_words[]={"bpm","play","stop","companion","clear","rescan",
-    "save","load","song","inline","graphics","theme","scope","wrap","tutor",NULL};
+    "save","load","song","inline","graphics","theme","scope","wrap","tutor","volume",NULL};
 static void command_prompt_open(void) {
     completion_reset();
     input_mode=2; input_len=0; input_buf[0]=0; pane_focus=0;

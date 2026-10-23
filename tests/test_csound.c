@@ -11,8 +11,11 @@
 
 char *websamp_fetch_text(const char *url);
 static int orchestra_fetches, missing_orchestra_fetches, gone_orchestra_fetches, lost_orchestra_fetches,
-    kept_orchestra_fetches;
+    kept_orchestra_fetches, invalid_orchestra_fetches;
 char *csound_test_fetch(const char *url) {
+    if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/invalid.orc")) {
+        invalid_orchestra_fetches++; return strdup_safe("giRetained += 100\ninvalid orchestra\n");
+    }
     if (!strcmp(url,"https://raw.githubusercontent.com/fixture/orchestra/main/tone.orc")) {
         orchestra_fetches++;
         return strdup_safe("instr Cached\na1 oscili p5,p4\nout a1,a1\nendin\n");
@@ -92,7 +95,7 @@ static void test_live_orchestra(void) {
     assert(update(state->program,"instr Held\na1 oscili p5,2*p4\na0 init 0\nout a0,a1\nendin\n",0));
     assert(csound_program_schedule(state->program,value,.4,.1,441));
     await_frame(state,8192);
-    assert(!update(state->program,"invalid orchestra",1));
+    assert(!update(state->program,"giRetained += 100\ninvalid orchestra",1));
     char include_path[]="/tmp/tompouce-csound-include-XXXXXX", include_code[256];
     int fd=mkstemp(include_path); assert(fd>=0);
     const char forbidden[]="giEscaped init 99\n";
@@ -160,6 +163,22 @@ static void test_orchestra_failed_url_cache(void) {
     assert(update(program,"instr AfterFailure\na1 oscili p5,p4\nout a1,a1\nendin\n",0));
     cJSON_Delete(loads); csound_program_free(program);
     puts("failed orchestra URLs reject from cache without refetching; the program survives");
+}
+/* A fetched syntax error resolves the web loader promise and caches that
+   URL, despite the compiler diagnostic. It must not run globals, erase old
+   definitions, refetch or recompile on its next canonical spelling. */
+static void test_orchestra_invalid_url_cache(void) {
+    CsoundProgram *program=compile("giRetained init 2\ninstr Alive\na1 oscili p5,p4\nout a1,a1\nendin\n",0); assert(program);
+    cJSON *loads=cJSON_Parse("[{\"url\":\"github:fixture/orchestra/main/invalid.orc\"}]"); assert(loads);
+    char error[1024];
+    assert(csound_program_update(program,loads,error,sizeof(error))==CSOUND_UPDATE_REJECTED);
+    assert(invalid_orchestra_fetches==1 && strstr(error,"Csound:"));
+    assert(cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(loads,0),"url"),
+        "https://raw.githubusercontent.com/fixture/orchestra/main/invalid.orc"));
+    assert(csound_program_update(program,loads,error,sizeof(error))==CSOUND_UPDATE_OK);
+    assert(invalid_orchestra_fetches==1);
+    assert(update(program,"instr AfterInvalid\na1 = p5*giRetained\nout a1,a1\nendin\n",0));
+    cJSON_Delete(loads); csound_program_free(program);
 }
 /* Runtime worker diagnostics reach the console ring through a dedicated
    socket: a note for an unknown instrument must surface its engine message
@@ -372,6 +391,7 @@ int main(int argc, char **argv) {
     cJSON_Delete(corpus);
     puts("native Csound loaders, rendering, invalid-source and execution-budget checks ok");
     test_csound_stash_adopts();
+    test_orchestra_invalid_url_cache();
     test_csound_worker_diagnostics();
 #endif
     return 0;

@@ -33,6 +33,8 @@ The Chromium companion is optional: open it when you want browser controls,
 while the audio engine keeps running natively. For terminal-only installation,
 use `./install.sh --no-browser`. See [JavaScript and native audio](docs/javascript.md)
 for supported Strudel features and differences from the browser version.
+Reusable setup files and an optional Switch Angel starter are covered in
+[prebake support](docs/prebakes.md).
 
 ## Install
 
@@ -130,6 +132,7 @@ at a time. F1 remains the Tompouce keybinding reference.
 - [GitHub Discussions](https://github.com/ekollof/tompouce/discussions) — questions, ideas and musical showcases
 - [Strudeltutor](#learn-with-strudeltutor) — interactive lessons, exercises and hints inside Tompouce
 - [`docs/examples.md`](docs/examples.md) — copy-pasteable example gallery
+- [`docs/prebakes.md`](docs/prebakes.md) — setup files, reusable helpers and the Switch Angel starter
 - [`docs/architecture.md`](docs/architecture.md) — module map, data flow, threading, limits
 - [`docs/acceptance.md`](docs/acceptance.md) — manual acceptance test checklist
 - [`docs/javascript.md`](docs/javascript.md) — upstream JavaScript Strudel runtime,

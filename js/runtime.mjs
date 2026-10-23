@@ -6,10 +6,12 @@ import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
 import { installNative, prepareNative } from './native-synth.mjs';
 import { queryFraction } from './query-time.mjs';
+import {installPrebakes,resetPrebakes,runPrebake,prepareAudioDefaults,isPrebaking} from './prebake.mjs';
 
 Object.assign(globalThis, core, mini, tonal);
 installNative(core);
 const { transpiler } = transpileModule;
+installPrebakes(core,transpiler);
 const modules = { '@strudel/core': core, '@strudel/mini': mini, '@strudel/tonal': tonal, '@strudel/transpiler': transpileModule };
 globalThis.__strudelModules = modules;
 globalThis.__moduleSource = (name) => {
@@ -336,6 +338,7 @@ globalThis.console = Object.fromEntries(['log', 'warn', 'error', 'info', 'debug'
  * note("c3 e3 g3").p('melody')
  */
 core.Pattern.prototype.p = function (id = '$') {
+  if(isPrebaking())return this;
   id = String(id);
   if (id.startsWith('_') || id.endsWith('_')) return core.silence;
   if (id.includes('$')) id += anonymous++;
@@ -495,17 +498,56 @@ globalThis.midikeys = async (input) => {
  * @example
  * note("c3 e3 g3").midichan(2).midi()
  */
+const midiMaps = new Map();
+function normalizeMidiMap(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map) || Object.keys(map).length>128)
+    throw new TypeError('MIDI maps require at most 128 control entries');
+  return Object.fromEntries(Object.entries(map).map(([key,value])=>[
+    core.getControlName(key),typeof value==='number'?{ccn:value}:value,
+  ]));
+}
+/** Register the default control-to-CC map for this program. */
+globalThis.defaultmidimap = (map) => {
+  if(!midiMaps.has('default') && midiMaps.size>=32)throw new RangeError('Too many MIDI maps');
+  midiMaps.set('default',normalizeMidiMap(map));
+};
+/** Register named inline MIDI maps. Remote manifests require host support. */
+globalThis.midimaps = async (maps) => {
+  if (!maps || typeof maps!=='object' || Array.isArray(maps) || Object.keys(maps).length>32)
+    throw new TypeError('midimaps requires an inline object with at most 32 maps');
+  const entries=Object.entries(maps).map(([name,map])=>[name,normalizeMidiMap(map)]);
+  if (new Set([...midiMaps.keys(),...entries.map(([name])=>name)]).size>32)
+    throw new RangeError('Too many MIDI maps');
+  for(const [name,map] of entries)midiMaps.set(name,map);
+};
 core.Pattern.prototype.midi = function (port, options) {
   if (core.isPattern(port)) throw new Error(`.midi does not accept Pattern input for midiport. Make sure to pass device name with single quotes.`);
-  const settings = port && typeof port === 'object' ? {...options,...port} : {...options};
-  const channel = Number.isFinite(settings.midichannel) ? settings.midichannel : undefined;
+  const settings = port && typeof port === 'object' ? {...port,...options} : {...options};
   return this.fmap(value=> {
     const object = {...((value && typeof value==='object')?value:{note:value})};
     object._midi = true;
-    if (channel !== undefined && object.midichan == null) object.midichan = channel;
+    object._midiOptions = {...settings,isController:!!settings.isController};
     return object;
   });
 };
+/* Resolve final hap controls, including transforms placed after .midi().
+   Routing captures settings; it must not freeze gain or mapped controls. */
+function prepareMidiValue(value) {
+  if(!value._midi)return value;
+  const settings=value._midiOptions ?? {};
+  const object={...value};
+  object._midiGain=(value.gain===undefined?(settings.gain===undefined?1:settings.gain):value.gain)*
+    (value.velocity===undefined?(settings.velocity===undefined?.9:settings.velocity):value.velocity);
+  const map=midiMaps.get(value.midimap ?? settings.midimap ?? 'default');
+  if(map) {
+    object._midiMapped=Object.keys(value).filter(key=>!key.startsWith('_') && Object.hasOwn(map,core.getControlName(key)) && map[core.getControlName(key)]).map(key=>{
+      const {ccn,min=0,max=1,exp=1}=map[key];
+      if(min===max)return {ccn,ccv:null};
+      return {ccn,ccv:Math.pow(Math.min(1,Math.max(0,(value[key]-min)/(max-min))),exp)};
+    });
+  }
+  return object;
+}
 /**
  * Set this pattern's rate in cycles per minute relative to the current clock.
  * Use setcpm() to change the shared transport tempo instead.
@@ -784,13 +826,21 @@ function prepare(code) {
   return { ...result, output: prefix + result.output };
 }
 
-globalThis.__compile = async (code, bpm = 120) => {
+globalThis.__compile = async (code, bpm = 120, prebake = '') => {
+  resetPrebakes();
+  midiMaps.clear();
   liveSliderReaders.clear();
   collecting = new Map(); anonymous = 0; eachTransform = undefined; allTransforms = [];
   sampleCalls = []; tempo = undefined; initialBpm = bpm; visuals = 0; visualSites = []; visualTiles = new Map(); aliases = new Map();
   queryCps=undefined;
   orchestraCalls = []; csoundUsed = false; pianoUsed = false;
   visualProbes=[]; visualAliases.clear();
+  if(prebake) {
+    await runPrebake(prebake);
+    // Setup may register patterns but must not contribute playing tracks.
+    collecting=new Map(); anonymous=0;
+  }
+  resetDefaultValues();
   const result = prepare(code);
   compiledVisualSites=visualSites;
   nextProbe=visualSites.length;
@@ -869,7 +919,7 @@ globalThis.__query = (begin, end, cps, probes = false) => {
       const mask=(hap.context?.scopeMask ?? 0) | (probes ? hap.context?.probeMask ?? 0 : 0);
       const frequency=item.workletSrc===undefined?440:Number.isFinite(item.freq)?item.freq:
         440*Math.pow(2,(core.valueToMidi({note:36,...item})-69)/12);
-      events.push({ begin: at, end: finish, value: prepareNative(prepareDuckNumbers(item),frequency), locations: locs, scopeMask:mask >>> 0 });
+      events.push({ begin: at, end: finish, value: prepareNative(prepareDuckNumbers(prepareAudioDefaults(prepareMidiValue(item))),frequency), locations: locs, scopeMask:mask >>> 0 });
     }
   }
   return JSON.stringify(events);

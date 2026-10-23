@@ -17,6 +17,7 @@ Press F5 to evaluate and Ctrl+P to play or stop.
 | --- | --- |
 | [Getting started](Getting-Started.md) | Installation, first sound and updates |
 | [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md) | Editing, lessons, songs, saves and pattern fundamentals |
+| [Prebake setup files](Prebakes.md) | Reusable helpers, automatic setup and the Switch Angel starter |
 | [Sounds and samples](Sounds-and-Samples.md) | F6, drum machines, GM synths, wavetables and imports |
 | [Visuals and themes](Visuals-and-Themes.md) | Inline views, Kitty graphics and live recoloring |
 | [Companion and integrations](Companion-and-Integrations.md) | Browser controls, MCP, MIDI and OSC |

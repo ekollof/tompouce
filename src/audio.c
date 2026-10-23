@@ -30,6 +30,16 @@ static _Atomic double bpm = 120.0;
 static _Atomic double effect_bpm = 120.0;
 static atomic_int playing;
 static atomic_int reference_mode;
+_Static_assert(ATOMIC_INT_LOCK_FREE==2,"output gain requires lock-free integer atomics");
+static atomic_uint output_gain_units=1000000;
+int audio_set_output_gain(double value) {
+    if (!isfinite(value) || value<0 || value>1) return 0;
+    atomic_store_explicit(&output_gain_units,(unsigned)lround(value*1000000),memory_order_relaxed);
+    return 1;
+}
+double audio_get_output_gain(void) {
+    return atomic_load_explicit(&output_gain_units,memory_order_relaxed)/1000000.0;
+}
 void audio_set_reference_mode(int on) { atomic_store(&reference_mode,on != 0); }
 static unsigned long audio_block_frames = 256;
 
@@ -1607,6 +1617,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                        const PaStreamCallbackTimeInfo *timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
     (void)input; (void)timeInfo; (void)statusFlags; (void)userData;
     float *out = (float*)output;
+    const double output_gain=audio_get_output_gain();
     for (unsigned long i = 0; i < frameCount; i++) {
         VoiceMix mixes[N_ORBITS];
         memset(pattern_scope_frame,0,sizeof(pattern_scope_frame));
@@ -2063,6 +2074,10 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             L = tanh(1.2 * L) * 1.1995;
             R = tanh(1.2 * R) * 1.1995;
         }
+        /* All backends consume this bus, including held Csound notes and
+           effect tails. Unity preserves the existing PCM operation order. */
+        if (output_gain==0) L=R=0;
+        else if (output_gain!=1) { L*=output_gain; R*=output_gain; }
         out[i*2] = (float)L;
         out[i*2+1] = (float)R;
         /* scope tap: lock-free ring for the viz pane (single writer) */

@@ -349,6 +349,59 @@ static void test_pulse_quantum_boundary(void) {
     memset(voices,0,sizeof(voices));audio_time=previous;
 }
 
+static void test_output_volume(void) {
+    assert(audio_get_output_gain()==1);
+    assert(!audio_set_output_gain(NAN) && !audio_set_output_gain(INFINITY));
+    assert(!audio_set_output_gain(-.1) && !audio_set_output_gain(1.1));
+    assert(audio_get_output_gain()==1);
+    playing=1; audio_set_reference_mode(1);
+    AudioEvent event={.inst=INST_TRI,.smp=sample_fixture(),.smp_speed=1,.gain=.1,
+        .sus=1,.duration=1,.rel=.1,.smp_gate=1};
+    dsp_params_init(&event.dsp); event.dsp.enabled=1;
+    event.dsp.p[DSP_LOOP]=1;
+    Voice *voice=start_sample(&event);
+    float unity[256],half[256],muted[256],restored[256];
+    pa_callback(NULL,unity,128,NULL,0,NULL);
+    assert(voice->active);
+    double age=voice->age;
+    assert(audio_set_output_gain(.5));
+    pa_callback(NULL,half,128,NULL,0,NULL);
+    assert(voice->active && voice->age>age);
+    assert(audio_set_output_gain(0));
+    pa_callback(NULL,muted,128,NULL,0,NULL);
+    assert(voice->active);
+    assert(audio_set_output_gain(1));
+    pa_callback(NULL,restored,128,NULL,0,NULL);
+    double energy=0;
+    for(int i=0;i<256;i++) {
+        assert(fabs(half[i]-unity[i]*.5)<1e-7);
+        assert(muted[i]==0);
+        assert(fabs(restored[i]-unity[i])<1e-7);
+        energy+=unity[i]*unity[i];
+    }
+    assert(energy>1e-6);
+    /* A real delay tail continues through mute after the source gate ends. */
+    int orbit=N_ORBITS-1;
+    double old_dt=orbit_dt[orbit],old_fb=orbit_fb[orbit];
+    event.orbit=orbit; event.time=audio_time; event.duration=128/SR; event.rel=0;
+    event.delay_send=1; event.delay_prepared=1;
+    orbit_dt[orbit]=128/SR; orbit_fb[orbit]=.5;
+    start_sample(&event);
+    pa_callback(NULL,unity,128,NULL,0,NULL);
+    assert(audio_set_output_gain(0));
+    pa_callback(NULL,muted,128,NULL,0,NULL);
+    for(int i=0;i<256;i++)assert(muted[i]==0);
+    assert(audio_set_output_gain(1));
+    pa_callback(NULL,restored,128,NULL,0,NULL);
+    energy=0;for(int i=0;i<256;i++)energy+=restored[i]*restored[i];
+    assert(energy>1e-6);
+    memset(dbuf[orbit],0,ORBIT_DELAY*2*sizeof(float));
+    memset(feedback_quantum[orbit],0,256*sizeof(float));
+    orbit_dt[orbit]=old_dt;orbit_fb[orbit]=old_fb;
+    memset(voices,0,sizeof(voices));
+    playing=0;audio_set_reference_mode(0);audio_time=0;
+}
+
 int main(void) {
     /* Never-used orbits must stay bit-exactly silent: the reverb and delay
        gates skip work only when their state is provably zero. Runs first so
@@ -361,6 +414,7 @@ int main(void) {
         }
         audio_time = 0; /* restore the timing baseline later tests assume */
     }
+    test_output_volume();
     /* Exercise the actual callback with opposite-polarity stereo channels.
        Averaging to mono would cancel this signal. No audio device is needed. */
     float stereo[] = {.25f,-.5f,.125f,.375f};

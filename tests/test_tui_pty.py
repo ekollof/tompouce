@@ -53,7 +53,7 @@ def gm_supported():
     return GM_SUPPORTED
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None, simd=None):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None, simd=None, output_volume=False):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     if name.startswith('GM synth') and not gm_supported():
@@ -235,6 +235,25 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                         assert b'\x1b_Ga=d,d=I,' in output[start:], (name, 'scroll left images behind')
             if vi:
                 assert b"VI:NORMAL" in re.sub(rb'\x1b\[[0-9;]*m', b'', output), (name, "vi startup config ignored")
+            if output_volume:
+                terminal_keys(b'\x1bOS'); drain(.15)
+                text=screen_text(output).decode()
+                lines=text.splitlines()
+                match=next((i,line.index('Volume')+7) for i,line in enumerate(lines) if 'Volume' in line)
+                row,col=match
+                generation=re.search(rb'gen=(\d+)',screen_text(output))
+                assert generation, text
+                x,y=col+5,row+1  # fourth bar cell: 4/9, snapped to .44
+                terminal_keys(f'\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m'.encode()); drain(.1)
+                assert b'output volume 0.44' in screen_text(output),screen_text(output)
+                terminal_keys(b'\x1b[1;5C'); drain(.1)
+                assert b'output volume 0.45' in screen_text(output),screen_text(output)
+                terminal_keys(f'\x1b[<65;{x};{y}M'.encode()); drain(.1)
+                assert b'output volume 0.44' in screen_text(output),screen_text(output)
+                terminal_keys(b'\x1b[C'); drain(.1)
+                assert b'output volume 0.45' in screen_text(output),screen_text(output)
+                assert re.search(rb'gen=(\d+)',screen_text(output))[1]==generation[1]
+                terminal_keys(b'\x1b'); drain(.1)
             if live_slider:
                 os.write(master,b'\x1bOS'); drain(.15)
                 match=re.search(rb'gen=(\d+)',screen_text(output)); assert match, screen_text(output)
@@ -587,6 +606,17 @@ check("F4 state diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", vi=True, observed=b'mode=VI:N')
 check("F4 SIMD diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=c cpu=', simd='c')
+check("output volume mouse and keys", "note('c4').gain(0)", output_volume=True,
+      expected="note('c4').gain(0)")
+check("output volume pixel mouse", "note('c4').gain(0)", output_volume=True, mouse_pixels=True,
+      expected="note('c4').gain(0)")
+check("output volume command", "note('c4').gain(0)", b'\x1bOQ/volume .5\r',
+      expected="note('c4').gain(0)", observed=b'output volume 0.50')
+check("output volume rejects extras", "note('c4').gain(0)",
+      [b'\x1bOQ/volume .5 extra\r',.1,b'\x1bOQ/volume\r'],
+      expected="note('c4').gain(0)", observed=b'output volume 1.00')
+check("output volume rejects NaN", "note('c4').gain(0)", b'\x1bOQ/volume nan\r',
+      expected="note('c4').gain(0)", observed=b'usage: /volume 0..1')
 check("F4 SIMD policy", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'mode=auto cpu=', simd='auto')
 check("F4 SIMD fallback", "note('c4').gain(0)", b'\x1bOS',

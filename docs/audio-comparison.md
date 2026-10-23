@@ -315,6 +315,12 @@ report, and the WAV and confined catalog remain under `fixture-banks`; the
 browser uses those bytes through a disposable Blob sample. These selected
 MP3/WAV gates do not establish complete decoder or full-song waveform parity.
 
+Five additional shared-mono cases (`TOMPOUCE_COMPARE_FILTER=pcm-mono`) guard
+the preparation fast path with upward/downward pitch compensation, reverse,
+looping and ADSR at fractional onsets. Both sides receive the same mono PCM16
+WAV and the report hashes that source independently from the stereo fixture.
+The 0.99 correlation and 0.85–1.15 gain gates are unchanged.
+
 Use `TOMPOUCE_COMPARE_FILTER=stretch` to select the stretch cases while iterating;
 omit it to run the full matrix.
 

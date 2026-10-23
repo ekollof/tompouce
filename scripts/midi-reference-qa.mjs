@@ -2,8 +2,8 @@
    live pattern queries and real WebMidi sends to an owned fake transport,
    compared with native commit and consumer-send decisions. Only the raw
    transport and clock mapping are replaced; deployed scheduling, validation
-   and byte conversion run unchanged. Note-off timestamps remain outside
-   this gate. A deployed
+   and byte conversion run unchanged. Note-on/off timestamp differences gate
+   each duration; physical device delivery latency stays outside this gate. A deployed
    change fails the gate for investigation, never for threshold loosening.
    Mini-notation strings are spelled with explicit mini() because the test
    REPL evaluates without the page transpiler; the native runtime transpiles
@@ -67,6 +67,48 @@ const cases = [
   {name: 'send-order', code: 'note(60).progNum(10).sysex([67,[1,2]]).ccn(74).ccv(0.5).midibend(0.25).miditouch(0.75).midi()',
     events: [{chan: 0, note: 60, prog: 10, sysex_id: [67], sysex: [1,2], cc: 74, ccv: 64,
       bend: 2047, touch: 95, cycle_start: 1}]},
+  {name:'controller',code:'note(60).ccn(74).ccv(.5).midi({isController:true})',
+    events:[{chan:0,note:-1,cc:74,ccv:64,cycle_start:1}]},
+  {name:'options',code:'note(60).midi({midichannel:2,velocity:.2,gain:.5},{midichannel:3,velocity:.8})',
+    events:[{chan:2,note:60,cycle_start:1}]},
+  {name:'options-overridden',code:'note(60).velocity(.5).gain(.5).midichan(4).midi({midichannel:2,velocity:.2,gain:.2})',
+    events:[{chan:3,note:60,cycle_start:1}]},
+  {name:'named-cc',code:"note(60).ccn('brightness').ccv(.5).midi()",
+    events:[{chan:0,note:60,cc:74,ccv:64,cycle_start:1}]},
+  {name:'unknown-cc',code:"note(60).ccn('noSuchController').ccv(.5).midibend(.5).midi()",
+    events:[{chan:0,note:60}]},
+  {name:'nrpn',code:'note(60).nrpnn([1,2]).nrpv(64).midibend(.5).midi()',
+    events:[{chan:0,note:60,bend:4095,cycle_start:1}]},
+  {name:'nrpn-bad',code:'note(60).nrpnn([128,2]).nrpv(64).midibend(.5).midi()',
+    events:[{chan:0,note:60}]},
+  {name:'duplicate-program',code:"note(60).progNum(10).midicmd(['progNum',11]).midi()",
+    events:[{chan:0,note:60,prog:10,cycle_start:1}]},
+  {name:'duplicate-sysex',code:"note(60).sysex([67,[1,2]]).midicmd(['sysex',68,[3,4]]).midi()",
+    events:[{chan:0,note:60,sysex_id:[67],sysex:[1,2],cycle_start:1}]},
+  ...[
+    ['short-gate','note(60).compress(0,.001).midi()'],
+    ['fractional-gate','note(60).fast(3).midi()'],
+    ['offset-gate','note(60).compress(0,.01).midi({noteOffsetMs:100})'],
+    ['zero-offset','note(60).midi({noteOffsetMs:0})'],
+    ['clip-gate','note(60).clip(.25).midi()'],
+    ['duration-gate','note(60).duration(.01).midi()'],
+    ['command-program',"note(60).midicmd(['progNum',11]).midi()"],
+    ['nrpn-two-data','note(60).nrpnn([1,2]).nrpv([64,32]).midi()'],
+    ['map-default',"defaultmidimap({lpf:{ccn:74,min:100,max:1100,exp:2}}); note(60).lpf(600).midi()"],
+    ['map-named',"await midimaps({qa:{lpf:74,pan:10}}); note(60).lpf(.5).pan(.25).midimap('qa').midi()"],
+    ['map-options',"await midimaps({qa:{lpf:74}}); note(60).lpf(.5).midi({midimap:'qa',isController:true})"],
+    ['map-clamp',"await midimaps({qa:{lpf:{ccn:'brightness',min:100,max:1100}}}); note(60).lpf(10000).midimap('qa').midi()"],
+    ['map-invalid',"await midimaps({qa:{lpf:{ccn:74,min:1,max:1}}}); note(60).lpf(.5).midimap('qa').midi()"],
+    ['null-gain','note(60).midi({gain:null})'],
+    ['controller-invalid-velocity','note(60).gain(2).ccn(74).ccv(.5).midi({isController:1})'],
+    ['map-before-invalid-note',"defaultmidimap({lpf:74}); note(60).lpf(.5).gain(2).midi()"],
+    ['controls-after-midi','note(60).midi({velocity:.2}).gain(.5).velocity(.8)'],
+    ['map-after-midi',"defaultmidimap({lpf:74}); note(60).midi().lpf(.5)"],
+    ['map-selection-after-midi',"await midimaps({qa:{lpf:74}}); note(60).midi().midimap('qa').lpf(.5)"],
+  ].map(([name,code])=>{
+    const split=code.lastIndexOf(';');
+    return {name,code,...(split>=0?{webcode:`(async()=>{${code.slice(0,split)};return ${code.slice(split+1)}})()`}:{})};
+  }),
 ];
 // Pinned 1.2.6 coerces numeric strings in control args (ccn("74") arrives
 // as 74; sysexid "0x77" as 119) while the deployed REPL preserves them, so
@@ -75,11 +117,11 @@ const cases = [
 
 async function webValues(browser) {
   return browser.evaluate(`(async()=>{
-    const sent=[];
+    const sent=[],timed=[];
     const ports=Array.from({length:3},(_,i)=>({id:'qa'+i,name:i?'out'+i:'out',
       manufacturer:'Tompouce QA',type:'output',state:'connected',connection:'open',
       open(){return Promise.resolve(this)},close(){return Promise.resolve(this)},
-      send(data){sent.push(Array.from(data))}}));
+      send(data,time){sent.push(Array.from(data));timed.push({bytes:Array.from(data),time})}}));
     Object.defineProperty(navigator,'requestMIDIAccess',{configurable:true,value:async()=>({
       inputs:new Map(),outputs:new Map(ports.map(p=>[p.id,p])),sysexEnabled:true})});
     setAudioContext(new OfflineAudioContext(2,44100,44100));
@@ -88,6 +130,7 @@ async function webValues(browser) {
       const instance = repl({getTime:()=>0, onSchedule:()=>{}, setInterval:()=>1, clearInterval:()=>{}});
       const entry = {name: test.name};
       try {
+        defaultmidimap({});
         await instance.evaluate(test.code, false);
         if (!WebMidi.enabled) await new Promise(resolve=>WebMidi.addOneTimeListener('enabled',resolve));
         getClockBridge().getPerformanceTime=at=>1000+at*1000;
@@ -95,13 +138,16 @@ async function webValues(browser) {
         else {
           const haps = instance.scheduler.pattern.queryArc(0, 1);
           entry.values = haps.slice(0, 4).map(h => ({begin: Number(h.whole.begin), end: Number(h.whole.end), value: h.value}));
-          sent.length=0;
+          sent.length=0;timed.length=0;
           entry.sendErrors=[];
           for (const hap of haps) {
             try {hap.context.onSchedule(hap,Number(hap.whole.begin)*2,.5);}
             catch(error){entry.sendErrors.push(String(error?.message??error));}
           }
           entry.sends=sent.filter(bytes=>(bytes[0]&0xF0)!==0x80);
+          const ons=timed.filter(m=>(m.bytes[0]&0xf0)===0x90);
+          const offs=timed.filter(m=>(m.bytes[0]&0xf0)===0x80);
+          entry.gates=ons.map((m,i)=>(offs[i].time-m.time)/1000);
         }
       } catch (error) { entry.error = String(error?.message ?? error); }
       try { instance.stop(); } catch {}
@@ -130,6 +176,14 @@ let web, bundleInfo;
 try {
   await browser.page('https://strudel.cc/');
   await browser.until('typeof repl==="function"', 25000);
+  const controllers=await browser.evaluate('Object.entries(WebMidi.MIDI_CONTROL_CHANGE_MESSAGES)');
+  assert.equal(controllers.length,128,'deployed controller catalog changed; review native names');
+  for(const [name] of controllers) {
+    assert.match(name,/^[a-z0-9]+$/);
+    // Actual send bytes are the oracle. WebMidi's exported constants reverse
+    // the coarse/fine NRPN/RPN names relative to its sender's lookup table.
+    cases.push({name:`catalog-${name}`,code:`ccn('${name}').ccv(.5).midi()`});
+  }
   web = await webValues(browser);
   const bundle = await browser.evaluate(`(async()=>{
     const resources = performance.getEntriesByType('resource').map(e=>e.name).filter(u=>u.endsWith('.js'));
@@ -178,10 +232,14 @@ for (const test of cases) {
     assert.deepEqual(norm(got.values, true), norm(want.values, false));
   } catch { failures.push(`${test.name}: hap values differ (web ${JSON.stringify(want.values)} native ${JSON.stringify(got.values)})`); }
   try {
-    assert.deepEqual(got.events ?? [], test.events);
+    if(test.events)assert.deepEqual(got.events ?? [], test.events);
   } catch { failures.push(`${test.name}: commit differs (want ${JSON.stringify(test.events)} got ${JSON.stringify(got.events)})`); }
   try {assert.deepEqual(got.sends,want.sends);}
   catch {failures.push(`${test.name}: sends differ (web ${JSON.stringify(want.sends)} native ${JSON.stringify(got.sends)})`);}
+  try {
+    assert.equal(got.gates.length,want.gates.length);
+    got.gates.forEach((gate,i)=>assert(Math.abs(gate-want.gates[i])<1e-9,`gate ${gate} != ${want.gates[i]}`));
+  } catch(error){failures.push(`${test.name}: note gates differ: ${error.message}`);}
 }
 assert.deepEqual(failures, []);
 console.log(`${cases.length} web/native MIDI cases passed (bundle ${bundleInfo.sha256_16})`);

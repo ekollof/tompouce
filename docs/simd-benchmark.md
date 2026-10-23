@@ -98,8 +98,40 @@ convolution FFT preparation, and 2.93 ms FFT plus 2.25 ms synthesis for a cold
 generated room. Cold WAV decode was 4.13 ms and installed MP3 decode 14.52 ms.
 Four independent stretch jobs took 29.1/14.6/8.4 ms wall time with 1/2/4 workers.
 These are workload-specific observations, not SIMD comparisons. Stretch is a
-reasonable second profiling target for preparation latency, after a callback
-convolution prototype; decode measurements do not justify replacing decoders.
+preparation bottleneck; decode measurements do not justify replacing decoders.
+
+### Stretch and native-rate decode fast paths
+
+`test_prep_profile` now repeats eight cold sample keys for mono and stereo
+separately. Each owned WAV contains eight seconds of 44.1 kHz PCM16; each
+stretch renders a 0.4-second gate, factor 1.7, pitch 311 Hz, ADSR and a
+fractional render-quantum offset. Fixture generation is outside timing.
+The following are median thread-CPU milliseconds **per call**, from three
+fresh serial processes per implementation on a Ryzen 7 5800X3D, GCC 16.2,
+Release build. Wall time and lock costs remain printed separately; this
+is warm filesystem-cache latency, not disk or network latency.
+
+| Work | Before | After | Improvement |
+|---|---:|---:|---:|
+| Mono WAV decode, eight seconds | 2.83 ms | 1.44 ms | 1.97× |
+| Stereo WAV decode, eight seconds | 2.73 ms | 1.57 ms | 1.74× |
+| Mono stretch preparation | 9.67 ms | 5.19 ms | 1.86× |
+| Stereo stretch preparation | 10.27 ms | 10.28 ms | unchanged |
+
+Decoders already produce owned interleaved stereo. At 44.1 kHz, preparation
+now retains that buffer instead of allocating, interpolating and copying it
+again. Other rates keep the existing interpolation and duration limits.
+Mono stretch channels have identical inputs and OLA state, so only one
+transform is needed; its output is copied into both channels. Stereo keeps
+both transforms, including the reference's reverse-channel offset behavior.
+Neither path changes FFT arithmetic, preparation budgets or callback work.
+
+Five additional shared-mono browser comparisons cover upward/downward
+stretch, reverse, looping and envelopes at fractional onsets. Their existing
+0.99 correlation and 0.85–1.15 gain criteria are unchanged. Decoder precision
+and independently decoded MP3 stretch remain covered separately. Cache hits
+perform no decode/stretch; concurrent identical misses still compute duplicate
+work before converging on one published entry, a remaining optimization target.
 
 ## Implemented convolution dispatch
 

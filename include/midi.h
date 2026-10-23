@@ -8,10 +8,16 @@ void midi_shutdown(void);
 int midi_ready(void);
 /* note on now, note off after dur_ms (worker thread). Thread-safe. */
 void midi_note(int chan, int note, int vel, int dur_ms);
+/* Dominant output preserves sub-millisecond web gates without the legacy
+   50ms floor. Invalid/unbounded durations never enqueue an unterminated on. */
+void midi_note_for(int chan, int note, int vel, double duration);
 /* Dominant MIDI extras, matching the deployed web output's message set.
    Channel is 0-15; sends are best-effort like midi_note and always recorded
    in the scheduling capture when enabled. */
 void midi_cc(int chan, int cc, int value);
+/* Up to 32 validated CC pairs under one output lock; NRPN selectors and
+   data must not interleave with a simultaneous controller restore. */
+void midi_cc_batch(int chan, const unsigned char (*pairs)[2], int count);
 void midi_program(int chan, int prog);
 void midi_bend(int chan, int value); /* -8192..8191, zero-centered */
 void midi_touch(int chan, int value);
@@ -64,7 +70,7 @@ typedef struct MidiCapturedNote { int on, chan, note, vel; double at; } MidiCapt
    d1=value (-8192..8191); touch uses d1=value; transport uses d1=cmd
    (1 clock, 2 start, 3 continue, 4 stop); sysex carries the framed
    F0..F7 bytes in sysex. */
-typedef struct MidiCaptured { int kind, chan, d1, d2; unsigned char sysex[264]; int sysex_len; double at; } MidiCaptured;
+typedef struct MidiCaptured { int kind, chan, d1, d2; unsigned char sysex[264]; int sysex_len; double at, duration; } MidiCaptured;
 void midi_capture_enable(int on);
 unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity);
 unsigned midi_captured_all(MidiCaptured *out, unsigned capacity);

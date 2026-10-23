@@ -180,6 +180,9 @@ static float *finish_audio(float *tmp, uint32_t have, int rate, int *len_out) {
     }
     uint32_t want = (uint32_t)want_d;
     if (want == 0) { free(tmp); return NULL; }
+    /* Decoders already return owned interleaved stereo. At the engine rate
+       there is no interpolation to perform and no second buffer to own. */
+    if (rate == 44100) { *len_out = (int)have; return tmp; }
     float *out = malloc(sizeof(float) * (size_t)want * 2);
     if (!out) { free(tmp); return NULL; }
     for (uint32_t i = 0; i < want; i++) {

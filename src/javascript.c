@@ -2,11 +2,14 @@
 #include "common.h"
 #include "slider.h"
 #include "midi.h"
+#include "websamp.h"
 #include <quickjs.h>
 #include <ctype.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 
 #include "runtime.inc"
@@ -41,6 +44,8 @@ struct JsProgram {
     char warned[32][64];
     int nwarned;
     int loading_allowed;
+    unsigned prebake_files;
+    size_t prebake_bytes;
 };
 
 static int interrupted(JSRuntime *runtime, void *opaque) {
@@ -196,24 +201,32 @@ static char *module_normalize(JSContext *ctx, const char *base, const char *name
     return js_strdup(ctx,normalized);
 }
 
-static char *local_module_source(JSContext *ctx, const char *name, size_t *size) {
+/* The application root and every child are opened without following links.
+   Optional applies only to absence, never unreadable/non-regular inputs. */
+static char *config_script_source(JSContext *ctx, const char *name, int optional, size_t *size) {
     char root[1024], path[1400];
     user_dir(root,sizeof(root),"XDG_CONFIG_HOME","tompouce",".config/tompouce");
-    int n = snprintf(path,sizeof(path),"%s/modules/%s",root,name);
-    if (!*root || n < 0 || (size_t)n >= sizeof(path) || !local_name_safe(name)) {
-        JS_ThrowReferenceError(ctx,"unsafe module path"); return NULL;
+    int n = snprintf(path,sizeof(path),"%s/%s",root,name);
+    if (!*root) {
+        if (!optional) JS_ThrowReferenceError(ctx,"configuration root unavailable");
+        return NULL;
+    }
+    if (n < 0 || (size_t)n >= sizeof(path)) {
+        JS_ThrowReferenceError(ctx,"unsafe script path"); return NULL;
     }
     int dir = open("/",O_RDONLY|O_DIRECTORY|O_CLOEXEC);
     char *save = NULL, *component = strtok_r(path,"/",&save);
     while (dir >= 0 && component) {
         char *next = strtok_r(NULL,"/",&save);
         int fd = openat(dir,component,O_RDONLY|O_NOFOLLOW|O_CLOEXEC|(next ? O_DIRECTORY : O_NONBLOCK));
+        int saved_errno=errno;
         close(dir); dir = fd; component = next;
+        if (dir<0 && optional && saved_errno==ENOENT) return NULL;
     }
     struct stat st;
     if (dir < 0 || fstat(dir,&st) || !S_ISREG(st.st_mode) || st.st_size < 0 || st.st_size > 256*1024) {
         if (dir >= 0) close(dir);
-        JS_ThrowReferenceError(ctx,"local module missing, linked, or larger than 256 KiB"); return NULL;
+        JS_ThrowReferenceError(ctx,"configuration script missing, linked, non-regular, or larger than 256 KiB"); return NULL;
     }
     *size = (size_t)st.st_size;
     char *text = malloc(*size+1);
@@ -221,11 +234,110 @@ static char *local_module_source(JSContext *ctx, const char *name, size_t *size)
     size_t used = 0;
     while (used < *size) {
         ssize_t got = read(dir,text+used,*size-used);
+        if (got<0 && errno==EINTR) continue;
         if (got <= 0) { free(text); close(dir); JS_ThrowReferenceError(ctx,"module read failed"); return NULL; }
         used += (size_t)got;
     }
     close(dir); text[used] = 0;
     return text;
+}
+
+static char *local_module_source(JSContext *ctx, const char *name, size_t *size) {
+    if (!local_name_safe(name)) { JS_ThrowReferenceError(ctx,"unsafe module path"); return NULL; }
+    char path[256];
+    int n=snprintf(path,sizeof(path),"modules/%s",name);
+    if (n<0 || (size_t)n>=sizeof(path)) { JS_ThrowReferenceError(ctx,"unsafe module path"); return NULL; }
+    return config_script_source(ctx,path,0,size);
+}
+
+static int prebake_name_safe(const char *name) {
+    if (!name || !*name || strlen(name)>240 || *name=='/' || strstr(name,"..")) return 0;
+    for (const unsigned char *p=(const unsigned char *)name;*p;p++)
+        if (!(isalnum(*p) || *p=='/' || *p=='_' || *p=='-' || *p=='.')) return 0;
+    size_t n=strlen(name);
+    return local_name_safe(name) || (n>8 && !strcmp(name+n-8,".strudel"));
+}
+
+static JSValue host_prebake(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->loading_allowed || p->prebake_files>=16)
+        return JS_ThrowReferenceError(ctx,"load at most 16 prebakes during evaluation, before pattern queries");
+    if (argc!=1 || !JS_IsString(argv[0]))return JS_ThrowTypeError(ctx,"prebake requires a file name");
+    size_t length; const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
+    if (!name)return JS_EXCEPTION;
+    int safe=strlen(name)==length && prebake_name_safe(name);
+    char path[256]; int n=snprintf(path,sizeof(path),"prebakes/%s",name);
+    JS_FreeCString(ctx,name);
+    if (!safe || n<0 || (size_t)n>=sizeof(path))return JS_ThrowReferenceError(ctx,"unsafe prebake name");
+    p->prebake_files++;
+    size_t size=0; char *text=config_script_source(ctx,path,0,&size);
+    if (!text)return JS_EXCEPTION;
+    if (size>1024*1024-p->prebake_bytes) {
+        free(text);return JS_ThrowRangeError(ctx,"prebakes exceed 1 MiB total");
+    }
+    p->prebake_bytes+=size;
+    JSValue result=JS_NewStringLen(ctx,text,size); free(text); return result;
+}
+
+/* Explicit opt-in fetch through the existing connection-address policy.
+   Pin upstream instead of distributing its unlicensed source in this tree. */
+int javascript_install_prebake(const char *provider, char *error, size_t error_size) {
+    if (!provider || strcmp(provider,"switchangel")) {
+        snprintf(error,error_size,"unknown prebake starter (available: switchangel)"); return 0;
+    }
+    const char *url="https://raw.githubusercontent.com/switchangel/strudel-scripts/706dd24814ac86193ceec6d0b263f432cba6e5ff/prebake.strudel";
+    char *text=websamp_fetch_text(url);
+    if (!text || strlen(text)>256*1024-256) {
+        free(text);snprintf(error,error_size,"prebake download failed or exceeds 256 KiB");return 0;
+    }
+    int result=javascript_store_prebake(text,error,error_size);
+    free(text); return result;
+}
+
+int javascript_store_prebake(const char *text, char *error, size_t error_size) {
+    const char *header="// tompouce-prebake: switchangel\n// Switch Angel / strudel-scripts, revision 706dd24814ac86193ceec6d0b263f432cba6e5ff\n";
+    if (!text || strlen(text)>256*1024-strlen(header)) {
+        snprintf(error,error_size,"prebake exceeds 256 KiB");return 0;
+    }
+    char root[1024]; user_dir(root,sizeof(root),"XDG_CONFIG_HOME","tompouce/prebakes",".config/tompouce/prebakes");
+    if (!*root || strstr(root,"/../") || strstr(root,"/./")) {
+        snprintf(error,error_size,"invalid prebake storage root");return 0;
+    }
+    int dir=open("/",O_RDONLY|O_DIRECTORY|O_CLOEXEC), ok=0;
+    char *save=NULL;
+    for (char *part=strtok_r(root,"/",&save);dir>=0 && part;part=strtok_r(NULL,"/",&save)) {
+        if (mkdirat(dir,part,0700) && errno!=EEXIST) { close(dir);dir=-1;break; }
+        int next=openat(dir,part,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+        close(dir);dir=next;
+    }
+    uint64_t nonce; char temporary[64]="";
+    int fd=-1;
+    if (dir>=0 && getrandom(&nonce,sizeof(nonce),0)==sizeof(nonce)) {
+        snprintf(temporary,sizeof(temporary),".prebake-%llx",(unsigned long long)nonce);
+        fd=openat(dir,temporary,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
+    }
+    if (fd>=0) {
+        const char *parts[]={header,text}; ok=1;
+        for (int i=0;i<2 && ok;i++) {
+            size_t size=strlen(parts[i]),used=0;
+            while (used<size) {
+                ssize_t n=write(fd,parts[i]+used,size-used);
+                if (n<0 && errno==EINTR)continue;
+                if (n<=0) { ok=0;break; } used+=(size_t)n;
+            }
+        }
+        if (fsync(fd))ok=0;
+        if (close(fd))ok=0;
+        if (ok && linkat(dir,temporary,dir,"switchangel.strudel",0))ok=0;
+        if (ok && fsync(dir))log_console("prebake installed; directory sync failed");
+    }
+    if (dir>=0) {
+        if (fd>=0)unlinkat(dir,temporary,0);
+        close(dir);
+    }
+    if (!ok)snprintf(error,error_size,"cannot store starter (existing file, unsafe directory, or write failure)");
+    return ok;
 }
 
 static JSModuleDef *module_loader(JSContext *ctx, const char *name, void *opaque) {
@@ -370,8 +482,9 @@ static int initialize(JsProgram *p, char *error, int n) {
     int e = JS_SetPropertyStr(ctx, global, "__hostMidiOpen", JS_NewCFunction(ctx, host_midi_open, "__hostMidiOpen", 1));
     int f = JS_SetPropertyStr(ctx, global, "__hostMidiRead", JS_NewCFunction(ctx, host_midi_read, "__hostMidiRead", 2));
     int g = JS_SetPropertyStr(ctx, global, "__hostMidiKeys", JS_NewCFunction(ctx, host_midi_keys, "__hostMidiKeys", 1));
+    int h = JS_SetPropertyStr(ctx, global, "__hostPrebake", JS_NewCFunction(ctx, host_prebake, "__hostPrebake", 1));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {
@@ -461,10 +574,21 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
     p->visual_source = strdup_safe(code);
     if (!p->source || !p->visual_source || !initialize(p, error, n)) { javascript_free(p); return NULL; }
     JSContext *ctx = p->context;
+    size_t prebake_length=0;
+    char *prebake=config_script_source(ctx,"prebake.strudel",1,&prebake_length);
+    p->prebake_bytes=prebake_length;
+    if (!prebake && JS_HasException(ctx)) {
+        JSValue failure=JS_GetException(ctx);
+        exception_text(ctx,failure,error,n); JS_FreeValue(ctx,failure);
+        javascript_free(p); return NULL;
+    }
     JSValue fn = global_function(ctx, "__compile");
-    JSValue args[2] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120)};
-    JSValue value = JS_Call(ctx, fn, JS_UNDEFINED, 2, args);
-    JS_FreeValue(ctx, args[0]); JS_FreeValue(ctx,args[1]); JS_FreeValue(ctx, fn);
+    JSValue args[3] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120),
+        JS_NewStringLen(ctx,prebake?prebake:"",prebake_length)};
+    free(prebake);
+    JSValue value = JS_IsException(args[0]) || JS_IsException(args[1]) || JS_IsException(args[2]) ?
+        JS_EXCEPTION : JS_Call(ctx, fn, JS_UNDEFINED, 3, args);
+    JS_FreeValue(ctx, args[0]); JS_FreeValue(ctx,args[1]); JS_FreeValue(ctx,args[2]); JS_FreeValue(ctx, fn);
     while (!JS_IsException(value) && JS_PromiseState(ctx, value) == JS_PROMISE_PENDING) {
         JSContext *job_ctx = NULL;
         int result = JS_ExecutePendingJob(p->runtime, &job_ctx);

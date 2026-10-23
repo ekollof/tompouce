@@ -36,6 +36,12 @@ static void *capture_writer(void *argument) {
     for (int i = 0; i < 200; i++) midi_cc(channel, 74, i % 128);
     return NULL;
 }
+static void *batch_writer(void *argument) {
+    (void)argument;
+    const unsigned char transaction[5][2]={{99,1},{98,2},{6,64},{101,127},{100,127}};
+    for (int i=0;i<100;i++) midi_cc_batch(4,transaction,5);
+    return NULL;
+}
 
 static void test_capture_concurrency(void) {
     /* Run before MIDI startup: these sends cannot reach any hardware. */
@@ -55,6 +61,23 @@ static void test_capture_concurrency(void) {
         counts[seen[i].chan]++;
     }
     for (int i = 0; i < 4; i++) assert(counts[i] == 200);
+    midi_capture_enable(1);
+    assert(!pthread_create(&writers[0],NULL,capture_writer,&channels[0]));
+    assert(!pthread_create(&writers[1],NULL,batch_writer,NULL));
+    assert(!pthread_join(writers[0],NULL) && !pthread_join(writers[1],NULL));
+    assert(midi_captured_all(seen,800)==700);
+    int batches=0;
+    for (int i=0;i<700;i++) if (seen[i].chan==4) {
+        const int expected[5]={99,98,6,101,100};
+        assert(i+5<=700);
+        for (int j=0;j<5;j++) assert(seen[i+j].chan==4 && seen[i+j].d1==expected[j]);
+        i+=4; batches++;
+    }
+    assert(batches==100);
+    midi_capture_enable(1);
+    const unsigned char invalid[2][2]={{74,64},{75,128}};
+    midi_cc_batch(0,invalid,2);
+    assert(!midi_captured_all(NULL,0)); /* Validate all before any send. */
     midi_capture_enable(0);
 }
 
@@ -239,6 +262,39 @@ static void test_threaded_delivery(void) {
     scheduler_shutdown();
     midi_capture_enable(0);
     puts("midi delivery: ordered notes with velocity, no local voices, legacy path intact");
+}
+
+static void test_short_gate_and_bounds(void) {
+    /* A fresh owned output has no subscribers. Keep the engine clock frozen
+       until the note is queued, then cross its 1ms gate in one callback. */
+    midi_shutdown(); midi_init(); midi_capture_enable(1);
+    double start=audio_time_now();
+    midi_note_for(0,60,64,.001);
+    pump_realtime(128);
+    MidiCapturedNote notes[4];
+    for (int i=0;i<100 && midi_captured_notes(notes,4)<2;i++) {
+        struct timespec pause={0,1000000}; nanosleep(&pause,NULL);
+    }
+    assert(midi_captured_notes(notes,4)==2 && notes[0].on && !notes[1].on);
+    assert(notes[1].at-start<.01); /* The old 50ms floor cannot pass. */
+    midi_capture_enable(1);
+    midi_note_for(0,60,64,NAN); midi_note_for(0,60,64,-1); midi_note_for(0,60,64,INFINITY);
+    assert(midi_captured_notes(notes,4)==0);
+    /* Filling the bounded queue must reject the next on, rather than emit
+       a note whose off can never be queued. Do not advance the clock. */
+    for (int i=0;i<1025;i++) midi_note_for(0,60,64,100);
+    assert(midi_captured_notes(NULL,0)==1024);
+    midi_capture_enable(0); midi_shutdown();
+    event_queue_clear(); audio_time=0;
+    assert(!track_load_from_code("await midimaps(Object.fromEntries(Array.from({length:33},(_,i)=>['m'+i,{}]))); note(60)"));
+    assert(!track_load_from_code("defaultmidimap(Object.fromEntries(Array.from({length:129},(_,i)=>['c'+i,i]))); note(60)"));
+    assert(track_load_from_code("note(60).nrpnn(Array(257).fill(1)).nrpv(64).midibend(.5).midi()"));
+    schedule_loaded(1);
+    assert(qhead && !qhead->ev.midi_nrpn_count && !qhead->ev.midi_has_bend && !qhead->ev.midi_cycle_start);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).set({_midiMapped:Array(33).fill({ccn:74,ccv:.5})}).midi()"));
+    schedule_loaded(0); assert(!qhead);
+    event_queue_clear();
 }
 
 static void test_midi_input_stores(void) {
@@ -1019,9 +1075,10 @@ static int midi_reference_main(void) {
         unsigned count = midi_captured_all(captured, 128);
         assert(count <= 128);
         midi_capture_enable(0);
-        cJSON *sends = cJSON_CreateArray();
+        cJSON *sends = cJSON_CreateArray(), *gates=cJSON_CreateArray();
         for (unsigned i = 0; i < count; i++) {
             MidiCaptured *msg = &captured[i];
+            if (msg->kind==MIDI_CAP_NOTE_ON) cJSON_AddItemToArray(gates,cJSON_CreateNumber(msg->duration));
             unsigned char bytes[264]; int nbytes = 0;
             if (msg->kind == MIDI_CAP_NOTE_ON || msg->kind == MIDI_CAP_CC) {
                 bytes[0] = (msg->kind == MIDI_CAP_NOTE_ON ? 0x90 : 0xB0) + msg->chan;
@@ -1044,6 +1101,7 @@ static int midi_reference_main(void) {
             cJSON_AddItemToArray(sends, message);
         }
         cJSON_AddItemToObject(entry, "sends", sends);
+        cJSON_AddItemToObject(entry,"gates",gates);
         cJSON_AddItemToArray(out, entry);
     }
     cJSON_Delete(cases);
@@ -1077,6 +1135,7 @@ int main(int argc, char **argv) {
     test_midi_restore_loopback();
     test_midi_extras_commit();
     test_midi_extras_delivery();
+    test_short_gate_and_bounds();
     event_queue_clear();
     midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");

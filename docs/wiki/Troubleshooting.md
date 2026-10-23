@@ -25,6 +25,11 @@ Changing the variable does not affect an already running process. When reporting
 an audio regression, include the CPU model and whether forcing C changes it.
 See [Development](Development.md#cpu-dispatch-and-benchmarks) for verification.
 
+## Output volume and mute
+
+If every song stays silent, check **F4 Volume** or use F2 `/volume 1`.
+Output mute survives song changes and reevaluation within the current process.
+
 ## My edit has no effect
 
 Music changes require F5; adding a supported visual call can activate immediately. Failed evaluation retains the previous playable pattern. Check the console and F4's pending-evaluation state. If you installed a new executable, close/reopen Tompouce normally: a running process keeps its previous executable.

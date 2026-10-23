@@ -29,9 +29,11 @@ chorus ring are demand-sized or right-sized, cutting BSS from 321 MiB to
 simultaneous long-convolver scaling, idle/synth gains and memory
 measurements.
 
-- [ ] Profile stretch preparation and decode latency for preparation-stage
-      fast paths, after the callback work above. Preserve measured decode
-      accuracy and the existing preparation budgets.
+- [ ] Coalesce concurrent identical stretch misses: the preparation profile
+      still measures four transforms for four requests for one key. Preserve
+      bounded work, cancellation and cache references without blocking the
+      audio callback. Native-rate decode and mono-stretch fast paths and their
+      measurements are recorded in the benchmark report.
 
 ## Plugin hosting
 
@@ -80,21 +82,35 @@ rtkit/wine-rt cannot be regression-tested here); measure round-trip
 MIDI-to-audio latency under load on a configured box before claiming
 live-coding suitability.
 
-## Remaining parity work (optional)
+## Remaining REPL parity work
 
 Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] Broaden Csound loader failure-side-effect coverage beyond URL caching,
-      parked engines and console diagnostics.
-- [ ] Extend MIDI output coverage for string CC names, MIDI maps, NRPN,
-      `isController`/options-object defaults, duplicate scalar/array sends,
-      note-off timestamps/durations and pinned numeric-string coercion drift.
-- [ ] Evaluate input beyond native CC/note-on. Web per-device stores versus
-      native merged stores and web non-CC store pollution are documented
-      divergences; do not break merged semantics or reproduce pollution merely
-      to turn a comparison green.
+- [ ] Broaden Switch Angel prebake helper checks beyond the selected pattern
+      helpers. Browser DOM controls, bmod/FX-based helpers and external-device
+      requirements are not established by the setup/gain-curve gates. See
+      [prebake support](docs/prebakes.md) for the supported startup/file contract.
+
+- [ ] Compare Csound loader side effects when JavaScript throws after an
+      earlier successful load, and when source catches a failed fetch. Native
+      preparation currently follows JavaScript evaluation. Syntax-error URL
+      caching, absence of failed-compile global mutations, held PCM, parked
+      engines and console diagnostics have maintained checks.
+- [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
+      manifests and explicit persistence across evaluations need design and
+      independent reference checks. Keep current 32-map/128-entry/32-send bounds.
+- [ ] Broaden MIDI output to channel-array options and physical note-off
+      delivery timing. The maintained gate covers named CCs, inline maps, NRPN,
+      controller/options defaults, duplicate scalar/command sends and exact
+      note-on/off timestamp differences. Pinned numeric-string coercion drift
+      remains explicit; do not replace the runtime or historical fixtures.
+
+Input beyond CC/note-on has been evaluated against the deployed stack:
+note-off, bend, touch and program messages do not become native CC entries.
+The web's per-device stores and non-CC store pollution remain documented
+divergences. Preserve native merged semantics and clean CC stores.
 
 Scope limits: generated multi-room tails use different random streams; browser
 wall-clock duck timers under contention have no exact native audio-clock

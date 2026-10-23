@@ -309,11 +309,16 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
             }
         }
         unsigned cursor=(unsigned)((block%FFT_SIZE+FFT_SIZE)%FFT_SIZE);
-        for (int channel=0;channel<2;channel++) {
+        for (int channel=0;channel<(channels==1?1:2);channel++) {
             transform(work->input[channel],work->sum[channel],key.factor,cursor,work->freq,work->shifted);
             for (int i=0;i<HOP;i++) {
                 long at=block+i-key.phase;
-                if (at>=0 && at<key.frames) buffer->pcm[(size_t)at*2+channel]=work->sum[channel][i];
+                if (at>=0 && at<key.frames) {
+                    buffer->pcm[(size_t)at*2+channel]=work->sum[channel][i];
+                    /* Mono source channels have identical input, envelope,
+                       pitch and OLA state; preserve stereo PCM bit for bit. */
+                    if (channels==1) buffer->pcm[(size_t)at*2+1]=work->sum[channel][i];
+                }
             }
             memmove(work->sum[channel],work->sum[channel]+HOP,(FFT_SIZE-HOP)*sizeof(float));
             memset(work->sum[channel]+FFT_SIZE-HOP,0,HOP*sizeof(float));

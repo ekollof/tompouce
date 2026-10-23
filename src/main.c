@@ -6,10 +6,19 @@
 #include "mcp.h"
 #include "banks.h"
 #include "csound_host.h"
+#include "javascript.h"
 #include <string.h>
 
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1],"--csound-worker")) return csound_worker_main();
+    if (argc>=2 && !strcmp(argv[1],"--install-prebake")) {
+        char error[512];
+        if (argc!=3 || !javascript_install_prebake(argv[2],error,sizeof(error))) {
+            fprintf(stderr,"%s\n",argc==3?error:"usage: tompouce --install-prebake switchangel"); return 1;
+        }
+        puts("Installed prebakes/switchangel.strudel. Activate with await loadPrebake('switchangel.strudel') in your source or prebake.strudel.");
+        return 0;
+    }
     int mcp = 0;
     int ui = 0;
     int mcp_port = 0;
@@ -33,6 +42,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("usage: tompouce [--mcp [--ui]] [--mcp-port N] [--bpm N] [--block N] [--code ...]\n");
             printf("  --mcp --ui from a terminal serves MCP on 127.0.0.1:%d (or --mcp-port).\n", MCP_DEFAULT_PORT);
+            puts("  --install-prebake switchangel downloads the pinned optional starter without overwriting existing files.");
             return 0;
         }
     }

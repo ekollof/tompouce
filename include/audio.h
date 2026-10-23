@@ -86,6 +86,10 @@ void audio_toggle_play(int on);
 int audio_is_playing(void);
 void audio_set_bpm(double bpm);
 double audio_get_bpm(void);
+/* Session-level final stereo bus attenuation, after all voices/effects.
+   Finite 0..1 only; lock-free for the callback. Persists across evaluations. */
+int audio_set_output_gain(double value);
+double audio_get_output_gain(void);
 void audio_set_block(unsigned long n);
 int audio_is_stream_active(void);
 const char *audio_backend_name(void);

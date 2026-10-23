@@ -3,6 +3,10 @@
 #include <cjson/cJSON.h>
 #include "csound_host.h"
 #include "visual.h"
+/* Confined, no-overwrite optional starter installation. The store entry
+   point also permits owned fixtures to test persistence without networking. */
+int javascript_install_prebake(const char *provider, char *error, size_t error_size);
+int javascript_store_prebake(const char *text, char *error, size_t error_size);
 
 typedef struct JsProgram JsProgram;
 int javascript_check(const char *code, char *error, int errorlen, int *line);

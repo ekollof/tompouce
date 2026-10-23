@@ -38,8 +38,8 @@ void midi_capture_enable(int on) {
     if (on) midi_log_count = 0;
     pthread_mutex_unlock(&midi_log_lock);
 }
-static void midi_log_add(int kind, int chan, int d1, int d2,
-    const unsigned char *sysex, int sysex_len) {
+static void midi_log_timed(int kind, int chan, int d1, int d2,
+    const unsigned char *sysex, int sysex_len, double duration) {
     pthread_mutex_lock(&midi_log_lock);
     if (!midi_capture_enabled || midi_log_count >= MIDI_CAPTURE_CAPACITY) {
         pthread_mutex_unlock(&midi_log_lock); return;
@@ -53,7 +53,12 @@ static void midi_log_add(int kind, int chan, int d1, int d2,
         slot->sysex_len = sysex_len;
     }
     slot->at = audio_time_now();
+    slot->duration=duration;
     pthread_mutex_unlock(&midi_log_lock);
+}
+static void midi_log_add(int kind, int chan, int d1, int d2,
+    const unsigned char *sysex, int sysex_len) {
+    midi_log_timed(kind,chan,d1,d2,sysex,sysex_len,0);
 }
 unsigned midi_captured_notes(MidiCapturedNote *out, unsigned capacity) {
     unsigned total = 0, copied = 0;
@@ -203,17 +208,25 @@ void midi_shutdown(void) {
 int midi_ready(void) { return midi_ok; }
 
 void midi_note(int chan, int note, int vel, int dur_ms) {
+    midi_note_for(chan,note,vel,fmax(50,dur_ms)/1000.0);
+}
+
+void midi_note_for(int chan, int note, int vel, double duration) {
     if (chan < 0 || chan > 15 || note < 0 || note > 127) return;
+    if (!isfinite(duration) || duration<0 || duration>86400) return;
     if (vel < 0) vel = 0;
     if (vel > 127) vel = 127;
-    if (dur_ms < 50) dur_ms = 50;
-    midi_log_add(MIDI_CAP_NOTE_ON, chan, note, vel, NULL, 0);
     pthread_mutex_lock(&midi_lock);
+    if (midi_running && n_offs>=MIDI_MAX_OFFS) {
+        pthread_mutex_unlock(&midi_lock);
+        log_console("midi: note-off queue full; note not sent"); return;
+    }
+    midi_log_timed(MIDI_CAP_NOTE_ON,chan,note,vel,NULL,0,duration);
     if (!midi_running) { pthread_mutex_unlock(&midi_lock); return; }
     if (midi_ok) send_raw(1, chan, note, vel);
     if (n_offs < MIDI_MAX_OFFS) {
         OffEv e;
-        e.at = audio_time_now() + dur_ms / 1000.0;
+        e.at = audio_time_now() + duration;
         e.ch = chan;
         e.note = note;
         int i = n_offs;
@@ -238,13 +251,22 @@ static void send_fixed_locked(snd_seq_event_t *ev) {
 
 void midi_cc(int chan, int cc, int value) {
     if (chan < 0 || chan > 15 || cc < 0 || cc > 127 || value < 0 || value > 127) return;
-    midi_log_add(MIDI_CAP_CC, chan, cc, value, NULL, 0);
+    const unsigned char pairs[1][2]={{(unsigned char)cc,(unsigned char)value}};
+    midi_cc_batch(chan,pairs,1);
+}
+
+void midi_cc_batch(int chan, const unsigned char (*pairs)[2], int count) {
+    if (chan<0 || chan>15 || !pairs || count<1 || count>32) return;
+    for (int i=0;i<count;i++) if (pairs[i][0]>127 || pairs[i][1]>127) return;
     pthread_mutex_lock(&midi_lock);
-    if (midi_ok && midi_running) {
-        snd_seq_event_t ev;
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_controller(&ev, chan, cc, value);
-        send_fixed_locked(&ev);
+    for (int i=0;i<count;i++) {
+        midi_log_add(MIDI_CAP_CC,chan,pairs[i][0],pairs[i][1],NULL,0);
+        if (midi_ok && midi_running) {
+            snd_seq_event_t ev;
+            snd_seq_ev_clear(&ev);
+            snd_seq_ev_set_controller(&ev,chan,pairs[i][0],pairs[i][1]);
+            send_fixed_locked(&ev);
+        }
     }
     pthread_mutex_unlock(&midi_lock);
 }

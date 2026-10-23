@@ -51,7 +51,7 @@ async function reference() {
     }
     if (frame===8192) {
       const prior=messages.length;
-      try {await loadCsound('invalid orchestra');} catch {invalidRejected=true;}
+      try {await loadCsound('giRetained += 100\ninvalid orchestra');} catch {invalidRejected=true;}
       invalidMessages=messages.length-prior;
       await loadCsound(other);
       await engine.inputMessage('i "Other" '+(.6-frame/rate)+' .05 441 .1');
@@ -77,12 +77,31 @@ async function reference() {
     }
   }
   const mean=(begin,end)=>right.slice(Math.round(begin*rate),Math.round(end*rate)).reduce((a,b)=>a+b,0)/Math.round((end-begin)*rate);
-  let fetches=0;
+  let fetches=0,failedFetches=0,invalidFetches=0;
   const originalFetch=window.fetch;
-  window.fetch=async(url,...args)=>String(url)==='https://raw.githubusercontent.com/fixture/orchestra/main/tone.orc'?
-    (fetches++,new Response('instr Cached\na1 oscili p5,p4\nout a1,a1\nendin\n')):originalFetch(url,...args);
+  window.fetch=async(url,...args)=>{
+    if(String(url)==='https://raw.githubusercontent.com/fixture/orchestra/main/tone.orc') {
+      fetches++;return new Response('instr Cached\na1 oscili p5,p4\nout a1,a1\nendin\n');
+    }
+    if(String(url)==='https://raw.githubusercontent.com/fixture/orchestra/main/invalid.orc') {
+      invalidFetches++;return new Response('giRetained += 100\ninvalid orchestra');
+    }
+    if(String(url)==='https://raw.githubusercontent.com/fixture/orchestra/main/missing.orc') {
+      failedFetches++;throw new TypeError('owned fixture fetch failure');
+    }
+    return originalFetch(url,...args);
+  };
   await loadOrc('github:fixture/orchestra/main/tone.orc');
   await loadOrc('https://raw.githubusercontent.com/fixture/orchestra/main/tone.orc');
+  const priorInvalid=messages.length;
+  let invalidURLRejected=false,failedRejections=0;
+  try{await loadOrc('github:fixture/orchestra/main/invalid.orc');}catch{invalidURLRejected=true;}
+  const invalidURLMessages=messages.length-priorInvalid;
+  await loadOrc('https://raw.githubusercontent.com/fixture/orchestra/main/invalid.orc');
+  const cachedInvalidMessages=messages.length-priorInvalid-invalidURLMessages;
+  for(const url of ['github:fixture/orchestra/main/missing.orc','https://raw.githubusercontent.com/fixture/orchestra/main/missing.orc']) {
+    try{await loadOrc(url);}catch{failedRejections++;}
+  }
   window.fetch=originalFetch;
   const host=repl({getTime:()=>0,onSchedule:()=>{},setInterval:()=>1,clearInterval:()=>{}});
   await host.evaluate('(async()=>{await loadCsound("invalid orchestra");return note(72).csound("Held")})()',false);
@@ -92,6 +111,7 @@ async function reference() {
   return JSON.stringify({moduleURL,loaderSource,version:String(await engine.getVersion()),
     name:engine.name,frames:count,rate,difference,leftEnergy,rightEnergy,crossings,first,
     initialGlobal:mean(.62,.63),repeatedGlobal:mean(.71,.715),fetches,invalidRejected,invalidMessages,invalidEvaluationAccepted,
+    failedFetches,failedRejections,invalidFetches,invalidURLRejected,invalidURLMessages,cachedInvalidMessages,
     contextState:context.state,baselineContextState:baselineContext.state});
 }
 
@@ -109,6 +129,9 @@ try {
   assert(Math.abs(result.initialGlobal-.3)<1e-6 && Math.abs(result.repeatedGlobal-.4)<1e-6);
   assert.equal(result.first,Math.round(.02*result.rate)+1);
   assert.equal(result.fetches,1);
+  assert.equal(result.failedFetches,1); assert.equal(result.failedRejections,2);
+  assert.equal(result.invalidFetches,1); assert.equal(result.invalidURLRejected,false);
+  assert(result.invalidURLMessages>0); assert.equal(result.cachedInvalidMessages,0);
   assert.equal(result.invalidRejected,false); assert(result.invalidMessages>0);
   assert.equal(result.invalidEvaluationAccepted,true);
   result.loaderSha256=createHash('sha256').update(result.loaderSource).digest('hex'); delete result.loaderSource;

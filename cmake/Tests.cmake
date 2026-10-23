@@ -65,6 +65,12 @@ add_custom_target(test-csound-reference-web
     DEPENDS test_csound WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+add_custom_target(test-prebake-reference-web
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_PREBAKE_BINARY=$<TARGET_FILE:test_javascript>"
+        node scripts/prebake-reference-qa.mjs
+    DEPENDS test_javascript
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+
 add_custom_target(test-voice-reference-web
     COMMAND node scripts/voice-pool-reference-qa.mjs
     COMMAND node scripts/voice-eviction-reference-qa.mjs
@@ -202,7 +208,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security)
+foreach(name audio audio_performance room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security javascript)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
         AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security")
@@ -216,6 +222,12 @@ foreach(name audio audio_performance room duck_onset native_synth dsp editor ter
     endif()
     if(name STREQUAL "dsp")
         list(APPEND sources src/dsp.c src/periodic.c)
+    endif()
+    if(name STREQUAL "websamp")
+        list(APPEND sources src/sampler.c)
+    endif()
+    if(name STREQUAL "javascript")
+        list(APPEND sources src/javascript.c src/slider.c)
     endif()
     if(name STREQUAL "live_sliders")
         list(APPEND sources src/slider.c src/javascript.c src/js_audio.c src/duck_onset.c)
@@ -249,13 +261,15 @@ target_link_options(test_websamp_security_sanitize PRIVATE -Wl,--export-dynamic)
 add_custom_target(test-security
     COMMAND $<TARGET_FILE:test_mcp_security>
     COMMAND $<TARGET_FILE:test_websamp_security>
+    COMMAND $<TARGET_FILE:test_javascript> --prebake
     COMMAND "${Python3_EXECUTABLE}" tests/test_companion.py
-    DEPENDS test_mcp_security test_websamp_security
+    DEPENDS test_mcp_security test_websamp_security test_javascript
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-security-sanitize
     COMMAND $<TARGET_FILE:test_mcp_security_sanitize>
     COMMAND $<TARGET_FILE:test_websamp_security_sanitize>
-    DEPENDS test_mcp_security_sanitize test_websamp_security_sanitize
+    COMMAND $<TARGET_FILE:test_javascript_sanitize> --prebake
+    DEPENDS test_mcp_security_sanitize test_websamp_security_sanitize test_javascript_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_dsp_sanitize>

@@ -78,6 +78,14 @@ typedef struct {
     unsigned char midi_sysex[256];
     int midi_cmd;         /* 0 none, 1 clock, 2 start, 3 continue, 4 stop */
     int midi_cycle_start; /* whole.begin == 0 transport start */
+    double midi_duration; /* dominant note gate after web noteOffsetMs */
+    int midi_nrpn_count;
+    unsigned char midi_nrpn[6][2]; /* bounded CC transaction, after direct CC */
+    int midi_post_prog, midi_has_post_prog, midi_has_post_sysex;
+    int midi_post_sysex_id_len, midi_post_sysex_len;
+    unsigned char midi_post_sysex_id[3], midi_post_sysex[256];
+    int midi_map_count;
+    unsigned char midi_map[32][2]; /* mapped CCs precede notes */
     int smp_gate;       // gate sampled notes by duration (melodic banks)
     int is_drum;        // 1 if drum token
     char token[64];     // sound name for drum or note name

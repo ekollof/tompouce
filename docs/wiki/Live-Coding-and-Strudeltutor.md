@@ -21,7 +21,18 @@
 
 F5 evaluates; it does not save the named project file. A failed evaluation retains the last playable pattern. Ctrl+Q recovery state is also separate from a deliberate project save.
 
+F4 includes a Volume slider for the final output. Drag it, use its mouse wheel,
+or click it and use arrows for 1% steps; Escape returns editor focus. F2
+`/volume .5` sets half amplitude and `/volume 1` restores unity. This changes
+held notes and effect tails immediately, without editing or evaluating source.
+The session's level survives song changes and reevaluation; restart restores unity.
+
 In vi normal mode, `:` opens local commands, including `:w`, `:e`, `:q`, `:help`, `:tutor` and `:set wrap`. Tab completes commands, settings and JSON paths. Unsaved-change guards protect commands such as `:e` and `:q`; use `!` only when you intend to discard edits. No shell commands run through this prompt.
+
+## Reusable setup
+
+For reusable helpers shared across songs, see [Prebake setup files](Prebakes.md).
+That guide covers automatic startup setup and the optional Switch Angel starter.
 
 ## Work through the tutorial
 

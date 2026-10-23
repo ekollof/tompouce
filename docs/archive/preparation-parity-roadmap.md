@@ -415,3 +415,28 @@ wet Arpoon and multi-room generated sequences remain diagnostic. These checks
 do not establish complete decoder, synthesis or full-song waveform parity.
 Use owned test engines/browser profiles and isolated audio resources; leave the
 user's running source, playback and routing untouched.
+
+## Preparation and MIDI follow-up
+
+- [x] Profile preparation separately from callback work and cache locking.
+      Native-rate decode retains its owned PCM; mono stretch reuses one
+      transform for both channels. Three-run CPU medians and workload details
+      are in `docs/simd-benchmark.md`; shared-mono web comparisons cover pitch
+      compensation, reverse, loops and envelopes without changing thresholds.
+- [x] Expand dominant MIDI to controller-only output, options precedence and
+      gain/velocity defaults, inline maps, all 128 named CCs, NRPN transactions
+      and duplicate scalar/command sends. The 180-case live gate compares
+      actual bytes/order and note-on/off timestamp differences. Gates preserve
+      fractional milliseconds and `.duration()` cycle units; short notes no
+      longer receive the legacy 50ms floor. Bounded queue saturation rejects
+      the next note-on rather than losing its off.
+- [x] Broaden Csound failure checks: globals before rejected syntax do not
+      mutate held state, a fetched syntax error resolves and caches its URL
+      without recompilation, and a rejected fetch remains cached/rejected.
+      Native and offline web engines retain held PCM and later definitions.
+- [x] Recheck controller input beyond CC/note-on against the deployed stack.
+      Note-off/bend/touch/program pollution stays confined to the web store;
+      native merged clean CC semantics are deliberately retained.
+
+Remaining work is in `TODO.md`; these checks do not establish full synthesis,
+physical MIDI timing or all JavaScript/loader-exception side-effect parity.

@@ -207,6 +207,11 @@ range divided by 1,000. These gates establish the tested control behavior;
 they do not establish complete browser audio, device or synthesis parity.
 Ordinary sliders do not continuously modulate already sounding voices in the
 web REPL; adding that behavior here would require a separate feature.
+F4's output Volume slider is a separate final-bus control: it scales held
+voices, Csound and effect tails immediately without changing source or running
+JavaScript. F2 `/volume .5` sets half amplitude; `/volume 1` restores unity.
+The level persists across evaluations and song changes for the current process.
+See [prebake support](prebakes.md) for the Switch Angel Volume widget mapping.
 
 Imports resolve the bundled modules:
 
@@ -235,6 +240,11 @@ isolated to each compiled program and refreshed on reevaluation.
 This is an embedded ECMAScript host, not Node.js or a browser: there
 is no filesystem/process API, DOM, WebAudio, Hydra, or browser input-device API.
 Additional JavaScript modules require an explicit addition to the bundle.
+
+[Prebake setup files](prebakes.md) can register reusable helpers before song
+evaluation. Load named files with `await loadPrebake('helpers.strudel')`, or
+use `~/.config/tompouce/prebake.strudel` for automatic setup. An opt-in pinned
+Switch Angel starter is available with `tompouce --install-prebake switchangel`.
 
 JavaScript Strudel is the only source language. The historical C mini/statement
 parser and `bpm` / `drum` / `notes` / `| transform` line dialect have been removed.
@@ -816,7 +826,11 @@ Rests and pitch-less drum patterns carry no MIDI note, and haps without a
 `gain` times `velocity`, defaulting to 1 times .9 for dominant MIDI, with
 seven-bit rounding including zero. Local audio gain stages do not affect it;
 an out-of-range note velocity aborts that MIDI hap. The legacy `midichan`
-path keeps its local gain rules. CC (`ccn` integer 0..127 with
+path keeps its local gain rules. Options can supply `gain`, `velocity`,
+`midichannel`, `noteOffsetMs` and `isController`; the second options argument
+overrides the first object, and explicit hap controls override defaults.
+Controller mode suppresses notes while retaining controls and transport.
+CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 `ccv` 0..1, also via `control([ccn, ccv])`), program change (`progNum`
 0..127, truncated), pitch bend (`midibend` -1..1), channel aftertouch
 (`miditouch` 0..1), sysex (integer `sysexid`/`sysexdata` bytes 0..255, up to
@@ -825,17 +839,39 @@ path keeps its local gain rules. CC (`ccn` integer 0..127 with
 array forms) all send through ALSA. `midiport` values are accepted and
 broadcast to ALSA subscribers. A hap at cycle zero additionally sends
 transport start, as on the web. Sends run in web order (note, program,
-sysex, CC, bend, touch, cycle-zero start, transport); a rejected extra
+sysex, CC, NRPN, bend, touch, cycle-zero start, transport/command); a rejected extra
 drops itself and every later extra for that hap with a console warning,
-matching the web throw-abort behavior. String sysex forms, non-integer CC
-numbers and out-of-range values never send. `cmake --build build --target
-test-midi-reference-web` gates 24 hap-value, commit and actual send-byte/order
-cases against the deployed REPL. Only MIDI transport and clock mapping are
-mocked; the deployed scheduler and WebMidi conversion/validation run normally.
-Note-off timestamps and durations are not compared. Open gaps: string CC
-names, MIDI maps, NRPN, `isController` and options-object
-velocity/gain/note-offset defaults, combined scalar-plus-array duplicate
-sends, and numeric-string control coercion drift (pinned 1.2.6 coerces
+matching the web throw-abort behavior. Numeric CCs truncate like WebMidi;
+unknown controller names and out-of-range values reject. `nrpnn([msb,lsb])`
+and `nrpv(value)` or `nrpv([coarse,fine])` send a bounded NRPN CC transaction,
+including the reference's RPN-null deselection. Both parameter and data bytes
+must fit 0..127. Scalar extras and equivalent `midicmd` array forms both send,
+with command forms following cycle-zero start rather than replacing earlier
+messages. String sysex forms remain unsupported.
+
+`defaultmidimap({lpf:74})` registers the current program's default map;
+`await midimaps({synth:{lpf:{ccn:74,min:100,max:1100,exp:2}}})` registers named
+maps selected with `.midimap('synth')` or MIDI options. Mapped CCs send before
+notes, in hap control order, with clamping and exponential scaling. Maps are
+bounded to 32 names including the default, 128 control entries per map and
+32 mapped sends per hap. Remote map manifests and map persistence across
+evaluations remain unsupported; inline definitions must be in the source.
+
+MIDI note gates use the hap duration in **cycles**, including `.duration()`
+and `.clip()`, converted at scheduling tempo. The default note-off offset is
+1 ms, capped at half the gate, and `noteOffsetMs:0` disables that offset.
+Nonnegative offsets and gates up to 24 hours are supported. Dominant MIDI
+keeps fractional milliseconds and short gates; the legacy local-plus-ALSA
+path retains its 50 ms floor. A full note-off queue rejects the new note-on
+instead of sending a note without a scheduled off.
+
+`cmake --build build --target test-midi-reference-web` gates 180 cases,
+including all 128 controller names, hap values, native commits, actual send
+bytes/order and note-on/off timestamp differences against the deployed REPL.
+Only MIDI transport and clock mapping are mocked; scheduling and WebMidi
+conversion/validation run normally. These gates establish note duration,
+not physical device delivery latency. Open gaps include channel-array options,
+remote/persistent maps and numeric-string control coercion drift (pinned 1.2.6 coerces
 `ccn("74")` to 74 while the deployed REPL preserves the string and
 rejects the send).
 

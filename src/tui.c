@@ -76,6 +76,7 @@ static int yank_lines;
 static int sel_active, sel_linewise, sel_line, sel_col, sel_inclusive;
 static int hl_line;
 static int mouse_enabled = 1, pane_focus, mouse_drag, mouse_slider = -1;
+static int output_volume_row=-1, output_volume_col, output_volume_focus, output_volume_drag;
 static int mouse_x, mouse_y;
 static int tty_active, smg_active, saved_tty_valid;
 static struct termios saved_tty;
@@ -2426,9 +2427,8 @@ static int slider_at_cursor(void) {
     return -1;
 }
 
-static void draw_slider_chip(int row, int col, int width, int idx) {
-    double v = 0, mn = 0, mx = 1;
-    if (width < 12 || !slider_info(idx, &v, &mn, &mx, NULL)) return;
+static void draw_numeric_slider(int row, int col, int width, double v, double mn, double mx) {
+    if (width<12)return;
     double span = mx - mn;
     double t = (span > 1e-12) ? (v - mn) / span : 0;
     if (t < 0) t = 0;
@@ -2441,6 +2441,20 @@ static void draw_slider_chip(int row, int col, int width, int idx) {
     char lab[24];
     snprintf(lab, sizeof(lab), "%s %.2f", bar, v);
     draw_text(row, col, lab, width, 8);
+}
+static void draw_slider_chip(int row, int col, int width, int idx) {
+    double v=0,mn=0,mx=1;
+    if(slider_info(idx,&v,&mn,&mx,NULL))draw_numeric_slider(row,col,width,v,mn,mx);
+}
+
+static void output_volume_status(void) {
+    snprintf(status_msg,sizeof(status_msg),"output volume %.2f",audio_get_output_gain());
+}
+
+static void output_volume_nudge(int direction) {
+    double value=round(audio_get_output_gain()*100)+direction;
+    audio_set_output_gain(fmax(0,fmin(1,value/100)));
+    output_volume_status();
 }
 
 /* Recent accepted notes; never parse or evaluate user code on the UI thread. */
@@ -3340,7 +3354,7 @@ static void right_geom(int *mid_out, int *h_out, int *w_out, int *state_h_out, i
     int w = cols - mid;
     if (w < 0) w = 0;
     int sh = 0;
-    if (show_state && h >= 14 && w >= 30) sh = h>=30?18:(h>=22?14:10);
+    if (show_state && h >= 14 && w >= 30) sh = h>=30?19:(h>=22?15:11);
     int th = 0;
     if (show_tracks && h - sh >= 16 && w >= 24) {
         int need = scheduler_song_count() + 2;
@@ -3405,6 +3419,7 @@ static const DocLine cheat[] = {
     {3, "F10 / F11         Narrow / widen the editor pane"},
     {3, "F12               Fullscreen piano roll + scope (Esc returns)"},
     {3, "Ctrl+Left/Right   Adjust live slider at cursor"},
+    {3, "F4 Volume        Drag, wheel or focus and use arrows; /volume 0..1"},
     {0, ""},
     {1, "Songs and files"},
     {3, "F7                Toggle sequential song playback"},
@@ -3634,6 +3649,7 @@ static void state_line(int *row, int maxrow, int col, int width, const char *for
 }
 
 static void draw_state_at(int r0, int c0, int h, int w) {
+    output_volume_row=-1;
     if (h < 5 || w < 20) return;
     terminal_box(r0, c0, h, w);
     terminal_move(r0, c0+2);
@@ -3641,6 +3657,11 @@ static void draw_state_at(int r0, int c0, int h, int w) {
     char b[256];
     int row = r0 + 1;
     int maxrow = r0 + h - 1;
+    output_volume_row=row; output_volume_col=c0+8;
+    blank_inner(row,c0+1,w-2);
+    draw_text(row,c0+1,"Volume",7,output_volume_focus&&pane_focus?8:0);
+    draw_numeric_slider(row,output_volume_col,w-9,audio_get_output_gain(),0,1);
+    row++;
     double now = audio_time_now();
     int qd = event_queue_depth();
     int av = 0; int by[10] = {0};
@@ -4066,6 +4087,16 @@ static void do_command_or_ai(const char *text) {
                     audio_set_bpm(bpm); snprintf(status_msg,256,"BPM %.0f",audio_get_bpm());
                 } else snprintf(status_msg,256,"BPM must be a nonnegative finite number");
             }
+        } else if (cmd && !strcmp(cmd,"volume")) {
+            char *arg=strtok_r(NULL," \t",&save), *extra=strtok_r(NULL," \t",&save);
+            if (!arg && !extra)output_volume_status();
+            else {
+                char *end=NULL; errno=0;
+                double value=arg?strtod(arg,&end):NAN;
+                if (extra || !arg || end==arg || *end || errno || !audio_set_output_gain(value))
+                    snprintf(status_msg,sizeof(status_msg),"usage: /volume 0..1");
+                else output_volume_status();
+            }
         } else if (cmd && (!strcmp(cmd,"tutor") || !strcmp(cmd,"tutor!"))) {
             if (strtok_r(NULL," \t",&save)) snprintf(status_msg,sizeof(status_msg),"usage: /tutor[!]");
             else tutor_open(cmd[5]=='!');
@@ -4322,7 +4353,25 @@ static void read_mouse(void) {
     int mid, h, w, sh, th;
     right_geom(&mid, &h, &w, &sh, &th);
     (void)w;
-    if (end == 'm') { mouse_drag = 0; mouse_slider = -1; return; }
+    if (end == 'm') { mouse_drag = 0; mouse_slider = -1; output_volume_drag=0; return; }
+    int volume_visible=show_state && sh>0 && output_volume_row==2+h-sh;
+    int volume_hit=volume_visible && mouse_y==output_volume_row && mouse_x>=mid+1 && mouse_x<mid+w-1;
+    if ((b&64) && volume_hit) {
+        input_mode=0;
+        pane_focus=output_volume_focus=1; reference_focus=0;
+        output_volume_nudge((b&1)?-1:1); return;
+    }
+    if (!(b&64) && (b&3)==0 && volume_visible && (volume_hit || output_volume_drag)) {
+        input_mode=0;
+        pane_focus=output_volume_focus=1; reference_focus=0;
+        if (!(b&32) && volume_hit)output_volume_drag=mouse_x>=output_volume_col;
+        if (output_volume_drag) {
+            double value=fmax(0,fmin(1,(mouse_x-output_volume_col)/9.0));
+            audio_set_output_gain(round(value*100)/100); output_volume_status();
+        }
+        return;
+    }
+    if (!(b&32) && !(b&64))output_volume_focus=0;
     if (b & 64) {
         int dir = (b & 1) ? 1 : -1;
         if (mouse_x >= mid && mouse_y>=1 && mouse_y<1+h-sh-th && show_reference && !show_docs && !search_mode && !file_mode) {
@@ -4721,8 +4770,12 @@ void tui_run(void) {
         if (ch == KEY_STRUDEL_STOP) { scheduler_transport_set(0); continue; }
         if (ch == 26) { editor_undo(); continue; }
         if (ch == 25) { editor_redo(); continue; }
-        if (ch == 27 && pane_focus) { pane_focus = 0; continue; }
+        if (ch == 27 && pane_focus) { pane_focus = 0; output_volume_focus=0; continue; }
         if (ch == 12) { toggle_console(); continue; } /* Ctrl+L, including vi and console focus. */
+        if (pane_focus && output_volume_focus && show_state &&
+            (ch==2001 || ch==2002 || ch==(int)NCKEY_LEFT || ch==(int)NCKEY_RIGHT)) {
+            output_volume_nudge(ch==2002 || ch==(int)NCKEY_RIGHT?1:-1); continue;
+        }
         if (pane_focus && vi_mode && vi_normal && ch==':' && vi_handle_normal(ch)) continue;
         if (pane_focus && ch != 17 && ch != 16 && ch != (int)NCKEY_PGDOWN && ch != (int)NCKEY_PGUP &&
             !(ch >= ((int)NCKEY_F00+(1)) && ch <= ((int)NCKEY_F00+(12)))) continue;
@@ -4823,6 +4876,7 @@ void tui_run(void) {
             continue;
         } else if (ch == ((int)NCKEY_F00+(4))) {
             show_state = !show_state;
+            if (!show_state)output_volume_focus=output_volume_drag=0;
             snprintf(status_msg, 256, show_state ? "state on" : "state off");
             continue;
         } else if (ch == ((int)NCKEY_F00+(6))) {

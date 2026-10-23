@@ -3,6 +3,7 @@
 - [Home](Home.md)
 - [Getting started](Getting-Started.md)
 - [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md)
+- [Prebake setup files](Prebakes.md)
 - [Sounds and samples](Sounds-and-Samples.md)
 - [Visuals and themes](Visuals-and-Themes.md)
 - [Companion and integrations](Companion-and-Integrations.md)

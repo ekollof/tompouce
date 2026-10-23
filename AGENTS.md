@@ -101,12 +101,17 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   `src/periodic.c` prepares immutable periodic waves and looping noise buffers;
   never build or evict their tables in rendering. Keep pulse's source gain,
   render-quantum startup and stereo routing separate from square synthesis.
+  Final output volume uses a lock-free integer target, read once per block
+  after voices/effects/limiting; preserve unity PCM and live tail continuity.
   Preserve floating-point operation order and test forced C/SSE2/AVX/AVX2 PCM
   equivalence; lower-ISA kernels must not emit newer instructions.
 - Accepted notes, shared-effect tails and duck callbacks survive live slider,
   tempo and program changes. Duck callbacks use a bounded independent timeline;
   control-only events reserve no voice and emit no MIDI or note history. Preserve
   phase anchors and transport revisions rather than restarting the scheduler.
+- Dominant MIDI gates use hap duration/clip in cycles and retain fractional
+  milliseconds. Preserve mapped-CC-before-note order, complete NRPN transactions
+  and bounded note-off admission; never emit an on whose off cannot be queued.
 - Direct sliders are query-time references with source identity and source/undo
   synchronization. Aliased sliders follow the web's static fallback. Explicit
   evaluation/start behavior and failed-evaluation retention must match the REPL.
@@ -135,6 +140,10 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   defaults. Import assets through the confined manifest-based sound store.
 - JavaScript Strudel is the only source language. Keep mini-notation and tonal
   parsing in the pinned upstream runtime; do not restore the retired C parser.
+- Prebakes run before song evaluation, within the same budgets. Keep their file
+  reads confined and disabled at query time; external offsets must not bind
+  song highlights/sliders. The optional Switch Angel starter stays a pinned
+  opt-in download; retain its explicit native-profile diagnostics and attribution.
 
 ## Security and code quality
 

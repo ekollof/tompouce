@@ -1,4 +1,4 @@
-/* Repeatable preparation profile. Steps 2 and 4 of TODO.md rerun these workloads.
+/* Repeatable preparation profile. See docs/simd-benchmark.md.
    cold: one long decode, one stretch miss, one sample-convolution miss,
    one generated-IR miss, then the same keys again as cache hits.
    live: nearby parameter changes that miss preparation and reuse the decoded sample.
@@ -53,12 +53,12 @@ static void snapshot(PrepLockStat locks[PREP_LOCK_COUNT], PrepWorkStat works[PRE
     prep_profile_snapshot(locks, works);
 }
 
-static char *write_wav(int frames) {
+static char *write_wav_channels(int frames, int channels) {
     char *path = strdup("/tmp/tompouce-prep-XXXXXX.wav");
     assert(path);
     int fd = mkstemps(path, 4);
     assert(fd >= 0);
-    size_t bytes = 44u + (size_t)frames * 4u;
+    size_t bytes = 44u + (size_t)frames * channels * 2u;
     unsigned char *data = calloc(1, bytes);
     assert(data);
     unsigned char header[44] = {
@@ -70,18 +70,23 @@ static char *write_wav(int frames) {
         header[40 + i] = (unsigned char)(pcm >> (8 * i));
     }
     memcpy(data, header, sizeof(header));
+    data[22]=(unsigned char)channels;
+    data[32]=(unsigned char)(channels*2);
+    unsigned rate=44100u*(unsigned)channels*2u;
+    for (int i=0;i<4;i++) data[28+i]=(unsigned char)(rate>>(8*i));
     for (int i = 0; i < frames; i++) {
         double phase = 2 * 3.141592653589793 * 440.0 * i / 44100.0;
         int left = (int)(8000 * sin(phase)), right = -left / 2;
-        unsigned char *sample = data + 44 + (size_t)i * 4u;
+        unsigned char *sample = data + 44 + (size_t)i * channels * 2u;
         sample[0] = (unsigned char)left; sample[1] = (unsigned char)((unsigned)left >> 8);
-        sample[2] = (unsigned char)right; sample[3] = (unsigned char)((unsigned)right >> 8);
+        if (channels==2) { sample[2] = (unsigned char)right; sample[3] = (unsigned char)((unsigned)right >> 8); }
     }
     assert(write(fd, data, bytes) == (ssize_t)bytes);
     assert(close(fd) == 0);
     free(data);
     return path;
 }
+static char *write_wav(int frames) { return write_wav_channels(frames,2); }
 
 static int acquire(const char *path) {
     int sample = smp_acquire_abs(path, 60);
@@ -246,6 +251,18 @@ static double run_pool_stretch(int workers, int count, int sample,
 }
 
 int main(void) {
+    /* Repeat cold keys, separate CPU from wall time, and never time fixture
+       generation. Kept observational: no machine-specific speed threshold. */
+    for (int channels=1;channels<=2;channels++) {
+        prep_profile_reset();
+        for (int i=0;i<8;i++) {
+            char *path=write_wav_channels(44100*8,channels);
+            int sample=acquire(path);
+            assert(!unlink(path)); free(path);
+            stretch_once(sample,1.7,311,.4);
+        }
+        print_prep(channels==1?"repeat-mono":"repeat-stereo");
+    }
     char *note_path = write_wav(44100);
     char *long_paths[4];
     for (int i = 0; i < 4; i++) long_paths[i] = write_wav(44100 * 8);

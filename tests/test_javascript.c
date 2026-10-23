@@ -138,6 +138,119 @@ static void write_module(const char *path, const char *source) {
     assert(file && fputs(source,file) >= 0 && fclose(file) == 0);
 }
 
+static void test_prebake(void) {
+    char root[]="/tmp/tompouce-prebake-XXXXXX",path[512],linked[1024];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    assert(!previous || saved);
+    assert(!setenv("XDG_CONFIG_HOME",root,1));
+    snprintf(path,sizeof(path),"%s/tompouce",root); assert(!mkdir(path,0700));
+    JsProgram *program; cJSON *haps=query("note(60)",&program);
+    cJSON_Delete(haps); javascript_free(program);
+    char error[1024]; cJSON *metadata=NULL;
+    char directory[512]; snprintf(directory,sizeof(directory),"%s/tompouce/prebakes",root);
+    snprintf(linked,sizeof(linked),"%s/outside",root); assert(!mkdir(linked,0700));
+    assert(!symlink(linked,directory));
+    assert(!javascript_store_prebake("void 0",error,sizeof(error)));
+    assert(!unlink(directory) && !rmdir(linked));
+    const char *starter="window.UISlider=()=>{throw Error('DOM control must be skipped')};\n"
+        "window.UISlider(()=>{},'Volume',.8); window.fixtureCount=(window.fixtureCount??0)+1;\n"
+        "setGainCurve(x=>x*x); setDefault('gain',1); $: note(99);\n";
+    assert(javascript_store_prebake(starter,error,sizeof(error)));
+    assert(!javascript_store_prebake("throw Error('must not replace')",error,sizeof(error)));
+    haps=query("await loadPrebake('switchangel.strudel'); await loadPrebake('switchangel.strudel'); note(fixtureCount).gain(.5)",&program);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    assert(cJSON_GetObjectItemCaseSensitive(value,"note")->valueint==1);
+    assert(cJSON_GetObjectItemCaseSensitive(value,"gain")->valuedouble==.25);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("await loadPrebake('switchangel.strudel'); $: note(60); $: note(64)",&program);
+    assert(cJSON_GetArraySize(haps)==2); cJSON_Delete(haps); javascript_free(program);
+    const char *rejected[]={"await loadPrebake('../prebake.strudel'); note(60)",
+        "await loadPrebake('/etc/passwd'); note(60)","await loadPrebake('switchangel.strudel\\0x'); note(60)",
+        "for(let i=0;i<17;i++) __hostPrebake('switchangel.strudel'); note(60)"};
+    for (size_t i=0;i<sizeof(rejected)/sizeof(*rejected);i++) {
+        program=javascript_compile(rejected[i],120,&metadata,error,sizeof(error)); assert(!program && !metadata);
+    }
+    snprintf(linked,sizeof(linked),"%s/link.strudel",directory); assert(!symlink("switchangel.strudel",linked));
+    program=javascript_compile("await loadPrebake('link.strudel'); note(60)",120,&metadata,error,sizeof(error));
+    assert(!program); assert(!unlink(linked));
+    program=javascript_compile("new Pattern(()=>{__hostPrebake('switchangel.strudel');return []})",120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata); metadata=NULL;
+    haps=javascript_query(program,0,1);
+    assert(!haps || !cJSON_GetArraySize(haps)); cJSON_Delete(haps); javascript_free(program);
+    for (int i=0;i<5;i++) {
+        snprintf(linked,sizeof(linked),"%s/big%d.strudel",directory,i);
+        FILE *file=fopen(linked,"w"); assert(file);
+        char *padding=malloc(256*1024); assert(padding); memset(padding,' ',256*1024); padding[0]=padding[1]='/';
+        assert(fwrite(padding,1,256*1024,file)==256*1024 && !fclose(file)); free(padding);
+    }
+    program=javascript_compile("for(let i=0;i<5;i++) await loadPrebake('big'+i+'.strudel'); note(60)",120,&metadata,error,sizeof(error));
+    assert(!program && strstr(error,"1 MiB"));
+    for (int i=0;i<5;i++) { snprintf(linked,sizeof(linked),"%s/big%d.strudel",directory,i); assert(!unlink(linked)); }
+    snprintf(linked,sizeof(linked),"%s/switchangel.strudel",directory); assert(!unlink(linked)); assert(!rmdir(directory));
+    snprintf(path,sizeof(path),"%s/tompouce/prebake.strudel",root);
+    write_module(path,
+        "await Promise.resolve(); const pitches = \"60 64\";\n"
+        "window.preLead = () => note(pitches);\n"
+        "register('preDouble', pat => pat.fast(2));\n"
+        "window.preCount = (window.preCount ?? 0)+1;\n"
+        "setcps(.75); samples({preSound:['https://example.com/pre.wav']});\n"
+        "$: note(99);\n");
+    program=javascript_compile("preLead().preDouble()",120,&metadata,error,sizeof(error));
+    if (!program) fprintf(stderr,"prebake error: %s\n",error);
+    assert(program && metadata);
+    assert(cJSON_GetObjectItemCaseSensitive(metadata,"bpm")->valuedouble==180);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(metadata,"samples"))==1);
+    cJSON_Delete(metadata); metadata=NULL;
+    haps=javascript_query(program,0,1);
+    if (!haps || cJSON_GetArraySize(haps)!=4) {
+        char *dump=haps?cJSON_PrintUnformatted(haps):NULL;
+        fprintf(stderr,"prebake haps: %s\n",dump?dump:"null"); free(dump);
+    }
+    assert(haps && cJSON_GetArraySize(haps)==4);
+    assert(!cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"locations")));
+    cJSON_Delete(haps);
+    /* Editing the file does not mutate an accepted runtime. Reevaluation
+       reads the replacement and uses a fresh set of globals/prototypes. */
+    write_module(path,"window.preLead=()=>note(72); window.preCount=(window.preCount??0)+1;");
+    haps=javascript_query(program,0,1); assert(cJSON_GetArraySize(haps)==4);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("note(preCount)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==1);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("preLead()",&program); assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    write_module(path,"// tompouce-prebake: switchangel\nwindow.UISlider=()=>{throw Error('unsupported widget')};window.UISlider(()=>{},'Other',.5)");
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program && strstr(error,"unsupported widget"));
+    write_module(path,"register('oops',");
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program && !metadata && strstr(error,"prebake.strudel"));
+    write_module(path,"throw new Error('fixture setup failed')");
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    if (program || !strstr(error,"fixture setup failed")) fprintf(stderr,"prebake rejection: %s\n",error);
+    assert(!program && strstr(error,"prebake.strudel") && strstr(error,"fixture setup failed"));
+    assert(!unlink(path));
+    snprintf(linked,sizeof(linked),"%s/elsewhere.strudel",root);
+    write_module(linked,"window.preLead=()=>note(99)");
+    assert(!symlink(linked,path));
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program && !metadata); assert(!unlink(path)); assert(!unlink(linked));
+    assert(!mkfifo(path,0600));
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program); assert(!unlink(path));
+    FILE *large=fopen(path,"w");
+    assert(large && !fseek(large,256*1024,SEEK_SET) && fputc(' ',large)!=EOF && !fclose(large));
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program); assert(!unlink(path));
+    snprintf(path,sizeof(path),"%s/tompouce",root); assert(!rmdir(path));
+    assert(!rmdir(root));
+    if (saved) { assert(!setenv("XDG_CONFIG_HOME",saved,1)); free(saved); }
+    else assert(!unsetenv("XDG_CONFIG_HOME"));
+}
+
 static void test_local_modules(void) {
     char root[] = "/tmp/tompouce-modules-XXXXXX", path[512];
     assert(mkdtemp(root));
@@ -364,7 +477,23 @@ static void test_tutorial(void) {
     puts("All 22 tutorial starters/answers query five cycles without warnings; control timing, periodic transforms and transposition verified");
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc==4 && !strcmp(argv[1],"--prebake-reference")) {
+        char root[]="/tmp/tompouce-prebake-reference-XXXXXX",directory[512],path[512],error[1024];
+        assert(mkdtemp(root) && !setenv("XDG_CONFIG_HOME",root,1));
+        snprintf(directory,sizeof(directory),"%s/tompouce",root); assert(!mkdir(directory,0700));
+        snprintf(path,sizeof(path),"%s/tompouce/prebake.strudel",root); write_module(path,argv[2]);
+        cJSON *metadata=NULL; JsProgram *program=javascript_compile(argv[3],120,&metadata,error,sizeof(error));
+        cJSON *haps=program?javascript_query(program,0,1):NULL;
+        char *text=haps?cJSON_PrintUnformatted(haps):NULL;
+        int ok=text!=NULL;
+        if (text) { puts(text);free(text); } else fprintf(stderr,"%s\n",error);
+        cJSON_Delete(haps);cJSON_Delete(metadata);javascript_free(program);
+        assert(!unlink(path) && !rmdir(directory) && !rmdir(root)); return ok?0:1;
+    }
+    if (argc>1 && !strcmp(argv[1],"--prebake")) {
+        test_prebake(); puts("prebake setup, refresh, rejection and confinement ok"); return 0;
+    }
     /* Coastline's final .size(4) is a room duration, not an unrelated size. */
     JsProgram *room_alias_program;
     cJSON *room_alias_haps=query("note(60).s('sine').room(.5).size(4)",&room_alias_program);
@@ -378,6 +507,7 @@ int main(void) {
     test_slider_highlights();
     test_visual_highlight_mapping();
     test_local_modules();
+    test_prebake();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

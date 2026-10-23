@@ -588,7 +588,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
         const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
             "attack","decay","sustain","release","speed","detune","delay","delaytime",
             "delayfeedback","midichan","midiport","midicmd","ccn","ccv","progNum","sysexid","sysexdata",
-            "midibend","miditouch","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
+            "midibend","miditouch","nrpnn","nrpv","midimap","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
             "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
@@ -668,6 +668,37 @@ static int midi_int(const cJSON *item, int min, int max, int *out) {
     return 1;
 }
 
+/* WebMidi's controller names, including the deliberately spelled
+   "sustenutopedal". Unknown strings must abort later extras, not become 0. */
+static int midi_controller(const cJSON *item, int *out) {
+    static const char *const names[128]={
+        "bankselectcoarse","modulationwheelcoarse","breathcontrollercoarse","controller3",
+        "footcontrollercoarse","portamentotimecoarse","dataentrycoarse","volumecoarse",
+        "balancecoarse","controller9","pancoarse","expressioncoarse","effectcontrol1coarse","effectcontrol2coarse",
+        "controller14","controller15","generalpurposeslider1","generalpurposeslider2","generalpurposeslider3","generalpurposeslider4",
+        "controller20","controller21","controller22","controller23","controller24","controller25","controller26","controller27",
+        "controller28","controller29","controller30","controller31","bankselectfine","modulationwheelfine","breathcontrollerfine","controller35",
+        "footcontrollerfine","portamentotimefine","dataentryfine","volumefine","balancefine","controller41","panfine","expressionfine",
+        "effectcontrol1fine","effectcontrol2fine","controller46","controller47","controller48","controller49","controller50","controller51",
+        "controller52","controller53","controller54","controller55","controller56","controller57","controller58","controller59",
+        "controller60","controller61","controller62","controller63","holdpedal","portamento","sustenutopedal","softpedal",
+        "legatopedal","hold2pedal","soundvariation","resonance","soundreleasetime","soundattacktime","brightness","soundcontrol6",
+        "soundcontrol7","soundcontrol8","soundcontrol9","soundcontrol10","generalpurposebutton1","generalpurposebutton2","generalpurposebutton3","generalpurposebutton4",
+        "controller84","controller85","controller86","controller87","controller88","controller89","controller90","reverblevel",
+        "tremololevel","choruslevel","celestelevel","phaserlevel","databuttonincrement","databuttondecrement","nonregisteredparameterfine","nonregisteredparametercoarse",
+        "registeredparameterfine","registeredparametercoarse","controller102","controller103","controller104","controller105","controller106","controller107",
+        "controller108","controller109","controller110","controller111","controller112","controller113","controller114","controller115",
+        "controller116","controller117","controller118","controller119","allsoundoff","resetallcontrollers","localcontrol","allnotesoff",
+        "omnimodeoff","omnimodeon","monomodeon","polymodeon"};
+    if (cJSON_IsString(item) && item->valuestring) {
+        for (int i=0;i<128;i++) if (!strcmp(item->valuestring,names[i])) { *out=i; return 1; }
+        return 0;
+    }
+    /* WebMidi converts a valid numeric CC using parseInt. */
+    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble<0 || item->valuedouble>=128) return 0;
+    *out=(int)item->valuedouble; return 1;
+}
+
 static int midi_sysex_bytes(const cJSON *item, unsigned char *out, int cap, int *len) {
     *len = 0;
     if (cJSON_IsNumber(item)) {
@@ -721,13 +752,36 @@ static int midi_parse_extras(JsProgram *program, const cJSON *value, AudioEvent 
     const cJSON *ccv = cJSON_GetObjectItemCaseSensitive(value, "ccv");
     if (ccn && ccv) {
         int number = 0;
-        if (!midi_int(ccn, 0, 127, &number) || !cJSON_IsNumber(ccv) ||
+        if (!midi_controller(ccn, &number) || !cJSON_IsNumber(ccv) ||
             !isfinite(ccv->valuedouble) || ccv->valuedouble < 0 || ccv->valuedouble > 1) {
             javascript_warn_control(program, "midi CC (requires integer ccn 0..127 and ccv 0..1)");
             return 0;
         }
         event->midi_has_cc = 1; event->midi_cc = number;
         event->midi_ccv = (int)fmax(0, fmin(127, round(ccv->valuedouble * 127)));
+    }
+    const cJSON *nrpnn=cJSON_GetObjectItemCaseSensitive(value,"nrpnn");
+    const cJSON *nrpv=cJSON_GetObjectItemCaseSensitive(value,"nrpv");
+    if (nrpnn && nrpv) {
+        int number[2], data[2], count=cJSON_IsArray(nrpv)?cJSON_GetArraySize(nrpv):1;
+        int n=cJSON_GetArraySize(nrpnn);
+        if (!cJSON_IsArray(nrpnn) || n<2 || n>256 || count<1 || count>256) {
+            javascript_warn_control(program,"midi NRPN (requires bounded parameter/data arrays)"); return 0;
+        }
+        int valid=1;
+        const cJSON *byte;
+        cJSON_ArrayForEach(byte,nrpnn) { int ignored; if (!midi_int(byte,0,255,&ignored)) valid=0; }
+        for (int i=0;i<2;i++) if (!midi_int(cJSON_GetArrayItem(nrpnn,i),0,127,&number[i])) valid=0;
+        for (int i=0;i<count;i++) {
+            const cJSON *v=cJSON_IsArray(nrpv)?cJSON_GetArrayItem(nrpv,i):nrpv;
+            if (!cJSON_IsNumber(v) || !isfinite(v->valuedouble) || v->valuedouble<0 || v->valuedouble>127) valid=0;
+            else if (i<2) data[i]=(int)v->valuedouble;
+        }
+        if (!valid) { javascript_warn_control(program,"midi NRPN (requires two parameter bytes and data bytes 0..127)"); return 0; }
+        unsigned char cc[6][2]={{99,number[0]},{98,number[1]},{6,data[0]},{38,count>1?data[1]:0},{101,127},{100,127}};
+        for (int i=0;i<6;i++) if (i!=3 || count>1) {
+            memcpy(event->midi_nrpn[event->midi_nrpn_count++],cc[i],2);
+        }
     }
     const cJSON *bend = cJSON_GetObjectItemCaseSensitive(value, "midibend");
     if (bend) {
@@ -776,24 +830,14 @@ static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEven
             javascript_warn_control(program, "midi progNum (requires a number 0..127)");
             return;
         }
-        if (!event->midi_has_prog) {
-            event->midi_has_prog = 1;
-            event->midi_prog = (int)floor(number->valuedouble);
-        }
+        event->midi_has_post_prog=1; event->midi_post_prog=(int)floor(number->valuedouble);
         return;
     }
     if (!strcmp(name, "sysex") && cJSON_GetArraySize(cmd) == 3) {
-        if (event->midi_has_sysex) return;
-        unsigned char id[3]; int id_len = 0, data_len = 0;
-        if (!midi_sysex_bytes(cJSON_GetArrayItem(cmd, 1), id, 3, &id_len) ||
-            !midi_sysex_bytes(cJSON_GetArrayItem(cmd, 2), event->midi_sysex,
-                (int)sizeof(event->midi_sysex), &data_len)) {
-            javascript_warn_control(program, "midi sysex (requires integer id/data bytes 0..255)");
-            return;
-        }
-        memcpy(event->midi_sysex_id, id, (size_t)id_len);
-        event->midi_has_sysex = 1;
-        event->midi_sysex_id_len = id_len; event->midi_sysex_len = data_len;
+        if (midi_sysex_bytes(cJSON_GetArrayItem(cmd,1),event->midi_post_sysex_id,3,&event->midi_post_sysex_id_len) &&
+                cJSON_IsArray(cJSON_GetArrayItem(cmd,2)) &&
+                midi_sysex_bytes(cJSON_GetArrayItem(cmd,2),event->midi_post_sysex,256,&event->midi_post_sysex_len)) event->midi_has_post_sysex=1;
+        else javascript_warn_control(program,"midi sysex (requires integer id/data bytes 0..255)");
         return;
     }
     if (!strcmp(name, "cc")) {
@@ -807,21 +851,69 @@ static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEven
    matching the web scheduler; rests and pitch-less drums carry no note but
    still deliver extras. Returns 0 when there is nothing to send. */
 static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
-    const cJSON *hap, AudioEvent *event) {
+    const cJSON *hap, double seconds, AudioEvent *event) {
+    const cJSON *settings=cJSON_GetObjectItemCaseSensitive(value,"_midiOptions");
+    int controller=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(settings,"isController"));
+    if (!cJSON_HasObjectItem(value,"midichan")) {
+        const cJSON *channel=cJSON_GetObjectItemCaseSensitive(settings,"midichannel");
+        if (cJSON_IsNumber(channel) && channel->valuedouble>=1 && channel->valuedouble<=16)
+            event->midi_chan=(int)channel->valuedouble-1;
+    }
     if (event->midi_chan < 0) event->midi_chan = 0;
+    const cJSON *mapped=cJSON_GetObjectItemCaseSensitive(value,"_midiMapped");
+    if (mapped) {
+        const cJSON *entry;
+        int valid=cJSON_IsArray(mapped) && cJSON_GetArraySize(mapped)<=32;
+        cJSON_ArrayForEach(entry,mapped) {
+            int cc;
+            const cJSON *v=cJSON_GetObjectItemCaseSensitive(entry,"ccv");
+            if (!valid || !midi_controller(cJSON_GetObjectItemCaseSensitive(entry,"ccn"),&cc) ||
+                !cJSON_IsNumber(v) || !isfinite(v->valuedouble) || v->valuedouble<0 || v->valuedouble>1) {
+                javascript_warn_control(program,"midi map (requires valid CCs; at most 32 sends per hap)");
+                event->midi_note=-1; return event->midi_map_count>0;
+            }
+            event->midi_map[event->midi_map_count][0]=(unsigned char)cc;
+            event->midi_map[event->midi_map_count++][1]=(unsigned char)round(v->valuedouble*127);
+        }
+        if (!valid) { javascript_warn_control(program,"midi map (requires an array)"); return 0; }
+    }
     /* MIDI has its own defaults and ignores the local audio gain stages. */
     const cJSON *gain = cJSON_GetObjectItemCaseSensitive(value, "gain");
     const cJSON *velocity = cJSON_GetObjectItemCaseSensitive(value, "velocity");
+    if (!gain) gain=cJSON_GetObjectItemCaseSensitive(settings,"gain");
+    if (!velocity) velocity=cJSON_GetObjectItemCaseSensitive(settings,"velocity");
+    if (!controller && cJSON_HasObjectItem(value,"note")) {
+        const cJSON *offset=cJSON_GetObjectItemCaseSensitive(settings,"noteOffsetMs");
+        double offset_ms=cJSON_IsNumber(offset) && isfinite(offset->valuedouble)?offset->valuedouble:1;
+        if (offset_ms<0) {
+            javascript_warn_control(program,"midi noteOffsetMs (requires nonnegative milliseconds)");
+            event->midi_note=-1; return event->midi_map_count>0;
+        }
+        const cJSON *begin=cJSON_GetObjectItemCaseSensitive(hap,"begin");
+        const cJSON *end=cJSON_GetObjectItemCaseSensitive(hap,"end");
+        double duration=cJSON_IsNumber(begin) && cJSON_IsNumber(end)?(end->valuedouble-begin->valuedouble)*seconds:event->duration;
+        const cJSON *gate=cJSON_GetObjectItemCaseSensitive(value,"duration");
+        const cJSON *clip=cJSON_GetObjectItemCaseSensitive(value,"clip");
+        if (cJSON_IsNumber(gate)) duration=gate->valuedouble*seconds;
+        if (cJSON_IsNumber(clip)) duration*=clip->valuedouble;
+        if (!isfinite(duration) || duration<0 || duration>86400) {
+            javascript_warn_control(program,"midi duration (requires bounded nonnegative seconds)");
+            event->midi_note=-1; return event->midi_map_count>0;
+        }
+        event->midi_duration=duration-fmin(offset_ms/1000,duration/2);
+    }
     event->gain = (gain && cJSON_IsNumber(gain) ? gain->valuedouble : 1) *
         (velocity && cJSON_IsNumber(velocity) ? velocity->valuedouble : .9);
-    if (cJSON_HasObjectItem(value, "note") &&
+    const cJSON *resolved_gain=cJSON_GetObjectItemCaseSensitive(value,"_midiGain");
+    if (resolved_gain) event->gain=cJSON_IsNumber(resolved_gain)?resolved_gain->valuedouble:NAN;
+    if (!controller && cJSON_HasObjectItem(value, "note") &&
         (!isfinite(event->gain) || event->gain < 0 || event->gain > 1)) {
         javascript_warn_control(program, "midi velocity (requires gain * velocity 0..1)");
-        return 0;
+        event->midi_note=-1; return event->midi_map_count>0;
     }
     int clean = midi_parse_extras(program, value, event);
     int extras = event->midi_has_prog || event->midi_has_sysex || event->midi_has_cc ||
-        event->midi_has_bend || event->midi_has_touch;
+        event->midi_has_bend || event->midi_has_touch || event->midi_nrpn_count;
     if (clean) {
         const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap, "begin");
         if (cJSON_IsNumber(begin) && isfinite(begin->valuedouble) && begin->valuedouble == 0)
@@ -834,7 +926,9 @@ static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
     } else if (!cJSON_HasObjectItem(value, "note")) {
         event->midi_note = -1;
     }
-    return event->midi_note >= 0 || extras || event->midi_cycle_start || event->midi_cmd != 0;
+    if (controller) event->midi_note=-1;
+    return event->midi_note >= 0 || extras || event->midi_map_count || event->midi_cycle_start ||
+        event->midi_cmd || event->midi_has_post_prog || event->midi_has_post_sysex;
 }
 
 static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsigned generation) {
@@ -849,7 +943,7 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
             double cycle=control(hap,"begin",0,-1e12,1e12);
             if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {
                 event.osc_only=1; event.generation=generation;
-                if (midi && midi_prepare_dominant(program,value,hap,&event)) event.midi_only=1;
+                if (midi && midi_prepare_dominant(program,value,hap,plan->seconds,&event)) event.midi_only=1;
                 event_queue_push(&event);
             } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
         }
@@ -876,7 +970,7 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
     if (!audio_event_values(hap,plan->origin,plan->seconds,&event,0)) return;
     event.generation=generation; event.duck_mask=0;
     if (midi) {
-        if (!midi_prepare_dominant(program,value,hap,&event)) return;
+        if (!midi_prepare_dominant(program,value,hap,plan->seconds,&event)) return;
         event.midi_only=1;
     }
     if (csound) {

@@ -25,7 +25,13 @@ for(let i=0;i<44100;i++) {
 const fixtureRoot=path.join(out,'fixture-banks');
 await fs.mkdir(path.join(fixtureRoot,'Dirt-Samples'),{recursive:true});
 await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/stretch.wav'),fixture);
-await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/strudel.json'),JSON.stringify({stretch_fixture:['stretch.wav']}));
+const monoFixture=Buffer.alloc(44+44100*2);
+fixture.copy(monoFixture,0,0,44);
+monoFixture.writeUInt32LE(monoFixture.length-8,4);monoFixture.writeUInt16LE(1,22);
+monoFixture.writeUInt32LE(88200,28);monoFixture.writeUInt16LE(2,32);monoFixture.writeUInt32LE(monoFixture.length-44,40);
+for(let i=0;i<44100;i++)monoFixture.writeInt16LE(fixture.readInt16LE(44+i*4),44+i*2);
+await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/mono.wav'),monoFixture);
+await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/strudel.json'),JSON.stringify({stretch_fixture:['stretch.wav'],mono_fixture:['mono.wav']}));
 const nativeEnvironment={...process.env};
 if (!nativeEnvironment.TOMPOUCE_BANKS && !nativeEnvironment.STRUDELTERM_BANKS) {
   for (const candidate of ['assets/banks',path.join(os.homedir(),'.local/lib/tompouce/assets/banks')]) {
@@ -144,6 +150,10 @@ try {
     { name: 'piano-generated-room-seeded', code: `note(60).s('piano').clip(.25).room(.5).roomsize(1)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99, randomSeed: 0xc0ffee },
     // A real onset at 0.25s avoids the upstream stretcher's negative-onset
     // rejection at zero (its graph schedules 40ms early). No captures shift.
+    { name: 'sine-gaincurve', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-gaincurve-velocity', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).velocity(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-gaincurve-delay', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).clip(.1).delay(.5).delaytime(.075).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-custom-default', code: `setDefault('gain',.5); resetDefaultValues(); note(69).s('sine')`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-fractional', code: `note(60).s('piano').speed(.75).stretch(1/3).clip(.25).late(.137)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-up', code: `note(60).s('piano').stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -156,6 +166,12 @@ try {
     { name: 'piano-stretch-down-fs3', code: `note(54).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-down-ds4', code: `note(63).s('piano').stretch(-2).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-stretch-down', code: `s('stretch_fixture').stretch(-2).clip(.25).late(.125)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
+    ...[
+      ['up',".stretch(2)"],['down',".stretch(-2)"],
+      ['reverse',".speed(-.75).begin(.9).stretch(-2)"],
+      ['loop',".stretch(-2).loop(1).loopBegin(.1).loopEnd(.2)"],
+      ['envelope',".stretch(2).attack(.03).decay(.08).sustain(.4).release(.12)"],
+    ].map(([name,effects])=>({name:`pcm-mono-${name}`,code:`s('mono_fixture')${effects}.clip(.25).late(.137)`,sound:'mono_fixture',fixture:true,mono:true,cycles:1,cps:.5,window:2,correlation:.99})),
     { name: 'pcm-stretch-down-fractional', code: `s('stretch_fixture').speed(.75).stretch(-2).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional', code: `s('stretch_fixture').clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional-speed', code: `s('stretch_fixture').speed(.75).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -206,7 +222,7 @@ try {
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
-      if(spec.fixture){const bytes=Uint8Array.from(atob(${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({stretch_fixture:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
+      if(spec.fixture){const bytes=Uint8Array.from(atob(spec.mono?${JSON.stringify(monoFixture.toString('base64'))}:${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.sound]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
       const selected=pattern.filterValues(v=>v.s===spec.sound);
@@ -242,7 +258,7 @@ try {
     const metrics = compare(nativeBytes, wav, spec.window);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
-    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(fixture)}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
+    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
     await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
     console.log(spec.name, JSON.stringify(metrics), passed === null ? 'DIAGNOSTIC' : passed ? 'PASS' : 'FAIL');
     await call('Target.closeTarget', { targetId: page.targetId }, null);

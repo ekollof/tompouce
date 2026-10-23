@@ -612,6 +612,27 @@ check("output volume pixel mouse", "note('c4').gain(0)", output_volume=True, mou
       expected="note('c4').gain(0)")
 check("output volume command", "note('c4').gain(0)", b'\x1bOQ/volume .5\r',
       expected="note('c4').gain(0)", observed=b'output volume 0.50')
+check("output volume global hotkeys", "note('c4').gain(0)",
+      [b'\x1b[1;3B', .1, b'\x1b[1;3B', .1, b'\x1b[1;3A'],
+      expected="note('c4').gain(0)", observed=b'output volume 0.99')
+check("output volume hotkeys in prompt", "note('c4').gain(0)",
+      [b'\x1bOQ/volume .5', .1, b'\x1b[1;3B', .1, b'\r'],
+      expected="note('c4').gain(0)", observed=b'output volume 0.50')
+check("output volume hotkeys in visualizer", "note('c4').gain(0)",
+      [b'\x1b[24~', .1, b'\x1b[1;3B', .1, b'\x1b', .1, b'\x1bOQ/volume\r'],
+      expected="note('c4').gain(0)", observed=b'output volume 0.99')
+check("output volume hotkeys in vi mode", "note('c4').gain(0)",
+      b'\x1b[1;3B', vi=True,
+      expected="note('c4').gain(0)", observed=b'output volume 0.99')
+check("output volume hotkeys in picker", "note('c4').gain(0)",
+      [b'\x1b[17~', .1, b'\x1b[1;3B', .1, b'\x1b', .1, b'\x1bOQ/volume\r'],
+      expected="note('c4').gain(0)", observed=b'output volume 0.99')
+check("output volume hotkey bounds", "note('c4').gain(0)",
+      [b'\x1bOQ/volume 0\r', .1, b'\x1b[1;3B', .1, b'\x1b[1;3A'],
+      expected="note('c4').gain(0)", observed=b'output volume 0.01')
+check("output volume hotkey repeat and release", "note('c4').gain(0)",
+      b'\x1b[1;3:1B\x1b[1;3:2B\x1b[1;3:3B',
+      expected="note('c4').gain(0)", observed=b'output volume 0.98')
 check("output volume rejects extras", "note('c4').gain(0)",
       [b'\x1bOQ/volume .5 extra\r',.1,b'\x1bOQ/volume\r'],
       expected="note('c4').gain(0)", observed=b'output volume 1.00')

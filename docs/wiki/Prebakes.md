@@ -29,6 +29,7 @@ Tompouce's final stereo output. Drag the bar, use the wheel over its row, or
 click it and use Left/Right or Ctrl+Left/Right for 1% steps. Escape returns
 focus to the editor. F2 `/volume .5` halves the output, `/volume 0` mutes,
 `/volume 1` restores unity, and `/volume` reports the current value.
+Alt+Up/Down raises/lowers output volume by 1% from any pane, even with F4 closed.
 
 Output volume changes held notes, Csound and effect tails on the next audio
 block across PipeWire, PulseAudio, JACK and ALSA. It does not edit source or

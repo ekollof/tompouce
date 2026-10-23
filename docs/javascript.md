@@ -211,6 +211,8 @@ F4's output Volume slider is a separate final-bus control: it scales held
 voices, Csound and effect tails immediately without changing source or running
 JavaScript. F2 `/volume .5` sets half amplitude; `/volume 1` restores unity.
 The level persists across evaluations and song changes for the current process.
+Alt+Up/Down raises/lowers output volume by 1% from any pane, including prompts
+and the fullscreen visualizer, even when F4 is closed.
 See [prebake support](prebakes.md) for the Switch Angel Volume widget mapping.
 
 Imports resolve the bundled modules:

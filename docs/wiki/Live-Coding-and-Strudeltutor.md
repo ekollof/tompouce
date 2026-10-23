@@ -10,6 +10,7 @@
 | F4 | Engine and editor diagnostics |
 | F5 | Evaluate source and commit it to the current song buffer |
 | Ctrl+P | Play/stop |
+| Alt+Up / Alt+Down | Raise/lower output volume by 1% from any pane |
 | Tab / Ctrl+Space | Context-aware completion; leading whitespace/selection retains indentation |
 | Shift+Tab | Previous completion or unindent |
 | Ctrl+Z / Ctrl+Y | Undo/redo; vi normal mode also uses `u` / Ctrl+R |

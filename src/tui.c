@@ -999,6 +999,8 @@ void tui_init(void) {
     terminal_bind_key("\033[1;5C", 2002); /* Ctrl+Right */
     terminal_bind_key("\033[5D", 2001);
     terminal_bind_key("\033[5C", 2002);
+    terminal_bind_key("\033[1;3A", KEY_VOLUME_UP);
+    terminal_bind_key("\033[1;3B", KEY_VOLUME_DOWN);
     terminal_bind_key("\033[<", 2100); /* SGR mouse report prefix */
     terminal_bind_key("\033[200~", 2101); /* bracketed paste */
     terminal_bind_key("\033[Z", 2102); /* Shift+Tab */
@@ -3420,6 +3422,7 @@ static const DocLine cheat[] = {
     {3, "F12               Fullscreen piano roll + scope (Esc returns)"},
     {3, "Ctrl+Left/Right   Adjust live slider at cursor"},
     {3, "F4 Volume        Drag, wheel or focus and use arrows; /volume 0..1"},
+    {3, "Alt+Up/Down      Raise / lower output volume by 1% (any pane)"},
     {0, ""},
     {1, "Songs and files"},
     {3, "F7                Toggle sequential song playback"},
@@ -4650,6 +4653,9 @@ void tui_run(void) {
             continue;
         }
         if (ch == -1) continue;
+        if (ch==KEY_VOLUME_UP || ch==KEY_VOLUME_DOWN) {
+            output_volume_nudge(ch==KEY_VOLUME_UP?1:-1); continue;
+        }
         if (ch!=9 && ch!=2102 && ch!=0) completion_reset();
         undo_tick++;
         if (show_viz && ch!=2101) {

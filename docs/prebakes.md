@@ -37,6 +37,7 @@ Drag its bar, use the mouse wheel over its row, or click it and use Left/Right
 or Ctrl+Left/Right for 1% steps. Escape returns focus to the editor. From the
 F2 prompt, `/volume .5` sets the output to half amplitude, `/volume 0` mutes,
 and `/volume 1` restores unity. `/volume` reports the current setting.
+Alt+Up/Down raises/lowers output volume by 1% from any pane, even with F4 closed.
 
 This is linear attenuation on Tompouce's final stereo output, after voices,
 Csound, effects and limiting. It changes held notes and effect tails on the

@@ -222,7 +222,8 @@ static int terminal_utf8(void) { return MB_CUR_MAX>1; }
 static int terminal_input[256], terminal_input_count;
 static int terminal_input_closed;
 static int terminal_mouse_down;
-enum { KEY_STRUDEL_EVALUATE=2120, KEY_STRUDEL_STOP, KEY_STRUDEL_NEXT, KEY_STRUDEL_PREVIOUS, KEY_REFERENCE };
+enum { KEY_STRUDEL_EVALUATE=2120, KEY_STRUDEL_STOP, KEY_STRUDEL_NEXT, KEY_STRUDEL_PREVIOUS, KEY_REFERENCE,
+       KEY_VOLUME_UP, KEY_VOLUME_DOWN };
 static void terminal_unget(unsigned int key) {
     if (terminal_input_count<256) terminal_input[terminal_input_count++]=(int)key;
 }
@@ -262,6 +263,10 @@ static int terminal_event(void) {
     int ctrl=ncinput_ctrl_p(&ni) || ni.ctrl;
     int alt=ncinput_alt_p(&ni) || ni.alt;
     int shift=ncinput_shift_p(&ni) || ni.shift;
+    if (alt && !ctrl && !shift) {
+        if (key==NCKEY_UP) return KEY_VOLUME_UP;
+        if (key==NCKEY_DOWN) return KEY_VOLUME_DOWN;
+    }
     if(shift && !ctrl && !alt && key==NCKEY_F00+1) return KEY_REFERENCE;
     /* Legacy terminfo reports Shift+F1 as F13 rather than a modifier. */
     if(!ctrl && !alt && key==NCKEY_F00+13) return KEY_REFERENCE;

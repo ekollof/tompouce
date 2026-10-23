@@ -513,6 +513,9 @@ check("Strudel shortcut previous label wraps", '$: note(60).gain(0)\n$: note(72)
 check("Strudel shortcut next label wraps", '$: note(60).gain(0)\n$: note(72).gain(0)',
       b'\x1bw\x1bw_', expected='_$: note(60).gain(0)\n$: note(72).gain(0)')
 check("Strudel shortcut ordinary Enter", 'one', b'\rX', expected='\nXone')
+check("fullscreen visualizer returns", 'one', b'\x1b[24~ignored\x1b[24~X', expected='Xone')
+check("fullscreen visualizer Escape", 'one', b'\x1b[24~ignored\x1b', expected='one')
+check("fullscreen visualizer paste", 'one', b'\x1b[24~\x1b[200~hidden\x1b[201~\x1b[24~X', expected='Xone')
 for opener, closer in [('(', ')'), ('[', ']'), ('{', '}'), ("'", "'"), ('"', '"'), ('`', '`')]:
     check("auto pair opener " + opener, '', opener.encode(), expected=opener+closer)
 check("auto pair complete expression", '', b'note("c4 e4").s(\'sine\').gain(0)',

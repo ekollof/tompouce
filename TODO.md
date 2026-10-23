@@ -8,6 +8,13 @@ live in [JavaScript/native audio](docs/javascript.md),
 [architecture](docs/architecture.md). Follow [AGENTS.md](AGENTS.md) for security,
 verification, installation and upstream terminal constraints.
 
+## Visual performance
+
+- [ ] Explore Strudel-compatible Hydra in the browser companion with an owned
+      WebGL canvas, bounded frame capture for terminal Kitty output, explicit
+      lifecycle and source-generation guards. The native F12 visualizer does
+      not execute Hydra/WebGL programs.
+
 ## CPU and memory follow-up
 
 Convolution selects AVX2, AVX or SSE2 accumulation at initialization according

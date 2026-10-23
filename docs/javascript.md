@@ -728,7 +728,13 @@ create widgets. Widgets scroll with code but are skipped by editing, selection,
 mouse placement and keyboard movement. UTF-8 terminals use 2×4 braille dots per
 cell, with an ASCII fallback. `/inline off` hides them and `/inline on` restores
 them; the preference persists. The bottom mini scope is suppressed while inline
-widgets are present. F12 independently toggles the larger visualization pane.
+widgets are present. F12 opens a fullscreen piano roll and master waveform.
+F12 or Esc returns to the editor; F1 returns and opens keyboard help.
+Ctrl+P controls playback. Other editor input is ignored while fullscreen,
+including pasted text. Supported terminals use Kitty images; other terminals
+use colored braille (ASCII when Unicode is unavailable). Both renderers use
+the syntax theme's cyan and magenta roles and fill the terminal below a
+single navigation line.
 
 A failed JavaScript evaluation retains the last playable program and reports
 the error. The editor keeps the failed source for correction; it does not

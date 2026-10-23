@@ -112,6 +112,7 @@ static int graphics_pending_count, graphics_previous_count;
 static double graphics_last_frame;
 #define GRAPHICS_FRAME_SECONDS (1.0/60.0)
 static void inline_graphics_clear(void);
+static void fullscreen_clear(void);
 
 static void graphics_read_palette(void) {
     /* Notcurses owns OSC input. Import its startup snapshot rather than racing
@@ -1039,6 +1040,7 @@ void tui_shutdown(void) {
     companion_shutdown();
     if (!smg_active && !tty_active) return;
     inline_graphics_clear();
+    fullscreen_clear();
     if (smg_active && notcurses_mice_disable(terminal_nc)<0)
         log_console("cannot disable terminal mouse tracking");
     fflush(terminal_output);
@@ -1862,7 +1864,7 @@ static void draw_status(void) {
             mode_str, audio_get_bpm(), audio_is_playing()?"PLAY":"STOP", track_count, songstr,
             first_err);
     else
-        snprintf(buf, sizeof(buf), "Tompouce [%s] BPM:%.0f %s trk:%d%s | %s | F1:help F2:AI F3:vi F4:state F5:eval F6:find F7:song F8:hold F9:tracks ^P:play ^Q:quit F12:viz",
+        snprintf(buf, sizeof(buf), "Tompouce [%s] BPM:%.0f %s trk:%d%s | %s | F1:help",
             mode_str, audio_get_bpm(), audio_is_playing()?"PLAY":"STOP", track_count, songstr,
             status_msg[0] ? status_msg : "Ready");
     terminal_move(0, 0);
@@ -3401,7 +3403,7 @@ static const DocLine cheat[] = {
     {3, "F6                Open / close the sound browser"},
     {3, "F9                Toggle the song track list"},
     {3, "F10 / F11         Narrow / widen the editor pane"},
-    {3, "F12               Toggle piano roll + scope pane"},
+    {3, "F12               Fullscreen piano roll + scope (Esc returns)"},
     {3, "Ctrl+Left/Right   Adjust live slider at cursor"},
     {0, ""},
     {1, "Songs and files"},
@@ -3766,27 +3768,6 @@ static void draw_tracks_at(int r0, int c0, int h, int w) {
     }
 }
 
-#define VIZ_H 12
-#define VIZ_SCOPE_ROWS 2
-
-static const char *midi_name(int m, char *out, size_t n) {
-    static const char *nm[12] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-    if (m < 0) m = 0;
-    if (m > 127) m = 127;
-    snprintf(out, n, "%s%d", nm[m % 12], m / 12 - 1);
-    return out;
-}
-
-/* braille dot bits for (col 0/1, level 0..7 bottom-up) */
-static unsigned braille_bit(int col, int lvl) {
-    static const unsigned left[4] = {0x01, 0x02, 0x04, 0x40};
-    static const unsigned right[4] = {0x08, 0x10, 0x20, 0x80};
-    int row = 3 - lvl / 2;
-    if (row < 0) row = 0;
-    if (row > 3) row = 3;
-    return (col == 0 ? left : right)[row];
-}
-
 static int scope_level(double v) {
     if (v < -1.0) v = -1.0;
     if (v > 1.0) v = 1.0;
@@ -3795,123 +3776,7 @@ static int scope_level(double v) {
     if (l > 7) l = 7;
     return l;
 }
-
-static void draw_viz_at(int r0, int w) {
-    int h = VIZ_H;
-    if (w < 20) return;
-    terminal_box(r0, 0, h, w);
-    terminal_move(r0, 2);
-    terminal_write(" piano roll + scope (F12:hide) ");
-    NoteHist hist[NOTE_HIST_N];
-    int nh = note_hist_copy(hist, NOTE_HIST_N);
-    double now = audio_time_now();
-    const double W = 4.0;
-    int roll_rows = h - 2 - VIZ_SCOPE_ROWS;
-    int gutter = 4;
-    int rw = w - 2 - gutter;
-    if (rw < 8) rw = 8;
-    if (rw > 500) rw = 500;
-    if (roll_rows < 2) roll_rows = 2;
-    if (roll_rows > 16) roll_rows = 16;
-
-    /* pitch range over visible window */
-    int lo = 127, hi = 0, any = 0;
-    for (int i = 0; i < nh; i++) {
-        if (hist[i].t0 + hist[i].dur < now - W || hist[i].t0 > now) continue;
-        if (hist[i].midi < lo) lo = hist[i].midi;
-        if (hist[i].midi > hi) hi = hist[i].midi;
-        any = 1;
-    }
-    static char grid[16][512];
-    for (int r = 0; r < roll_rows; r++)
-        for (int x = 0; x < rw; x++) grid[r][x] = ' ';
-    if (!any) {
-        terminal_move(r0 + 2, gutter + 1);
-        terminal_write("(no notes yet)");
-        for (int r = 0; r < roll_rows; r++)
-            if (r != 1) blank_inner(r0 + 1 + r, gutter + 1, rw);
-    } else {
-        if (hi - lo + 1 < 6) {
-            int c = (hi + lo) / 2;
-            lo = c - 3; hi = c + 2;
-        }
-        if (lo < 0) { hi -= lo; lo = 0; }
-        if (hi > 127) { lo -= hi - 127; hi = 127; if (lo < 0) lo = 0; }
-        int span = hi - lo + 1;
-        int step = (span + roll_rows - 1) / roll_rows;
-        if (step < 1) step = 1;
-        for (int i = 0; i < nh; i++) {
-            double s0 = hist[i].t0, s1 = hist[i].t0 + hist[i].dur;
-            if (s1 < now - W || s0 > now) continue;
-            int x0 = (int)((s0 - (now - W)) / W * rw);
-            int x1 = (int)((s1 - (now - W)) / W * rw);
-            if (x0 < 0) x0 = 0;
-            if (x1 >= rw) x1 = rw - 1;
-            int rr = (hi - hist[i].midi) / step;
-            if (rr < 0) rr = 0;
-            if (rr >= roll_rows) rr = roll_rows - 1;
-            for (int x = x0; x <= x1; x++)
-                grid[rr][x] = hist[i].is_drum ? 'o' : '#';
-        }
-        for (int r = 0; r < roll_rows; r++) {
-            int ptop = hi - r * step;
-            char lab[8] = {' ', ' ', ' ', ' ', 0};
-            for (int k = 0; k < step; k++) {
-                int pp = ptop - k;
-                if (pp < lo) break;
-                if (pp % 12 == 0) {
-                    char nm[8];
-                    midi_name(pp, nm, sizeof(nm));
-                    snprintf(lab, sizeof(lab), "%-3s", nm);
-                    break;
-                }
-            }
-            terminal_move(r0 + 1 + r, 1);
-            terminal_write(lab);
-            terminal_write_n(grid[r], (unsigned)rw);
-        }
-    }
-
-    /* braille scope: min/max per column over recent output */
-    {
-        int sc_base = r0 + 1 + roll_rows;
-        float sbuf[1024];
-        int sn = rw * 2;
-        if (sn > 1024) sn = 1024;
-        if (sn < 2) sn = 2;
-        audio_scope_copy(sbuf, sn);
-        for (int x = 0; x < rw; x++) {
-            int i0 = x * sn / rw, i1 = (x + 1) * sn / rw;
-            if (i1 <= i0) i1 = i0 + 1;
-            if (i1 > sn) i1 = sn;
-            int lo2 = 7, hi2 = 0;
-            for (int i = i0; i < i1; i++) {
-                int l = scope_level(sbuf[i]);
-                if (l < lo2) lo2 = l;
-                if (l > hi2) hi2 = l;
-            }
-            terminal_move(sc_base, gutter + 1 + x);
-            if (viz_utf8) {
-                unsigned bits = 0;
-                for (int lv = lo2; lv <= hi2; lv++) {
-                    bits |= braille_bit(0, lv) | braille_bit(1, lv);
-                }
-                terminal_putc((uint32_t)(0x2800 + bits));
-            } else {
-                static const char *lvch = " .:-=+*#@";
-                char c[2] = { lvch[hi2], 0 };
-                terminal_write(c);
-            }
-        }
-        if (!viz_utf8) {
-            /* second scope row: center line */
-            terminal_move(sc_base + 1, gutter + 1);
-            for (int x = 0; x < rw; x++) terminal_write("-");
-        } else {
-            blank_inner(sc_base + 1, gutter + 1, rw);
-        }
-    }
-}
+#include "tui_visualizer.h"
 
 static void draw_right_pane(void) {
     int mid, h, w, sh, th;
@@ -4351,7 +4216,7 @@ void tui_frame(void) {
     if (graphics_cell_height < 1) graphics_cell_height = 16;
     graphics_pending_count = 0;
     memset(graphics_pending,0,sizeof(graphics_pending));
-    viz_h = (show_viz && rows >= 28) ? VIZ_H : 0;
+    viz_h = 0;
     /* full clear only on first frame or resize; otherwise every pane
        rewrites all its rows, so Notcurses diffs stay minimal (no flicker) */
     {
@@ -4363,10 +4228,15 @@ void tui_frame(void) {
             lc = cols;
         }
     }
+    if (show_viz) {
+        inline_graphics_clear();
+        draw_fullscreen_viz();
+        return;
+    }
+    fullscreen_clear();
     draw_status();
     draw_code();
     draw_console();
-    if (viz_h > 0) draw_viz_at(rows - 3 - viz_h, cols);
     draw_input();
     int graphic_layout_changed=graphics_pending_count!=graphics_previous_count ||
         memcmp(graphics_pending,graphics_previous,(size_t)graphics_pending_count*sizeof(InlineGraphic));
@@ -4617,6 +4487,7 @@ static void read_paste(void) {
         free(text);
         return;
     }
+    if (show_viz) { free(text); return; }
     if (!overflow) text[n] = 0;
     if (!overflow && matched == 6 && search_mode && !strchr(text,'\n') && n <= 240) {
         snprintf(search_buf,sizeof(search_buf),"%s",text); search_len = (int)n;
@@ -4732,6 +4603,16 @@ void tui_run(void) {
         if (ch == -1) continue;
         if (ch!=9 && ch!=2102 && ch!=0) completion_reset();
         undo_tick++;
+        if (show_viz && ch!=2101) {
+            if (ch==27 || ch==(int)NCKEY_F00+12 || ch==(int)NCKEY_F00+1) {
+                show_viz=0; fullscreen_clear(); terminal_clear(); graphics_redraw=1;
+                if (ch==(int)NCKEY_F00+1) { show_docs=1; docs_scroll=0; }
+            } else if (ch==17) { state_save(); break; }
+            else if (ch==16) {
+                if (audio_is_playing()) scheduler_transport_set(0); else do_perform();
+            }
+            continue;
+        }
         if (ch == 2100) { vi_reset(); read_mouse(); continue; }
         if (ch == 2101) { vi_reset(); read_paste(); continue; }
 

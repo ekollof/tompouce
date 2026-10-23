@@ -10,10 +10,11 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
-- [ ] Explore Strudel-compatible Hydra in the browser companion with an owned
-      WebGL canvas, bounded frame capture for terminal Kitty output, explicit
-      lifecycle and source-generation guards. The native F12 visualizer does
-      not execute Hydra/WebGL programs.
+- [ ] Add a separate `/hydra` command that opens a browser window or tab running
+      a Strudel-compatible Hydra visualizer, connected to Tompouce's audio
+      outputs so Hydra can react to the music. Keep it independent of F12,
+      with authenticated output access, bounded audio/analysis streaming and
+      explicit browser/session lifecycle and source-generation guards.
 
 ## CPU and memory follow-up
 

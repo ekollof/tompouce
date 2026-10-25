@@ -310,6 +310,13 @@ and full-song parity remains unverified.
 Setting only `pwrate` supplies the web's `.3` sweep default; setting only
 `pwsweep` supplies a 1 Hz rate. Pulse is distinct from `square`.
 
+Pitch envelopes support linear `.pcurve(0)` and exponential `.pcurve(1)`
+ramps in detune cents, including anchors, negative depths, short gates and
+release. Exponential ramps follow WebAudio's zero/sign-crossing behavior;
+they are not a squared linear envelope. Nineteen browser audio gates cover
+selected oscillator pitch/vibrato cases; sample and worklet automation need
+separate comparisons.
+
 On basic waveforms, numeric `n` selects the number of harmonic coefficients;
 zero retains the stock oscillator. `partials` overrides `n`. Custom waves use
 the web's coefficient signs, phase rotation, peak normalization and frequency

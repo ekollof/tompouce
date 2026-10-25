@@ -575,9 +575,24 @@ a-rate oscillator automation from the quantum's array head even when the
 audible destination begins later in that quantum. Native oscillators now
 retain that alignment, including fractional starts, without shifting amplitude
 envelopes or sample playback. See the [Chromium oscillator implementation](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/webaudio/oscillator_handler.cc).
-Glide correlation improved from about 0.93 to over 0.999999. Nonlinear pitch
-curves, live oneshot/grid timing and full helper/synthesis equivalence remain
-outside these established gates.
+Glide correlation improved from about 0.93 to over 0.999999.
+
+Ten additional `pitch-exponential-` cases cover `.pcurve(1)` defaults, decay,
+negative depths, sign crossings, exact-zero endpoints, nonzero sustain,
+truncated attack/decay, release and fractional starts. The former squared
+linear-envelope approximation failed all eight initial discovery cases.
+Native pitch now follows the deployed `getPitchEnvelope`/`getParamADSR`
+AudioParam event schedule in cents: exponential interpolation, .001-cent zero
+range endpoints, linearly clipped endpoints for short gates, exact sustain
+sets and WebAudio's hold behavior for sign-crossing ramps. Endpoint arithmetic
+order is preserved because rounding through zero changes that behavior.
+Sample-aligned clock error is removed before these discontinuities without
+shifting fractional onsets. The 19 linear/exponential pitch/vibrato comparisons
+pass unchanged gates; exponential correlations range from 0.99947 to above
+0.999999. Run with `TOMPOUCE_COMPARE_FILTER=pitch-`.
+
+Sample/worklet pitch automation, live oneshot/grid timing and full
+helper/synthesis equivalence remain outside these established gates.
 
 ## Kabelsalat effect tails and input routing
 

@@ -48,7 +48,8 @@ arrangements, orbit mute/solo, parameter locks, scale/arpeggio helpers, sample
 timing, text-to-synth, linear glide and seeded humanize/glitch controls.
 Native UTF-8 `TextEncoder` and the web's `getFrequencyFromValue` helper are
 available. Glide, accent and delay also have browser audio comparisons.
-Live oneshot/grid timing and nonlinear pitch curves need separate checks.
+Linear/exponential oscillator pitch has 19 browser audio gates. Live
+oneshot/grid timing and sample/worklet pitch automation need separate checks.
 Other helpers may require unavailable
 samples, external MIDI devices or browser/audio APIs such as `bmod` and `FX`.
 An unavailable API retains its error; full helper compatibility is not claimed.

@@ -154,6 +154,8 @@ with the complete pinned starter, using the existing 0.99 correlation and
 0.85–1.15 gain limits. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
+Ten exponential oscillator pitch checks additionally cover detune ramps,
+anchors, signed/zero endpoints, short gates, release and fractional starts.
 The oneshot event check uses a stopped zero-time clock; live evaluation/grid
-timing, nonlinear pitch curves, custom FX/bmod routing and external devices
+timing, sample/worklet pitch automation, custom FX/bmod routing and external devices
 remain separate checks rather than claims established by this matrix.

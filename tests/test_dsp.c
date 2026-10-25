@@ -262,7 +262,32 @@ static void test_pitch_envelope_defaults(void) {
     assert(fabs(state.pitch_onset_fraction-.6/SR)<1e-14);
 }
 
+static void test_exponential_pitch(void) {
+    DspParams p; dsp_params_init(&p); p.enabled=1;
+    p.p[DSP_PCURVE]=1; p.p[DSP_PENV]=12; p.p[DSP_PANCHOR]=.5;
+    p.p[DSP_PATT]=.1; p.p[DSP_PDEC]=.2; p.p[DSP_PSUS]=.5; p.p[DSP_PREL]=.2;
+    /* AudioParam ramps across a sign change hold their start value. */
+    assert(fabs(dsp_pitch_multiplier(&p,.05,1)-pow(2,-.5))<1e-12);
+    assert(fabs(dsp_pitch_multiplier(&p,.1,1)-pow(2,.5))<1e-12);
+    /* Decimal segment rounding makes this endpoint slightly negative, so
+       this decay also crosses zero and holds until the endpoint. */
+    assert(fabs(dsp_pitch_multiplier(&p,.2,1)-pow(2,.5))<1e-12);
+    assert(fabs(dsp_pitch_multiplier(&p,.5,1)-1)<1e-12);
+    assert(dsp_pitch_multiplier(&p,1.1,1)==1);
+    assert(fabs(dsp_pitch_multiplier(&p,1.2,1)-pow(2,-.5))<1e-12);
+    /* With exact binary durations a zero ramp endpoint becomes .001 cents. */
+    p.p[DSP_PATT]=.125; p.p[DSP_PDEC]=.25;
+    double midpoint=sqrt(600*.001);
+    assert(fabs(dsp_pitch_multiplier(&p,.25,1)-pow(2,midpoint/1200))<1e-12);
+    /* Short gates clip endpoints linearly before exponential interpolation. */
+    p.p[DSP_PANCHOR]=1; p.p[DSP_PATT]=.5;
+    double endpoint=-1200+(1200+.001)*.1;
+    double cents=-sqrt(1200*-endpoint);
+    assert(fabs(dsp_pitch_multiplier(&p,.025,.05)-pow(2,cents/1200))<1e-12);
+}
+
 int main(void) {
+    test_exponential_pitch();
     test_pitch_envelope_defaults();
     /* Public Superdough .room(1) supplies no duration override: the first
        shared room uses generate()'s two-second default. */

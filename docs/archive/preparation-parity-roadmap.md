@@ -512,3 +512,12 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       the right input. Eight independent PCM gates cover delays, feedback,
       cleanup ranges, stereo input and explicit output channels; callback tests
       cover released programs, retirement, tail energy and cleanup ownership.
+
+## Exponential oscillator pitch
+
+- [x] Replace squared-linear `pcurve(1)` with the web's exponential detune
+      schedule, including zero endpoints, sign crossings, clipped segments,
+      exact sustain sets and release. Preserve endpoint operation order and
+      sample-aligned discontinuities. Ten new browser audio gates pass alongside
+      the existing nine linear pitch/vibrato gates; sample/worklet pitch
+      automation remains separate work.

@@ -92,6 +92,18 @@ try {
   await level('syntax error retains both notes',.1,.2);
   await tool(port,'music_set_code',{code:"note(69).csound('HeldQA').gain(.5)",autostart:true});
   await level('previously loaded instrument survives native interlude',.2,.3);
+  const retained='instr AfterThrowQA\na1 = p5\na0 init 0\nout a0,a1\nendin\n';
+  await assert.rejects(tool(port,'music_set_code',{code:'await loadCsound('+literal(retained)+"); throw Error('owned stream evaluation failure')"}),
+    /Evaluation failed; last playable pattern retained/);
+  assert.match(await tool(port,'music_get_console'),/owned stream evaluation failure/);
+  await level('JavaScript throw retains held notes',.2,.3);
+  // Invalid scheme rejects before any filesystem read or network request.
+  await tool(port,'music_set_code',{code:"let caught=false; try { await loadOrc('file:///owned-fixture.orc') } catch { caught=true } if(!caught) throw Error('loader failed to reject'); note(60).gain(0)"});
+  await level('caught URL rejection retains held notes',.2,.3);
+  // Query an onset within half a second of the edit. A slow(4) onset would
+  // wait for the next eight-second boundary, after the original notes expire.
+  await tool(port,'music_set_code',{code:"note(69).csound('AfterThrowQA').gain(.5).fast(4)",autostart:true});
+  await level('instrument loaded before JavaScript throw survives',.2,.4);
   await fs.mkdir(artifacts,{recursive:true});
   await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({passed:true,binary:process.env.TOMPOUCE_TEST_BINARY??'./build/tompouce',
     sink:sinkName,levels},null,2)+'\n');

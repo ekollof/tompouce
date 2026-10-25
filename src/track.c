@@ -40,11 +40,11 @@ int track_load_from_code(const char *code_buf) {
     cJSON *metadata = NULL;
     {
         char error[512];
-        program = javascript_compile(code_buf,audio_get_bpm(),&metadata,error,sizeof(error));
         pthread_mutex_lock(&tracks_lock);
         JsProgram *previous=track_count==1?tracks[0].javascript:NULL;
         javascript_retain(previous);
         pthread_mutex_unlock(&tracks_lock);
+        program = javascript_compile_from(code_buf,audio_get_bpm(),previous,&metadata,error,sizeof(error));
         if (program && !javascript_prepare_csound_from(program,metadata,previous,error,sizeof(error))) {
             javascript_free(program); program = NULL;
             cJSON_Delete(metadata); metadata = NULL;

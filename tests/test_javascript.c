@@ -690,6 +690,19 @@ int main(int argc, char **argv) {
     cJSON_Delete(haps); javascript_free(program);
 
     char error[512]; cJSON *meta = NULL;
+    const char *bad_csound[]={
+        "__hostCsound('other','text')",
+        "__hostCsound('code\\0other','text')",
+        "__hostCsound('code',null)",
+        "__hostCsound('code','abc\\0def')",
+        "__hostCsound('code','x'.repeat(65537))",
+        "__hostCsound('url','x'.repeat(481))",
+        "for(let i=0;i<17;i++) __hostCsound('code','')"
+    };
+    for (unsigned i=0;i<sizeof(bad_csound)/sizeof(*bad_csound);i++) {
+        program=javascript_compile(bad_csound[i],120,&meta,error,sizeof(error));
+        assert(!program && !meta);
+    }
     program = javascript_compile("while(true){}; note('c4')", 120, &meta, error, sizeof(error));
     assert(!program && !meta);
     program = javascript_compile("import { missing } from '@strudel/core'; note('c4')",120,&meta,error,sizeof(error));

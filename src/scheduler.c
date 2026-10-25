@@ -893,6 +893,7 @@ void scheduler_shutdown(void) {
     pthread_join(generator_tid, NULL);
     prep_pool_stop();
     osc_output_shutdown();
+    javascript_release_csound_session();
     pthread_mutex_lock(&tracks_lock);
     song_clear_all();
     free(song_tracks);

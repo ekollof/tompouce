@@ -1522,6 +1522,7 @@ static void test_csound_callback_continuity(void) {
     pthread_mutex_lock(&tracks_lock);
     javascript_free(tracks[0].javascript); memset(&tracks[0],0,sizeof(tracks[0])); track_count=0;
     pthread_mutex_unlock(&tracks_lock);
+    javascript_release_csound_session();
     audio_toggle_play(0); event_queue_clear();
 }
 #endif

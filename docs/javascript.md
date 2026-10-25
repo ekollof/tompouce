@@ -893,7 +893,8 @@ execution time. After trusted engine initialization it cannot open files,
 create processes, or access the network; `loadOrc` fetching happens in the
 parent using the existing URL policy. The audio callback consumes buffered
 stereo PCM without IPC, allocation, or Csound calls. Failed fetching or host
-initialization keeps the previous playable program; orchestra syntax diagnostics
+initialization keeps the previous playable program unless source catches the
+loader rejection and returns a valid pattern; orchestra syntax diagnostics
 retain existing definitions while allowing the new musical pattern, as above.
 Engine runtime messages (for example an unknown instrument at note time)
 travel back over a dedicated socket into the console ring through the
@@ -903,9 +904,14 @@ per evaluation, 2 MiB of combined source per update and 64 cached orchestra URLs
 per Csound session are accepted. Failed orchestra fetches stay rejected
 without refetching, matching the deployed loader's session promise cache;
 oversize content is not cached, so shrunken upstream text loads normally.
-Loads that succeed before a later failure stay available to the next
-evaluation through a parked session engine, matching the deployed page
-engine. Named instruments receive frequency,
+Live loaders apply in source order at their call sites during evaluation.
+Loads that succeed before a later JavaScript throw or loader failure stay
+available to the next evaluation through a parked session engine, matching
+the deployed page engine. Failed evaluation retains the previous musical
+pattern; it does not roll back successful orchestra loads. A caught fetch
+failure can therefore select an alternative pattern. Loads are never replayed
+after evaluation, and query-time loader calls are rejected. The existing
+evaluation and worker budgets remain in force. Named instruments receive frequency,
 gain, and the slash-separated Strudel control map as p4/p5/p6, matching the
 upstream bridge.
 

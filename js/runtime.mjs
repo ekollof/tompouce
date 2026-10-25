@@ -685,6 +685,7 @@ globalThis.loadCsound = globalThis.loadCSound = globalThis.loadcsound = async (c
   if (typeof code !== 'string' || code.length > 65536 || orchestraCalls.length >= 16)
     throw new TypeError('loadCsound requires bounded orchestra text');
   orchestraCalls.push({ code }); csoundUsed = true;
+  if (typeof globalThis.__hostCsound === 'function') globalThis.__hostCsound('code',code);
 };
 /**
  * Load a Csound orchestra from an allowed public HTTP(S) or github: URL.
@@ -700,6 +701,7 @@ globalThis.loadOrc = async (url) => {
   if (typeof url !== 'string' || url.length > 480 || orchestraCalls.length >= 16)
     throw new TypeError('loadOrc requires a bounded URL');
   orchestraCalls.push({ url }); csoundUsed = true;
+  if (typeof globalThis.__hostCsound === 'function') globalThis.__hostCsound('url',url);
 };
 /**
  * Route events to a named or numeric Csound instrument instead of local audio.

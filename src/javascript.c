@@ -44,6 +44,8 @@ struct JsProgram {
     char warned[32][64];
     int nwarned;
     int loading_allowed;
+    int eager_csound;
+    unsigned orchestra_calls;
     unsigned prebake_files;
     size_t prebake_bytes;
 };
@@ -401,6 +403,12 @@ int javascript_prepare_csound(JsProgram *p, const cJSON *metadata, char *error, 
    discarding partial loads with the failed evaluation. */
 static CsoundProgram *stashed_csound;
 static pthread_mutex_t stashed_csound_lock = PTHREAD_MUTEX_INITIALIZER;
+void javascript_release_csound_session(void) {
+    pthread_mutex_lock(&stashed_csound_lock);
+    CsoundProgram *program=stashed_csound; stashed_csound=NULL;
+    pthread_mutex_unlock(&stashed_csound_lock);
+    csound_program_free(program);
+}
 static void park_csound(JsProgram *p) {
     if (!p || !p->csound) return;
     pthread_mutex_lock(&stashed_csound_lock);
@@ -413,6 +421,18 @@ static void park_csound(JsProgram *p) {
 int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
                                    JsProgram *previous, char *error, size_t size) {
     const cJSON *loads = cJSON_GetObjectItemCaseSensitive(metadata,"csound");
+    if (p->eager_csound) {
+        /* A csound() pattern without explicit loads still needs the default
+           instruments. Explicit loads were applied during evaluation. */
+        if (!p->csound && cJSON_IsArray(loads)) {
+            cJSON *empty=cJSON_CreateArray();
+            if (!empty) return 0;
+            p->csound=csound_program_create(empty,error,size); cJSON_Delete(empty);
+            if (!p->csound) return 0;
+            park_csound(p);
+        }
+        return 1; /* Never replay applied loads. */
+    }
     if (cJSON_IsArray(loads) && cJSON_GetArraySize(loads)>16) {
         snprintf(error,size,"Csound: too many orchestra loads"); return 0;
     }
@@ -420,13 +440,9 @@ int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
         /* Evaluations without loads keep running without an engine, unless a
            failed evaluation parked one with surviving loads. */
         pthread_mutex_lock(&stashed_csound_lock);
-        if (stashed_csound) {
-            p->csound=stashed_csound; csound_program_retain(p->csound);
-            pthread_mutex_unlock(&stashed_csound_lock);
-        } else {
-            pthread_mutex_unlock(&stashed_csound_lock);
-            return 1;
-        }
+        int available=stashed_csound!=NULL;
+        pthread_mutex_unlock(&stashed_csound_lock);
+        if (!available) return 1;
     }
     p->csound_source=cJSON_IsArray(loads)?cJSON_PrintUnformatted(loads):
         strdup_safe(previous&&previous->csound_source?previous->csound_source:"[]");
@@ -460,6 +476,53 @@ int javascript_prepare_csound_from(JsProgram *p, const cJSON *metadata,
     return 1;
 }
 CsoundProgram *javascript_csound(JsProgram *p) { return p ? p->csound : NULL; }
+static JSValue host_csound(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->loading_allowed || now_seconds()>p->deadline || p->orchestra_calls>=16)
+        return JS_ThrowTypeError(ctx,"load Csound only during evaluation (16 loads maximum)");
+    if (argc!=2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1]))
+        return JS_ThrowTypeError(ctx,"invalid Csound load");
+    size_t kind_length=0;
+    const char *kind=JS_ToCStringLen(ctx,&kind_length,argv[0]);
+    size_t length=0;
+    const char *text=JS_ToCStringLen(ctx,&length,argv[1]);
+    if (!kind || !text) {
+        if(kind)JS_FreeCString(ctx,kind);
+        if(text)JS_FreeCString(ctx,text);
+        return JS_EXCEPTION;
+    }
+    int valid=(kind_length==4 && !strcmp(kind,"code") && length<=65536) ||
+        (kind_length==3 && !strcmp(kind,"url") && length<=480);
+    if (!valid || strlen(text)!=length) {
+        JS_FreeCString(ctx,kind); JS_FreeCString(ctx,text);
+        return JS_ThrowTypeError(ctx,"invalid or oversized Csound load");
+    }
+    p->orchestra_calls++;
+    if (!p->eager_csound) {
+        JS_FreeCString(ctx,kind); JS_FreeCString(ctx,text); return JS_UNDEFINED;
+    }
+    char error[1024]="Csound load failed";
+    cJSON *loads=cJSON_CreateArray(), *load=cJSON_CreateObject();
+    int ok=loads && load && cJSON_AddStringToObject(load,kind,text);
+    JS_FreeCString(ctx,kind); JS_FreeCString(ctx,text);
+    if (!ok || !cJSON_AddItemToArray(loads,load)) {
+        cJSON_Delete(load); cJSON_Delete(loads); return JS_ThrowOutOfMemory(ctx);
+    }
+    if (!p->csound) {
+        cJSON *empty=cJSON_CreateArray();
+        if (empty) p->csound=csound_program_create(empty,error,sizeof(error));
+        cJSON_Delete(empty);
+    }
+    CsoundUpdateResult result=p->csound?csound_program_update(p->csound,loads,error,sizeof(error)):CSOUND_UPDATE_FAILED;
+    cJSON_Delete(loads);
+    /* Successful loads survive a later JS throw. Fetch failures reject the
+       loader's Promise here, so source can catch them before choosing music. */
+    park_csound(p);
+    if (result==CSOUND_UPDATE_FAILED) return JS_ThrowTypeError(ctx,"%s",error);
+    if (result==CSOUND_UPDATE_REJECTED) log_console("%s",error);
+    return JS_UNDEFINED;
+}
 void javascript_activate_sliders(JsProgram *p) { if (p) slider_bank_activate(p->sliders); }
 const char *javascript_source(const JsProgram *p) { return p?p->source:NULL; }
 
@@ -483,8 +546,9 @@ static int initialize(JsProgram *p, char *error, int n) {
     int f = JS_SetPropertyStr(ctx, global, "__hostMidiRead", JS_NewCFunction(ctx, host_midi_read, "__hostMidiRead", 2));
     int g = JS_SetPropertyStr(ctx, global, "__hostMidiKeys", JS_NewCFunction(ctx, host_midi_keys, "__hostMidiKeys", 1));
     int h = JS_SetPropertyStr(ctx, global, "__hostPrebake", JS_NewCFunction(ctx, host_prebake, "__hostPrebake", 1));
+    int i = JS_SetPropertyStr(ctx, global, "__hostCsound", JS_NewCFunction(ctx, host_csound, "__hostCsound", 2));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {
@@ -555,16 +619,24 @@ static cJSON *json_value(JSContext *ctx, JSValue value) {
 static int utf8_offset(const char *s, int units);
 static int visual_source_matches(const char *compiled, const char *editor);
 
-JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int n) {
+static JsProgram *compile_program(const char *code, double bpm, JsProgram *previous, int eager,
+                                  cJSON **metadata, char *error, int n) {
     if (metadata) *metadata = NULL;
     if (error && n > 0) snprintf(error, (size_t)n, "could not initialize JavaScript runtime");
     if (!code || strlen(code) > (size_t)INT_MAX) return NULL;
     JsProgram *p = calloc(1, sizeof(*p));
     if (!p) return NULL;
     atomic_init(&p->refs,1);
+    p->eager_csound=eager;
+    if (eager) {
+        pthread_mutex_lock(&stashed_csound_lock);
+        p->csound=previous && previous->csound?previous->csound:stashed_csound;
+        csound_program_retain(p->csound);
+        pthread_mutex_unlock(&stashed_csound_lock);
+    }
     p->sliders=slider_bank_create();
-    if (!p->sliders) { free(p); return NULL; }
-    if (pthread_mutex_init(&p->lock,NULL) != 0) { slider_bank_free(p->sliders); free(p); return NULL; }
+    if (!p->sliders) { csound_program_free(p->csound); free(p); return NULL; }
+    if (pthread_mutex_init(&p->lock,NULL) != 0) { csound_program_free(p->csound); slider_bank_free(p->sliders); free(p); return NULL; }
     p->lock_ready = 1;
     if (pthread_mutex_init(&p->spans_lock,NULL) != 0) { javascript_free(p); return NULL; }
     p->lock_ready = 2;
@@ -633,6 +705,14 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
     else exception_text(ctx, result, error, n);
     JS_FreeValue(ctx, result); JS_FreeValue(ctx, value);
     javascript_free(p); return NULL;
+}
+
+JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int n) {
+    return compile_program(code,bpm,NULL,0,metadata,error,n);
+}
+JsProgram *javascript_compile_from(const char *code, double bpm, JsProgram *previous,
+                                 cJSON **metadata, char *error, int n) {
+    return compile_program(code,bpm,previous,1,metadata,error,n);
 }
 
 static cJSON *query_events(JsProgram *p, double begin, double end, double cps, int probes) {

@@ -163,6 +163,19 @@ void prep_unlock(pthread_mutex_t *mutex, int kind) {
     pthread_mutex_unlock(mutex);
 }
 
+int prep_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex, int kind) {
+    int tracked=kind>=0 && kind<PREP_LOCK_COUNT;
+    if (tracked && (hold_active & (1u<<kind))) {
+        atomic_fetch_add(&lock_hold_ns[kind],elapsed_ns(&hold_started[kind],CLOCK_MONOTONIC));
+        hold_active &= ~(1u<<kind);
+    }
+    int result=pthread_cond_wait(condition,mutex);
+    if (tracked && atomic_load_explicit(&enabled,memory_order_relaxed) &&
+        clock_gettime(CLOCK_MONOTONIC,&hold_started[kind])==0)
+        hold_active |= 1u<<kind;
+    return result;
+}
+
 void prep_work_begin(int work) {
     if (work < 0 || work >= PREP_WORK_COUNT ||
         !atomic_load_explicit(&enabled, memory_order_relaxed)) return;

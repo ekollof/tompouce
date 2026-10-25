@@ -102,16 +102,23 @@ async function reference() {
   for(const url of ['github:fixture/orchestra/main/missing.orc','https://raw.githubusercontent.com/fixture/orchestra/main/missing.orc']) {
     try{await loadOrc(url);}catch{failedRejections++;}
   }
-  window.fetch=originalFetch;
   const host=repl({getTime:()=>0,onSchedule:()=>{},setInterval:()=>1,clearInterval:()=>{}});
   await host.evaluate('(async()=>{await loadCsound("invalid orchestra");return note(72).csound("Held")})()',false);
   const invalidEvaluationAccepted=!host.state.evalError &&
     Number(host.scheduler.pattern.queryArc(0,1)[0].value.note)===72;
+  await host.evaluate('(async()=>{await loadCsound("giEvalRetained init 7");throw Error("owned evaluation failure")})()',false);
+  const laterThrowRejected=!!host.state.evalError;
+  const retainedAfterThrow=await engine.evalCode('return giEvalRetained');
+  await host.evaluate('(async()=>{try{await loadOrc("github:fixture/orchestra/main/missing.orc")}catch{}return note(73).csound("Held")})()',false);
+  const caughtFetchAccepted=!host.state.evalError &&
+    Number(host.scheduler.pattern.queryArc(0,1)[0].value.note)===73;
+  window.fetch=originalFetch;
   host.stop();
   return JSON.stringify({moduleURL,loaderSource,version:String(await engine.getVersion()),
     name:engine.name,frames:count,rate,difference,leftEnergy,rightEnergy,crossings,first,
     initialGlobal:mean(.62,.63),repeatedGlobal:mean(.71,.715),fetches,invalidRejected,invalidMessages,invalidEvaluationAccepted,
     failedFetches,failedRejections,invalidFetches,invalidURLRejected,invalidURLMessages,cachedInvalidMessages,
+    laterThrowRejected,retainedAfterThrow,caughtFetchAccepted,
     contextState:context.state,baselineContextState:baselineContext.state});
 }
 
@@ -134,6 +141,9 @@ try {
   assert(result.invalidURLMessages>0); assert.equal(result.cachedInvalidMessages,0);
   assert.equal(result.invalidRejected,false); assert(result.invalidMessages>0);
   assert.equal(result.invalidEvaluationAccepted,true);
+  assert.equal(result.laterThrowRejected,true);
+  assert.equal(result.retainedAfterThrow,7);
+  assert.equal(result.caughtFetchAccepted,true);
   result.loaderSha256=createHash('sha256').update(result.loaderSource).digest('hex'); delete result.loaderSource;
   await fs.mkdir(artifacts,{recursive:true});
   await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify({url:'https://strudel.cc/',capturedAt:new Date().toISOString(),...result},null,2)+'\n');

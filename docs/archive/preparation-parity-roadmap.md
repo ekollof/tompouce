@@ -440,3 +440,18 @@ user's running source, playback and routing untouched.
 
 Remaining work is in `TODO.md`; these checks do not establish full synthesis,
 physical MIDI timing or all JavaScript/loader-exception side-effect parity.
+
+## Shared stretch preparation and Csound evaluation ordering
+
+- [x] Coalesce identical concurrent stretch misses before computation. Four
+      simultaneous requests now perform one transform and share its immutable
+      result. Slot pins protect waiting references from eviction; both buffer
+      and FFT-workspace allocation failures wake waiters and allow retries.
+      A deterministic test covers the original requester discarding its result.
+- [x] Compare successful Csound loads followed by JavaScript throws and caught
+      fetch failures against the deployed REPL. Native live loaders now apply
+      at their call sites, preserving successful loads while retaining the last
+      playable pattern after evaluation fails. Caught fetch errors can produce
+      a new pattern. PCM assertions verify updates apply once and query-time
+      loader calls have no side effects; existing held-PCM and confinement
+      gates remain in place.

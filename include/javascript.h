@@ -10,7 +10,12 @@ int javascript_store_prebake(const char *text, char *error, size_t error_size);
 
 typedef struct JsProgram JsProgram;
 int javascript_check(const char *code, char *error, int errorlen, int *line);
+/* Collect orchestra metadata for isolated/offline fixtures; callers prepare
+   it explicitly. Live program changes must use javascript_compile_from. */
 JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int errorlen);
+/* Live evaluation applies loaders at their call sites, sharing session state. */
+JsProgram *javascript_compile_from(const char *code, double bpm, JsProgram *previous,
+                                 cJSON **metadata, char *error, int errorlen);
 void javascript_free(JsProgram *program);
 void javascript_retain(JsProgram *program);
 /* Publish controls only after a successful program load. Failed compiles keep
@@ -46,4 +51,7 @@ int javascript_prepare_csound(JsProgram *program, const cJSON *metadata, char *e
 int javascript_prepare_csound_from(JsProgram *program, const cJSON *metadata,
                                    JsProgram *previous, char *error, size_t size);
 CsoundProgram *javascript_csound(JsProgram *program);
+/* Drop the parked session reference at shutdown or owned-fixture teardown.
+   Active programs/audio retain their own references. Not a transport action. */
+void javascript_release_csound_session(void);
 #endif

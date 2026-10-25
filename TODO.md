@@ -16,25 +16,6 @@ verification, installation and upstream terminal constraints.
       with authenticated output access, bounded audio/analysis streaming and
       explicit browser/session lifecycle and source-generation guards.
 
-## CPU and memory follow-up
-
-Convolution selects AVX2, AVX or SSE2 accumulation at initialization according
-to CPU/OS support, with portable C fallback and `TOMPOUCE_SIMD` overrides.
-Per-sample voice paths skip provably-identity work through activity flags
-cached in `dsp_init`, and never-used orbits skip their fallback reverb and
-delay work. Convolution histories, orbit delay lines, the fallback reverb
-network, pending duck controls, the visual feedback caches and the per-voice
-chorus ring are demand-sized or right-sized, cutting BSS from 321 MiB to
-23 MiB. The [benchmark report](docs/simd-benchmark.md) records the speedups,
-simultaneous long-convolver scaling, idle/synth gains and memory
-measurements.
-
-- [ ] Coalesce concurrent identical stretch misses: the preparation profile
-      still measures four transforms for four requests for one key. Preserve
-      bounded work, cancellation and cache references without blocking the
-      audio callback. Native-rate decode and mono-stretch fast paths and their
-      measurements are recorded in the benchmark report.
-
 ## Plugin hosting
 
 LV2 instruments/effects first, headless (generic parameter sliders, no
@@ -93,11 +74,6 @@ and measured divergences are recorded in the archive.
       requirements are not established by the setup/gain-curve gates. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
 
-- [ ] Compare Csound loader side effects when JavaScript throws after an
-      earlier successful load, and when source catches a failed fetch. Native
-      preparation currently follows JavaScript evaluation. Syntax-error URL
-      caching, absence of failed-compile global mutations, held PCM, parked
-      engines and console diagnostics have maintained checks.
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and
       independent reference checks. Keep current 32-map/128-entry/32-send bounds.

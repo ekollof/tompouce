@@ -36,6 +36,8 @@ void prep_profile_reset(void);
 void prep_profile_snapshot(PrepLockStat locks[PREP_LOCK_COUNT], PrepWorkStat works[PREP_WORK_COUNT]);
 void prep_lock(pthread_mutex_t *mutex, int kind);
 void prep_unlock(pthread_mutex_t *mutex, int kind);
+/* Exclude condition sleep from lock hold time; caller holds the mutex. */
+int prep_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex, int kind);
 void prep_work_begin(int work);
 void prep_work_end(int work);
 

@@ -254,11 +254,14 @@ static void test_csound_stash_adopts(void) {
     assert(bad && metadata);
     assert(!javascript_prepare_csound_from(bad,metadata,NULL,error,sizeof(error)));
     assert(kept_orchestra_fetches==1 && lost_orchestra_fetches==1);
+    CsoundProgram *parked=javascript_csound(bad); assert(parked);
     cJSON_Delete(metadata); javascript_free(bad);
     metadata=NULL;
     JsProgram *plain=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
     assert(plain && metadata);
+    unsigned references=atomic_load(&parked->refs);
     assert(javascript_prepare_csound_from(plain,metadata,NULL,error,sizeof(error)));
+    assert(atomic_load(&parked->refs)==references+1);
     CsoundProgram *engine=javascript_csound(plain); assert(engine);
     assert(kept_orchestra_fetches==1 && lost_orchestra_fetches==1);
     cJSON_Delete(metadata); metadata=NULL;
@@ -278,7 +281,9 @@ static void render(CsoundProgram *program, const char *instrument, int midi) {
     if (instrument[0] >= '0' && instrument[0] <= '9') assert(cJSON_AddNumberToObject(value,"csound",strtod(instrument,NULL)));
     else assert(cJSON_AddStringToObject(value,"csound",instrument));
     if (midi) assert(cJSON_AddBoolToObject(value,"_csoundMidi",1));
-    assert(csound_program_schedule(program,value,.03,.1,220));
+    /* Session loaders retain the renderer's timeline across evaluations. */
+    double onset=.03+atomic_load(&program->read_frame)/SR;
+    assert(csound_program_schedule(program,value,onset,.1,220));
     csound_program_activate(program,0);
     double sum = 0, previous = 0; int first = -1, crossings = 0;
     for (int frame = 0; frame < 8820; frame++) {
@@ -292,6 +297,8 @@ static void render(CsoundProgram *program, const char *instrument, int midi) {
         previous = left;
     }
     assert(sum > .001);
+    if (first < (int)(.03*SR)-CSOUND_TEST_MARGIN || first > (int)(.03*SR)+CSOUND_TEST_MARGIN)
+        fprintf(stderr,"Csound %s onset %d (expected near %.0f)\n",instrument,first,.03*SR);
     assert(first >= (int)(.03*SR)-CSOUND_TEST_MARGIN && first <= (int)(.03*SR)+CSOUND_TEST_MARGIN);
     if (!strcmp(instrument,"Test") && !midi) {
         if (first!=(int)llround(.03*SR)+1) fprintf(stderr,"sample-accurate Csound onset: first=%d expected=%d\n",first,(int)llround(.03*SR)+1);
@@ -335,6 +342,21 @@ int main(int argc, char **argv) {
     assert(!stat(confined_path,&file_status) && file_status.st_size == 0);
     assert(!unlink(confined_path));
     puts("PASS expected rejection: orchestra file access");
+    {
+        char error[512]; cJSON *metadata=NULL;
+        JsProgram *defaults=javascript_compile_from("note(60).csound('triangle')",120,NULL,&metadata,error,sizeof(error));
+        assert(defaults && metadata);
+        assert(javascript_prepare_csound(defaults,metadata,error,sizeof(error)));
+        assert(javascript_csound(defaults));
+        cJSON_Delete(metadata); javascript_free(defaults);
+        javascript_release_csound_session();
+    }
+    assert(!track_load_from_code(
+        "await loadCsound('instr BeforeThrow\\na1 oscili p5,p4\\nout a1,a1\\nendin');"
+        "throw Error('owned first evaluation failure')"));
+    assert(track_load_from_code("note(60).csound('BeforeThrow')"));
+    assert(javascript_csound(tracks[0].javascript));
+    render(javascript_csound(tracks[0].javascript),"BeforeThrow",0);
     assert(track_load_from_code("await loadCsound`instr Tone\na1 oscili p5,p4\nout a1,a1\nendin`; note('c3').csound('Tone')"));
     CsoundProgram *registry=javascript_csound(tracks[0].javascript);
     assert(track_load_from_code("note('c3').csound('triangle')"));
@@ -360,6 +382,34 @@ int main(int argc, char **argv) {
     log_console_stderr(1);
     assert(javascript_csound(tracks[0].javascript)==registry);
     render(registry,"Ordered",0);
+    playing=tracks[0].javascript;
+    assert(!track_load_from_code(
+        "await loadCsound('giEvalRetained init 7\\ninstr EvalRetained\\na1 = giEvalRetained/100\\nout a1,a1\\nendin');"
+        "throw Error('owned evaluation failure')"));
+    assert(tracks[0].javascript==playing && javascript_csound(playing)==registry);
+    assert(track_load_from_code(
+        "await loadCsound('giEvalRetained += 1');"
+        "try { await loadOrc('github:fixture/orchestra/main/lost.orc') } catch {}"
+        "note(73).csound('EvalRetained')"));
+    assert(javascript_csound(tracks[0].javascript)==registry && lost_orchestra_fetches==1);
+    cJSON *haps=javascript_query(tracks[0].javascript,0,1);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==73);
+    cJSON_Delete(haps);
+    assert(track_load_from_code(
+        "note(73).fmap(v=>{try{__hostCsound('code','giEvalRetained += 100')}catch{}return v}).csound('EvalRetained')"));
+    haps=javascript_query(tracks[0].javascript,0,1);
+    assert(haps && cJSON_GetArraySize(haps)==1); cJSON_Delete(haps);
+    cJSON *value=cJSON_Parse("{\"csound\":\"EvalRetained\"}"); assert(value);
+    double onset=.03+atomic_load(&registry->read_frame)/SR;
+    assert(csound_program_schedule(registry,value,onset,.1,220)); cJSON_Delete(value);
+    csound_program_activate(registry,0);
+    for (int frame=0;frame<8820;frame++) {
+        if (frame%64==0) { struct timespec pause={0,1500000}; nanosleep(&pause,NULL); }
+        double left=0,right=0; csound_program_sample(registry,&left,&right);
+        if (frame>2205 && frame<4000) assert(fabs(left-.08)<1e-6 && fabs(right-.08)<1e-6);
+    }
+    puts("PASS web evaluation ordering: loads survive throws, failed fetches are catchable, updates apply once");
     assert(track_load_from_code("note(60).gain(0)"));
     FILE *file = fopen("tests/fixtures/strudel-examples.json","rb");
     assert(file);
@@ -380,12 +430,15 @@ int main(int argc, char **argv) {
         slider_begin();
         JsProgram *js = javascript_compile(code,120,&metadata,error,sizeof(error));
         assert(js);
-        if (!javascript_prepare_csound(js,metadata,error,sizeof(error))) {
+        /* These onset fixtures require independent engines: the live session
+           intentionally retains earlier instruments and their effect tails. */
+        program=csound_program_create(cJSON_GetObjectItemCaseSensitive(metadata,"csound"),error,sizeof(error));
+        if (!program) {
             fprintf(stderr,"%s: %s\n",title,error); abort();
         }
-        program = javascript_csound(js);
         assert(program);
         render(program,!strcmp(title,"CSound demo") ? "CoolSynth" : "FM1",0);
+        csound_program_free(program);
         cJSON_Delete(metadata); javascript_free(js);
     }
     cJSON_Delete(corpus);

@@ -26,10 +26,12 @@ static struct {
     unsigned long used;
     size_t reserved_bytes;
     int reserved;
+    unsigned waiters;
 } cache[CACHE_SIZE];
 static size_t cache_bytes; /* published buffers plus in-flight reservations */
 static unsigned long serial;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ready=PTHREAD_COND_INITIALIZER;
 static void stretch_lock(void) { prep_lock(&lock, PREP_LOCK_STRETCH); }
 static void stretch_unlock(void) { prep_unlock(&lock, PREP_LOCK_STRETCH); }
 static pthread_once_t tables_once=PTHREAD_ONCE_INIT;
@@ -148,13 +150,14 @@ static int cache_reserve_locked(size_t bytes) {
     if (bytes>CACHE_BYTES) return -1;
     for (;;) {
         int slot=-1;
-        for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer && !cache[i].reserved) { slot=i; break; }
+        for (int i=0;i<CACHE_SIZE;i++) if (!cache[i].buffer && !cache[i].reserved && !cache[i].waiters) { slot=i; break; }
         if (slot>=0 && cache_bytes+bytes<=CACHE_BYTES) {
+            memset(&cache[slot].key,0,sizeof(cache[slot].key));
             cache[slot].reserved=1; cache[slot].reserved_bytes=bytes; cache_bytes+=bytes;
             return slot;
         }
         int oldest=-1;
-        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !atomic_load(&cache[i].buffer->refs) &&
+        for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !cache[i].waiters && !atomic_load(&cache[i].buffer->refs) &&
             (oldest<0 || cache[i].used<cache[oldest].used)) oldest=i;
         if (oldest<0) return -1;
         cache_bytes-=cache[oldest].buffer->bytes;
@@ -166,6 +169,7 @@ static void cache_release_reservation_locked(int slot) {
     if (slot<0 || slot>=CACHE_SIZE) return;
     cache_bytes-=cache[slot].reserved_bytes;
     cache[slot].reserved_bytes=0; cache[slot].reserved=0;
+    pthread_cond_broadcast(&ready);
 }
 
 /* The compute runs outside the lock. A duplicate that completed first wins;
@@ -180,6 +184,7 @@ static const StretchBuffer *cache_publish(int slot, const StretchKey *key, Stret
     }
     cache[slot].key=*key; cache[slot].buffer=buffer; cache[slot].used=++serial;
     cache[slot].reserved=0; cache[slot].reserved_bytes=0;
+    pthread_cond_broadcast(&ready);
     stretch_unlock(); return buffer;
 }
 
@@ -253,7 +258,23 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !memcmp(&cache[i].key,&key,sizeof(key))) {
         cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); return cache[i].buffer;
     }
+    for (int i=0;i<CACHE_SIZE;i++) if (cache[i].reserved && !memcmp(&cache[i].key,&key,sizeof(key))) {
+        /* Pin the slot until each waiter retains the result (or observes
+           failure). Only preparation threads wait; the callback never enters
+           this API. Keep condition sleep out of cache-lock hold statistics. */
+        if (cache[i].waiters>=CACHE_SIZE) { stretch_unlock(); return NULL; }
+        cache[i].waiters++;
+        while (cache[i].reserved) if (prep_cond_wait(&ready,&lock,PREP_LOCK_STRETCH)) {
+            cache[i].waiters--; stretch_unlock(); return NULL;
+        }
+        StretchBuffer *result=cache[i].buffer;
+        if (result) { cache[i].used=++serial; stretch_retain(result); }
+        cache[i].waiters--;
+        stretch_unlock();
+        return result;
+    }
     int slot=cache_reserve_locked(bytes);
+    if (slot>=0) cache[slot].key=key;
     stretch_unlock();
     if (slot<0) return NULL;
     StretchBuffer *buffer=calloc(1,bytes);

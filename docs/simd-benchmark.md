@@ -130,8 +130,16 @@ Five additional shared-mono browser comparisons cover upward/downward
 stretch, reverse, looping and envelopes at fractional onsets. Their existing
 0.99 correlation and 0.85–1.15 gain criteria are unchanged. Decoder precision
 and independently decoded MP3 stretch remain covered separately. Cache hits
-perform no decode/stretch; concurrent identical misses still compute duplicate
-work before converging on one published entry, a remaining optimization target.
+perform no decode/stretch. Concurrent identical stretch misses now share one
+in-flight preparation: four requests run one transform rather than four (75%
+fewer transforms for that workload), and all retain the same immutable PCM.
+The preparation profile observed about 11 ms of transform CPU for this case;
+this is a workload measurement, not a fourfold whole-song speedup claim.
+Waiters sleep only on preparation threads, outside the profiled cache-lock
+hold window. Their cache slot stays pinned until each has retained the result;
+an obsolete original requester can discard its reference safely. Allocation
+failures wake all waiters, free the reservation and permit a later retry.
+The 128-entry/128 MiB cache limits and transform arithmetic are unchanged.
 
 ## Implemented convolution dispatch
 

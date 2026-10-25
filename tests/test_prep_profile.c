@@ -414,6 +414,8 @@ int main(void) {
         assert(pthread_create(&same[i], NULL, same_stretch_thread, &same_stretch[i]) == 0);
     }
     for (int i = 0; i < 4; i++) assert(pthread_join(same[i], NULL) == 0);
+    prep_profile_snapshot(locks, works);
+    assert(works[PREP_STRETCH].calls == 1);
     for (int i = 0; i < 4; i++) assert(same_stretch[i].buffer == same_stretch[0].buffer);
     for (int i = 0; i < 4; i++) stretch_release(same_stretch[i].buffer);
     AudioEvent same_event = stretch_event(note, 1.7, 311, .4);

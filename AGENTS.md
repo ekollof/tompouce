@@ -119,6 +119,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   Preserve asynchronous orchestra merges, the merge fence, held audio and loaded
   definitions. Do not weaken file/network/process/thread confinement to run an
   orchestra. Initialization/worker failures must remain observable.
+  Live loaders apply at their source call sites; successful loads survive later
+  JavaScript failure and fetch rejections are catchable. Never replay applied
+  loads after evaluation or permit query-time loading.
 - `src/tui.c` and its private headers own foreground editor/modal state.
   Notcurses owns keyboard and mouse protocols. Keep input decoding, wrapped-row
   geometry, cursor placement, selection and undo consistent. Palette replies
@@ -198,8 +201,8 @@ the pinned event fixtures. Narrow green gates do not establish full parity.
 See `docs/javascript.md`, `docs/audio-comparison.md` and `TODO.md` for coverage.
 Remaining areas requiring independent checks include missing duck targets,
 nested/control-output routing, shared delay/reverb automation and tails,
-voice-pool policy, large backend render bursts, Csound loader failure side
-effects/diagnostics and controller coverage. Preserve current execution budgets
+voice-pool policy, large backend render bursts, additional Csound loader failure
+cases and controller coverage. Preserve current execution budgets
 and distinguish CPU work from scheduling delays when investigating timeouts.
 Do not claim complete MP3 decoding, synthesis or full-song waveform parity from
 the maintained shared-PCM and selected browser audio gates.

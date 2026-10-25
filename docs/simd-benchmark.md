@@ -141,6 +141,35 @@ an obsolete original requester can discard its reference safely. Allocation
 failures wake all waiters, free the reservation and permit a later retry.
 The 128-entry/128 MiB cache limits and transform arithmetic are unchanged.
 
+## Shared convolution preparation and reverb random state
+
+Four concurrent requests for one sample-convolution key and four for one
+generated-room key now build one kernel of each kind. The duplicate-job
+profile's FFT channel-preparation calls drop from 16 to 4, and room synthesis
+calls from 4 to 1. One local before/after run measured 10.08 to 2.22 ms of FFT
+preparation CPU and 4.48 to 1.02 ms of room synthesis CPU. These describe this
+duplicate workload, not an overall playback speedup. Cache sizes stay at 16
+distinct sample kernels and 16 distinct rooms; waiting requests consume no
+additional kernel slots, and failed reservations remain pinned until waiters
+observe their result. Allocation failures wake waiters and allow retries.
+
+Room generation now reserves a segment of the shared random stream after
+impulse allocation, then generates with private state outside the lock.
+Successful coalesced requests advance the stream as cache hits do. An exact
+affine LCG jump replaces the per-draw cache-hit loop, bounding the locked work
+logarithmically even for a 10-second room. Cold allocation failure consumes no
+random draws, and kernel-build failure preserves the producer's consumed
+segment. Sequential kernels match the prior implementation bit for bit across
+cold requests, cache hits, a 10-second room and the following new room.
+
+`test_convolution_prepare` deterministically gates concurrent misses and tests
+impulse/kernel/tail allocation failures, retries, shared results and random
+draw accounting. Its linear reference checks the jump through the maximum IR
+length. `test-convolution-prepare-tsan` instruments both preparation paths,
+their lock profiler and SIMD initialization; the fixture also has an
+ASan/UBSan variant in `test-sanitize`. Web long-room and existing generated-room
+audio gates retain their thresholds and diagnostic classifications.
+
 ## Implemented convolution dispatch
 
 `src/convolution_mix.c` now supplies portable C, SSE2, AVX and AVX2 accumulation

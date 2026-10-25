@@ -6,10 +6,20 @@
 #include "prep_profile.h"
 #include <stdint.h>
 
-/* Process-wide generated-room random stream; see convolution_prepare_reverb.
-   Generation misses are serialized by the room lane, so unlocked stream
-   steps below never interleave; the locked lookup/hit path is atomic. */
+/* Reserve independent random segments under the cache lock. Rendering and
+   kernel construction use only private state, including concurrent callers. */
 static uint32_t reverb_stream=0xc0ffeeu;
+static pthread_mutex_t reverb_lock=PTHREAD_MUTEX_INITIALIZER;
+
+/* Exact affine LCG jump modulo 2^32, in logarithmic time. */
+static uint32_t reverb_advance(uint32_t state,uint64_t count) {
+    uint32_t multiplier=1664525u,increment=1013904223u;
+    while (count) {
+        if (count&1) state=state*multiplier+increment;
+        increment*=multiplier+1u; multiplier*=multiplier; count>>=1;
+    }
+    return state;
+}
 
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim) {
     return convolution_prepare_reverb_ex(size,fade,lp,dim,NULL);
@@ -18,8 +28,8 @@ const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,d
 const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double lp,double dim,const char **error) {
     if (error) *error=NULL;
     enum { CACHE=16 };
-    static struct { double size,fade,lp,dim; ConvKernel *kernel; int reserved; } cache[CACHE];
-    static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+    static struct { double size,fade,lp,dim; ConvKernel *kernel; int reserved; unsigned waiters; const char *error; } cache[CACHE];
+    static pthread_cond_t ready=PTHREAD_COND_INITIALIZER;
     /* The web regenerates rooms with fresh randomness per call and keeps no
        cache; comparison pages seed Math.random with this same LCG. Native
        continues one process-wide stream across generations so rooms vary per
@@ -40,36 +50,57 @@ const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double l
         if (error) *error="IR duration outside native capacity";
         return NULL;
     }
-    prep_lock(&lock, PREP_LOCK_REVERB);
-    for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
+    prep_lock(&reverb_lock, PREP_LOCK_REVERB);
+    for (unsigned i=0;i<CACHE;i++) if ((cache[i].kernel || cache[i].reserved) && cache[i].size==size && cache[i].fade==fade &&
         cache[i].lp==lp && cache[i].dim==dim) {
+        if (cache[i].reserved) {
+            if (cache[i].waiters>=128) {
+                if (error) *error="too many pending requests for one room";
+                prep_unlock(&reverb_lock,PREP_LOCK_REVERB); return NULL;
+            }
+            cache[i].waiters++;
+            while (cache[i].reserved) if (prep_cond_wait(&ready,&reverb_lock,PREP_LOCK_REVERB)) {
+                cache[i].waiters--;
+                if (error) *error="room preparation wait failed";
+                prep_unlock(&reverb_lock,PREP_LOCK_REVERB); return NULL;
+            }
+            cache[i].waiters--;
+        }
         const ConvKernel *result=cache[i].kernel;
-        for (long skip=0;skip<2*frames;skip++) reverb_stream=reverb_stream*1664525u+1013904223u;
-        prep_unlock(&lock, PREP_LOCK_REVERB); return result;
+        if (result) reverb_stream=reverb_advance(reverb_stream,2*(uint64_t)frames);
+        else if (error) *error=cache[i].error;
+        prep_unlock(&reverb_lock, PREP_LOCK_REVERB); return result;
     }
     int slot=-1;
-    for (unsigned i=0;i<CACHE;i++) if (!cache[i].kernel && !cache[i].reserved) { slot=(int)i; break; }
+    for (unsigned i=0;i<CACHE;i++) if (!cache[i].kernel && !cache[i].reserved && !cache[i].waiters) { slot=(int)i; break; }
     if (slot<0) {
-        prep_unlock(&lock, PREP_LOCK_REVERB);
+        prep_unlock(&reverb_lock, PREP_LOCK_REVERB);
         if (error) *error="generated IR cache full (16 distinct rooms)";
         return NULL;
     }
     cache[slot].reserved=1;
-    prep_unlock(&lock, PREP_LOCK_REVERB);
+    cache[slot].size=size; cache[slot].fade=fade; cache[slot].lp=lp; cache[slot].dim=dim; cache[slot].error=NULL;
+    prep_unlock(&reverb_lock, PREP_LOCK_REVERB);
     float *impulse=calloc((size_t)frames*2,sizeof(*impulse));
     if (!impulse) {
         if (error) *error="impulse allocation failed";
-        prep_lock(&lock, PREP_LOCK_REVERB);
+        prep_lock(&reverb_lock, PREP_LOCK_REVERB);
+        cache[slot].error="impulse allocation failed";
         cache[slot].reserved=0;
-        prep_unlock(&lock, PREP_LOCK_REVERB);
+        pthread_cond_broadcast(&ready);
+        prep_unlock(&reverb_lock, PREP_LOCK_REVERB);
         return NULL;
     }
+    prep_lock(&reverb_lock,PREP_LOCK_REVERB);
+    uint32_t random=reverb_stream;
+    reverb_stream=reverb_advance(reverb_stream,2*(uint64_t)frames);
+    prep_unlock(&reverb_lock,PREP_LOCK_REVERB);
     /* Continuing stream: the web consumes fresh randomness per call. */
     double decay_base=pow(.001,1.0/decay);
     prep_work_begin(PREP_REVERB);
     for (int ch=0;ch<2;ch++) for (long i=0;i<frames;i++) {
-        reverb_stream=reverb_stream*1664525u+1013904223u;
-        double value=(reverb_stream/2147483648.0-1)*pow(decay_base,(double)i);
+        random=random*1664525u+1013904223u;
+        double value=(random/2147483648.0-1)*pow(decay_base,(double)i);
         if (i<fade_frames) value*=i/(double)fade_frames;
         impulse[(size_t)i*2+ch]=(float)value;
     }
@@ -90,24 +121,16 @@ const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double l
     prep_work_end(PREP_REVERB);
     ConvKernel *kernel=convolution_kernel(impulse,(int)frames,2,1); free(impulse);
     if (!kernel && error) *error="IR kernel allocation/build failed";
-    prep_lock(&lock, PREP_LOCK_REVERB);
-    for (unsigned i=0;i<CACHE;i++) if (cache[i].kernel && cache[i].size==size && cache[i].fade==fade &&
-        cache[i].lp==lp && cache[i].dim==dim) {
-        const ConvKernel *result=cache[i].kernel;
-        cache[slot].reserved=0;
-        prep_unlock(&lock, PREP_LOCK_REVERB);
-        convolution_kernel_free(kernel);
-        if (error) *error=NULL;
-        return result;
-    }
-    if (kernel) {
-        cache[slot].size=size; cache[slot].fade=fade; cache[slot].lp=lp; cache[slot].dim=dim;
-        cache[slot].kernel=kernel; cache[slot].reserved=0;
-    } else cache[slot].reserved=0;
-    prep_unlock(&lock, PREP_LOCK_REVERB);
+    prep_lock(&reverb_lock, PREP_LOCK_REVERB);
+    cache[slot].kernel=kernel; cache[slot].reserved=0;
+    if (!kernel) cache[slot].error="IR kernel allocation/build failed";
+    pthread_cond_broadcast(&ready);
+    prep_unlock(&reverb_lock, PREP_LOCK_REVERB);
     return kernel;
 }
 
 void convolution_reverb_reset_stream(void) {
+    prep_lock(&reverb_lock,PREP_LOCK_REVERB);
     reverb_stream=0xc0ffeeu;
+    prep_unlock(&reverb_lock,PREP_LOCK_REVERB);
 }

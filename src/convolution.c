@@ -73,19 +73,29 @@ ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, in
 
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin) {
     enum { CACHE = 16 };
-    static struct { int sample; double size, speed, begin; ConvKernel *kernel; int reserved; } cache[CACHE];
+    static struct { int sample; double size, speed, begin; ConvKernel *kernel; int reserved; unsigned waiters; } cache[CACHE];
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
     if (!isfinite(size) || !isfinite(speed) || !isfinite(begin) || size <= 0 || size > 10 ||
         speed == 0 || fabs(speed) > 8 || begin < 0 || begin > 1) return NULL;
     prep_lock(&lock, PREP_LOCK_CONV);
-    for (unsigned i = 0; i < CACHE; i++) if (cache[i].kernel && cache[i].sample == sample && cache[i].size == size &&
+    for (unsigned i = 0; i < CACHE; i++) if ((cache[i].kernel || cache[i].reserved) && cache[i].sample == sample && cache[i].size == size &&
         cache[i].speed == speed && cache[i].begin == begin) {
+        if (cache[i].reserved) {
+            if (cache[i].waiters>=128) { prep_unlock(&lock,PREP_LOCK_CONV); return NULL; }
+            cache[i].waiters++;
+            while (cache[i].reserved) if (prep_cond_wait(&ready,&lock,PREP_LOCK_CONV)) {
+                cache[i].waiters--; prep_unlock(&lock,PREP_LOCK_CONV); return NULL;
+            }
+            cache[i].waiters--;
+        }
         const ConvKernel *result = cache[i].kernel; prep_unlock(&lock, PREP_LOCK_CONV); return result;
     }
     int slot = -1;
-    for (unsigned i = 0; i < CACHE; i++) if (!cache[i].kernel && !cache[i].reserved) { slot = (int)i; break; }
+    for (unsigned i = 0; i < CACHE; i++) if (!cache[i].kernel && !cache[i].reserved && !cache[i].waiters) { slot = (int)i; break; }
     if (slot < 0) { prep_unlock(&lock, PREP_LOCK_CONV); return NULL; }
     cache[slot].reserved = 1;
+    cache[slot].sample=sample; cache[slot].size=size; cache[slot].speed=speed; cache[slot].begin=begin;
     prep_unlock(&lock, PREP_LOCK_CONV);
     float *buffer; int length, channels;
     smp_get_stereo(sample,&buffer,&length,&channels);
@@ -93,6 +103,7 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     if (!buffer || frames < 1 || frames > CONV_MAX_FRAMES) {
         prep_lock(&lock, PREP_LOCK_CONV);
         cache[slot].reserved = 0;
+        pthread_cond_broadcast(&ready);
         prep_unlock(&lock, PREP_LOCK_CONV);
         return NULL;
     }
@@ -100,6 +111,7 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     if (!impulse) {
         prep_lock(&lock, PREP_LOCK_CONV);
         cache[slot].reserved = 0;
+        pthread_cond_broadcast(&ready);
         prep_unlock(&lock, PREP_LOCK_CONV);
         return NULL;
     }
@@ -113,18 +125,8 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
     ConvKernel *kernel = build_kernel(impulse,frames,channels,1,length);
     free(impulse);
     prep_lock(&lock, PREP_LOCK_CONV);
-    for (unsigned i = 0; i < CACHE; i++) if (cache[i].kernel && cache[i].sample == sample && cache[i].size == size &&
-        cache[i].speed == speed && cache[i].begin == begin) {
-        const ConvKernel *result = cache[i].kernel;
-        cache[slot].reserved = 0;
-        prep_unlock(&lock, PREP_LOCK_CONV);
-        convolution_kernel_free(kernel);
-        return result;
-    }
-    if (kernel) {
-        cache[slot].sample = sample; cache[slot].size = size; cache[slot].speed = speed;
-        cache[slot].begin = begin; cache[slot].kernel = kernel; cache[slot].reserved = 0;
-    } else cache[slot].reserved = 0;
+    cache[slot].kernel=kernel; cache[slot].reserved=0;
+    pthread_cond_broadcast(&ready);
     prep_unlock(&lock, PREP_LOCK_CONV);
     return kernel;
 }

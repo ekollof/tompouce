@@ -431,6 +431,8 @@ int main(void) {
     }
     for (int i = 0; i < 4; i++) assert(pthread_join(same[i], NULL) == 0);
     for (int i = 0; i < 4; i++) assert(same_conv[i].kernel == same_conv[0].kernel);
+    snapshot(locks, works);
+    assert(works[PREP_FFT].calls==2);
     assert(convolution_prepare(note, .3, 1, 0) == same_conv[0].kernel);
 
     SameReverbJob same_reverb[4];
@@ -444,6 +446,7 @@ int main(void) {
     assert(convolution_prepare_reverb(.37, .01, 6000, 900) == same_reverb[0].kernel);
     snapshot(locks, works);
     print_prep("duplicate-jobs");
+    assert(works[PREP_FFT].calls==4 && works[PREP_REVERB].calls==1);
     assert(locks[PREP_LOCK_STRETCH].hold_ns * 8 < works[PREP_STRETCH].wall_ns);
     assert(locks[PREP_LOCK_CONV].hold_ns * 8 < works[PREP_FFT].wall_ns);
     assert(locks[PREP_LOCK_REVERB].hold_ns * 8 < works[PREP_REVERB].wall_ns + works[PREP_FFT].wall_ns);

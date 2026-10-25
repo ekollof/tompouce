@@ -34,13 +34,15 @@ void convolution_state_free(ConvState *state);
 /* Deep-copy a state, including its history, into dst. dst must be zeroed or
    previously freed; a plain struct assignment would alias the history. */
 int convolution_state_clone(ConvState *dst, const ConvState *src);
-/* Generator thread only. Immutable cached kernels live for the process. */
+/* Generator/worker only. Identical concurrent preparations share one build;
+   waiters may sleep. Never call these from the audio callback. Immutable
+   cached kernels live for the process. */
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin);
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim);
 /* Optional static failure description; generator/worker only. */
 const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double lp,double dim,const char **error);
-/* Reset the generated-room random stream to its startup seed. Tests call this
-   for isolation; the comparison renderer starts every case from the seed. */
+/* Reset the generated-room random stream to its startup seed, with preparation
+   idle. Does not clear cached kernels. Tests/offline renderers only. */
 void convolution_reverb_reset_stream(void);
 /* Test/offline builder; normalization follows WebAudio when normalize != 0. */
 ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, int normalize);

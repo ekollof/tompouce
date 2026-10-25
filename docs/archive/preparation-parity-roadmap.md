@@ -455,3 +455,17 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       a new pattern. PCM assertions verify updates apply once and query-time
       loader calls have no side effects; existing held-PCM and confinement
       gates remain in place.
+
+## Shared convolution preparation and reverb random state
+
+- [x] Coalesce identical concurrent sample-convolution and generated-room
+      misses. Four requests now share one kernel build for each key, reducing
+      the duplicate-job profile's FFT channel-preparation calls from 16 to 4
+      and room synthesis calls from 4 to 1. Failed builds wake all waiters,
+      retain their error, release their slot safely and permit retries.
+- [x] Remove concurrent writes to the generated-room random stream. Reserve
+      segments under a short lock and generate from private state; exact LCG
+      jumping replaces long locked cache-hit loops. Sequential kernels remain
+      bit-identical to the prior implementation, including cache hits and a
+      maximum-size room followed by a new room. Deterministic failure tests,
+      ThreadSanitizer and ASan/UBSan cover the preparation paths.

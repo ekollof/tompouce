@@ -10,11 +10,24 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound
-        audio audio_performance prep_profile prep_deadlines prep_cpu stretch room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security)
+        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
+
+# Instrument both preparation implementations (included by the fixture),
+# the lock profiler and SIMD initialization when checking their concurrency.
+add_executable(test_convolution_prepare_tsan EXCLUDE_FROM_ALL
+    tests/test_convolution_prepare.c src/prep_profile.c src/convolution_mix.c)
+set_target_properties(test_convolution_prepare_tsan PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+target_compile_options(test_convolution_prepare_tsan PRIVATE -UNDEBUG -g -fsanitize=thread -fno-omit-frame-pointer)
+target_link_options(test_convolution_prepare_tsan PRIVATE -fsanitize=thread)
+target_link_libraries(test_convolution_prepare_tsan PRIVATE tompouce_core)
+add_custom_target(test-convolution-prepare-tsan
+    COMMAND $<TARGET_FILE:test_convolution_prepare_tsan>
+    DEPENDS test_convolution_prepare_tsan WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
 
 foreach(variant simd simd_portable simd_sanitize)
     add_executable(test_convolution_${variant} EXCLUDE_FROM_ALL tests/test_convolution_simd.c)
@@ -208,10 +221,11 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance stretch room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security javascript)
+foreach(name audio audio_performance stretch convolution_prepare room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp mcp_security websamp_security javascript)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
-        AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security" AND NOT name STREQUAL "stretch")
+        AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security" AND NOT name STREQUAL "stretch"
+        AND NOT name STREQUAL "convolution_prepare")
         list(APPEND sources src/stretch.c)
     endif()
     if(name STREQUAL "native_synth")
@@ -275,6 +289,7 @@ add_custom_target(test-security-sanitize
     DEPENDS test_mcp_security_sanitize test_websamp_security_sanitize test_javascript_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-sanitize
+    COMMAND $<TARGET_FILE:test_convolution_prepare_sanitize>
     COMMAND $<TARGET_FILE:test_stretch_sanitize>
     COMMAND $<TARGET_FILE:test_dsp_sanitize>
     COMMAND $<TARGET_FILE:test_audio_sanitize>
@@ -288,7 +303,7 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_midi_sanitize>
     COMMAND $<TARGET_FILE:test_gm_webaudiofont_sanitize>
     COMMAND $<TARGET_FILE:test_websamp_sanitize>
-    DEPENDS test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize
+    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

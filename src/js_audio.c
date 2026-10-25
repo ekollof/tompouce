@@ -853,8 +853,24 @@ static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEven
 static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
     const cJSON *hap, double seconds, AudioEvent *event) {
     const cJSON *settings=cJSON_GetObjectItemCaseSensitive(value,"_midiOptions");
+    const cJSON *channels=cJSON_GetObjectItemCaseSensitive(value,"_midiChannels");
+    if (channels) {
+        if (!cJSON_IsArray(channels) || cJSON_GetArraySize(channels)>16) {
+            javascript_warn_control(program,"midi channels (at most 16 destinations per hap)"); return 0;
+        }
+        const cJSON *channel;
+        cJSON_ArrayForEach(channel,channels) {
+            if (!cJSON_IsNumber(channel) || !isfinite(channel->valuedouble) ||
+                channel->valuedouble<0 || channel->valuedouble>15 || floor(channel->valuedouble)!=channel->valuedouble) {
+                javascript_warn_control(program,"midi channels (requires resolved integers 0..15)"); return 0;
+            }
+            event->midi_channels[event->midi_channel_count++]=(unsigned char)channel->valueint;
+        }
+        if (!event->midi_channel_count) event->midi_channel_count=-1;
+        event->midi_chan=event->midi_channel_count>0?event->midi_channels[0]:0;
+    }
     int controller=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(settings,"isController"));
-    if (!cJSON_HasObjectItem(value,"midichan")) {
+    if (!channels && !cJSON_HasObjectItem(value,"midichan")) {
         const cJSON *channel=cJSON_GetObjectItemCaseSensitive(settings,"midichannel");
         if (cJSON_IsNumber(channel) && channel->valuedouble>=1 && channel->valuedouble<=16)
             event->midi_chan=(int)channel->valuedouble-1;

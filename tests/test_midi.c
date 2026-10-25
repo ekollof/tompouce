@@ -239,6 +239,23 @@ static void test_threaded_delivery(void) {
             if (!seen[i].on && seen[i].note==rotation[r]) { off=1; cursor=(int)i+1; break; }
         assert(off);
     }
+    /* Real producer/consumer routing fans out once per message, without
+       introducing local voices, and retains every admitted channel's off. */
+    midi_capture_enable(1);
+    assert(track_load_from_code("note(72).fast(4).midi({midichannel:[2,4]})"));
+    assert(wait_captured(4,10,&peak_voices) && peak_voices==0);
+    int multi_offs=0; double deadline=monotonic()+10;
+    do {
+        pump_realtime(128);
+        total=midi_captured_notes(seen,512); multi_offs=0;
+        for (unsigned i=0;i<total && i<512;i++) if (!seen[i].on && seen[i].note==72) multi_offs++;
+    } while (multi_offs<4 && monotonic()<deadline);
+    assert(multi_offs>=4);
+    int multi_ons=0;
+    for (unsigned i=0;i<total && i<512 && multi_ons<4;i++) if (seen[i].on && seen[i].note==72) {
+        assert(seen[i].chan==(multi_ons%2?3:1)); multi_ons++;
+    }
+    assert(multi_ons==4);
     /* Legacy local-plus-ALSA path still sounds and emits. */
     assert(track_load_from_code("note(67).s('sine').midichan(2)"));
     int found67=0;
@@ -282,7 +299,12 @@ static void test_short_gate_and_bounds(void) {
     assert(midi_captured_notes(notes,4)==0);
     /* Filling the bounded queue must reject the next on, rather than emit
        a note whose off can never be queued. Do not advance the clock. */
-    for (int i=0;i<1025;i++) midi_note_for(0,60,64,100);
+    for (int i=0;i<1023;i++) midi_note_for(0,60,64,100);
+    const unsigned char channels[]={2,0};
+    midi_notes_for(channels,2,60,64,100);
+    assert(midi_captured_notes(NULL,0)==1023); /* Reject the whole fan-out. */
+    midi_notes_for(channels,1,60,64,100);
+    midi_note_for(0,60,64,100);
     assert(midi_captured_notes(NULL,0)==1024);
     midi_capture_enable(0); midi_shutdown();
     event_queue_clear(); audio_time=0;
@@ -295,6 +317,71 @@ static void test_short_gate_and_bounds(void) {
     assert(track_load_from_code("note(60).set({_midiMapped:Array(33).fill({ccn:74,ccv:.5})}).midi()"));
     schedule_loaded(0); assert(!qhead);
     event_queue_clear();
+    assert(track_load_from_code("note(60).midi({midichannel:Array(17).fill(1)})"));
+    schedule_loaded(0); assert(!qhead);
+    event_queue_clear();
+}
+
+/* Receive only this process's own output: no discovery-by-name connection
+   to another running engine and no external hardware or audio device. */
+static void test_channel_note_off_loopback(void) {
+    midi_shutdown(); midi_init();
+    if (!midi_ready()) { puts("SKIP channel note-off loopback: no ALSA sequencer"); return; }
+    snd_seq_t *receiver=NULL;
+    assert(snd_seq_open(&receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
+    snd_seq_set_client_name(receiver,"tompouce-channel-timing-qa");
+    int port=snd_seq_create_simple_port(receiver,"owned receiver",
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+    assert(port>=0);
+    snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client,-1);
+    int sender=-1,sender_port=-1;
+    while (snd_seq_query_next_client(receiver,client)>=0) {
+        if (snd_seq_client_info_get_pid(client)!=(int)getpid() || strcmp(snd_seq_client_info_get_name(client),"tompouce")) continue;
+        snd_seq_port_info_t *info; snd_seq_port_info_alloca(&info);
+        snd_seq_port_info_set_client(info,snd_seq_client_info_get_client(client));
+        snd_seq_port_info_set_port(info,-1);
+        while (snd_seq_query_next_port(receiver,info)>=0) if (!strcmp(snd_seq_port_info_get_name(info),"out")) {
+            assert(sender<0);
+            sender=snd_seq_client_info_get_client(client); sender_port=snd_seq_port_info_get_port(info);
+        }
+    }
+    assert(sender>=0 && snd_seq_connect_from(receiver,port,sender,sender_port)>=0);
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    const unsigned char channels[]={2,0,2};
+    midi_capture_enable(1);
+    midi_notes_for(channels,3,67,100,.02);
+    int ons=0,offs=0; double first=monotonic();
+    while (offs<3 && monotonic()-first<2) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(receiver,&event)>=0 && event) {
+            if (event->type==SND_SEQ_EVENT_NOTEON) {
+                assert(ons<3 && event->data.note.channel==channels[ons++]);
+                assert(event->data.note.note==67 && event->data.note.velocity==100);
+            } else if (event->type==SND_SEQ_EVENT_NOTEOFF) {
+                assert(ons==3 && offs<3 && event->data.note.channel==channels[offs++]);
+                assert(event->data.note.note==67);
+                assert(audio_time_now()>=.02 && audio_time_now()<.03);
+            }
+        }
+        if (offs<3) pump_realtime(128);
+    }
+    assert(ons==3 && offs==3);
+    MidiCapturedNote notes[8];
+    assert(midi_captured_notes(notes,8)==6);
+    for (int i=0;i<3;i++) {
+        assert(notes[i].on && !notes[i+3].on);
+        assert(notes[i].chan==channels[i] && notes[i+3].chan==channels[i]);
+    }
+    const unsigned char invalid[]={0,16};
+    midi_capture_enable(1);
+    midi_notes_for(invalid,2,67,100,.02);
+    midi_notes_for(channels,17,67,100,.02);
+    midi_notes_for(NULL,1,67,100,.02);
+    assert(!midi_captured_notes(NULL,0));
+    midi_capture_enable(0); snd_seq_close(receiver); midi_shutdown();
+    audio_toggle_play(0); event_queue_clear();
+    puts("channel fan-out reaches owned ALSA receiver in order; every 20ms note-off arrives before 30ms of audio time");
 }
 
 static void test_midi_input_stores(void) {
@@ -1071,9 +1158,9 @@ static int midi_reference_main(void) {
             cJSON_AddItemToArray(events, dump);
         }
         cJSON_AddItemToObject(entry, "events", events);
-        MidiCaptured captured[128];
-        unsigned count = midi_captured_all(captured, 128);
-        assert(count <= 128);
+        MidiCaptured captured[1024];
+        unsigned count = midi_captured_all(captured, 1024);
+        assert(count <= 1024);
         midi_capture_enable(0);
         cJSON *sends = cJSON_CreateArray(), *gates=cJSON_CreateArray();
         for (unsigned i = 0; i < count; i++) {
@@ -1136,6 +1223,7 @@ int main(int argc, char **argv) {
     test_midi_extras_commit();
     test_midi_extras_delivery();
     test_short_gate_and_bounds();
+    test_channel_note_off_loopback();
     event_queue_clear();
     midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");

@@ -536,6 +536,14 @@ function prepareMidiValue(value) {
   if(!value._midi)return value;
   const settings=value._midiOptions ?? {};
   const object={...value};
+  // WebMidi sanitizes channel options with parseInt, preserving order and
+  // duplicates. Bound raw fan-out before scanning or allocating its result.
+  const channel=value.midichan===undefined?
+    (Object.hasOwn(settings,'midichannel')?settings.midichannel:1):value.midichan;
+  const channels=channel==null?['all']:Array.isArray(channel)?channel:[channel];
+  object._midiChannels=channels.length>16?null:
+    (channels.includes('all')?Array.from({length:16},(_,i)=>i):
+      channels.map(ch=>parseInt(ch)).filter(ch=>ch>=1 && ch<=16).map(ch=>ch-1));
   object._midiGain=(value.gain===undefined?(settings.gain===undefined?1:settings.gain):value.gain)*
     (value.velocity===undefined?(settings.velocity===undefined?.9:settings.velocity):value.velocity);
   const map=midiMaps.get(value.midimap ?? settings.midimap ?? 'default');

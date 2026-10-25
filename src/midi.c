@@ -212,29 +212,38 @@ void midi_note(int chan, int note, int vel, int dur_ms) {
 }
 
 void midi_note_for(int chan, int note, int vel, double duration) {
-    if (chan < 0 || chan > 15 || note < 0 || note > 127) return;
+    if (chan<0 || chan>15) return;
+    unsigned char channel=(unsigned char)chan;
+    midi_notes_for(&channel,1,note,vel,duration);
+}
+
+void midi_notes_for(const unsigned char *channels,int count,int note,int vel,double duration) {
+    if (!channels || count<1 || count>16 || note<0 || note>127) return;
+    for (int i=0;i<count;i++) if (channels[i]>15) return;
     if (!isfinite(duration) || duration<0 || duration>86400) return;
     if (vel < 0) vel = 0;
     if (vel > 127) vel = 127;
     pthread_mutex_lock(&midi_lock);
-    if (midi_running && n_offs>=MIDI_MAX_OFFS) {
+    if (midi_running && count>MIDI_MAX_OFFS-n_offs) {
         pthread_mutex_unlock(&midi_lock);
         log_console("midi: note-off queue full; note not sent"); return;
     }
-    midi_log_timed(MIDI_CAP_NOTE_ON,chan,note,vel,NULL,0,duration);
-    if (!midi_running) { pthread_mutex_unlock(&midi_lock); return; }
-    if (midi_ok) send_raw(1, chan, note, vel);
-    if (n_offs < MIDI_MAX_OFFS) {
+    double at=audio_time_now()+duration;
+    for (int channel=0;channel<count;channel++) {
+        int chan=channels[channel];
+        midi_log_timed(MIDI_CAP_NOTE_ON,chan,note,vel,NULL,0,duration);
+        if (!midi_running) continue;
+        if (midi_ok) send_raw(1,chan,note,vel);
         OffEv e;
-        e.at = audio_time_now() + duration;
+        e.at = at;
         e.ch = chan;
         e.note = note;
         int i = n_offs;
         while (i > 0 && offs[i - 1].at > e.at) { offs[i] = offs[i - 1]; i--; }
         offs[i] = e;
         n_offs++;
-        pthread_cond_signal(&midi_cond);
     }
+    if (midi_running) pthread_cond_signal(&midi_cond);
     pthread_mutex_unlock(&midi_lock);
 }
 

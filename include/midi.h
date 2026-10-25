@@ -11,6 +11,9 @@ void midi_note(int chan, int note, int vel, int dur_ms);
 /* Dominant output preserves sub-millisecond web gates without the legacy
    50ms floor. Invalid/unbounded durations never enqueue an unterminated on. */
 void midi_note_for(int chan, int note, int vel, double duration);
+/* Ordered fan-out, including duplicate channels. Reserve every note-off
+   atomically before sending any note-on; count is bounded to 16. */
+void midi_notes_for(const unsigned char *channels, int count, int note, int vel, double duration);
 /* Dominant MIDI extras, matching the deployed web output's message set.
    Channel is 0-15; sends are best-effort like midi_note and always recorded
    in the scheduling capture when enabled. */

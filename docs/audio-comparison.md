@@ -548,4 +548,26 @@ artifacts for the final runs are `/tmp/tompouce-long-room-backend-c-unrolled`
 and `/tmp/tompouce-long-room-backend-auto-unrolled`. They are evidence from one
 machine, not permanent baselines or guarantees under arbitrary host contention.
 
+## MIDI channel routing and delivery
+
+`node scripts/midi-reference-qa.mjs` compares 206 cases against the deployed
+REPL using owned fake WebMidi transports and native scheduler dispatch. It
+checks hap values, exact message bytes/order and note-on/off timestamp
+differences. Channel-array coverage includes order, duplicate/empty lists,
+all-channel selection, WebMidi conversion/filtering, explicit overrides,
+options precedence, mapped CCs, NRPN, program changes, bend, touch, SysEx and
+transport. The largest mapped case emits 32 CCs to each of 16 channels before
+the notes. Native fan-out is capped at 16 raw channel entries; oversize lists
+are rejected with a warning and tested separately from the web gate.
+
+`test_midi` also tests the real producer/consumer path and owned ALSA delivery.
+Its receiver subscribes only to the output client identified by this process's
+PID and client/port names. It receives an ordered three-channel note fan-out,
+including a duplicate channel, then all three 20 ms note-offs before 30 ms of
+synthetic audio time. The callback is paced in 128-frame steps. Queue-pressure
+tests prove that insufficient off capacity rejects the entire note fan-out,
+while the remaining scalar slot remains usable. No external MIDI device or
+audio device is opened by this loopback fixture. This establishes the local
+ALSA boundary, not USB/DIN/device latency or behavior under arbitrary load.
+
 Native implementations and bounds are described in [JavaScript/native audio](javascript.md).

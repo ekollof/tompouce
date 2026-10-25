@@ -22,6 +22,13 @@ See the [MCP setup](https://github.com/ekollof/tompouce/blob/master/README.md#mc
 
 The native backend supports MIDI notes and `midichan` through ALSA output. Check F4 or MCP health for MIDI readiness and the project reference for current startup/device configuration. This is separate from `gm_` synths, which play the web's per-instrument sample packs to audio (FluidSynth is only their offline fallback).
 
+Use `.midi({midichannel:[1,3]})` to send notes and channel controls to an ordered
+channel list, or `.midi({midichannel:'all'})` for all 16 channels. Duplicates
+remain duplicate sends; an empty list suppresses channel messages. Lists are
+bounded to 16 entries, and `.midichan()` overrides the option. Transport and
+SysEx send once per hap. A note fan-out reserves every required note-off before
+sending its note-ons, so queue saturation cannot produce a partial fan-out.
+
 ## OSC
 
 Route a pattern to an external receiver such as SuperDirt:

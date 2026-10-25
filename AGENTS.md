@@ -116,6 +116,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 - Dominant MIDI gates use hap duration/clip in cycles and retain fractional
   milliseconds. Preserve mapped-CC-before-note order, complete NRPN transactions
   and bounded note-off admission; never emit an on whose off cannot be queued.
+  Channel lists preserve order/duplicates under the 16-destination bound;
+  reserve note-offs for the whole fan-out before any note-on. Channel messages
+  fan out individually; transport and SysEx remain once per hap.
 - Direct sliders are query-time references with source identity and source/undo
   synchronization. Aliased sliders follow the web's static fallback. Explicit
   evaluation/start behavior and failed-evaluation retention must match the REPL.

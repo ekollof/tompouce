@@ -831,6 +831,18 @@ an out-of-range note velocity aborts that MIDI hap. The legacy `midichan`
 path keeps its local gain rules. Options can supply `gain`, `velocity`,
 `midichannel`, `noteOffsetMs` and `isController`; the second options argument
 overrides the first object, and explicit hap controls override defaults.
+Channel options also accept ordered arrays, for example
+`note("c4 e4").midi({midichannel:[1,3]})`, or `'all'` for channels 1–16.
+Duplicates remain duplicate sends; an empty list suppresses channel messages
+while transport and SysEx still send once per hap. WebMidi's `parseInt`
+conversion and invalid-channel filtering apply to these options. Explicitly
+null or undefined `midichannel` selects all channels, as in the REPL; omitting
+the option retains channel 1. At most 16 raw destinations are accepted per hap,
+including duplicates; larger lists warn and suppress that MIDI hap.
+Mapped CCs precede the note fan-out, followed by each extra's channel fan-out
+in REPL order. NRPN remains a complete transaction for each channel.
+Every fan-out reserves all its note-off slots before sending any note-on; if
+the bounded queue cannot hold them all, none of those note-ons is sent.
 Controller mode suppresses notes while retaining controls and transport.
 CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 `ccv` 0..1, also via `control([ccn, ccv])`), program change (`progNum`

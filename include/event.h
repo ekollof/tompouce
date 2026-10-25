@@ -66,6 +66,8 @@ typedef struct {
     double rel;         // release seconds, -1 = default
     int midi_chan;      // MIDI channel 0-15, -1 = off
     int midi_note;      // MIDI note for midi out, -1 = none
+    int midi_channel_count; /* -1 empty, 0 legacy scalar, 1..16 ordered fan-out */
+    unsigned char midi_channels[16]; /* duplicates retained, channels 0..15 */
     /* Dominant MIDI extras, parsed in web send order (program, sysex, CC,
        bend, touch, transport). A rejected extra drops itself and every later
        extra, matching the web scheduler's throw-abort behavior. */

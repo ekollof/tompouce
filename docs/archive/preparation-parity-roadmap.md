@@ -469,3 +469,16 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       bit-identical to the prior implementation, including cache hits and a
       maximum-size room followed by a new room. Deterministic failure tests,
       ThreadSanitizer and ASan/UBSan cover the preparation paths.
+
+## MIDI channel-array parity
+
+- [x] Support ordered MIDI channel arrays and all-channel options, retaining
+      duplicate sends and WebMidi's conversion/filtering behavior. Empty lists
+      suppress channel messages while global messages remain once per hap.
+      The independent deployed-REPL gate now covers 206 cases, including
+      mapped CCs and extras over all 16 channels. Raw lists are bounded to 16
+      entries; larger lists warn and reject that MIDI hap.
+- [x] Reserve off capacity atomically for each complete note fan-out, retaining
+      one off for every accepted on. Threaded scheduling and an owned ALSA
+      receiver verify ordered delivery and 20 ms gates, including duplicate
+      channels. Physical-device timing under load remains in `TODO.md`.

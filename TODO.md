@@ -77,8 +77,10 @@ and measured divergences are recorded in the archive.
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and
       independent reference checks. Keep current 32-map/128-entry/32-send bounds.
-- [ ] Broaden MIDI output to channel-array options and physical note-off
-      delivery timing. The maintained gate covers named CCs, inline maps, NRPN,
+- [ ] Measure physical-device MIDI note-off delivery timing under load. Channel
+      arrays now have independent web gates and an owned ALSA loopback check;
+      this does not measure USB/DIN transport or device response. The maintained
+      gate covers named CCs, inline maps, NRPN,
       controller/options defaults, duplicate scalar/command sends and exact
       note-on/off timestamp differences. Pinned numeric-string coercion drift
       remains explicit; do not replace the runtime or historical fixtures.

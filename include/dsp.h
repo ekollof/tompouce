@@ -73,6 +73,9 @@ typedef struct {
     unsigned noise_seed;
     double held;
     unsigned tick;
+    /* Oscillator a-rate automation alignment for its first render quantum. */
+    double pitch_onset_fraction, pitch_quantum_offset;
+    unsigned pitch_initial_frames;
     /* Derived once in dsp_init. Controls are immutable per voice, so these
        cannot change during playback; they let the per-sample paths skip work
        that is provably identity (see dsp_frequency/dsp_process). */
@@ -88,6 +91,9 @@ double dsp_filter_frequency(const DspParams *params, int type, double age, doubl
 void dsp_init(DspState *state, const DspParams *p);
 double dsp_process(DspState *state, double sample, double age, double gate);
 double dsp_frequency(DspState *state, double freq, double age, double gate);
+/* OscillatorNode a-rate automation starts at the first quantum's array head,
+   even when audible output begins part-way through that quantum. */
+void dsp_oscillator_onset(DspState *state, double onset);
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate);
 double dsp_envelope(double age, double gate, double attack, double decay, double sustain, double release);
 double dsp_noise(DspState *state, int color);

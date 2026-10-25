@@ -548,6 +548,58 @@ artifacts for the final runs are `/tmp/tompouce-long-room-backend-c-unrolled`
 and `/tmp/tompouce-long-room-backend-auto-unrolled`. They are evidence from one
 machine, not permanent baselines or guarantees under arbitrary host contention.
 
+## Prebake helpers and oscillator pitch envelopes
+
+The prebake reference gate compares 81 setup/helper/API cases against the
+deployed transpiler and native QuickJS. Multi-cycle cases cover arrangements,
+cueing, sample timing and stateful glide. Ten branch cases check solo labels,
+muting, replacement, query-time identity and `each`/`all` transforms against
+the actual REPL. Existing exact checks remain exact;
+new floating-point text-synth/random/glide/frequency cases allow 1e-12 absolute
+numeric error with exact event counts and structure. Raw postgain, velocity
+and delay helper checks disable the gain curve; separate audio checks retain
+the actual starter's quadratic shaping.
+
+Three `prebake-` PCM cases fetch the pinned Switch Angel starter into an owned
+fixture config and compare glide, accent and delay against the real web player.
+Nine `pitch-envelope-` cases independently cover native pitch ADSR defaults,
+partial/zero segment settings, sustain-based anchors, short gates, late and
+fractional onsets, and vibrato. These retain the existing 0.99 correlation and
+0.85–1.15 RMS ratio gates, without shifting or rescaling captures. Metadata
+queries use a separate fresh pattern for the stateful glide audio render so
+previewing events does not prime the pattern's musical state.
+
+The glide check exposed two native pitch problems: incorrect ADSR defaults and
+segment minima, and initial oscillator automation timing. Chromium processes
+a-rate oscillator automation from the quantum's array head even when the
+audible destination begins later in that quantum. Native oscillators now
+retain that alignment, including fractional starts, without shifting amplitude
+envelopes or sample playback. See the [Chromium oscillator implementation](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/webaudio/oscillator_handler.cc).
+Glide correlation improved from about 0.93 to over 0.999999. Nonlinear pitch
+curves, live oneshot/grid timing and full helper/synthesis equivalence remain
+outside these established gates.
+
+## Kabelsalat effect tails and input routing
+
+Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
+zero/short/extended cleanup times, feedback, clipped and naturally ending
+stereo samples, and explicit output channels. Run them with
+`TOMPOUCE_COMPARE_FILTER=kabel-fxr node scripts/compare-audio.mjs` after building
+`render_audio`. They retain the existing 0.99 correlation and 0.85..1.15 RMS
+ratio gates, with no capture shifts or gain correction. Observed correlations
+range from 0.9986 to above 0.999999.
+
+The native effect now drains zero input until the original hap's effects
+cleanup deadline and applies the web's final linear fade when `fxr` exceeds
+the source release. Natural sample termination does not move that deadline.
+Like the browser worklet, a single graph reads the first input channel and
+produces both outputs; the former independent right-input graph was removed.
+Callback tests retain graph state across program release and pool retirement,
+then check bounded cleanup without freeing graph state in rendering.
+
+These gates do not establish graph-source `fxr`, nonlinear effect ordering,
+fractional-onset worklet startup or arbitrary nested `FX` chain parity.
+
 ## MIDI channel routing and delivery
 
 `node scripts/midi-reference-qa.mjs` compares 206 cases against the deployed

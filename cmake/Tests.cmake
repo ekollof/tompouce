@@ -62,6 +62,8 @@ endforeach()
 set_tests_properties(tui_pty PROPERTIES LABELS "ui" RUN_SERIAL TRUE)
 set_tests_properties(terminal_render_pty PROPERTIES LABELS "ui")
 add_test(NAME live_controls_reference COMMAND node js/test-live-controls.mjs)
+add_test(NAME text_encoding COMMAND node js/test-text-encoding.mjs)
+set_tests_properties(text_encoding PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 30)
 set_tests_properties(live_controls_reference PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 30
     ENVIRONMENT "TOMPOUCE_LIVE_CONTROLS_BINARY=$<TARGET_FILE:test_live_sliders>")

@@ -57,8 +57,13 @@ postgain, shape/distortion volume, delay send and tremolo depth.
 The output Volume control is downstream of that curve: `/volume .5` always
 halves the final amplitude.
 
-The full file loads in QuickJS. Maintained web checks cover `acidenv`,
-`trancegate`, `tgate`, `rlpf`/`rhpf`, `octave`, `sc`/`setScale` and `DX`.
+The full file loads in QuickJS. Maintained web checks cover orbit mute/solo,
+cue selection, arrangements, fills, note/scale/arpeggio helpers, parameter
+locks, pan, delay, accents, sample timing, text-to-synth (`stxt`), linear glide,
+and seeded humanize/glitch controls, as well as the original filter helpers.
+Native `TextEncoder` supplies UTF-8 encoding, including Unicode replacement
+and `encodeInto`; it supplies no DOM APIs. The public
+`getFrequencyFromValue` pitch helper follows the web's note/frequency fallbacks.
 This does not establish compatibility for every helper: browser DOM controls,
 external MIDI devices, unavailable samples/synths and effect APIs such as
 `bmod`/`FX` still require their own support. Calling an unavailable API retains
@@ -136,8 +141,19 @@ TOMPOUCE_COMPARE_FILTER=gaincurve node scripts/compare-audio.mjs
 TOMPOUCE_COMPARE_FILTER=custom-default node scripts/compare-audio.mjs
 ```
 
-The web gate uses the deployed REPL and its actual transpiler, comparing 13
-setup/helper cases with the native QuickJS file-loading path. It records the
+The web gate uses the deployed REPL and its actual transpiler, comparing 81
+setup/helper/API cases with the native QuickJS file-loading path, including
+multi-cycle arrangements and ten branch solo/identity/transform cases. It records the
 upstream starter revision/hash, browser transpiler hash and native bundle hash.
-Musical controls are compared separately from defaults and gain shaping,
-which the four audio gates compare against actual browser rendering.
+Existing exact event checks remain exact. New text-synth/random/glide and frequency
+checks allow at most 1e-12 absolute numeric error, with exact structure and
+event counts. Helper-specific delay, velocity and postgain checks disable the
+gain curve to inspect their raw controls. Gain shaping keeps its separate
+browser audio gates. Three more audio gates cover glide, accent and delay
+with the complete pinned starter, using the existing 0.99 correlation and
+0.85–1.15 gain limits. Glide additionally exposed and fixed pitch-envelope
+defaults, minimum segment durations and first-quantum oscillator automation.
+Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
+The oneshot event check uses a stopped zero-time clock; live evaluation/grid
+timing, nonlinear pitch curves, custom FX/bmod routing and external devices
+remain separate checks rather than claims established by this matrix.

@@ -482,3 +482,33 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       one off for every accepted on. Threaded scheduling and an owned ALSA
       receiver verify ordered delivery and 20 ms gates, including duplicate
       channels. Physical-device timing under load remains in `TODO.md`.
+
+## Expanded prebake helper and pitch checks
+
+- [x] Match REPL branch solo prefixes, registered pattern-state identity and
+      `each()` on unlabelled final patterns. Ten additional deployed-web cases
+      bring the shared setup/helper/API gate to 81 comparisons.
+- [x] Expand deployed-REPL prebake checks from 13 to 71 setup/helper/API cases,
+      covering multi-cycle arrangements, cueing, orbit control, parameter locks,
+      sample timing, text synthesis, glide and seeded random transforms. Raw
+      velocity/postgain/delay helpers are checked separately from gain shaping.
+- [x] Supply UTF-8 `TextEncoder` (`encode`/`encodeInto`, surrogate replacement,
+      typed destinations and receiver checks) and Superdough's public frequency
+      resolver, fixing native `stxt` and glide queries. Query errors fail the
+      reference gate even when the upstream pattern layer returns no haps.
+- [x] Add three starter-based PCM gates and nine independent pitch/vibrato
+      gates. Fix pitch ADSR defaults, minimum durations, implicit sustain
+      anchors and oscillator automation in partial first render quanta.
+      Live oneshot/grid clocks, nonlinear pitch curves, custom FX/bmod paths,
+      bank-dependent sounds and external devices remain explicit follow-up.
+
+## Kabelsalat effect cleanup and channels
+
+- [x] Retain `audioin()` effect graphs through their bounded `fxr` cleanup
+      deadline, process zero after source completion, and apply the web output
+      fade. Preserve the original hap deadline for naturally ending samples.
+- [x] Use one graph reading the first input channel, as the browser worklet
+      does, with graph-defined stereo outputs. Remove duplicate state/work on
+      the right input. Eight independent PCM gates cover delays, feedback,
+      cleanup ranges, stereo input and explicit output channels; callback tests
+      cover released programs, retirement, tail energy and cleanup ownership.

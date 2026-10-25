@@ -105,6 +105,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   `src/periodic.c` prepares immutable periodic waves and looping noise buffers;
   never build or evict their tables in rendering. Keep pulse's source gain,
   render-quantum startup and stereo routing separate from square synthesis.
+  Pitch ADSR defaults and segment minima follow the REPL. Preserve oscillator
+  a-rate automation alignment for partial first quanta; do not shift amplitude
+  envelopes, sample transport or worklet startup to emulate it.
   Final output volume uses a lock-free integer target, read once per block
   after voices/effects/limiting; preserve unity PCM and live tail continuity.
   Preserve floating-point operation order and test forced C/SSE2/AVX/AVX2 PCM

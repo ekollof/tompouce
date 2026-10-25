@@ -48,12 +48,13 @@ static AudioEvent prepare_gm(const char *code) {
 
 static void test_retiring_resources(void) {
     const char *sources[]={"note(60).s('bytebeat').bbexpr('t*5')",
-        "note(60).s('sine').K(audioin().mul(.5).out())"};
+        "note(60).s('sine').K(audioin().mul(.5).out())",
+        "note(60).s('sine').clip(.05).K(audioin().delay(.1).out()).fxr(.5)"};
     for (unsigned source=0;source<sizeof(sources)/sizeof(sources[0]);source++) {
         clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
         AudioEvent event=prepare(sources[source]); audio_trigger_event(&event);
         NativeSynthState *left=voices[0].native_state,*right=voices[0].native_right;
-        assert(left && (!native_synth_effect(event.native_synth) || right));
+        assert(left && !right);
         native_synth_release(event.native_synth);
         AudioEvent silent={.time=.1,.duration=1,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
             .gain=0,.att=.001,.dec=.05,.sus=.6,.rel=.01,.midi_chan=-1,.midi_note=-1,
@@ -66,11 +67,34 @@ static void test_retiring_resources(void) {
         for (int i=0;i<32;i++) pa_callback(NULL,output,512,NULL,0,NULL);
         if(native_synth_effect(event.native_synth)) {
             assert(voices[MAX_VOICES].active && voices[MAX_VOICES].native_state==left);
-            while(audio_time<voices[MAX_VOICES].gate_end+voices[MAX_VOICES].vrel+.02)
+            while(audio_time<voices[MAX_VOICES].graph_end+.02)
                 pa_callback(NULL,output,512,NULL,0,NULL);
         }
         assert(!voices[MAX_VOICES].active && voices[MAX_VOICES].native_state==left);
         clear_voices(); /* The owning state references are freed exactly once, off callback. */
+    }
+}
+
+static void test_effect_release(void) {
+    const char *codes[]={
+        "note(69).s('sine').clip(.05).release(.01).worklet('audioin().delay(.1).out()').fxr(.5)",
+        "note(69).s('sine').clip(.05).release(.01).worklet('audioin().delay(.1).out()').fxr(0)"};
+    for (int extended=0;extended<2;extended++) {
+        clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
+        AudioEvent event=prepare(codes[extended]);
+        assert(event.fx_release==(extended?0:.5));
+        audio_trigger_event(&event);
+        native_synth_release(event.native_synth); /* preparation/program may go away */
+        NativeSynthState *held=voices[0].native_state;
+        float output[2]; double tail_energy=0;
+        for (unsigned frame=0;frame<30000;frame++) {
+            pa_callback(NULL,output,1,NULL,0,NULL);
+            if(frame>6615 && frame<8820) tail_energy+=output[0]*output[0];
+            if(frame==11025) assert(voices[0].active==!extended);
+        }
+        assert(extended?tail_energy==0:tail_energy>1);
+        assert(!voices[0].active && voices[0].native_state==held);
+        clear_voices(); /* graph state reclaimed off callback */
     }
 }
 
@@ -179,6 +203,7 @@ int main(void) {
 #endif
     test_gm();
     test_retiring_resources();
+    test_effect_release();
     test_wavetable_banks();
     const char *waves[]={"zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise"};
     for (int i=0;i<7;i++) {
@@ -214,7 +239,7 @@ int main(void) {
     AudioEvent effect=prepare("note(60).K(audioin().mul(.5).out())");
     playing=1; audio_trigger_event(&effect);
     VoiceMix mix={0}; route_voice(&voices[0],.25,-.5,&mix);
-    assert(fabs(mix.left-.125)<1e-9 && fabs(mix.right+.25)<1e-9);
+    assert(fabs(mix.left-.125)<1e-9 && fabs(mix.right-.125)<1e-9);
     clear_voices(); native_synth_release(effect.native_synth);
     cJSON *bad=cJSON_Parse("{\"s\":\"bytebeat\",\"_nativeProgram\":{\"kind\":\"bytebeat\",\"result\":0,\"ops\":[{\"op\":\"+\",\"value\":0,\"ins\":[999]}]}}");
     assert(bad && !native_synth_prepare(bad,440,1)); cJSON_Delete(bad);

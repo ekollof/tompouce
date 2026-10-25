@@ -7,8 +7,26 @@ import { parse } from 'acorn';
 import { installNative, prepareNative } from './native-synth.mjs';
 import { queryFraction } from './query-time.mjs';
 import {installPrebakes,resetPrebakes,runPrebake,prepareAudioDefaults,isPrebaking} from './prebake.mjs';
+import {TextEncoder as Utf8TextEncoder} from './text-encoding.mjs';
 
 Object.assign(globalThis, core, mini, tonal);
+globalThis.TextEncoder ??= Utf8TextEncoder;
+/**
+ * Resolve a note/frequency object like Superdough, including its fallback
+ * note and octave multiplier. Used by prebake glide helpers.
+ * @name getFrequencyFromValue
+ * @param {object} value note, optional freq override and octave multiplier
+ * @param {number} fallback default MIDI note when note is falsy, default 36
+ * @example
+ * freq(getFrequencyFromValue({note:'a3'})).s('sine').gain(.3)
+ */
+globalThis.getFrequencyFromValue=(value,fallback=36)=>{
+  let {note,freq,octave=0}=value;
+  note=note||fallback;
+  if(typeof note==='string')note=core.noteToMidi(note);
+  if(!freq && typeof note==='number')freq=core.midiToFreq(note);
+  return Number(freq*Math.pow(2,octave));
+};
 installNative(core);
 const { transpiler } = transpileModule;
 installPrebakes(core,transpiler);
@@ -330,7 +348,8 @@ globalThis.console = Object.fromEntries(['log', 'warn', 'error', 'info', 'debug'
 /**
  * Register a named pattern branch for playback. Branches are stacked together.
  * An id beginning or ending with an underscore mutes that branch; '$' ids
- * receive unique suffixes. Dollar-label syntax uses this helper automatically.
+ * receive unique suffixes. An id longer than one character starting with S
+ * solos that branch. Dollar-label syntax uses this helper automatically.
  * @name p
  * @param {string | number} id branch identifier, default '$'
  * @example
@@ -855,7 +874,16 @@ globalThis.__compile = async (code, bpm = 120, prebake = '') => {
   compiledVisualSites=visualSites;
   nextProbe=visualSites.length;
   const value = await Function(`"use strict";return (async()=>{${observeBranches(result.output)}})()`)();
-  let pattern = collecting.size ? core.stack(...Array.from(collecting.values(), (p) => eachTransform ? eachTransform(p) : p)) : value;
+  let pattern = value;
+  if (collecting.size) {
+    const branches = Array.from(collecting.entries());
+    const isSolo = ([id]) => id.length > 1 && id.startsWith('S');
+    const soloActive = branches.some(isSolo);
+    pattern = core.stack(...branches.filter(branch => !soloActive || isSolo(branch)).map(([id, p]) => {
+      const named = p.withState(state => state.setControls({ id }));
+      return eachTransform ? eachTransform(named) : named;
+    }));
+  } else if (eachTransform) pattern = eachTransform(pattern);
   if (pattern === undefined) pattern = core.silence;
   if (!core.isPattern(pattern)) pattern = core.reify(pattern);
   for (const transform of allTransforms) pattern = transform(pattern);

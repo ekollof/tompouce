@@ -112,6 +112,13 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    ...[0,.005,.2,.5].map(release=>({name:`kabel-fxr-${release}`,sound:'sine',
+      code:`note(69).s('sine').gain(.5).clip(.05).release(.01).worklet('audioin().delay(.1).out()').fxr(${release})`,
+      cycles:1,cps:.5,window:.8,correlation:.99})),
+    {name:'kabel-fxr-feedback',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).release(.01).worklet('audioin().add(x=>x.delay(.05).mul(.5)).out()').fxr(.5)`,cycles:1,cps:.5,window:.8,correlation:.99},
+    ...[false,true].map(natural=>({name:`kabel-fxr-stereo-${natural?'natural':'clipped'}`,sound:'stretch_fixture',fixture:true,
+      code:`s('stretch_fixture').gain(.5).speed(4)${natural?'':'.clip(.05)'}.worklet('audioin().delay(.1).out()').fxr(.5)`,cycles:1,cps:.5,window:.8,correlation:.99})),
+    {name:'kabel-fxr-explicit-channels',sound:'stretch_fixture',fixture:true,code:`s('stretch_fixture').gain(.5).clip(.05).worklet('audioin().delay(.1).out(0).mul(-.5).out(1)').fxr(.5)`,cycles:1,cps:.5,window:.8,correlation:.99},
     ...['sawtooth','square','triangle'].flatMap(sound=>[1,8,32,64].map(n=>({
       name:`source-${sound}-n${n}`,code:`note(69).s('${sound}').n(${n}).gain(.5)`,sound,
       cycles:1,cps:.5,window:2,correlation:.99}))),
@@ -151,6 +158,21 @@ try {
     // A real onset at 0.25s avoids the upstream stretcher's negative-onset
     // rejection at zero (its graph schedules 40ms early). No captures shift.
     { name: 'sine-gaincurve', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'prebake-glide', code: `note("60 67 64 72").s('sine').gain(.5).glide(.2)`, sound:'sine', cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
+    ...[
+      ['defaults',`.penv(12)`],
+      ['decay-only',`.pdec(.1)`],
+      ['zero-attack',`.penv(-7).patt(0).pdec(.2).psus(0).panchor(0)`],
+      ['anchor',`.penv(7).patt(.02).pdec(.1).psus(.3)`],
+      ['short',`.penv(12).patt(.2).clip(.025)`],
+      ['late',`.note(67).penv(-7).patt(0).pdec(.2).psus(0).panchor(0).late(.25)`],
+      ['fractional',`.penv(7).patt(.01).pdec(.2).psus(0).panchor(0).late(.137)`],
+      ['vibrato-late',`.vib(5).vibmod(.5).late(.137)`],
+      ['vibrato-mixed',`.penv(7).patt(.01).pdec(.2).psus(0).panchor(0).vib(5).vibmod(.5).late(.137)`],
+    ].map(([name,controls])=>({name:`pitch-envelope-${name}`,code:`note(69).s('sine').gain(.5)${controls}`,
+      sound:'sine',cycles:1,cps:.5,window:2,correlation:.99})),
+    { name: 'prebake-accent', code: `note("60 64").s('sawtooth').lpf(1200).lpenv(2).velocity(.5).accent(2).gain(.4)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-delay', code: `note(69).s('sine').gain(.5).clip(.1).dly(.5).delaytime(.075)`,sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
     { name: 'sine-gaincurve-velocity', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).velocity(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-gaincurve-delay', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).clip(.1).delay(.5).delaytime(.075).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-custom-default', code: `setDefault('gain',.5); resetDefaultValues(); note(69).s('sine')`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -204,7 +226,18 @@ try {
     const bytes=await (await fetch(s.src)).arrayBuffer();
     return {url:s.src,sha256:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(b=>b.toString(16).padStart(2,'0')).join('')};
   }))`);
-  for (const spec of cases.filter(spec=>!process.env.TOMPOUCE_COMPARE_FILTER || spec.name.includes(process.env.TOMPOUCE_COMPARE_FILTER))) {
+  const selectedCases=cases.filter(spec=>!process.env.TOMPOUCE_COMPARE_FILTER || spec.name.includes(process.env.TOMPOUCE_COMPARE_FILTER));
+  let starter;
+  const prebakeRoot=path.join(out,'prebake-config');
+  if(selectedCases.some(spec=>spec.prebake)) {
+    const url='https://raw.githubusercontent.com/switchangel/strudel-scripts/706dd24814ac86193ceec6d0b263f432cba6e5ff/prebake.strudel';
+    const response=await fetch(url); if(!response.ok)throw Error('Pinned prebake fixture download failed');
+    starter=await response.text(); if(Buffer.byteLength(starter)>256*1024)throw Error('Oversize prebake fixture');
+    await fs.mkdir(path.join(prebakeRoot,'tompouce'),{recursive:true});
+    await fs.writeFile(path.join(prebakeRoot,'tompouce/prebake.strudel'),'// tompouce-prebake: switchangel\n'+starter,{mode:0o600});
+    report.prebake={url,sha256:hash(starter)};
+  }
+  for (const spec of selectedCases) {
     const page = await call('Target.createTarget', { url: 'https://strudel.cc/' }, null);
     session = (await call('Target.attachToTarget', { targetId: page.targetId, flatten: true }, null)).sessionId;
     let initialized = false;
@@ -218,15 +251,28 @@ try {
     const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native.f32`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
     const rendered = spawnSync(renderer, [request, native], { encoding: 'utf8', timeout: 120000,
-      env:spec.fixture?{...nativeEnvironment,TOMPOUCE_BANKS:fixtureRoot}:nativeEnvironment });
+      env:{...nativeEnvironment,...(spec.fixture?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{})} });
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
+      if(spec.prebake)await evaluate(${JSON.stringify(starter??'')},__comparisonTranspiler.transpiler,{addReturn:false});
       if(spec.fixture){const bytes=Uint8Array.from(atob(spec.mono?${JSON.stringify(monoFixture.toString('base64'))}:${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.sound]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
-      const selected=pattern.filterValues(v=>v.s===spec.sound);
+      let selected=pattern.filterValues(v=>v.s===spec.sound);
       const haps=selected.queryArc(0,spec.cycles,{_cps:spec.cps}).filter(h=>h.hasOnset());
+      // Metadata must not prime stateful helpers such as glide before PCM
+      // rendering. The native renderer consumes its prepared haps once.
+      if(spec.freshRender)selected=(await evaluate(spec.code,__comparisonTranspiler.transpiler)).pattern.filterValues(v=>v.s===spec.sound);
+      const renderEvents=[];
+      if(spec.freshRender) {
+        const query=selected.queryArc.bind(selected);
+        selected.queryArc=(...args)=>{
+          const haps=query(...args);
+          renderEvents.push(...haps.filter(h=>h.hasOnset()).map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})));
+          return haps;
+        };
+      }
       const original=URL.createObjectURL, click=HTMLAnchorElement.prototype.click;
       let blob;
       URL.createObjectURL=function(value){blob=value;return original.call(URL,value)};
@@ -248,12 +294,13 @@ try {
         if(!blob)throw new Error('No WAV captured');
         const bytes=new Uint8Array(await blob.arrayBuffer());
         let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-        return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value}))};
+        return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents};
       } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
     await fs.writeFile(path.join(out, `${spec.name}-browser.wav`), wav);
     await fs.writeFile(path.join(out, `${spec.name}-browser-events.json`), JSON.stringify(captured.events, null, 2));
+    if(captured.renderEvents.length)await fs.writeFile(path.join(out,`${spec.name}-browser-render-events.json`),JSON.stringify(captured.renderEvents,null,2));
     const nativeBytes = await fs.readFile(native);
     const metrics = compare(nativeBytes, wav, spec.window);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;

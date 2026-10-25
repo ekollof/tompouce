@@ -18,6 +18,12 @@ Array indices follow manifest order. `.n()` selects variants; pitched maps choos
 
 Built-in sources include sine, triangle, sawtooth, square, supersaw and noise, plus native ZzFX, bytebeat and a bounded Kabelsalat host. Basic synths need no sample downloads.
 
+Kabelsalat `audioin()` follows the web worklet: it reads the first input channel
+into one graph, with `.out()` providing both outputs by default. Explicit
+`.out(0)`/`.out(1)` calls select graph output channels. For these effects,
+`.fxr(seconds)` retains and fades tails after the source release (bounded to
+60 seconds). This does not establish support for arbitrary nested `FX` chains.
+
 The synth category includes 125 `gm_` names (General MIDI, no FluidSynth required):
 
 ```js

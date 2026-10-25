@@ -64,6 +64,7 @@ typedef struct {
     int smp;            // sample id when track has bank, else -1
     double att;         // attack seconds, -1 = default
     double rel;         // release seconds, -1 = default
+    double fx_release;  /* optional downstream effect cleanup extension */
     int midi_chan;      // MIDI channel 0-15, -1 = off
     int midi_note;      // MIDI note for midi out, -1 = none
     int midi_channel_count; /* -1 empty, 0 legacy scalar, 1..16 ordered fan-out */

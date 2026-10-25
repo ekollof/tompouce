@@ -20,8 +20,12 @@ conditionals, arithmetic, alignment, scales, voicings, and signals. Variables,
 closures, functions, arrays, loops, and async functions execute as JavaScript.
 Double quoted strings and backticks use Strudel mini-notation; single quoted
 strings remain ordinary strings. `$:` plays concurrent patterns. Named labels
-also work; a leading or trailing underscore mutes a label. `all` and `each`
-apply transforms to the collected patterns. Several statements can share a
+also work; a leading or trailing underscore mutes a label. Prefix a label with
+`S` to solo it (`S$:` or `Sdrums:`); multiple solo labels play together and
+exclude ordinary branches. A label consisting only of `S` does not solo.
+Registered labels are available through pattern-state `id`. `all` transforms
+the combined pattern; `each` transforms each collected branch, or the final
+pattern when there are no registered branches. Several statements can share a
 line, and statements and strings can span editor lines.
 
 `slider(value,min,max,step)` supplies a live control pattern. Register it with
@@ -362,8 +366,9 @@ inside a bytebeat expression are rejected; expressions are at most 4,096 bytes.
 
 `K(...)` uses the pinned Kabelsalat graph constructors, including Strudel `S(...)`
 inputs and mini-notation placeholders. `sFreq` resolves per event and `sGate`
-tracks its gate. `audioin()` effects process each input channel independently,
-preserving stereo sample polarity. Sources and effects support stereo output
+tracks its gate. Like the web worklet, `audioin()` reads the first input channel
+into one graph; `.out()` supplies both output channels by default. Use explicit
+`.out(0)`/`.out(1)` calls for separate graph outputs. Sources and effects support stereo output
 channels 0/1, arithmetic/math, ranges, oscillator/noise nodes, ADSR, filters,
 lag/slide/slew, fold/distortion, clocks, triggers, sequences, hold and delay.
 Feedback requires a delay; device input, MIDI/mouse nodes, custom UGens and
@@ -371,9 +376,14 @@ raw JavaScript nodes are unavailable. Unsupported nodes are rejected during
 compilation. This is a native adaptation rather than a complete browser host.
 Graph sources with ADSR nodes keep their own envelope, including release/delay
 time, without a second outer ADSR. Sources without graph ADSR use the native
-default envelope. Effects run after the source envelope; their lifetime is
-currently bounded by the source voice, so browser `fxr` tail behavior is not
-fully reproduced.
+default envelope. `audioin()` effects run after the source envelope.
+`.fxr(seconds)` extends their cleanup deadline beyond the source release,
+feeding silence through the graph after the source ends and fading its output
+from the original release deadline to the effects deadline. Values are bounded
+to 0..60 seconds; values at or below the source release add no extension.
+Accepted graphs retain their state across program changes and voice retirement.
+General nested `FX(...)` chains and graph-source `fxr` behavior remain outside
+this coverage.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

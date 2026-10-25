@@ -232,7 +232,38 @@ static void test_inactive_fast_paths(void) {
     puts("inactive DSP fast paths are bit-identical");
 }
 
+static void test_pitch_envelope_defaults(void) {
+    DspParams p;
+    cJSON *value=cJSON_Parse("{\"penv\":12}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value);
+    assert(p.p[DSP_PATT]==.2 && p.p[DSP_PDEC]==.001 && p.p[DSP_PSUS]==1);
+    assert(p.p[DSP_PREL]==.001 && p.p[DSP_PANCHOR]==1);
+    assert(fabs(dsp_pitch_multiplier(&p,0,1)-.5)<1e-12);
+    assert(fabs(dsp_pitch_multiplier(&p,.1,1)-sqrt(.5))<1e-12);
+    assert(dsp_pitch_multiplier(&p,.2,1)==1);
+    value=cJSON_Parse("{\"pdecay\":0.1}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value);
+    assert(p.p[DSP_PENV]==1 && p.p[DSP_PATT]==.001 && p.p[DSP_PDEC]==.1);
+    assert(p.p[DSP_PSUS]==.001 && p.p[DSP_PANCHOR]==.001 && p.p[DSP_PREL]==.01);
+    value=cJSON_Parse("{\"penv\":-7,\"pattack\":0,\"pdecay\":0.2,\"psustain\":0,\"panchor\":0}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value);
+    assert(p.p[DSP_PATT]==.001 && p.p[DSP_PANCHOR]==0);
+    assert(dsp_pitch_multiplier(&p,0,.5)==1);
+    assert(fabs(dsp_pitch_multiplier(&p,.001,.5)-pow(2,-7/12.0))<1e-12);
+    assert(fabs(dsp_pitch_multiplier(&p,.101,.5)-pow(2,-3.5/12))<1e-12);
+    DspState state; dsp_init(&state,&p); dsp_oscillator_onset(&state,.5);
+    assert(state.pitch_initial_frames==94);
+    assert(fabs(state.pitch_quantum_offset-34/SR)<1e-15);
+    assert(dsp_frequency(&state,440,0,.5)==440);
+    assert(fabs(dsp_frequency(&state,440,94/SR,.5)-440*dsp_pitch_multiplier(&p,94/SR,.5))<1e-12);
+    assert(!state.pitch_initial_frames);
+    dsp_init(&state,&p); dsp_oscillator_onset(&state,.274);
+    assert(state.pitch_initial_frames==76);
+    assert(fabs(state.pitch_onset_fraction-.6/SR)<1e-14);
+}
+
 int main(void) {
+    test_pitch_envelope_defaults();
     /* Public Superdough .room(1) supplies no duration override: the first
        shared room uses generate()'s two-second default. */
     cJSON *room_defaults=cJSON_Parse("{\"room\":1}"); assert(room_defaults);

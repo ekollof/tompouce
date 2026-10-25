@@ -887,11 +887,18 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->gate_end = v->note_off_time;
     v->phase = 0;
     v->age = 0;
+    if (v->inst==INST_SINE || v->inst==INST_SAW || v->inst==INST_SQUARE ||
+        v->inst==INST_TRI || v->inst==INST_ADDITIVE || v->inst==INST_SUPERSAW)
+        dsp_oscillator_onset(&v->dsp,ev->time);
     v->env = 0;
     v->released = 0;
     v->vatt = ev->att;
     v->vrel = ev->rel;
     v->graph_end=v->note_off_time+fmax(0,v->vrel);
+    if (native_synth_effect(ev->native_synth)) {
+        v->fx_release=ev->fx_release;
+        v->graph_end=v->note_off_time+fmax(v->vrel,v->fx_release);
+    }
     v->vdec = ev->dec;
     v->vsus = ev->sus;
     v->pw = ev->pw;
@@ -1344,8 +1351,6 @@ void audio_trigger_event(AudioEvent *ev) {
         }
     }
     NativeSynthState *prepared=ev->native_synth?native_synth_state_new(ev->native_synth):NULL;
-    NativeSynthState *prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
-    if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
     if (ev->native_synth && !prepared) {
         NativeSynthState *retired[VOICE_SLOTS*2]; int count=0;
         pthread_mutex_lock(&voice_lock);
@@ -1356,8 +1361,6 @@ void audio_trigger_event(AudioEvent *ev) {
         pthread_mutex_unlock(&voice_lock);
         for (int i=0;i<count;i++) native_synth_state_free(retired[i]);
         prepared=native_synth_state_new(ev->native_synth);
-        prepared_right=prepared && native_synth_effect(ev->native_synth)?native_synth_state_new(ev->native_synth):NULL;
-        if (prepared && native_synth_effect(ev->native_synth) && !prepared_right) { native_synth_state_free(prepared); prepared=NULL; }
     }
     if (ev->native_synth && !prepared) { log_console("native synth: state memory budget exceeded"); return; }
     pthread_mutex_lock(&voice_lock);    // find free voice
@@ -1383,7 +1386,6 @@ void audio_trigger_event(AudioEvent *ev) {
         prep_profile_event(PREP_RESERVED_SOURCE,ev->time,audio_time_now());
     prepare_source_cut(&voices[chosen]);
     voices[chosen].native_state=prepared;
-    voices[chosen].native_right=prepared_right;
     dbg_push(&voices[chosen], chosen);
     pthread_mutex_unlock(&voice_lock);
     native_synth_state_free(previous.left);
@@ -1397,11 +1399,14 @@ typedef struct {
 
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
     if (native_synth_effect(v->native_program)) {
-        double ignored, input_r=r;
+        /* The web worklet reads inputs[0][0] once; the graph itself supplies
+           both output channels. Do not run a second graph on the right input. */
         native_synth_process(v->native_state,v->age,v->gate_end-v->start_time,v->freq,v->start_time,
-                             l,l,&l,&ignored);
-        native_synth_process(v->native_right,v->age,v->gate_end-v->start_time,v->freq,v->start_time,
-                             input_r,input_r,&ignored,&r);
+                             l,r,&l,&r);
+    }
+    if (v->fx_release>v->vrel && audio_time>v->graph_end-v->fx_release+v->vrel) {
+        double fade=fmax(0,(v->graph_end-audio_time)/(v->fx_release-v->vrel));
+        l*=fade; r*=fade;
     }
     double left = v->pan <= 0 ? 1 : 1-v->pan;
     double right = v->pan >= 0 ? 1 : 1+v->pan;
@@ -1674,6 +1679,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 /* Sample cut fades the source before its downstream effects;
                    retain the graph until its original envelope/lifetime ends. */
                 double cut_gain=source_cut_gain(V);
+                if (V->fx_release>V->vrel) {
+                    if (audio_time>=V->graph_end) { V->active=0; continue; }
+                    if (V->source_finished || age>=V->gate_end-V->start_time+V->vrel ||
+                        (V->stretch_buffer && V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) ||
+                        (V->smpbuf && (V->smppos<0 || V->smppos>=V->smplen))) {
+                        V->source_finished=1;
+                        V->env=0;
+                        double gate=V->gate_end-V->start_time;
+                        double left=dsp_process(&V->dsp,0,age,gate);
+                        double right=V->smp_channels==2 || V->stretch_buffer?
+                            dsp_process(&V->dsp_right,0,age,gate):left;
+                        route_voice(V,left,right,vm); V->age+=dt; continue;
+                    }
+                }
                 if (V->stretch_buffer) {
                     const float *pcm=stretch_pcm(V->stretch_buffer);
                     if (V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) {
@@ -1760,7 +1779,10 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                             if (V->smppos < lo) V->smppos += hi-lo;
                         }
                     }
-                    if (V->smppos < lower || V->smppos >= smp_lim) V->active = 0;
+                    if (V->smppos < lower || V->smppos >= smp_lim) {
+                        if (V->fx_release>V->vrel) V->source_finished=1;
+                        else V->active=0;
+                    }
                     continue;
                 } else if (V->smpbuf) { V->active = 0; continue; }
                 if (is_drum) {

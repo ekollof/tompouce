@@ -478,13 +478,25 @@ static void test_tutorial(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc==4 && !strcmp(argv[1],"--prebake-reference")) {
+    if ((argc==4 || argc==5) && !strcmp(argv[1],"--prebake-reference")) {
+        int cycles=1;
+        if (argc==5) {
+            char *end=NULL; long count=strtol(argv[4],&end,10);
+            if (!end || *end || count<1 || count>16) return 1;
+            cycles=(int)count;
+        }
         char root[]="/tmp/tompouce-prebake-reference-XXXXXX",directory[512],path[512],error[1024];
         assert(mkdtemp(root) && !setenv("XDG_CONFIG_HOME",root,1));
         snprintf(directory,sizeof(directory),"%s/tompouce",root); assert(!mkdir(directory,0700));
         snprintf(path,sizeof(path),"%s/tompouce/prebake.strudel",root); write_module(path,argv[2]);
         cJSON *metadata=NULL; JsProgram *program=javascript_compile(argv[3],120,&metadata,error,sizeof(error));
-        cJSON *haps=program?javascript_query(program,0,1):NULL;
+        cJSON *haps=program?cJSON_CreateArray():NULL;
+        for (int cycle=0;haps && cycle<cycles;cycle++) {
+            cJSON *part=javascript_query(program,cycle,cycle+1);
+            if (!part) { cJSON_Delete(haps); haps=NULL; snprintf(error,sizeof(error),"prebake reference query failed at cycle %d",cycle); break; }
+            while (part->child) cJSON_AddItemToArray(haps,cJSON_DetachItemFromArray(part,0));
+            cJSON_Delete(part);
+        }
         char *text=haps?cJSON_PrintUnformatted(haps):NULL;
         int ok=text!=NULL;
         if (text) { puts(text);free(text); } else fprintf(stderr,"%s\n",error);
@@ -642,6 +654,25 @@ int main(int argc, char **argv) {
 
     haps = query("_: s(\"bd*4\"); melody: note(\"c4 e4\"); each(x=>x.fast(2)); all(x=>x.rev())", &program);
     assert(cJSON_GetArraySize(haps) == 4);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps = query("$: note(60); S$: note(64); S$: note(67); Sbad_: note(72); each(x=>x.fast(2))", &program);
+    assert(cJSON_GetArraySize(haps) == 4);
+    for (int i=0; i<4; i++) {
+        value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,i),"value");
+        int note = cJSON_GetObjectItemCaseSensitive(value,"note")->valueint;
+        assert(note == 64 || note == 67);
+    }
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps = query("each(x=>x.fast(3)); note(60)", &program);
+    assert(cJSON_GetArraySize(haps) == 3);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps = query("lead: new Pattern(state=>note(60).set({observedId:state.controls.id}).query(state))", &program);
+    assert(cJSON_GetArraySize(haps) == 1);
+    value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    assert(!strcmp(cJSON_GetObjectItemCaseSensitive(value,"observedId")->valuestring,"lead"));
     cJSON_Delete(haps); javascript_free(program);
 
     haps = query("const p = note('c4'); p.cpm(60)", &program);

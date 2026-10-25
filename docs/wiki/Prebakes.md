@@ -42,8 +42,14 @@ Its quadratic gain curve is active: `.gain(.5)` becomes `.25`
 before velocity is applied. Enabling it can change levels in existing songs.
 The final output Volume control is linear and downstream of this curve.
 
-Maintained comparisons cover `acidenv`, `trancegate`, `tgate`, `rlpf`/`rhpf`,
-`octave`, `sc`/`setScale` and `DX`. Other helpers may require unavailable
+Maintained comparisons cover 81 setup/helper/API cases, including branch
+solo/identity/transforms, cueing,
+arrangements, orbit mute/solo, parameter locks, scale/arpeggio helpers, sample
+timing, text-to-synth, linear glide and seeded humanize/glitch controls.
+Native UTF-8 `TextEncoder` and the web's `getFrequencyFromValue` helper are
+available. Glide, accent and delay also have browser audio comparisons.
+Live oneshot/grid timing and nonlinear pitch curves need separate checks.
+Other helpers may require unavailable
 samples, external MIDI devices or browser/audio APIs such as `bmod` and `FX`.
 An unavailable API retains its error; full helper compatibility is not claimed.
 

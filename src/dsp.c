@@ -1,5 +1,6 @@
 #include "dsp.h"
 #include "common.h"
+#include <float.h>
 
 typedef struct { const char *name; double initial, min, max; } Parameter;
 static const Parameter parameters[] = {
@@ -15,8 +16,8 @@ static const Parameter parameters[] = {
     {"tremolodepth",1,0,1}, {"tremoloskew",.5,.001,.999}, {"tremolophase",0,-64,64},
     {"tremoloshape",0,0,4}, {"phaserrate",0,0,200}, {"phaserdepth",.75,0,1},
     {"phasercenter",1000,20,16000}, {"phasersweep",2000,0,16000},
-    {"penv",0,-96,96}, {"pattack",.005,0,30}, {"pdecay",.1,0,30},
-    {"psustain",0,0,1}, {"prelease",.1,0,30}, {"panchor",0,0,1},
+    {"penv",0,-96,96}, {"pattack",.2,0,30}, {"pdecay",.001,0,30},
+    {"psustain",1,0,1}, {"prelease",.001,0,30}, {"panchor",1,0,1},
     {"vib",0,0,200}, {"vibmod",.1,0,48}, {"room",0,0,1},
     {"roomsize",2,0,10}, {"dry",1,0,1}, {"begin",0,0,1}, {"end",1,0,1},
     {"loop",0,0,1}, {"loopBegin",0,0,1}, {"loopEnd",1,0,1},
@@ -98,6 +99,14 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
         for (int i = 0; i < 4; i++) names[i] = parameters[base+3+i].name;
         dsp_read_adsr(value,names,defaults,p->p+base+3);
         if (!cJSON_HasObjectItem(value,parameters[base+2].name)) p->p[base+2] = 1;
+    }
+    const char *const pitch_names[]={"pattack","pdecay","psustain","prelease"};
+    const double pitch_defaults[]={.2,.001,1,.001};
+    dsp_read_adsr(value,pitch_names,pitch_defaults,p->p+DSP_PATT);
+    p->p[DSP_PANCHOR]=number(value,"panchor",p->p[DSP_PSUS],0,1);
+    if (!cJSON_HasObjectItem(value,"penv")) for (int i=0;i<4;i++) {
+        const cJSON *control=cJSON_GetObjectItemCaseSensitive(value,pitch_names[i]);
+        if (cJSON_IsNumber(control) && isfinite(control->valuedouble)) { p->p[DSP_PENV]=1; break; }
     }
     const char *const vowels[] = {"a","e","i","o","u","ae","aa","oe","ue","y","uh","un","en","an","on"};
     int v = symbol(value, "vowel", vowels, 15);
@@ -339,6 +348,19 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
     return ratio;
 }
 
+void dsp_oscillator_onset(DspState *state,double onset) {
+    if (!state->pitch_active) return;
+    double frame=onset*SR;
+    if (!isfinite(frame)) return;
+    double nearest=round(frame);
+    if (fabs(frame-nearest)<=10*DBL_EPSILON*fmax(1,fabs(frame))) frame=nearest;
+    double first=ceil(frame),offset=fmod(first,128);
+    if (offset<0) offset+=128;
+    state->pitch_onset_fraction=(first-frame)/SR;
+    state->pitch_quantum_offset=offset/SR;
+    state->pitch_initial_frames=128-(unsigned)offset;
+}
+
 double dsp_frequency(DspState *s, double freq, double age, double gate) {
     if (!s->control.enabled) return freq;
     const double *p = s->control.p;
@@ -346,7 +368,14 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
        exactly zero, so the result is freq unchanged (freq is bounded well
        inside the clamp range by the event layer). */
     if (!s->pitch_active && !s->fm_active) return freq;
-    if (s->pitch_active) freq *= dsp_pitch_multiplier(&s->control,age,gate);
+    if (s->pitch_active) {
+        double pitch_age=age+s->pitch_onset_fraction;
+        if (s->pitch_initial_frames) {
+            if (age*SR+1e-7<s->pitch_initial_frames) pitch_age-=s->pitch_quantum_offset;
+            else s->pitch_initial_frames=0;
+        }
+        if (pitch_age>=0) freq*=dsp_pitch_multiplier(&s->control,pitch_age,gate);
+    }
     if (!s->fm_active) return freq;
     double modulation[8];
     for (int i = 0; i < 8; i++) {

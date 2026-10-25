@@ -247,6 +247,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     dsp_read_adsr(v,envelope_names,envelope_defaults,envelope);
     ev->att = envelope[0]; ev->dec = envelope[1];
     ev->sus = envelope[2]; ev->rel = envelope[3];
+    ev->fx_release = control(v,"FXrelease",0,0,60);
     ev->smp = ev->wt = ev->midi_chan = ev->midi_note = -1;
     ev->delay_send = control(v,"delay",0,0,1);
     ev->delay_time = cJSON_HasObjectItem(v,"delaytime") ? control(v,"delaytime",0,0,1)
@@ -585,6 +586,8 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
     cJSON_ArrayForEach(field,value) {
         const char *name = field->string;
         if (!name || *name == '_' || dsp_supports_control(name)) continue;
+        if (!strcmp(name,"FXrelease") && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                cJSON_GetObjectItemCaseSensitive(value,"_nativeProgram"),"effect"))) continue;
         const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
             "attack","decay","sustain","release","speed","detune","delay","delaytime",
             "delayfeedback","midichan","midiport","midicmd","ccn","ccv","progNum","sysexid","sysexdata",

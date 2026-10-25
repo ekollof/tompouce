@@ -69,14 +69,27 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] Broaden Switch Angel prebake helper checks beyond the selected pattern
-      helpers. Browser DOM controls, bmod/FX-based helpers and external-device
-      requirements are not established by the setup/gain-curve gates. See
+- [ ] Extend Kabelsalat checks beyond the verified `audioin()` effect tails:
+      graph-source `fxr`, effect ordering with nonlinear native controls and
+      render-quantum startup at fractional onsets need independent comparisons.
+- [ ] Audit remaining shared delay/reverb automation and tail interactions
+      against the web, including nested/control-output routing and live edits.
+      Distinguish confirmed behavior differences from missing coverage.
+- [ ] Assess remaining visualization options and shared-effect tail attribution:
+      browser styling/layout options, per-pattern shared delay/reverb/duck tails
+      and isolated Csound taps. Document intentional terminal adaptations rather
+      than claiming browser-pixel parity.
+- [ ] Finish Switch Angel integration checks beyond the 81 setup/helper/API
+      cases and selected audio gates: live oneshot evaluation/grid timing,
+      bank-specific sounds, bmod/FX routing and external devices. Nonlinear
+      pitch-envelope curves also need independent audio comparisons. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
 
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and
       independent reference checks. Keep current 32-map/128-entry/32-send bounds.
+- [ ] Add web-compatible string-form MIDI sysex with bounded parsing and
+      rejection tests, preserving current byte-array framing and send ordering.
 - [ ] Measure physical-device MIDI note-off delivery timing under load. Channel
       arrays now have independent web gates and an owned ALSA loopback check;
       this does not measure USB/DIN transport or device response. The maintained
@@ -96,6 +109,9 @@ equivalent. Slider/expression changes retain event-level coverage where no
 bare-REPL counterpart exists. Full-song waveform parity, complete decoder/synth
 equivalence, remote-download deadlines, Hydra/browser input-device APIs and
 arbitrary npm resolution remain non-goals unless explicitly re-scoped.
+Kabelsalat device-input/mouse nodes and custom JavaScript UGens also require
+explicit scope and confinement design before implementation. The separate
+Hydra task above covers visualizer integration, not general browser input APIs.
 Non-PipeWire backend underruns remain unmeasured.
 
 ## Terminal blockers awaiting upstream

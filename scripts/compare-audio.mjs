@@ -112,6 +112,16 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    ...[
+      ['gain-low',`.gain(.2).worklet('audioin().fold(8).out()')`],
+      ['gain-high',`.gain(.8).worklet('audioin().fold(8).out()')`],
+      ['offset',`.gain(.2).worklet('audioin().add(.1).out()')`],
+      ['shape',`.gain(.5).worklet('audioin().mul(3).out()').shape(.5)`],
+      ['filter',`.gain(.5).worklet('audioin().fold(3).out()').lpf(800).lpq(1)`],
+      ['tail-filter',`.gain(.5).clip(.05).worklet('audioin().delay(.1).fold(3).out()').lpf(800).lpq(1).fxr(.4)`],
+      ['tail-offset',`.gain(.2).clip(.05).worklet('audioin().add(.1).out()').fxr(.4)`],
+    ].map(([name,controls])=>({name:`kabel-order-${name}`,sound:'sine',code:`note(69).s('sine')${controls}`,cycles:1,cps:.5,window:1,correlation:.99})),
+    {name:'kabel-order-stereo-shape',sound:'stretch_fixture',fixture:true,code:`s('stretch_fixture').gain(.5).clip(.05).worklet('audioin().delay(.1).out(0).mul(-.5).out(1)').shape(.5).fxr(.5)`,cycles:1,cps:.5,window:1,correlation:.99},
     ...[0,.005,.2,.5].map(release=>({name:`kabel-fxr-${release}`,sound:'sine',
       code:`note(69).s('sine').gain(.5).clip(.05).release(.01).worklet('audioin().delay(.1).out()').fxr(${release})`,
       cycles:1,cps:.5,window:.8,correlation:.99})),

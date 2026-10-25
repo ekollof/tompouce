@@ -70,7 +70,7 @@ Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
 - [ ] Extend Kabelsalat checks beyond the verified `audioin()` effect tails:
-      graph-source `fxr`, effect ordering with nonlinear native controls and
+      graph-source `fxr`, remaining native control combinations and
       render-quantum startup at fractional onsets need independent comparisons.
 - [ ] Audit remaining shared delay/reverb automation and tail interactions
       against the web, including nested/control-output routing and live edits.

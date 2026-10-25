@@ -854,7 +854,8 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
     else v->dsp.control.enabled=v->dsp_right.control.enabled=0;
-    if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE || ev->stretch_buffer)) dsp_init(&v->dsp_right,&ev->dsp);
+    if (ev->dsp.enabled && (ev->inst == INST_SUPERSAW || ev->inst == INST_NATIVE ||
+        ev->stretch_buffer || native_synth_effect(ev->native_synth))) dsp_init(&v->dsp_right,&ev->dsp);
     v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
     v->native_program=ev->native_synth;
@@ -1398,12 +1399,6 @@ typedef struct {
 } VoiceMix;
 
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
-    if (native_synth_effect(v->native_program)) {
-        /* The web worklet reads inputs[0][0] once; the graph itself supplies
-           both output channels. Do not run a second graph on the right input. */
-        native_synth_process(v->native_state,v->age,v->gate_end-v->start_time,v->freq,v->start_time,
-                             l,r,&l,&r);
-    }
     if (v->fx_release>v->vrel && audio_time>v->graph_end-v->fx_release+v->vrel) {
         double fade=fmax(0,(v->graph_end-audio_time)/(v->fx_release-v->vrel));
         l*=fade; r*=fade;
@@ -1438,7 +1433,22 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
     }
 }
 
+/* Worklet input is the enveloped source, before event gain and native effects.
+   One graph reads the first input channel and supplies both output channels. */
+static void mix_graph_effect(Voice *v,double left,double right,VoiceMix *mix) {
+    double gate=v->gate_end-v->start_time;
+    native_synth_process(v->native_state,v->age,gate,v->freq,v->start_time,left,right,&left,&right);
+    left=dsp_process(&v->dsp,left*v->amp,v->age,gate);
+    right=dsp_process(&v->dsp_right,right*v->amp,v->age,gate);
+    route_voice(v,left,right,mix);
+}
+
 static void mix_voice(Voice *v, double sample, VoiceMix *mix) {
+    if (native_synth_effect(v->native_program)) {
+        /* Legacy procedural drums arrive with event gain already applied. */
+        double input=v->amp!=0?sample/v->amp:0;
+        mix_graph_effect(v,input,input,mix); return;
+    }
     sample = dsp_process(&v->dsp,sample,v->age,v->gate_end-v->start_time);
     route_voice(v,sample,sample,mix);
 }
@@ -1658,12 +1668,15 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double phaser_right=V->dsp_right.control.p[DSP_PHASER];
                         V->dsp.control.p[DSP_PHASER]=0;
                         V->dsp_right.control.p[DSP_PHASER]=0;
-                        double left=dsp_process(&V->dsp,0,V->age,gate),right=left;
-                        if(V->smp_channels==2 || V->inst==INST_SUPERSAW || V->inst==INST_NATIVE)
-                            right=dsp_process(&V->dsp_right,0,V->age,gate);
+                        if (native_synth_effect(V->native_program)) mix_graph_effect(V,0,0,&mixes[V->orbit]);
+                        else {
+                            double left=dsp_process(&V->dsp,0,V->age,gate),right=left;
+                            if(V->smp_channels==2 || V->inst==INST_SUPERSAW || V->inst==INST_NATIVE)
+                                right=dsp_process(&V->dsp_right,0,V->age,gate);
+                            route_voice(V,left,right,&mixes[V->orbit]);
+                        }
                         V->dsp.control.p[DSP_PHASER]=phaser;
                         V->dsp_right.control.p[DSP_PHASER]=phaser_right;
-                        route_voice(V,left,right,&mixes[V->orbit]);
                         V->age+=dt;
                         continue;
                     }
@@ -1686,11 +1699,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         (V->smpbuf && (V->smppos<0 || V->smppos>=V->smplen))) {
                         V->source_finished=1;
                         V->env=0;
-                        double gate=V->gate_end-V->start_time;
-                        double left=dsp_process(&V->dsp,0,age,gate);
-                        double right=V->smp_channels==2 || V->stretch_buffer?
-                            dsp_process(&V->dsp_right,0,age,gate):left;
-                        route_voice(V,left,right,vm); V->age+=dt; continue;
+                        mix_graph_effect(V,0,0,vm); V->age+=dt; continue;
                     }
                 }
                 if (V->stretch_buffer) {
@@ -1702,7 +1711,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     double left=pcm[(size_t)V->stretch_frame*2]*V->amp*cut_gain;
                     double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp*cut_gain;
                     V->env=dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
-                    route_voice(V,dsp_process(&V->dsp,left,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
+                    if (native_synth_effect(V->native_program))
+                        mix_graph_effect(V,pcm[(size_t)V->stretch_frame*2]*cut_gain,pcm[(size_t)V->stretch_frame*2+1]*cut_gain,vm);
+                    else route_voice(V,dsp_process(&V->dsp,left,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
                     V->stretch_frame++; V->smppos+=V->smpstep; V->age+=dt; continue;
                 }
                 if (V->inst==INST_NATIVE) {
@@ -1759,7 +1770,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     double transport = V->smpstep*dsp_pitch_multiplier(&V->dsp.control,age,V->gate_end-V->start_time);
                     g*=cut_gain;
                     double s = left*V->amp*g;
-                    if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
+                    if (native_synth_effect(V->native_program)) mix_graph_effect(V,left*g,right*g,vm);
+                    else if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
                         right *= V->amp*g;
                         double gate = V->gate_end-V->start_time;
                         route_voice(V,dsp_process(&V->dsp,s,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
@@ -1972,6 +1984,12 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     V->phase += phaseinc;
                     if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
+                    if (native_synth_effect(V->native_program)) {
+                        double source_gain=env*(V->dsp.control.enabled && w!=INST_PULSE?.3:1);
+                        if (w==INST_SUPERSAW) mix_graph_effect(V,V->dsp.supersaw_l*source_gain,V->dsp.supersaw_r*source_gain,vm);
+                        else mix_graph_effect(V,sample*source_gain,sample*source_gain,vm);
+                        V->age+=dt; continue;
+                    }
                     V->age += dt;
                     double smp = sample * env * amp;
                     /* Superdough oscillator sources have a fixed 0.3 gain

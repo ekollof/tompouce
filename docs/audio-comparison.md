@@ -612,8 +612,19 @@ produces both outputs; the former independent right-input graph was removed.
 Callback tests retain graph state across program release and pool retirement,
 then check bounded cleanup without freeing graph state in rendering.
 
-These gates do not establish graph-source `fxr`, nonlinear effect ordering,
-fractional-onset worklet startup or arbitrary nested `FX` chain parity.
+Eight additional `kabel-order-` gates check graph-before-gain/DSP ordering:
+low/high-gain nonlinear folding, an additive offset, native waveshaping and
+filtering, offset/filter tails, and distinct stereo graph outputs followed by
+waveshaping. All pass the existing gates with correlation above 0.9999997.
+The native graph now consumes the enveloped source before event gain, then
+both graph outputs pass independently through native DSP, panning and sends.
+This fixes additive offsets that previously bypassed gain and waveshaping
+levels that changed because processing ran in the opposite order. Unit tests
+check explicit stereo outputs and zero gain even with an additive graph.
+`TOMPOUCE_COMPARE_FILTER=kabel-` runs all 16 effect comparisons.
+
+These gates do not establish graph-source `fxr`, all native control
+combinations, fractional-onset worklet startup or arbitrary nested `FX` chain parity.
 
 ## MIDI channel routing and delivery
 

@@ -21,6 +21,8 @@ Built-in sources include sine, triangle, sawtooth, square, supersaw and noise, p
 Kabelsalat `audioin()` follows the web worklet: it reads the first input channel
 into one graph, with `.out()` providing both outputs by default. Explicit
 `.out(0)`/`.out(1)` calls select graph output channels. For these effects,
+the graph runs after the source envelope and before event gain and native DSP.
+Both graph outputs receive downstream effects independently. In addition,
 `.fxr(seconds)` retains and fades tails after the source release (bounded to
 60 seconds). This does not establish support for arbitrary nested `FX` chains.
 

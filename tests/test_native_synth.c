@@ -98,6 +98,23 @@ static void test_effect_release(void) {
     }
 }
 
+static void test_effect_order(void) {
+    clear_voices(); audio_time=0; playing=1;
+    AudioEvent event=prepare("note(69).s('sine').gain(.2).shape(.5).worklet('audioin().add(.1).out(0).mul(-.5).out(1)')");
+    audio_trigger_event(&event);
+    VoiceMix mix={0}; mix_graph_effect(&voices[0],.25,-.5,&mix);
+    double left=(.25+.1)*.2,right=left*-.5;
+    left=3*left/(1+2*fabs(left)); right=3*right/(1+2*fabs(right));
+    assert(fabs(mix.left-left)<1e-12 && fabs(mix.right-right)<1e-12);
+    clear_voices(); native_synth_release(event.native_synth);
+
+    event=prepare("note(69).s('sine').gain(0).worklet('audioin().add(.1).out()')");
+    audio_trigger_event(&event);
+    mix=(VoiceMix){0}; mix_graph_effect(&voices[0],.25,-.5,&mix);
+    assert(mix.left==0 && mix.right==0);
+    clear_voices(); native_synth_release(event.native_synth);
+}
+
 static void test_gm(void) {
     assert(gm_synth_count()==125 && gm_synth_program("gm_piano")==0 && gm_synth_program("gm_flute")==73);
     assert(gm_synth_program("gm_gunshot")==127 && gm_synth_program("gm_missing")==-1);
@@ -204,6 +221,7 @@ int main(void) {
     test_gm();
     test_retiring_resources();
     test_effect_release();
+    test_effect_order();
     test_wavetable_banks();
     const char *waves[]={"zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise"};
     for (int i=0;i<7;i++) {
@@ -238,8 +256,8 @@ int main(void) {
     for (size_t i=0;i<sizeof(graphs)/sizeof(*graphs);i++) { AudioEvent event=prepare(graphs[i]); render(&event); native_synth_release(event.native_synth); }
     AudioEvent effect=prepare("note(60).K(audioin().mul(.5).out())");
     playing=1; audio_trigger_event(&effect);
-    VoiceMix mix={0}; route_voice(&voices[0],.25,-.5,&mix);
-    assert(fabs(mix.left-.125)<1e-9 && fabs(mix.right-.125)<1e-9);
+    VoiceMix mix={0}; mix_graph_effect(&voices[0],.25,-.5,&mix);
+    assert(fabs(mix.left-.125*effect.gain)<1e-9 && fabs(mix.right-.125*effect.gain)<1e-9);
     clear_voices(); native_synth_release(effect.native_synth);
     cJSON *bad=cJSON_Parse("{\"s\":\"bytebeat\",\"_nativeProgram\":{\"kind\":\"bytebeat\",\"result\":0,\"ops\":[{\"op\":\"+\",\"value\":0,\"ins\":[999]}]}}");
     assert(bad && !native_synth_prepare(bad,440,1)); cJSON_Delete(bad);

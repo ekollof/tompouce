@@ -521,3 +521,13 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       sample-aligned discontinuities. Ten new browser audio gates pass alongside
       the existing nine linear pitch/vibrato gates; sample/worklet pitch
       automation remains separate work.
+
+## Kabelsalat effect ordering
+
+- [x] Run the effect graph after the source envelope but before event gain and
+      native DSP, including zero-input tails and retired voices. Initialize both
+      downstream DSP channels for stereo graph output from a mono source.
+      Eight new browser PCM gates cover nonlinear folding, additive offsets,
+      waveshaping, filters and tails; the eight earlier effect-tail gates pass
+      unchanged. Native callback tests cover explicit stereo output and zero
+      event gain. Other native control combinations remain separate checks.

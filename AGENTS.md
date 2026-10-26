@@ -142,6 +142,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   envelopes, sample transport or worklet startup to emulate it.
   FM depth scales by modulator frequency; carrier pitch automation must not
   retune the modulator. Keep its no-envelope default and first-quantum alignment.
+  Explicit FM ADSR uses the shared AudioParam endpoint scheduler, exponential
+  default curve and REPL segment minima; never square a linear envelope.
   Static detune is unison spread, not generic source transposition.
   BufferSource detune is k-rate; preserve first-evaluation event clamping and
   cache its ratio per 128-frame quantum without moving source onset.

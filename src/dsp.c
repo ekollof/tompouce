@@ -67,7 +67,7 @@ void dsp_params_init(DspParams *p) {
     for (int i = 0; i < DSP_FMBASE; i++) p->p[i] = parameters[i].initial;
     for (int i = 0; i < 8; i++) {
         double *op = p->p + DSP_FMBASE + i * 8;
-        op[1] = 1; op[2] = .001; op[3] = .1; op[4] = 1; op[5] = .1;
+        op[1] = 1; op[2] = .001; op[3] = .001; op[4] = 1; op[5] = .01; op[6] = 1;
     }
 }
 
@@ -169,6 +169,13 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     const char *fields[] = {"fmi", "fmh", "fmattack", "fmdecay", "fmsustain", "fmrelease", "fmenv", "fmwave"};
     const double maximum[] = {64,64,30,30,1,30,1,6};
     for (int i = 0; i < 8; i++) {
+        char adsr_names[4][32]; const char *adsr_keys[4];
+        for (int j=0;j<4;j++) {
+            snprintf(adsr_names[j],sizeof(adsr_names[j]),"%s%d",fields[j+2],i+1);
+            adsr_keys[j]=i==0 && !cJSON_HasObjectItem(value,adsr_names[j])?
+                fields[j+2]:adsr_names[j];
+        }
+        const double defaults[4]={.001,.001,1,.01};
         for (int j = 0; j < 8; j++) {
             char name[32];
             snprintf(name, sizeof(name), "%s%d", fields[j], i + 1);
@@ -188,6 +195,7 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
                 if (kind >= 0) *dest = kind;
             }
         }
+        dsp_read_adsr(value,adsr_keys,defaults,p->p+DSP_FMBASE+i*8+2);
         for (int j = 0; j < 8; j++) {
             char name[32];
             snprintf(name, sizeof(name), "fmi%d%d", i + 1, j + 1);
@@ -334,22 +342,19 @@ void dsp_init(DspState *s, const DspParams *p) {
     s->effects_active = active;
 }
 
-static double scheduled_pitch_cents(const double *p,double age,double gate,double first_time,int exponential) {
-    /* Superdough schedules AudioParam ramps in detune cents,
+static double scheduled_envelope(double age,double gate,double first_time,int exponential,
+    double low,double high,double attack,double decay,double sustain_ratio,double release) {
+    /* Superdough schedules gain and pitch AudioParam ramps alike,
        clipping segment endpoints linearly when the gate cuts them short.
-       Exponential zero range endpoints become .001 cents; sustain stays exact.
+       Exponential zero range endpoints become .001; sustain stays exact.
        BufferSource's first evaluation clamps past events to first_time. */
     /* Remove accumulated clock error only at sample-aligned ages, so a
        discontinuity lands on its frame without moving fractional onsets. */
     double frame=age*SR,nearest=round(frame);
     if (fabs(frame-nearest)<1e-6) age=nearest/SR;
-    double depth=100*p[DSP_PENV];
-    double low=0-depth*p[DSP_PANCHOR];
-    double high=depth-depth*p[DSP_PANCHOR];
     if (exponential && low==0) low=.001;
     if (exponential && high==0) high=.001;
-    double sustain=low+p[DSP_PSUS]*(high-low);
-    double attack=p[DSP_PATT],decay=p[DSP_PDEC];
+    double sustain=low+sustain_ratio*(high-low);
     double times[5]={0},values[5]={low};
     int ramps[5]={0},count=1;
     if (attack>gate) {
@@ -373,7 +378,7 @@ static double scheduled_pitch_cents(const double *p,double age,double gate,doubl
             times[count]=gate; values[count]=sustain; count++;
         }
     }
-    times[count]=gate+p[DSP_PREL]; values[count]=low; ramps[count++]=1;
+    times[count]=gate+release; values[count]=low; ramps[count++]=1;
     for (int i=0;i<count;i++) times[i]=fmax(first_time,times[i]);
     for (int i=1;i<count;i++) {
         if (age<times[i]) {
@@ -387,6 +392,12 @@ static double scheduled_pitch_cents(const double *p,double age,double gate,doubl
         }
     }
     return low;
+}
+
+static double scheduled_pitch_cents(const double *p,double age,double gate,double first_time,int exponential) {
+    double depth=100*p[DSP_PENV];
+    return scheduled_envelope(age,gate,first_time,exponential,0-depth*p[DSP_PANCHOR],
+        depth-depth*p[DSP_PANCHOR],p[DSP_PATT],p[DSP_PDEC],p[DSP_PSUS],p[DSP_PREL]);
 }
 
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
@@ -463,8 +474,7 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
         double phase = s->fm_phase[i];
         for (int j = 0; j < 8; j++) phase += s->fm_last[j] * s->control.matrix[j][i];
         double env = (s->control.fm_envelopes&(1u<<i))?
-            dsp_envelope(age, gate, op[2], op[3], op[4], op[5]):1;
-        if (op[6] > 0) env *= env;
+            scheduled_envelope(age,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5]):1;
         double wave = sin(phase), u = phase/(2*M_PI); u -= floor(u);
         switch ((int)op[7]) {
         case 1: wave = 4*fabs(u-.5)-1; break;

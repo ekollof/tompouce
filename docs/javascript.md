@@ -328,8 +328,12 @@ Five FM/frequency gates cover harmonicity-scaled depth, carrier pitch
 envelopes/vibrato, static detune and fractional onset. FM modulators retain
 their base frequency when carrier pitch automation changes, and have no
 amplitude envelope unless FM ADSR controls are supplied. Their first render
-quantum follows the carrier's a-rate array alignment. Explicit FM ADSR curves,
-operator matrices and other source/frequency combinations need further checks.
+quantum follows the carrier's a-rate array alignment. Nine further browser
+gates cover explicit FM ADSR defaults, linear and exponential ramps, zero-length
+segments and gates ending during attack or decay. FM defaults to exponential
+ramps with the REPL's segment minima and decay-dependent sustain default.
+Envelope/onset combinations, operator matrices and other source/frequency
+combinations need further checks.
 
 Static `detune` controls unison spread where supported; it does not transpose
 basic oscillators or samples. Five further browser gates cover sine, triangle,

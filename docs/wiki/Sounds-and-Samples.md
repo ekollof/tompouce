@@ -51,8 +51,9 @@ basic oscillators or samples, matching the REPL. Use `note`, `freq` or sample
 `speed` for transposition. Pitch envelopes and vibrato still change pitch.
 FM depth follows harmonicity, and carrier pitch automation leaves the modulator
 frequency unchanged. FM has no amplitude envelope until FM ADSR controls are
-specified. Selected browser comparisons cover these behaviors; explicit FM
-envelope curves and operator matrices need further checks.
+specified. Nine browser gates cover FM ADSR defaults, linear/exponential curves,
+zero-length segments and short gates. Envelope/onset combinations and operator
+matrices need further checks.
 
 ## Wavetables
 

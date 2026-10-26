@@ -592,3 +592,11 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       fractional onset quantum. Remove generic static-detune transposition;
       retain unison spread and pitch automation. Explicit FM ADSR and operator
       matrices remain follow-up work.
+
+## Explicit FM envelopes
+
+- [x] Add nine FM ADSR browser gates. Apply the REPL's segment minima,
+      decay-dependent sustain default and exponential default curve. Reuse the
+      pitch AudioParam endpoint scheduler for actual linear/exponential ramps
+      and gates truncated in attack/decay; retain pitch PCM gates unchanged.
+      Envelope/onset combinations and operator matrices remain follow-up work.

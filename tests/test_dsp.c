@@ -247,6 +247,21 @@ static void test_fm_source_semantics(void) {
     }
     cJSON_AddNumberToObject(value,"fmattack",.1);
     dsp_params_read(&p,value); assert(p.fm_envelopes==1);
+    assert(p.p[DSP_FMBASE+2]==.1 && p.p[DSP_FMBASE+3]==.001);
+    assert(p.p[DSP_FMBASE+4]==1 && p.p[DSP_FMBASE+5]==.01 && p.p[DSP_FMBASE+6]==1);
+    dsp_init(&state,&p); state.fm_phase[0]=M_PI/2;
+    assert(fabs(dsp_frequency(&state,440,.05,.5)-440*(1+sqrt(.001)))<1e-8);
+    cJSON_AddStringToObject(value,"fmenv","linear");
+    dsp_params_read(&p,value); dsp_init(&state,&p); state.fm_phase[0]=M_PI/2;
+    assert(fabs(dsp_frequency(&state,440,.05,.5)-660)<1e-8);
+    cJSON_DeleteItemFromObjectCaseSensitive(value,"fmattack");
+    cJSON_AddNumberToObject(value,"fmdecay",.2);
+    dsp_params_read(&p,value);
+    assert(p.p[DSP_FMBASE+2]==.001 && p.p[DSP_FMBASE+4]==.001);
+    cJSON_AddNumberToObject(value,"fmattack2",0);
+    cJSON_AddNumberToObject(value,"fmrelease2",0);
+    dsp_params_read(&p,value);
+    assert(p.fm_envelopes==3 && p.p[DSP_FMBASE+8+2]==.001 && p.p[DSP_FMBASE+8+5]==.01);
     cJSON_Delete(value);
 }
 

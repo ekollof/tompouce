@@ -131,9 +131,13 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   `src/periodic.c` prepares immutable periodic waves and looping noise buffers;
   never build or evict their tables in rendering. Keep pulse's source gain,
   render-quantum startup and stereo routing separate from square synthesis.
+  Pulse/supersaw worklets skip quantum heads at or before Float32 begin;
+  supersaw phases must not advance during those silent startup blocks.
   Pitch ADSR defaults and segment minima follow the REPL. Preserve oscillator
   a-rate automation alignment for partial first quanta; do not shift amplitude
   envelopes, sample transport or worklet startup to emulate it.
+  BufferSource detune is k-rate; preserve first-evaluation event clamping and
+  cache its ratio per 128-frame quantum without moving source onset.
   Worklet gate/fade/cleanup anchors retain the original hap and raw release;
   natural sample endings and source ADSR minima must not move those clocks.
   Final output volume uses a lock-free integer target, read once per block

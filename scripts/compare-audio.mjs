@@ -112,6 +112,36 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    ...[
+      ['baseline',''],
+      ['release',`.penv(7).patt(.02).pdec(.1).psus(.3).panchor(0).prel(.2).release(.3)`],
+      ['linear',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0)`],
+      ['exponential',`.penv(-7).pcurve(1).patt(.03).pdec(.2).psus(.2).panchor(1)`],
+      ['late',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0).late(.137)`],
+      ['vibrato',`.vib(5).vibmod(.5)`],
+    ].map(([name,controls])=>({name:`worklet-pitch-supersaw-${name}`,sound:'supersaw',seedSupersaw:true,
+      code:`note(69).s('supersaw').gain(.5).clip(.25)${controls}`,cycles:1,cps:.5,window:name==='release'?.9:.6,correlation:.99})),
+    ...[
+      ['linear',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0)`],
+      ['exponential',`.penv(-7).pcurve(1).patt(.03).pdec(.2).psus(.2).panchor(1)`],
+      ['late',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0).late(.137)`],
+      ['vibrato',`.vib(5).vibmod(.5)`],
+      ['release',`.penv(7).patt(.02).pdec(.1).psus(.3).panchor(0).prel(.2).release(.3)`],
+    ].map(([name,controls])=>({name:`worklet-pitch-pulse-${name}`,sound:'pulse',
+      code:`note(69).s('pulse').gain(.2).clip(.25)${controls}`,cycles:1,cps:.5,window:name==='release'?.9:.6,correlation:.99})),
+    {name:'worklet-pitch-graph',sound:'sine',code:`note(69).s('sine').gain(.5).K(sine(sFreq).mul(.1).out()).penv(12).patt(.1).vib(5).vibmod(.5)`,cycles:1,cps:.5,window:.6,correlation:.99},
+    ...[
+      ['linear',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0)`],
+      ['exponential',`.penv(7).pcurve(1).patt(.02).pdec(.2).psus(0).panchor(0)`],
+      ['late',`.penv(-7).patt(.1).pdec(.2).psus(.5).late(.137)`],
+      ['vibrato',`.vib(5).vibmod(.5)`],
+      ['release',`.penv(12).patt(.01).pdec(.05).psus(.3).panchor(0).prel(.2).release(.3)`],
+      ['exponential-late',`.penv(-7).pcurve(1).patt(.03).pdec(.2).psus(.2).panchor(1).late(.137)`],
+    ].map(([name,controls])=>({name:`sample-pitch-${name}`,sound:'mono_fixture',fixture:true,mono:true,
+      code:`s('mono_fixture').gain(.5).clip(.25)${controls}`,cycles:1,cps:.5,window:.6,correlation:.99})),
+    ...[1,-.75].map(speed=>({name:`sample-pitch-stereo-${speed}`,sound:'stretch_fixture',fixture:true,
+      code:`s('stretch_fixture').gain(.5).speed(${speed}).penv(7).patt(.02).pdec(.2).psus(0).panchor(0).clip(.25)`,
+      cycles:1,cps:.5,window:.6,correlation:.99})),
     ...[0,.5].map(fxr=>({name:`kabel-fxr-natural-long-delay-${fxr}`,sound:'stretch_fixture',fixture:true,
       code:`s('stretch_fixture').gain(.5).speed(8).worklet('audioin().delay(.8).out()').fxr(${fxr})`,cycles:1,cps:.5,window:1.2,correlation:.99})),
     ...[0,.005,.01].map(release=>({name:`kabel-src-short-release-${release}`,sound:'sine',
@@ -319,6 +349,16 @@ try {
       const suspend=OfflineAudioContext.prototype.suspend;
       const createBuffer=BaseAudioContext.prototype.createBuffer;
       const random=Math.random;
+      const addModule=AudioWorklet.prototype.addModule;
+      const seededWorklets=[];
+      if(spec.seedSupersaw)AudioWorklet.prototype.addModule=async function(url,...args){
+        const text=await(await fetch(url)).text();
+        if(!text.includes('supersaw-oscillator'))return addModule.call(this,url,...args);
+        seededWorklets.push(Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join(''));
+        const seed='let __comparisonSeed=0xc0ffee; Math.random=()=>{__comparisonSeed=(Math.imul(__comparisonSeed,1664525)+1013904223)>>>0;return __comparisonSeed/4294967296};\\n';
+        const owned=original.call(URL,new Blob([seed,text],{type:'text/javascript'}));
+        try{return await addModule.call(this,owned,...args)}finally{URL.revokeObjectURL(owned)}
+      };
       if(spec.seedNoise)BaseAudioContext.prototype.createBuffer=function(channels,length,rate){
         if(channels===1 && length===88200 && rate===44100){
           let seed=0xc0ffee;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
@@ -331,8 +371,9 @@ try {
         if(!blob)throw new Error('No WAV captured');
         const bytes=new Uint8Array(await blob.arrayBuffer());
         let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-        return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents};
-      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random}
+        if(spec.seedSupersaw && !seededWorklets.length)throw Error('Seeded supersaw worklet was not loaded');
+        return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents,seededWorklets};
+      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random;AudioWorklet.prototype.addModule=addModule}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
     await fs.writeFile(path.join(out, `${spec.name}-browser.wav`), wav);
@@ -342,7 +383,7 @@ try {
     const metrics = compare(nativeBytes, wav, spec.window);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
-    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
+    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
     await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
     console.log(spec.name, JSON.stringify(metrics), passed === null ? 'DIAGNOSTIC' : passed ? 'PASS' : 'FAIL');
     await call('Target.closeTarget', { targetId: page.targetId }, null);

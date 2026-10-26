@@ -783,6 +783,20 @@ void audio_prepare_room(AudioEvent *event) {
     event->room_prepared=1;
 }
 
+static double sample_pitch_ratio(Voice *v,double now) {
+    if (!v->dsp.pitch_active) return 1;
+    double quantum=native_synth_quantum_time(now);
+    if (quantum!=v->sample_pitch_quantum) {
+        v->sample_pitch_quantum=quantum;
+        /* A silent pre-onset quantum does not consume automation events.
+           Their first real evaluation clamps older events to that boundary. */
+        double first=ceil(v->start_time*SR/128)*128/SR-v->start_time;
+        v->sample_pitch_ratio=quantum<v->start_time?1:
+            dsp_sample_pitch_multiplier(&v->dsp.control,quantum-v->start_time,v->gate_end-v->start_time,first);
+    }
+    return v->sample_pitch_ratio;
+}
+
 static void voice_onset(Voice *v) {
     v->onset_pending=0;
     if (v->dsp.control.source_noise)
@@ -793,8 +807,7 @@ static void voice_onset(Voice *v) {
     if (v->dsp.control.enabled && v->smpbuf && !v->stretch_buffer) {
         double elapsed=fmax(0,audio_time-v->start_time);
         v->age=elapsed;
-        v->smppos+=elapsed*SR*v->smpstep*
-            dsp_pitch_multiplier(&v->dsp.control,0,v->gate_end-v->start_time);
+        v->smppos+=elapsed*SR*v->smpstep*sample_pitch_ratio(v,audio_time);
     }
     for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
         pattern_scope_generation[i]=v->scope_generation;
@@ -889,7 +902,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->phase = 0;
     v->age = 0;
     if (v->inst==INST_SINE || v->inst==INST_SAW || v->inst==INST_SQUARE ||
-        v->inst==INST_TRI || v->inst==INST_ADDITIVE || v->inst==INST_SUPERSAW)
+        v->inst==INST_TRI || v->inst==INST_ADDITIVE)
         dsp_oscillator_onset(&v->dsp,ev->time);
     v->env = 0;
     v->released = 0;
@@ -922,13 +935,15 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     if (v->orbit < 0 || v->orbit >= N_ORBITS) v->orbit = 0;
     orbits_ensure();
     v->onset_serial=++voice_onset_serial;
-    if (v->inst==INST_PULSE) {
+    if (v->inst==INST_PULSE || v->inst==INST_SUPERSAW) {
         /* Worklet begin/time parameters are Float32. At an exact quantum
            boundary their rounding decides which block is first active. */
         double begin=(float)v->start_time;
         v->source_begin=(floor(begin*SR/128)+1)*128/SR;
-        double lfo=begin*v->dsp.control.p[DSP_PWRATE];
-        v->dsp.pulse_lfo_phase=lfo-floor(lfo);
+        if (v->inst==INST_PULSE) {
+            double lfo=begin*v->dsp.control.p[DSP_PWRATE];
+            v->dsp.pulse_lfo_phase=lfo-floor(lfo);
+        }
     }
     if (v->inst==INST_SUPERSAW)
         dsp_supersaw_init(&v->dsp,v->dsp.noise_seed ^ (unsigned)v->onset_serial*0x9e3779b9u);
@@ -950,6 +965,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->smplen = 0;
     v->smppos = 0;
     v->smpstep = 1.0;
+    v->sample_pitch_quantum=-1; v->sample_pitch_ratio=1;
     v->smp_gate = ev->smp_gate;
     v->stretch_factor = ev->stretch > 0 ? ev->stretch : 1;
     v->stretch_buffer=ev->stretch_buffer;
@@ -1785,7 +1801,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         g = 1.0 - rt / r;
                     }
                     double left = source_value(V,V->smppos,0), right = source_value(V,V->smppos,1);
-                    double transport = V->smpstep*dsp_pitch_multiplier(&V->dsp.control,age,V->gate_end-V->start_time);
+                    double transport = V->smpstep*sample_pitch_ratio(V,audio_time);
                     g*=cut_gain;
                     double s = left*V->amp*g;
                     if (native_synth_effect(V->native_program)) mix_graph_effect(V,left*g,right*g,vm);
@@ -1980,7 +1996,10 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                             sample=V->dsp.control.enabled?dsp_source_noise(&V->dsp):((double)rand()/RAND_MAX)*2-1; break;
                         case INST_PINK: case INST_BROWN:
                             sample=V->dsp.control.enabled?dsp_source_noise(&V->dsp):dsp_noise(&V->dsp,w==INST_PINK?1:2); break;
-                        case INST_SUPERSAW: sample = dsp_supersaw(&V->dsp,freq); break;
+                        case INST_SUPERSAW:
+                            if (audio_time+1e-10>=V->source_begin) sample=dsp_supersaw(&V->dsp,freq);
+                            else V->dsp.supersaw_l=V->dsp.supersaw_r=0;
+                            break;
                         case INST_PULSE:
                             if (audio_time+1e-10>=V->source_begin) sample=dsp_pulse(&V->dsp,(float)freq);
                             break;

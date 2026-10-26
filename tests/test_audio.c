@@ -41,6 +41,24 @@ static Voice *start_sample(AudioEvent *event) {
     return &voices[0];
 }
 
+static void test_sample_pitch_quantum(void) {
+    Voice v={0}; DspParams params; dsp_params_init(&params); params.enabled=1;
+    params.p[DSP_PENV]=12; params.p[DSP_PATT]=.1;
+    dsp_init(&v.dsp,&params);
+    v.start_time=50.25/SR; v.gate_end=1; v.sample_pitch_quantum=-1;
+    /* A partial first quantum still reads pre-onset detune zero. */
+    assert(sample_pitch_ratio(&v,51/SR)==1);
+    assert(sample_pitch_ratio(&v,127/SR)==1);
+    /* First evaluation clamps the initial -1200-cent event to this boundary. */
+    double expected=.5;
+    assert(sample_pitch_ratio(&v,128/SR)==expected);
+    assert(sample_pitch_ratio(&v,255/SR)==expected);
+    double next=pow(2,-1+128/(.1*SR-(128-50.25)));
+    assert(fabs(sample_pitch_ratio(&v,256/SR)-next)<1e-12);
+    params.p[DSP_PENV]=0; dsp_init(&v.dsp,&params);
+    assert(sample_pitch_ratio(&v,512/SR)==1);
+}
+
 static void test_sample_windows(void) {
     float output[32];
     AudioEvent event = {0};
@@ -335,6 +353,31 @@ static void test_supersaw_callback(void) {
     memset(voices,0,sizeof(voices));
 }
 
+static void test_supersaw_quantum_start(void) {
+    const double onsets[]={0,50.25/SR,128/SR,.274};
+    for (unsigned i=0;i<sizeof(onsets)/sizeof(*onsets);i++) {
+        memset(voices,0,sizeof(voices)); audio_time=0; playing=1;
+        AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
+            .time=onsets[i],.duration=1,.att=.001,.dec=.05,.sus=.6,.rel=.01};
+        dsp_params_init(&event.dsp); event.dsp.enabled=1; event.dsp.p[DSP_PENV]=7;
+        audio_trigger_event(&event);
+        assert(!voices[0].dsp.pitch_initial_frames);
+        double phase=voices[0].dsp.saw_phase[0],energy=0;
+        unsigned first=i==3?12160:128;
+        assert(fabs(voices[0].source_begin-first/SR)<1e-12);
+        float out[2];
+        for (unsigned frame=0;frame<first+8;frame++) {
+            pa_callback(NULL,out,1,NULL,0,NULL);
+            if (frame<first) {
+                assert(out[0]==0 && out[1]==0);
+                assert(voices[0].dsp.saw_phase[0]==phase);
+            } else energy+=out[0]*out[0]+out[1]*out[1];
+        }
+        assert(energy>1e-8);
+    }
+    memset(voices,0,sizeof(voices));
+}
+
 static void test_pulse_quantum_boundary(void) {
     double previous=audio_time;audio_time=0;playing=1;
     memset(voices,0,sizeof(voices));
@@ -566,11 +609,13 @@ int main(void) {
     event_queue_clear();
 
     test_sample_windows();
+    test_sample_pitch_quantum();
     test_convolution();
     test_stretch();
     test_pattern_scopes();
     test_live_scope_attachment();
     test_supersaw_callback();
+    test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");

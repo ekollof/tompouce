@@ -332,10 +332,11 @@ void dsp_init(DspState *s, const DspParams *p) {
     s->effects_active = active;
 }
 
-static double exponential_pitch_cents(const double *p,double age,double gate) {
-    /* Superdough schedules exponential AudioParam ramps in detune cents,
+static double scheduled_pitch_cents(const double *p,double age,double gate,double first_time,int exponential) {
+    /* Superdough schedules AudioParam ramps in detune cents,
        clipping segment endpoints linearly when the gate cuts them short.
-       Zero range endpoints become .001 cents; a sustain set stays exact. */
+       Exponential zero range endpoints become .001 cents; sustain stays exact.
+       BufferSource's first evaluation clamps past events to first_time. */
     /* Remove accumulated clock error only at sample-aligned ages, so a
        discontinuity lands on its frame without moving fractional onsets. */
     double frame=age*SR,nearest=round(frame);
@@ -343,8 +344,8 @@ static double exponential_pitch_cents(const double *p,double age,double gate) {
     double depth=100*p[DSP_PENV];
     double low=0-depth*p[DSP_PANCHOR];
     double high=depth-depth*p[DSP_PANCHOR];
-    if (low==0) low=.001;
-    if (high==0) high=.001;
+    if (exponential && low==0) low=.001;
+    if (exponential && high==0) high=.001;
     double sustain=low+p[DSP_PSUS]*(high-low);
     double attack=p[DSP_PATT],decay=p[DSP_PDEC];
     double times[5]={0},values[5]={low};
@@ -352,31 +353,34 @@ static double exponential_pitch_cents(const double *p,double age,double gate) {
     if (attack>gate) {
         times[count]=gate;
         values[count]=gate*((high-low)/attack)+low;
-        if(values[count]==0)values[count]=.001;
+        if(exponential && values[count]==0)values[count]=.001;
         ramps[count++]=1;
     } else {
         times[count]=attack; values[count]=high; ramps[count++]=1;
         if (attack+decay>gate) {
             times[count]=gate; values[count]=(gate-attack)*((sustain-high)/decay)+high;
-            if(values[count]==0)values[count]=.001;
+            if(exponential && values[count]==0)values[count]=.001;
             ramps[count++]=1;
         } else {
             times[count]=attack+decay;
             /* Preserve the web's slope operation order: rounding around zero
                can turn a nominally zero endpoint into a sign-crossing ramp. */
             values[count]=(times[count]-attack)*((sustain-high)/decay)+high;
-            if(values[count]==0)values[count]=.001;
+            if(exponential && values[count]==0)values[count]=.001;
             ramps[count++]=1;
             times[count]=gate; values[count]=sustain; count++;
         }
     }
     times[count]=gate+p[DSP_PREL]; values[count]=low; ramps[count++]=1;
+    for (int i=0;i<count;i++) times[i]=fmax(first_time,times[i]);
     for (int i=1;i<count;i++) {
         if (age<times[i]) {
             double start=values[i-1],end=values[i];
             /* WebAudio holds the start value for zero/sign-crossing ramps. */
-            if (!ramps[i] || start==0 || end==0 || signbit(start)!=signbit(end)) return start;
+            if (!ramps[i]) return start;
             double fraction=(age-times[i-1])/(times[i]-times[i-1]);
+            if (!exponential) return start+(end-start)*fraction;
+            if (start==0 || end==0 || signbit(start)!=signbit(end)) return start;
             return start*pow(end/start,fraction);
         }
     }
@@ -391,7 +395,7 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
     if (p[DSP_PENV] == 0 && p[DSP_VIB] <= 0) return 1;
     double ratio = 1;
     if (p[DSP_PENV] != 0) {
-        if (p[DSP_PCURVE]>0) ratio*=pow(2,exponential_pitch_cents(p,age,gate)/1200);
+        if (p[DSP_PCURVE]>0) ratio*=pow(2,scheduled_pitch_cents(p,age,gate,0,1)/1200);
         else {
             double env = dsp_envelope(age, gate, p[DSP_PATT], p[DSP_PDEC], p[DSP_PSUS], p[DSP_PREL]);
             ratio *= pow(2, p[DSP_PENV] * (env - p[DSP_PANCHOR]) / 12);
@@ -399,6 +403,14 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
     }
     if (p[DSP_VIB] > 0) ratio *= pow(2, sin(2*M_PI*age*p[DSP_VIB])*p[DSP_VIBMOD]/12);
     return ratio;
+}
+
+double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gate,double first_time) {
+    if (!params->enabled || first_time<=0) return dsp_pitch_multiplier(params,age,gate);
+    const double *p=params->p;
+    double cents=p[DSP_PENV]!=0?scheduled_pitch_cents(p,age,gate,first_time,p[DSP_PCURVE]>0):0;
+    if (p[DSP_VIB]>0) cents+=100*sin(2*M_PI*age*p[DSP_VIB])*p[DSP_VIBMOD];
+    return pow(2,cents/1200);
 }
 
 void dsp_oscillator_onset(DspState *state,double onset) {

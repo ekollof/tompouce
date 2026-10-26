@@ -49,7 +49,11 @@ timing, text-to-synth, linear glide and seeded humanize/glitch controls.
 Native UTF-8 `TextEncoder` and the web's `getFrequencyFromValue` helper are
 available. Glide, accent and delay also have browser audio comparisons.
 Linear/exponential oscillator pitch has 19 browser audio gates. Live
-oneshot/grid timing and sample/worklet pitch automation need separate checks.
+oneshot/grid timing and additional pitch/FM combinations need separate checks. Eight
+shared-PCM sample pitch gates cover quantum-rate envelopes/vibrato, fractional
+starts, release, stereo and reverse playback.
+Twelve full-player worklet cases cover selected pulse/supersaw pitch and
+startup, plus Kabelsalat source replacement behavior.
 Other helpers may require unavailable
 samples, external MIDI devices or browser/audio APIs such as `bmod` and `FX`.
 An unavailable API retains its error; full helper compatibility is not claimed.

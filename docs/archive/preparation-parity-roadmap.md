@@ -539,3 +539,20 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       effects after natural sample endings even without an `fxr` extension.
       Six new web PCM regressions cover delayed natural samples and short raw
       releases; all 30 Kabelsalat comparisons pass with unchanged thresholds.
+
+## BufferSource pitch automation
+
+- [x] Use quantum-rate sample pitch with a cached ratio, preserving the first
+      automation evaluation's event clamping and fractional source alignment.
+      Eight shared-PCM browser gates cover linear/exponential pitch, vibrato,
+      release, fractional starts, stereo and reverse playback; the existing
+      oscillator gates remain unchanged. Worklet pitch needs separate checks.
+
+## Worklet pitch and full-player supersaw startup
+
+- [x] Add twelve full-player worklet cases for selected pulse/supersaw pitch,
+      vibrato, release and startup plus Kabelsalat source replacement. Seed
+      supersaw phase input in the diagnostic only and record the deployed
+      worklet hash. Wait until the first active worklet quantum before advancing
+      native supersaw phases, and keep OscillatorNode automation offsets off
+      worklets. Other source/FM combinations remain explicit follow-up work.

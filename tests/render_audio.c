@@ -79,13 +79,23 @@ int main(int argc, char **argv) {
                 event.dsp.p[DSP_ROOMFADE],event.dsp.p[DSP_ROOMLP],event.dsp.p[DSP_ROOMDIM]);
     }
     qsort(events,(size_t)used,sizeof(*events),compare_events);
+    int seed_supersaw=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request,"seedSupersaw"));
+    if (seed_supersaw && (used!=1 || events[0].inst!=INST_SUPERSAW)) {
+        fprintf(stderr,"seeded supersaw comparison requires one supersaw event\n");
+        free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
+    }
     FILE *output = fopen(argv[2],"wb");
     if (!output) { free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
     playing = 1; audio_set_reference_mode(1);
     long frames = lround(cycles->valuedouble/cps->valuedouble*SR);
     int next = 0, ok = 1;
     for (long frame = 0; frame < frames; frame++) {
-        while (next < used && lround(events[next].time*SR) <= frame) audio_trigger_event(&events[next++]);
+        while (next < used && lround(events[next].time*SR) <= frame) {
+            audio_trigger_event(&events[next++]);
+            if (seed_supersaw) for (int i=0;i<MAX_VOICES;i++)
+                if (voices[i].active && voices[i].onset_serial==voice_onset_serial)
+                    dsp_supersaw_init(&voices[i].dsp,0xc0ffee);
+        }
         float stereo[2];
         pa_callback(NULL,stereo,1,NULL,0,NULL);
         if (fwrite(stereo,sizeof(float),2,output) != 2) { ok = 0; break; }

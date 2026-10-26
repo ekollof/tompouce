@@ -22,7 +22,7 @@ typedef struct Voice {
     int has_pan;
     double waveform_gain;
     double start_time;
-    double source_begin; /* pulse worklet's first active render quantum */
+    double source_begin; /* source worklet's first active render quantum */
     unsigned long long onset_serial;
     int onset_pending;
     int sampled_source, cut_pending;
@@ -73,6 +73,7 @@ typedef struct Voice {
     int smplen;
     double smppos;  // fractional position for pitch-shifted playback
     double smpstep; // advance per output sample (1 = original pitch)
+    double sample_pitch_quantum, sample_pitch_ratio; /* BufferSource k-rate detune */
     int smp_gate;   // respect note duration + release (melodic banks)
     double stretch_factor;
     const StretchBuffer *stretch_buffer;

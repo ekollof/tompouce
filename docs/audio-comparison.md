@@ -591,8 +591,56 @@ shifting fractional onsets. The 19 linear/exponential pitch/vibrato comparisons
 pass unchanged gates; exponential correlations range from 0.99947 to above
 0.999999. Run with `TOMPOUCE_COMPARE_FILTER=pitch-`.
 
-Sample/worklet pitch automation, live oneshot/grid timing and full
+Additional pitch/FM combinations, live oneshot/grid timing and full
 helper/synthesis equivalence remain outside these established gates.
+
+## Sample pitch automation
+
+Eight `sample-pitch-` gates use the exact shared mono/stereo PCM fixture to
+isolate BufferSource detune from decoding. They cover linear/exponential
+envelopes, vibrato, release, fractional starts, stereo and reverse playback.
+The initial four comparisons failed at correlations 0.3188..0.9736 because
+native sample transport evaluated pitch every frame. Native transport now
+reads a cached ratio once per 128-frame quantum, following the browser's
+k-rate detune. For fractional starts, events older than the first active
+automation evaluation are clamped to that quantum; their endpoint values and
+later deadlines retain the original schedule. Sample onset and source-position
+alignment are preserved. See Chromium's
+[BufferSource playback-rate calculation](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/webaudio/audio_buffer_source_handler.cc)
+and [AudioParam event clamping](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/modules/webaudio/audio_param_handler.cc).
+
+All eight cases correlate above 0.9999998 at lag zero and retain the existing
+0.99 correlation / 0.85..1.15 RMS gates. The `pitch-` filter runs these alongside
+the 19 oscillator checks. The callback regression checks pre-onset neutrality,
+the initial clamped value, a shortened attack and a held within-quantum ratio.
+This does not establish arbitrary sample, stretch or worklet pitch parity.
+
+## Worklet pitch and supersaw startup
+
+Twelve `worklet-pitch-` cases use the same full-player capture path: six
+supersaw cases (baseline, linear/exponential pitch, release, fractional onset,
+vibrato), five pulse cases and one Kabelsalat graph-source case. Supersaw phase
+initialization is controlled with the same LCG seed in both renderers. The
+native diagnostic permits that override only for a single supersaw event;
+production randomness is unchanged. The browser worklet remains the deployed
+code, with only its random input seeded; its original SHA-256 is recorded.
+
+The five initial supersaw comparisons failed at correlations -0.41..-0.12:
+native phases advanced before the browser's first active quantum. Native
+supersaw now waits for the first quantum whose head exceeds its Float32 begin
+parameter. It keeps phases still before startup and does not apply the
+OscillatorNode partial-quantum automation offset to the worklet. Pulse and
+Kabelsalat already passed their initial checks. Graph-source pattern pitch
+controls affect the replaced oscillator, not the graph's own `sFreq`.
+
+The initial corrected supersaw gates correlate above 0.9999999 at aligned
+starts and 0.99941 at the fractional onset; pulse gates exceed 0.99966 and the
+graph-source gate exceeds 0.9999999. All use the unchanged 0.99 correlation,
+0.85..1.15 RMS, exact duration and zero-lag gates. The `pitch-` filter now runs
+39 oscillator/sample/worklet comparisons. Callback tests verify that supersaw
+stays silent without advancing phases until startup, including Float32 boundary
+rounding and fractional onsets. These gates do not establish every source,
+FM combination or full-song parity.
 
 ## Kabelsalat effect tails and input routing
 

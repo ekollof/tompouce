@@ -95,6 +95,7 @@ double dsp_frequency(DspState *state, double freq, double age, double gate);
    even when audible output begins part-way through that quantum. */
 void dsp_oscillator_onset(DspState *state, double onset);
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate);
+double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gate,double first_time);
 double dsp_envelope(double age, double gate, double attack, double decay, double sustain, double release);
 double dsp_noise(DspState *state, int color);
 /* Voice preparation only. Independent phases avoid a coherent onset burst. */

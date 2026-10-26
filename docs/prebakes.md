@@ -156,6 +156,10 @@ defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
 Ten exponential oscillator pitch checks additionally cover detune ramps,
 anchors, signed/zero endpoints, short gates, release and fractional starts.
+Eight shared-PCM sample pitch checks cover quantum-rate automation, fractional
+starts, release, vibrato, stereo and reverse playback.
+Twelve worklet checks add pulse/supersaw envelopes, vibrato, release and startup,
+plus a Kabelsalat source with pitch controls on the replaced oscillator.
 The oneshot event check uses a stopped zero-time clock; live evaluation/grid
-timing, sample/worklet pitch automation, custom FX/bmod routing and external devices
+timing, additional pitch/FM combinations, custom FX/bmod routing and external devices
 remain separate checks rather than claims established by this matrix.

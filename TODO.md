@@ -82,10 +82,12 @@ and measured divergences are recorded in the archive.
       than claiming browser-pixel parity.
 - [ ] Finish Switch Angel integration checks beyond the 81 setup/helper/API
       cases and selected audio gates: live oneshot evaluation/grid timing,
-      bank-specific sounds, bmod/FX routing and external devices. Sample and
-      worklet pitch-envelope automation need separate audio comparisons beyond
-      the verified linear/exponential oscillator gates. See
+      bank-specific sounds, bmod/FX routing and external devices. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
+- [ ] Extend pitch comparisons to bytebeat/ZzFX and additional FM/frequency
+      combinations beyond the selected oscillator, sample, pulse, supersaw and
+      Kabelsalat gates. Keep startup, source replacement and detune semantics
+      distinct rather than applying one envelope model to every source.
 
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and

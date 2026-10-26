@@ -314,8 +314,17 @@ Pitch envelopes support linear `.pcurve(0)` and exponential `.pcurve(1)`
 ramps in detune cents, including anchors, negative depths, short gates and
 release. Exponential ramps follow WebAudio's zero/sign-crossing behavior;
 they are not a squared linear envelope. Nineteen browser audio gates cover
-selected oscillator pitch/vibrato cases; sample and worklet automation need
-separate comparisons.
+selected oscillator pitch/vibrato cases. Eight additional shared-PCM sample
+gates cover linear/exponential pitch, vibrato, release, fractional starts,
+stereo and reverse playback. Sample detune updates once per 128-frame quantum;
+its first automation evaluation clamps past events to that boundary, matching
+Chromium. The computed ratio is cached per quantum. Twelve full-player worklet
+cases cover selected pulse/supersaw pitch/vibrato/release and a Kabelsalat
+source. Pulse and supersaw start in the first quantum whose head is later than
+their Float32 begin parameter; supersaw phases stay still before then.
+Kabelsalat graph sources retain their own frequency/gate logic: pattern pitch
+controls on the replaced source do not automatically modulate `sFreq`.
+Other source and FM/frequency combinations remain outside these gates.
 
 On basic waveforms, numeric `n` selects the number of harmonic coefficients;
 zero retains the stock oscillator. `partials` overrides `n`. Custom waves use

@@ -735,6 +735,39 @@ void audio_inherit_room(AudioEvent *event, unsigned explicit_fields) {
     pthread_mutex_unlock(&voice_lock);
 }
 
+/* Preparation only. Source disconnection can precede the original hap's
+   cleanup: a non-looping BufferSource ends when its PCM runs out. */
+static double sample_connection_duration(const AudioEvent *event,int frames) {
+    double rate=fabs(event->smp_speed);
+    if (event->freq>0) rate*=event->freq/midi_to_freq(smp_base_midi(event->smp));
+    rate=fmax(.001,fmin(4096,rate));
+    const double *p=event->dsp.p;
+    double gate=event->smp_gate?event->duration:frames*(p[DSP_END]-p[DSP_BEGIN])/(rate*SR);
+    double stop=fmax(0,gate)+event->rel+.01;
+    if (p[DSP_LOOP]>0) return stop;
+    double remaining=fmax(0,frames*(1-p[DSP_BEGIN]));
+    if (!p[DSP_PENV] && p[DSP_VIB]<=0) return fmin(stop,remaining/(rate*SR));
+    double start=event->time*SR,nearest=round(start);
+    if (fabs(start-nearest)<1e-7) start=nearest;
+    double frame=ceil(start),first=ceil(start/128)*128/SR-event->time;
+    double quantum=floor(frame/128)*128;
+    double ratio=quantum/SR<event->time?1:dsp_sample_pitch_multiplier(&event->dsp,
+        quantum/SR-event->time,gate,first);
+    remaining-=(frame-start)*rate*ratio;
+    /* At most ~95 seconds of quantum work; unusually long modulation keeps
+       the conservative stop deadline instead of unbounded preparation. */
+    for (unsigned block=0;block<32768 && frame/SR<event->time+stop;block++) {
+        quantum=floor(frame/128)*128;
+        ratio=quantum/SR<event->time?1:dsp_sample_pitch_multiplier(&event->dsp,
+            quantum/SR-event->time,gate,first);
+        double step=rate*ratio,count=quantum+128-frame;
+        if (step>0 && remaining<=count*step)
+            return fmin(stop,fmax(0,(frame+ceil(fmax(0,remaining)/step))/SR-event->time));
+        remaining-=count*step; frame+=count;
+    }
+    return stop;
+}
+
 void audio_prepare_room(AudioEvent *event) {
     if (!event || event->room_prepared) return;
     if (event->dsp.enabled && event->dsp.p[DSP_ROOM]>0 &&
@@ -750,16 +783,19 @@ void audio_prepare_room(AudioEvent *event) {
         RoomState *garbage=NULL;
         int stereo=event->has_pan || event->stretch_buffer || event->inst==INST_SUPERSAW ||
             event->inst==INST_PULSE || native_synth_stereo(event->native_synth);
+        double connected=event->duration+fmax(event->fx_release,event->rel+.01);
         if (event->smp>=0) {
             float *pcm; int frames,channels;
             smp_get_stereo(event->smp,&pcm,&frames,&channels);
             stereo|=channels==2;
+            if (stereo && frames>0 && !event->has_pan && !event->stretch_buffer && !event->native_synth)
+                connected=sample_connection_duration(event,frames);
         }
         pthread_mutex_lock(&voice_lock);
         /* Sends are connected at preparation time, including future and
            silent notes. Source cleanup keeps that channel width alive. */
         if (stereo && !event->control_only) room_stereo_until[event->orbit]=fmax(room_stereo_until[event->orbit],
-            event->time+event->duration+fmax(event->fx_release,event->rel+.01));
+            event->time+connected);
         if (event->room_params_valid) {
             for (int i=0;i<4;i++) room_parameters[event->orbit][i]=event->dsp.p[room_fields[i]];
             room_parameters[event->orbit][4]=event->room_speed;

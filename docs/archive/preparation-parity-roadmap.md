@@ -566,3 +566,13 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       Prepare offline room sends before rendering, like the eager web player.
       Natural sample lifetimes, source eviction, live reconnections and nested
       routing remain explicit follow-up work.
+
+## Natural sample room-send lifetimes
+
+- [x] Derive stereo room-send connection deadlines from actual non-looping
+      sample transport rather than the original hap. Use direct arithmetic for
+      constant rates and bounded preparation-time quantum integration for pitch
+      modulation, retaining a conservative source-stop fallback for long notes.
+      Nine new shared-PCM gates cover natural/fast/reverse endings, short buffers,
+      pitch, vibrato, slices, loops and `fxr`. Panned/stretched/graph lifetimes
+      and live reconnections remain separate follow-up checks.

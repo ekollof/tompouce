@@ -59,6 +59,29 @@ static void test_sample_pitch_quantum(void) {
     assert(sample_pitch_ratio(&v,512/SR)==1);
 }
 
+static void test_sample_connection_lifetime(void) {
+    AudioEvent event={.smp=sample_fixture(),.smp_speed=1,.duration=2,.rel=.01};
+    dsp_params_init(&event.dsp); event.dsp.enabled=1;
+    assert(sample_connection_duration(&event,44100)==1);
+    event.smp_speed=8; event.fx_release=1.5;
+    assert(sample_connection_duration(&event,44100)==.125);
+    event.smp_gate=1;
+    assert(sample_connection_duration(&event,44100)==.125);
+    event.smp_speed=-2;
+    assert(sample_connection_duration(&event,44100)==.5);
+    event.dsp.p[DSP_LOOP]=1;
+    assert(fabs(sample_connection_duration(&event,44100)-2.02)<1e-12);
+    event.dsp.p[DSP_LOOP]=0; event.smp_gate=0; event.smp_speed=1;
+    event.dsp.p[DSP_PENV]=12; event.dsp.p[DSP_PATT]=event.dsp.p[DSP_PDEC]=.001;
+    event.dsp.p[DSP_PSUS]=1; event.dsp.p[DSP_PANCHOR]=0;
+    /* First quantum is unity; the remaining source PCM runs at double rate. */
+    double predicted=sample_connection_duration(&event,44100);
+    assert(fabs(predicted-(128+(44100-128)/2.0)/SR)<1e-12);
+    event.dsp.p[DSP_PENV]=0; event.dsp.p[DSP_VIB]=5; event.smp_speed=.001;
+    /* Extremely long modulation hits the bounded conservative fallback. */
+    assert(fabs(sample_connection_duration(&event,44100)-1000.02)<1e-9);
+}
+
 static void test_sample_windows(void) {
     float output[32];
     AudioEvent event = {0};
@@ -609,6 +632,7 @@ int main(void) {
     event_queue_clear();
 
     test_sample_windows();
+    test_sample_connection_lifetime();
     test_sample_pitch_quantum();
     test_convolution();
     test_stretch();

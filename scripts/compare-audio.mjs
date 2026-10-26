@@ -112,6 +112,16 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    ...[
+      ['natural',''],['fast',`.speed(8).irspeed(8)`],['reverse',`.speed(-2).irspeed(-2)`],
+      ['short-buffer',`.speed(8).irspeed(8).clip(1)`],
+      ['pitch',`.penv(7).patt(.02).pdec(.2).psus(0).panchor(0)`],
+      ['vibrato',`.vib(5).vibmod(.5)`],
+      ['slice',`.begin(.5).end(.75)`],
+      ['loop',`.loop(1).loopBegin(.1).loopEnd(.2).clip(.05)`],
+      ['fxr',`.speed(8).irspeed(8).fxr(1.5)`],
+    ].map(([name,controls])=>({name:`shared-room-lifetime-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
+      code:`s('stretch_fixture').gain(.03)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
     {name:'shared-room-single',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.3).clip(.05).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99},
     ...[
       ['send-toggle',`.room("1 0 1")`],

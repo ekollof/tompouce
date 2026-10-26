@@ -127,6 +127,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   fallback, per-kernel target flags and `TOMPOUCE_SIMD` verification override.
   Mono-IR input-width transitions pause the right convolution history; preserve
   both channel clocks through cloning, reuse and stereo reconnection.
+  Room-send width may end at natural sample completion before hap/FX cleanup;
+  derive modulated lifetimes with bounded preparation work, never in rendering.
   Coalesce identical kernel preparations outside the callback. Reserve reverb
   random segments under the cache lock, generate from private state, and keep
   cache-hit random advancement logarithmic while preserving the stream.

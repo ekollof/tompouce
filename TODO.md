@@ -73,11 +73,11 @@ and measured divergences are recorded in the archive.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
       startup now have independent web comparisons. Nested `FX(...)` chains
       remain outside that coverage.
-- [ ] Extend shared-effect checks beyond the 13 send/orbit/fixed-IR cases:
-      natural/pitch-modulated sample connection lifetimes, source eviction,
-      live reconnections, kernel-change automation, nested/control-output routing
-      and live edits remain open. Distinguish confirmed differences from missing
-      coverage; the clipped-source mono-IR tail-width transition is verified.
+- [ ] Extend shared-effect checks beyond the 22 send/orbit/fixed-IR/lifetime
+      cases: panned/stretched/graph source connections, source eviction, live
+      reconnections, kernel-change automation, nested/control-output routing and
+      live edits remain open. Very long modulation uses a bounded conservative
+      connection deadline; distinguish these limits from established PCM parity.
 - [ ] Assess remaining visualization options and shared-effect tail attribution:
       browser styling/layout options, per-pattern shared delay/reverb/duck tails
       and isolated Csound taps. Document intentional terminal adaptations rather

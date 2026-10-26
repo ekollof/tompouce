@@ -514,9 +514,27 @@ reuse. All 13 cases pass unchanged gates. Delay correlations exceed 0.99974;
 room correlations exceed 0.999999 with RMS ratios 0.9930..0.9937. That small
 remaining level difference is not corrected or normalized out.
 
-These gates verify the selected clipped-source lifetimes. Natural and
-pitch-modulated sample endings, source eviction, live reconnections, kernel
-changes and nested/control-output routing still need independent checks.
+Nine additional `shared-room-lifetime-` gates extend the shared-effect matrix
+to 22 cases. Stereo sources without a pan stage cover natural completion,
+fast/reverse playback, a buffer shorter than its explicit clip, pitch envelopes,
+vibrato, slicing, looping and `fxr`. Source and mono IR use the exact shared PCM;
+fast/reverse cases apply corresponding IR rates to avoid near-silent captures,
+and all levels stay below clipping. The prior stereo deadline followed the
+original hap, leaving the wrong right-channel tail after the source disconnected.
+The valid initial captures failed at correlations -0.217..0.901. All nine now
+correlate above 0.999996 at lag zero with the unchanged thresholds.
+
+Preparation calculates the natural buffer lifetime from source rate, offset
+and the source's scheduled stop. Pitch/vibrato transport uses the same
+quantum-rate envelope schedule as rendering, with at most 32,768 quanta of
+work; unusually long modulation retains the conservative scheduled-stop
+deadline. This performs no callback integration or allocation. Tests cover
+constant rate, reverse playback, loop lifetime, a known pitch integral and
+the bounded fallback. An `fxr` extension does not keep a disconnected sample
+source stereo merely because its shared reverb continues sounding.
+
+Panned/stretched/graph source connections, source eviction, live reconnections,
+kernel changes and nested/control-output routing still need independent checks.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

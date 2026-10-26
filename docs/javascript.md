@@ -359,6 +359,11 @@ It also checks sample release tails, explicit duration gating, reverse
 slices, looping through release, and effects on both stereo channels.
 ### ZzFX, bytebeat and Kabelsalat
 
+Like the REPL, ZzFX and bytebeat use their source frequency without applying
+`detune`, `penv` or `vib` controls. Six independent browser comparisons cover
+these controls on `z_sine` and a custom bytebeat expression; this does not
+establish equivalence for every ZzFX preset or frequency combination.
+
 ```js
 note("c3 e3 g3").s('z_sawtooth').zrand(0).slide(.1).zdelay(.05)
 note("c3 e3").s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(0)

@@ -86,8 +86,8 @@ and measured divergences are recorded in the archive.
       cases and selected audio gates: live oneshot evaluation/grid timing,
       bank-specific sounds, bmod/FX routing and external devices. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
-- [ ] Extend pitch comparisons to bytebeat/ZzFX and additional FM/frequency
-      combinations beyond the selected oscillator, sample, pulse, supersaw and
+- [ ] Extend pitch comparisons to additional FM/frequency combinations beyond
+      the selected oscillator, sample, pulse, supersaw, bytebeat/ZzFX and
       Kabelsalat gates. Keep startup, source replacement and detune semantics
       distinct rather than applying one envelope model to every source.
 

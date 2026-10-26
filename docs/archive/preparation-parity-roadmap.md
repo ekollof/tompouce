@@ -576,3 +576,10 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       Nine new shared-PCM gates cover natural/fast/reverse endings, short buffers,
       pitch, vibrato, slices, loops and `fxr`. Panned/stretched/graph lifetimes
       and live reconnections remain separate follow-up checks.
+
+## Generated-source pitch controls
+
+- [x] Compare ZzFX and bytebeat envelope, vibrato and detune behavior against
+      the deployed REPL. Remove native-only detune transposition for these
+      generated sources; retain oscillator/sample/graph handling. Six new gates
+      pass without changing reference thresholds.

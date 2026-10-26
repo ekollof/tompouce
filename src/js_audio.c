@@ -293,7 +293,9 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         ev->inst=INST_NATIVE; ev->is_drum=0;
     }
     ev->freq = control(v,"freq",440*pow(2,(midi-69)/12),.01,SR*.45);
-    if (ev->inst!=INST_SUPERSAW)
+    /* Generated ZzFX/bytebeat sources take frequency directly; unlike
+       oscillators and samples, the REPL gives them no detune AudioParam. */
+    if (ev->inst!=INST_SUPERSAW && !native_synth_sound(sound))
         ev->freq *= pow(2,control(v,"detune",0,-9600,9600)/1200);
     if (ev->is_drum) ev->freq = 0;
     snprintf(ev->token,sizeof(ev->token),"%.63s",*sound ? sound : native?"kabelsalat":"triangle");

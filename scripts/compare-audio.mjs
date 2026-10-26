@@ -300,6 +300,13 @@ try {
     { name: 'piano-stretch-reverse', code: `note(60).s('piano').speed(-.5).stretch(1).begin(.98).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-loop', code: `note(60).s('piano').speed(.5).stretch(1).loop(1).loopBegin(.005).loopEnd(.01).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch-envelope-filter', code: `note(60).s('piano').speed(.5).stretch(1).attack(.03).decay(.08).sustain(.4).release(.12).lpf(1600).lpq(.7).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    ...['z_sine','bytebeat'].flatMap(sound=>[
+      ['envelope','.penv(12).patt(.05).pdec(.2).psus(.25).prel(.1)'],
+      ['vibrato','.vib(5).vibmod(.5)'],
+      ['detune','.detune(700)'],
+    ].map(([name,controls])=>({name:`generated-pitch-${sound}-${name}`,sound,
+      code:`note(69).s('${sound}').zrand(0).bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.1).attack(.01).decay(.04).sustain(.5).release(.1).clip(.25)${controls}`,
+      cycles:1,cps:.5,window:2,correlation:.99}))),
     { name: 'zzfx-sine', code: `note(69).s('z_sine').zrand(0).gain(.5).attack(.01).decay(.04).sustain(.5).release(.1).clip(.25)`, sound: 'z_sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'bytebeat', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'saw-440', code: `note(69).s('sawtooth').gain(.5)`, sound: 'sawtooth', cycles: 1, cps: .5, window: 2, correlation: .99 },

@@ -1,5 +1,13 @@
 # Browser/native audio comparison
 
+The six `generated-pitch-` cases independently check pitch envelopes, vibrato
+and detune on `z_sine` and custom bytebeat. The deployed player ignores these
+controls for these generated sources. Removing native-only detune transposition
+raises the detune correlations from approximately zero to 0.999999 (ZzFX) and
+0.999320 (bytebeat). All six pass unchanged 0.99 correlation and RMS gates at
+zero lag; measured RMS ratios are 1.00152 and 1.00220 respectively. These checks
+do not establish all-preset or arbitrary-frequency equivalence.
+
 Run from the repository root after `npm ci --ignore-scripts` in `js/`:
 
 ```sh

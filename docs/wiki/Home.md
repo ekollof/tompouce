@@ -6,6 +6,8 @@ The performance keys match the web editor. Ctrl+Enter or Alt+Enter evaluates and
 
 Patterns can also leave the machine. ALSA carries MIDI notes, channels and controller input. `.osc()` sends timestamped SuperDirt bundles over UDP, by default to `127.0.0.1:57120`. See [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations).
 
+Room and sample convolution picks an AVX2, AVX, SSE2 or portable C spectrum kernel before audio starts. The choice follows the CPU, keeps the same PCM, and is shown in F4. See [Development](https://github.com/ekollof/tompouce/wiki/Development#cpu-dispatch-and-benchmarks).
+
 Start with [Getting started](https://github.com/ekollof/tompouce/wiki/Getting-Started), then try the bundled 22-lesson Strudeltutor. A simple synth pattern works without sample banks or a browser:
 
 ```js
@@ -25,7 +27,7 @@ Press F5 to evaluate and Ctrl+P to play or stop.
 | [Sounds and samples](https://github.com/ekollof/tompouce/wiki/Sounds-and-Samples) | F6, drum machines, GM synths, wavetables and imports |
 | [Visuals and themes](https://github.com/ekollof/tompouce/wiki/Visuals-and-Themes) | Inline views, Kitty graphics and live recoloring |
 | [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations) | Browser controls, MCP, MIDI and OSC |
-| [Development](https://github.com/ekollof/tompouce/wiki/Development) | CMake/Ninja, tests, architecture and contributions |
+| [Development](https://github.com/ekollof/tompouce/wiki/Development) | CMake/Ninja, tests, SIMD convolution dispatch and contributions |
 | [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting) | Silence, failed evaluation, missing sounds and tutorial updates |
 | [Learn Strudel](https://github.com/ekollof/tompouce/wiki/Learn-Strudel) | Official workshops, reference pages and practice ideas |
 

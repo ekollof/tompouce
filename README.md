@@ -40,6 +40,9 @@ keys. Native audio does not reproduce every browser waveform or parameter.
 - **MIDI and OSC.** ALSA carries MIDI notes, channels and controller input.
   `.osc()` sends timestamped `/dirt/play` bundles to SuperDirt or another
   receiver, by default `127.0.0.1:57120`. `gm_` sounds stay local samples.
+- **SIMD convolution.** Spectrum accumulation uses AVX2, AVX, SSE2 or portable C,
+  chosen once from CPU support before playback. The audio callback does not
+  detect features. F4 shows the active kernel; `TOMPOUCE_SIMD` can force one.
 
 The Chromium companion is optional: open it when you want browser controls,
 while the audio engine keeps running natively. For terminal-only installation,

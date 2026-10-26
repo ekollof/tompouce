@@ -1,5 +1,9 @@
 # Tompouce
 
+<p align="center">
+  <img src="docs/images/logo.jpg" alt="Tompouce logo" width="180">
+</p>
+
 Source: [ekollof/tompouce](https://github.com/ekollof/tompouce).
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.

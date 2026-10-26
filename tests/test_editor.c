@@ -26,8 +26,8 @@ static void test_reference_browser(void) {
     assert(reference_key((int)NCKEY_UP) && reference_selected==0);
     assert(reference_key((int)NCKEY_PGDOWN) && reference_scroll>0);
     assert(reference_key((int)NCKEY_PGUP) && reference_scroll==0);
-    const char *native_queries[]={"slider","_scope","loadCSound","csoundm","midin","K","S","sGate","bbexpr","oschost"};
-    const char *native_names[]={"slider","scope","loadCsound","csoundm","midin","K","S","sGate","bbexpr","oschost"};
+    const char *native_queries[]={"slider","_scope","loadCSound","csoundm","midin","K","S","sGate","bbexpr","oschost","fxr","FXrelease"};
+    const char *native_names[]={"slider","scope","loadCsound","csoundm","midin","K","S","sGate","bbexpr","oschost","fxr","fxr"};
     for(size_t i=0;i<sizeof(native_queries)/sizeof(native_queries[0]);i++) {
         reference_open(native_queries[i]);assert(reference_count>0);
         const StrudelReference *entry=&strudel_reference[reference_matches[0]];

@@ -167,7 +167,7 @@ evaluate the editor source.
 
 Reference prose comes from the installed, lockfile-pinned Strudel 1.2.6 source
 documentation and JSDoc alongside Tompouce's embedded runtime implementations
-(442 documented entries, including 37 runtime entries). Runtime documentation
+(444 documented entries, including 39 runtime entries). Runtime documentation
 covers sliders, visualizations and their underscored aliases, pattern branches,
 MIDI/OSC routing, sample maps, tempo helpers, Csound and native synthesis.
 It includes parameters, return values and examples. Native descriptions take

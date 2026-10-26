@@ -963,6 +963,23 @@ globalThis.__query = (begin, end, cps, probes = false) => {
   return JSON.stringify(events);
 };
 
+/**
+ * Keep a Kabelsalat graph running after the note ends. The cleanup deadline
+ * is the hap end plus the longer of the pattern release and this time, clamped
+ * to 0..60 seconds. A value at or below the pattern release adds no fade. A
+ * longer value fades linearly from the pattern-release point to that deadline.
+ * An audioin() effect then feeds silence. A K() source keeps sounding with its
+ * gate low. Delay length does not move the deadline. Nested FX() chains are
+ * outside this control.
+ * @name fxr
+ * @synonyms FXrelease FXrel FXr
+ * @param {number | Pattern} seconds effect release in seconds, from 0 to 60
+ * @returns Pattern
+ * @example
+ * s("bd sd").delay(.4).delaytime(.2).fxr(.8)
+ * @example
+ * note("c3 e3").K(sine(sFreq).mul(.2).add(x => x.delay(.1).mul(.4)).out()).fxr(.5)
+ */
 /* Separate, bounded drawing queries. Only the generator calls this; no visual
    query is scheduled as audio, and the UI never executes user JavaScript. */
 globalThis.__visualQuery = (time, cps) => {

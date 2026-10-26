@@ -1,6 +1,8 @@
 # Tompouce documentation
 
-Tompouce is a terminal live-coding environment for music. It embeds Strudel 1.2.6 in QuickJS, schedules patterns locally, and renders audio in C. The Notcurses editor, native audio engine, optional Chromium companion and MCP interface work with the same session.
+Tompouce is a terminal live-coding environment for music. Its aim is parity with the Strudel web REPL: it embeds Strudel 1.2.6 in QuickJS, schedules patterns locally, and renders audio in C. The Notcurses editor, native audio engine, optional Chromium companion and MCP interface work with the same session.
+
+The performance keys match the web editor. Ctrl+Enter or Alt+Enter evaluates and starts playback. Ctrl+. or Alt+. stops. F5 and Ctrl+P do those same jobs. Alt+W and Alt+Q move between `$` labels.
 
 Start with [Getting started](https://github.com/ekollof/tompouce/wiki/Getting-Started), then try the bundled 22-lesson Strudeltutor. A simple synth pattern works without sample banks or a browser:
 

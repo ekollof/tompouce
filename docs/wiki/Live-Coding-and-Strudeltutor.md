@@ -8,7 +8,10 @@
 | F2 | Prompt; enter slash commands such as `/tutor` or `/save` |
 | F3 | Toggle vi editing |
 | F4 | Engine and editor diagnostics |
-| F5 | Evaluate source and commit it to the current song buffer |
+| F5 | Evaluate source, commit it to the current song buffer, and start playback |
+| Ctrl+Enter / Alt+Enter | Evaluate and start, matching the Strudel REPL. Plain Enter still inserts a newline |
+| Ctrl+. / Alt+. | Stop playback, matching the Strudel REPL |
+| Alt+W / Alt+Q | Next / previous `$` label, wrapping, as in the web editor |
 | Ctrl+P | Play/stop |
 | Alt+Up / Alt+Down | Raise/lower output volume by 1% from any pane |
 | Tab / Ctrl+Space | Context-aware completion; leading whitespace/selection retains indentation |

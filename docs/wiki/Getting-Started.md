@@ -37,7 +37,7 @@ setcpm(108 / 4)
 note("c4 e4 g4 c5").s('triangle').gain(0.4)
 ```
 
-Press F5. If transport is stopped, press Ctrl+P. Change a note, press F5 again, and listen. F1 opens the keybinding reference; Escape returns focus from the right pane to the editor.
+Press Ctrl+Enter or Alt+Enter, the same keys as the Strudel REPL, or press F5. That evaluates the pattern and starts playback. Ctrl+. or Alt+. stops. Ctrl+P toggles play and stop. Change a note and evaluate again. F1 opens the keybinding reference; Escape returns focus from the right pane to the editor.
 
 For guided practice, press F2, enter `/tutor`, then Enter. See [Live coding and Strudeltutor](https://github.com/ekollof/tompouce/wiki/Live-Coding-and-Strudeltutor).
 

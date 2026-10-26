@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tompouce</title>
-  <meta name="description" content="A terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <meta name="description" content="A terminal live-coding environment for music, aiming for Strudel parity, built in C.">
   <link rel="canonical" href="https://ekollof.github.io/tompouce/">
   <meta property="og:title" content="Tompouce">
-  <meta property="og:description" content="A terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <meta property="og:description" content="A terminal live-coding environment for music, aiming for Strudel parity, built in C.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://ekollof.github.io/tompouce/">
   <meta property="og:image" content="https://ekollof.github.io/tompouce/og.jpg">
   <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Tompouce logo beside the title and the line: a terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <meta property="og:image:alt" content="Tompouce logo beside the title and the line: a terminal live-coding environment for music, aiming for Strudel parity, built in C.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Tompouce">
-  <meta name="twitter:description" content="A terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <meta name="twitter:description" content="A terminal live-coding environment for music, aiming for Strudel parity, built in C.">
   <meta name="twitter:image" content="https://ekollof.github.io/tompouce/og.jpg">
-  <meta name="twitter:image:alt" content="Tompouce logo beside the title and the line: a terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <meta name="twitter:image:alt" content="Tompouce logo beside the title and the line: a terminal live-coding environment for music, aiming for Strudel parity, built in C.">
   <link rel="icon" href="logo.jpg" type="image/jpeg">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -37,7 +37,8 @@
       <img class="logo" src="logo.jpg" width="168" height="168" alt="Tompouce logo: a layered pastry with a waveform in the icing">
       <div>
         <h1>Tompouce</h1>
-        <p class="lede">A terminal live-coding environment for music, inspired by Strudel, built in C.</p>
+        <p class="lede">A terminal live-coding environment for music, aiming for Strudel parity, built in C.</p>
+        <p class="keys">The same patterns, and the web REPL's keys: Ctrl+Enter or Alt+Enter evaluates and starts. Ctrl+. or Alt+. stops.</p>
         <p class="links">
           <a class="button" href="https://github.com/ekollof/tompouce">Source</a>
           <a class="button" href="https://github.com/ekollof/tompouce/wiki">Documentation</a>
@@ -63,7 +64,7 @@ cd tompouce
       </article>
       <article>
         <h2>First sound</h2>
-        <p>Type this in the editor. Press F5 to evaluate. If transport is stopped, press Ctrl+P.</p>
+        <p>Type this in the editor. Press Ctrl+Enter, Alt+Enter, or F5 to evaluate and start. Ctrl+. or Alt+. stops. Ctrl+P toggles play.</p>
         <pre><code><span class="fn">setcpm</span>(108 / 4)
 <span class="fn">note</span>(<span class="str">"c4 e4 g4 c5"</span>).<span class="fn">s</span>(<span class="str">'triangle'</span>).<span class="fn">gain</span>(0.4)</code></pre>
         <p class="note">Press F2 and enter <code>/tutor</code> for 22 lessons. F1 is the keybinding reference.</p>
@@ -73,7 +74,7 @@ cd tompouce
     <section class="points">
       <h2>In the terminal</h2>
       <ul>
-        <li>Strudel patterns run in QuickJS. Audio is rendered in C.</li>
+        <li>Strudel parity is the target. Patterns run in QuickJS, and the REPL keys match the web editor. Audio is rendered in C.</li>
         <li>Write, evaluate and listen in one keyboard-driven session, with vi editing.</li>
         <li>Output goes through PipeWire, PulseAudio, JACK or ALSA.</li>
         <li>A Chromium companion is optional. The engine keeps running natively.</li>

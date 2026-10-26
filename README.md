@@ -7,7 +7,7 @@
 Source: [ekollof/tompouce](https://github.com/ekollof/tompouce).
 Site: [ekollof.github.io/tompouce](https://ekollof.github.io/tompouce/).
 
-A terminal live-coding environment for music, inspired by Strudel, built in C.
+A terminal live-coding environment for music, aiming for parity with Strudel, built in C.
 
 New to Strudel? [Strudeltutor](#learn-with-strudeltutor) teaches live coding
 through 22 interactive lessons inspired by vimtutor. Press **F2**, enter
@@ -20,6 +20,8 @@ through 22 interactive lessons inspired by vimtutor. Press **F2**, enter
 Writing Strudel shouldn't require running a full browser or Electron app.
 Tompouce embeds Strudel's JavaScript runtime in QuickJS and generates audio in C,
 bringing the editor, sound engine and live visualizations into your terminal.
+The aim is parity with the web REPL: the same patterns, and the same performance
+keys. Native audio does not reproduce every browser waveform or parameter.
 
 - **A small memory footprint.** More RAM stays available for samples, effects
   and other music tools. Effect, room and orbit buffers are allocated only when
@@ -28,7 +30,9 @@ bringing the editor, sound engine and live visualizations into your terminal.
   binary reserves 23 MiB of static storage. Usage varies with the composition
   and loaded samples.
 - **A keyboard-driven workflow.** Write, evaluate, browse sounds and watch patterns
-  in one place, with vi editing and your terminal's colors.
+  in one place, with vi editing and your terminal's colors. Ctrl+Enter or Alt+Enter
+  evaluates and starts, and Ctrl+. or Alt+. stops, matching the Strudel REPL.
+  F5 and Ctrl+P do those same jobs.
 - **Local, offline music making.** Installed sound banks work without a network
   connection. Downloaded or imported samples stay available locally.
 - **Native Linux audio.** Connect through PipeWire, PulseAudio, JACK or ALSA,
@@ -348,7 +352,10 @@ its text display.
 Keys:
 - `Tab` — complete a word in insert mode; indent two spaces in leading whitespace or a selection. `Shift+Tab` cycles completion backward, otherwise unindents.
 - Type code in the editor (left pane).
-- `F5` — evaluate code (`Ctrl+R` also evaluates outside vi normal mode)
+- `F5` — evaluate code and start playback (`Ctrl+R` also does this outside vi normal mode)
+- `Ctrl+Enter` / `Alt+Enter` — evaluate and start, matching the Strudel REPL. Plain Enter still inserts a newline
+- `Ctrl+.` / `Alt+.` — stop playback, matching the Strudel REPL. An already stopped transport stays stopped
+- `Alt+W` / `Alt+Q` — next / previous `$` label, wrapping, as in the web editor
 - `Ctrl+P` — play / stop. Stop ends new scheduling; submitted notes and tails finish. Play restarts at cycle zero.
 - `F1` — toggle Tompouce keybinding cheatsheet over the console pane (`PgUp`/`PgDn` scroll)
 - `Ctrl+L` — hide / restore the console; the editor expands when no other right-hand panels are open.

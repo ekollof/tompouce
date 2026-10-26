@@ -4,6 +4,8 @@ Tompouce is a terminal live-coding environment for music. Its aim is parity with
 
 The performance keys match the web editor. Ctrl+Enter or Alt+Enter evaluates and starts playback. Ctrl+. or Alt+. stops. F5 and Ctrl+P do those same jobs. Alt+W and Alt+Q move between `$` labels.
 
+Patterns can also leave the machine. ALSA carries MIDI notes, channels and controller input. `.osc()` sends timestamped SuperDirt bundles over UDP, by default to `127.0.0.1:57120`. See [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations).
+
 Start with [Getting started](https://github.com/ekollof/tompouce/wiki/Getting-Started), then try the bundled 22-lesson Strudeltutor. A simple synth pattern works without sample banks or a browser:
 
 ```js

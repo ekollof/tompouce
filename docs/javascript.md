@@ -381,18 +381,24 @@ lag/slide/slew, fold/distortion, clocks, triggers, sequences, hold and delay.
 Feedback requires a delay; device input, MIDI/mouse nodes, custom UGens and
 raw JavaScript nodes are unavailable. Unsupported nodes are rejected during
 compilation. This is a native adaptation rather than a complete browser host.
-Graph sources with ADSR nodes keep their own envelope, including release/delay
-time, without a second outer ADSR. Sources without graph ADSR use the native
-default envelope. `audioin()` effects run after the source envelope and before
+`K(...)` graph sources replace the oscillator or sample. Pattern ADSR stays on
+those replaced sources and is not applied again to the graph. Use `sGate` ADSR
+inside the graph. Startup follows the browser generic processor: a 128-frame
+quantum whose start is still before the onset stays silent and does not advance
+the graph, then the whole next quantum plays. `sGate` stays high for the quantum
+that contains the hap end and drops for the following quantum. Bytebeat keeps
+its own `currentTime <= begin` guard.
+`audioin()` effects run after the source envelope and before
 event gain, native filters and waveshaping. Both graph output channels receive
 the downstream effects independently, including when the input source is mono.
-`.fxr(seconds)` extends their cleanup deadline beyond the source release,
-feeding silence through the graph after the source ends and fading its output
-from the original release deadline to the effects deadline. Values are bounded
-to 0..60 seconds; values at or below the source release add no extension.
-Accepted graphs retain their state across program changes and voice retirement.
-General nested `FX(...)` chains and graph-source `fxr` behavior remain outside
-this coverage.
+`.fxr(seconds)` sets the cleanup deadline to the hap end plus the longer of the
+pattern release and that time, bounded to 0..60 seconds. Values at or below the
+pattern release add no fade. `audioin()` effects then feed silence through the
+graph. Graph sources keep running, with the gate low, and a linear fade runs
+from the pattern-release deadline to the effects deadline. Delay length does
+not extend either deadline. Accepted graphs retain their state across program
+changes and voice retirement.
+General nested `FX(...)` chains remain outside this coverage.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

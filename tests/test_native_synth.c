@@ -98,6 +98,86 @@ static void test_effect_release(void) {
     }
 }
 
+static void test_graph_source_release(void) {
+    const char *codes[]={
+        "note(69).clip(.05).release(.01).K(sine(sFreq).mul(.08).add(x=>x.delay(.1).mul(.5)).out()).fxr(.5)",
+        "note(69).clip(.05).release(.01).K(sine(sFreq).mul(.08).add(x=>x.delay(.1).mul(.5)).out()).fxr(0)"};
+    for (int extended=0;extended<2;extended++) {
+        clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
+        AudioEvent event=prepare(codes[extended]);
+        assert(event.fx_release==(extended?0:.5) && !native_synth_effect(event.native_synth));
+        audio_trigger_event(&event);
+        native_synth_release(event.native_synth);
+        float output[2]; double tail_energy=0;
+        for (unsigned frame=0;frame<30000;frame++) {
+            pa_callback(NULL,output,1,NULL,0,NULL);
+            if (frame>6615 && frame<8820) tail_energy+=output[0]*output[0];
+            if (frame==11025) assert(voices[0].active==!extended);
+        }
+        assert(extended?tail_energy==0:tail_energy>1e-3);
+        assert(!voices[0].active);
+        clear_voices();
+    }
+}
+
+static void test_graph_quantum(void) {
+    AudioEvent event=prepare("note(69).K(sine(sFreq).mul(.2).out())");
+    event.time=50/SR;
+    clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
+    audio_trigger_event(&event);
+    float out[2]; double early=0, started=0;
+    for (int frame=0;frame<256;frame++) {
+        pa_callback(NULL,out,1,NULL,0,NULL);
+        double energy=out[0]*out[0]+out[1]*out[1];
+        if (frame<128) early+=energy; else started+=energy;
+    }
+    assert(early==0 && started>1e-4);
+    clear_voices();
+    event.time=128/SR; audio_time=0; playing=1;
+    audio_trigger_event(&event);
+    early=started=0;
+    for (int frame=0;frame<256;frame++) {
+        pa_callback(NULL,out,1,NULL,0,NULL);
+        double energy=out[0]*out[0]+out[1]*out[1];
+        if (frame<128) early+=energy; else if (frame<192) started+=energy;
+    }
+    assert(early==0 && started>1e-4);
+    clear_voices();
+    /* Gate stays high for the quantum that contains the hap end. */
+    AudioEvent gated=prepare("note(69).K(sine(sFreq).mul(sGate).mul(.2).out())");
+    gated.time=0; gated.duration=50/SR; gated.rel=.01; gated.fx_release=0;
+    audio_time=0; playing=1;
+    audio_trigger_event(&gated);
+    double at_gate=0, after=0;
+    for (int frame=0;frame<160;frame++) {
+        pa_callback(NULL,out,1,NULL,0,NULL);
+        if (frame==60) at_gate=out[0];
+        if (frame==140) after=out[0];
+    }
+    assert(fabs(at_gate)>.01 && after==0);
+    clear_voices();
+    native_synth_release(event.native_synth);
+    native_synth_release(gated.native_synth);
+}
+
+static void test_effect_late(void) {
+    clear_voices(); audio_time=0; playing=1; next_voice_onset=HUGE_VAL;
+    AudioEvent event=prepare("note(69).s('sine').late(.137).clip(.05).release(.01).gain(.5).worklet('audioin().delay(.05).out()').fxr(.3)");
+    assert(event.fx_release==.3 && event.time==.274);
+    audio_trigger_event(&event);
+    native_synth_release(event.native_synth);
+    float out[2]; double tail=0;
+    for (unsigned frame=0;frame<30000;frame++) {
+        pa_callback(NULL,out,1,NULL,0,NULL);
+        if (audio_time>.40 && audio_time<.48) tail+=out[0]*out[0];
+        if (frame==22050) assert(voices[0].active);
+    }
+    assert(tail>1);
+    while (voices[0].active && audio_time<1) pa_callback(NULL,out,1,NULL,0,NULL);
+    assert(!voices[0].active && audio_time>=.674);
+    clear_voices();
+}
+
 static void test_effect_order(void) {
     clear_voices(); audio_time=0; playing=1;
     AudioEvent event=prepare("note(69).s('sine').gain(.2).shape(.5).worklet('audioin().add(.1).out(0).mul(-.5).out(1)')");
@@ -221,6 +301,9 @@ int main(void) {
     test_gm();
     test_retiring_resources();
     test_effect_release();
+    test_effect_late();
+    test_graph_source_release();
+    test_graph_quantum();
     test_effect_order();
     test_wavetable_banks();
     const char *waves[]={"zzfx","z_sine","z_triangle","z_sawtooth","z_square","z_tan","z_noise"};
@@ -255,7 +338,7 @@ int main(void) {
     };
     for (size_t i=0;i<sizeof(graphs)/sizeof(*graphs);i++) { AudioEvent event=prepare(graphs[i]); render(&event); native_synth_release(event.native_synth); }
     AudioEvent effect=prepare("note(60).K(audioin().mul(.5).out())");
-    playing=1; audio_trigger_event(&effect);
+    playing=1; audio_time=0; audio_trigger_event(&effect);
     VoiceMix mix={0}; mix_graph_effect(&voices[0],.25,-.5,&mix);
     assert(fabs(mix.left-.125*effect.gain)<1e-9 && fabs(mix.right-.125*effect.gain)<1e-9);
     clear_voices(); native_synth_release(effect.native_synth);

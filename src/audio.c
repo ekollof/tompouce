@@ -896,7 +896,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->vatt = ev->att;
     v->vrel = ev->rel;
     v->graph_end=v->note_off_time+fmax(0,v->vrel);
-    if (native_synth_effect(ev->native_synth)) {
+    if (native_synth_effect(ev->native_synth) || native_synth_graph(ev->native_synth)) {
         v->fx_release=ev->fx_release;
         v->graph_end=v->note_off_time+fmax(v->vrel,v->fx_release);
     }
@@ -1399,8 +1399,11 @@ typedef struct {
 } VoiceMix;
 
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
-    if (v->fx_release>v->vrel && audio_time>v->graph_end-v->fx_release+v->vrel) {
-        double fade=fmax(0,(v->graph_end-audio_time)/(v->fx_release-v->vrel));
+    /* Same anchors as the web release node: full level until note_off+release,
+       then a linear fade to note_off+fxr. graph_end can be that deadline. */
+    if (v->fx_release>v->vrel && audio_time>v->note_off_time+v->vrel) {
+        double span=v->fx_release-v->vrel;
+        double fade=fmax(0,(v->note_off_time+v->fx_release-audio_time)/span);
         l*=fade; r*=fade;
     }
     double left = v->pan <= 0 ? 1 : 1-v->pan;
@@ -1437,7 +1440,7 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
    One graph reads the first input channel and supplies both output channels. */
 static void mix_graph_effect(Voice *v,double left,double right,VoiceMix *mix) {
     double gate=v->gate_end-v->start_time;
-    native_synth_process(v->native_state,v->age,gate,v->freq,v->start_time,left,right,&left,&right);
+    native_synth_process(v->native_state,audio_time,gate,v->freq,v->start_time,left,right,&left,&right);
     left=dsp_process(&v->dsp,left*v->amp,v->age,gate);
     right=dsp_process(&v->dsp_right,right*v->amp,v->age,gate);
     route_voice(v,left,right,mix);
@@ -1692,9 +1695,14 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 /* Sample cut fades the source before its downstream effects;
                    retain the graph until its original envelope/lifetime ends. */
                 double cut_gain=source_cut_gain(V);
-                if (V->fx_release>V->vrel) {
+                /* audioin() keeps feeding silence after the source ends.
+                   A graph source keeps running with its gate low instead. */
+                if (native_synth_effect(V->native_program) && V->fx_release>V->vrel) {
                     if (audio_time>=V->graph_end) { V->active=0; continue; }
-                    if (V->source_finished || age>=V->gate_end-V->start_time+V->vrel ||
+                    /* Fractional onsets leave age a sample behind the output
+                       clock, so the cleanup deadline is the note-off clock. */
+                    if (V->source_finished || audio_time>=V->note_off_time+V->vrel ||
+                        age>=V->gate_end-V->start_time+V->vrel ||
                         (V->stretch_buffer && V->stretch_frame>=(unsigned)stretch_frames(V->stretch_buffer)) ||
                         (V->smpbuf && (V->smppos<0 || V->smppos>=V->smplen))) {
                         V->source_finished=1;
@@ -1718,11 +1726,17 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 }
                 if (V->inst==INST_NATIVE) {
                     double gate=V->gate_end-V->start_time, left=0,right=0;
+                    int graph=native_synth_graph(V->native_program);
+                    /* The worklet stops when the quantum start reaches
+                       hap end + max(release, fxr), after finishing any quantum
+                       that began earlier. Delay length does not extend it. */
+                    if (graph && native_synth_quantum_time(audio_time)>=V->graph_end) { V->active=0; continue; }
                     int own_envelope=native_synth_enveloped(V->native_program);
                     double env=retiring_envelope(V,own_envelope?1:dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel));
                     double tail=native_synth_tail(V->native_program);
-                    if ((tail>=0 && age>=gate+fmax(V->vrel,tail)) ||
-                        !native_synth_process(V->native_state,age,gate,V->freq,V->start_time,0,0,&left,&right)) {
+                    double clock=graph?audio_time:age;
+                    if ((!graph && tail>=0 && age>=gate+fmax(V->vrel,tail)) ||
+                        !native_synth_process(V->native_state,clock,gate,V->freq,V->start_time,0,0,&left,&right)) {
                         V->active=0; continue;
                     }
                     V->env=env;
@@ -1881,7 +1895,11 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         else envtarget = sus;
                     } else {
                         double rt = audio_time - V->release_time;
-                        if (rt >= r) { V->active = 0; envtarget = 0; }
+                        if (rt >= r) {
+                            envtarget = 0;
+                            if (!(native_synth_effect(V->native_program) && V->fx_release>V->vrel && audio_time<V->graph_end))
+                                V->active = 0;
+                        }
                         else envtarget = V->release_start_level * (1.0 - rt/r);
                     }
                     if (V->dsp.control.enabled)

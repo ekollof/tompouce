@@ -76,8 +76,17 @@ int native_synth_sound(const char *sound) {
     return !strncmp(sound,"bytebeat",8) && (!sound[8] || sound[8]==':')?2:0;
 }
 int native_synth_effect(const NativeSynth *p) { return p && p->effect; }
+int native_synth_graph(const NativeSynth *p) { return p && p->kind==3; }
 int native_synth_stereo(const NativeSynth *p) { return p && p->kind!=1; }
-int native_synth_enveloped(const NativeSynth *p) { return p && (p->kind==1 || (p->kind==3 && !p->effect && p->envelope)); }
+/* Graph sources are the worklet output. Pattern ADSR stays on the oscillator
+   or sample the worklet replaced, including graphs without an internal ADSR. */
+int native_synth_enveloped(const NativeSynth *p) { return p && (p->kind==1 || (p->kind==3 && !p->effect)); }
+double native_synth_quantum_time(double now) {
+    if (!isfinite(now) || now<=0) return 0;
+    long frame=(long)llround(now*SR);
+    if (frame<0) frame=0;
+    return (double)(frame & ~127L)/SR;
+}
 double native_synth_tail(const NativeSynth *p) { return p && p->kind==1?-1:p?p->tail:0; }
 void native_synth_retain(const NativeSynth *p) { if (p) atomic_fetch_add(&((NativeSynth *)p)->refs,1); }
 void native_synth_release(const NativeSynth *p) { if (p) atomic_fetch_sub(&((NativeSynth *)p)->refs,1); }
@@ -262,6 +271,17 @@ int native_synth_process(NativeSynthState *s,double age,double gate,double frequ
         }
         if (s->frame<s->byte_wait) { s->frame++; return 1; }
     }
+    int gate_open=age<gate;
+    if (p->kind==3) {
+        /* Generic processor: `age` is the output clock. A quantum whose start
+           is still before the onset stays silent and does not advance play
+           position. The gate drops for the whole quantum once that start is
+           past the hap end. Bytebeat keeps its own <= begin guard above. */
+        double qtime=native_synth_quantum_time(age);
+        if (qtime<origin) { *left=*right=0; return 1; }
+        gate_open=!(qtime>origin+gate);
+        age=s->frame/SR;
+    }
     s->outputs[0]=s->outputs[1]=0;
     for (int i=0;i<p->count;i++) {
         const NativeOp *op=&p->ops[i];
@@ -270,7 +290,7 @@ int native_synth_process(NativeSynthState *s,double age,double gate,double frequ
         switch (op->type) {
         case N_CONST: out=op->value; break;
         case N_TIME: out=age; break;
-        case N_GATE: out=age<gate?1:0; break;
+        case N_GATE: out=p->kind==3?gate_open:age<gate?1:0; break;
         case N_AUDIO: out=input_l; break;
         case N_BYTE_TIME:
             /* The worklet reads float32 AudioParam frequency and divides its

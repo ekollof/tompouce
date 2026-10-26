@@ -69,9 +69,10 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] Extend Kabelsalat checks beyond the verified `audioin()` effect tails:
-      graph-source `fxr`, remaining native control combinations and
-      render-quantum startup at fractional onsets need independent comparisons.
+- [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
+      Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
+      startup now have independent web comparisons. Nested `FX(...)` chains
+      remain outside that coverage.
 - [ ] Audit remaining shared delay/reverb automation and tail interactions
       against the web, including nested/control-output routing and live edits.
       Distinguish confirmed behavior differences from missing coverage.

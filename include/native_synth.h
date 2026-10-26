@@ -13,9 +13,12 @@ void native_synth_release(const NativeSynth *program);
 NativeSynthState *native_synth_state_new(const NativeSynth *program);
 void native_synth_state_free(NativeSynthState *state);
 int native_synth_effect(const NativeSynth *program);
+int native_synth_graph(const NativeSynth *program);
 int native_synth_stereo(const NativeSynth *program);
 int native_synth_enveloped(const NativeSynth *program);
 double native_synth_tail(const NativeSynth *program);
+/* Start time, in seconds, of the 128-frame render quantum containing `now`. */
+double native_synth_quantum_time(double now);
 /* Callback safe: bounded native operations only; 0 marks the end of ZzFX. */
 int native_synth_process(NativeSynthState *state, double age, double gate, double frequency,
                          double origin, double input_l, double input_r, double *left, double *right);

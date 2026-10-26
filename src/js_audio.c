@@ -586,8 +586,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
     cJSON_ArrayForEach(field,value) {
         const char *name = field->string;
         if (!name || *name == '_' || dsp_supports_control(name)) continue;
-        if (!strcmp(name,"FXrelease") && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
-                cJSON_GetObjectItemCaseSensitive(value,"_nativeProgram"),"effect"))) continue;
+        if (!strcmp(name,"FXrelease") && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(value,"_nativeProgram"))) continue;
         const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
             "attack","decay","sustain","release","speed","detune","delay","delaytime",
             "delayfeedback","midichan","midiport","midicmd","ccn","ccv","progNum","sysexid","sysexdata",

@@ -621,10 +621,20 @@ both graph outputs pass independently through native DSP, panning and sends.
 This fixes additive offsets that previously bypassed gain and waveshaping
 levels that changed because processing ran in the opposite order. Unit tests
 check explicit stereo outputs and zero gain even with an additive graph.
-`TOMPOUCE_COMPARE_FILTER=kabel-` runs all 16 effect comparisons.
+`TOMPOUCE_COMPARE_FILTER=kabel-` runs the effect comparisons together with the
+graph-source cases below.
 
-These gates do not establish graph-source `fxr`, all native control
-combinations, fractional-onset worklet startup or arbitrary nested `FX` chain parity.
+Eight further gates cover `K(...)` sources: `fxr` at 0 and 0.5 seconds on a
+feedback delay, an internal `sGate` ADSR with a longer `fxr`, then gain/shape,
+low-pass and pan. One fractional onset uses `.late(.137)`. Correlations are
+0.99961 for the extended delay tail and above 0.99996 for the others, with
+RMS ratios inside 0.85..1.15. `kabel-fx-late` checks the same 128-frame
+worklet startup on an `audioin()` delay and correlates at 0.99929. Graph
+sources keep oscillating with the gate low until the hap end plus the longer
+of the pattern release and `fxr`; the linear fade matches the web release
+node. A fractional onset previously let the legacy oscillator envelope stop
+the voice one sample before that tail. Nested `FX(...)` chains remain outside
+these gates.
 
 ## MIDI channel routing and delivery
 

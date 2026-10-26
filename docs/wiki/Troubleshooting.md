@@ -23,7 +23,7 @@ TOMPOUCE_SIMD=c tompouce
 requests fall back to C with a console diagnostic. Invalid values also use C.
 Changing the variable does not affect an already running process. When reporting
 an audio regression, include the CPU model and whether forcing C changes it.
-See [Development](Development.md#cpu-dispatch-and-benchmarks) for verification.
+See [Development](https://github.com/ekollof/tompouce/wiki/Development#cpu-dispatch-and-benchmarks) for verification.
 
 ## Output volume and mute
 
@@ -50,7 +50,7 @@ For a semitone shift after scale resolution, use `.transpose(7)` instead.
 
 F6 lists the loaded catalog. Banks skipped during installation are unavailable offline until installed. `gm_` sounds use the installed `gm-webaudiofont` packs (or fetch them on first play); only when packs are unreachable do they need FluidSynth and a usable GM soundfont. `wt_` banks require their installed AKWF catalog/audio; procedural `wt:` oscillators are separate.
 
-Explicit `samples()` maps override defaults; a failed explicit map is not silently replaced with another instrument. Review the console, installed bank paths and [Sounds and samples](Sounds-and-Samples.md).
+Explicit `samples()` maps override defaults; a failed explicit map is not silently replaced with another instrument. Review the console, installed bank paths and [Sounds and samples](https://github.com/ekollof/tompouce/wiki/Sounds-and-Samples).
 
 ## Tutorial changes are missing
 
@@ -58,7 +58,7 @@ Explicit `samples()` maps override defaults; a failed explicit map is not silent
 
 ## Colors, graphics and mouse
 
-Enable `/theme omarchy`, `/theme pywal` or `/theme auto`; default `/theme off` does not watch files. Check the paths listed in [Visuals and themes](Visuals-and-Themes.md). Missing/invalid files keep the last valid palette.
+Enable `/theme omarchy`, `/theme pywal` or `/theme auto`; default `/theme off` does not watch files. Check the paths listed in [Visuals and themes](https://github.com/ekollof/tompouce/wiki/Visuals-and-Themes). Missing/invalid files keep the last valid palette.
 
 Use `/graphics auto` in a Kitty-capable terminal; tmux/screen and unsupported terminals use braille. `/inline off` hides inline views independently of F12. Hold Shift for the terminal's native mouse selection; Escape returns pane focus to the editor. F1 documents active shortcuts.
 

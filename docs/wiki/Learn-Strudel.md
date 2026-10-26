@@ -1,6 +1,6 @@
 # Learn Strudel
 
-Tompouce's 22-lesson Strudeltutor is a practical first stop: F2 `/tutor`, then F5 to apply edits and Ctrl+N/Ctrl+B to navigate. It uses built-in synths, so the core lessons work offline. See [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md) for progress and save behavior.
+Tompouce's 22-lesson Strudeltutor is a practical first stop: F2 `/tutor`, then F5 to apply edits and Ctrl+N/Ctrl+B to navigate. It uses built-in synths, so the core lessons work offline. See [Live coding and Strudeltutor](https://github.com/ekollof/tompouce/wiki/Live-Coding-and-Strudeltutor) for progress and save behavior.
 
 ## Official learning path
 

@@ -39,7 +39,7 @@ note("c4 e4 g4 c5").s('triangle').gain(0.4)
 
 Press F5. If transport is stopped, press Ctrl+P. Change a note, press F5 again, and listen. F1 opens the keybinding reference; Escape returns focus from the right pane to the editor.
 
-For guided practice, press F2, enter `/tutor`, then Enter. See [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md).
+For guided practice, press F2, enter `/tutor`, then Enter. See [Live coding and Strudeltutor](https://github.com/ekollof/tompouce/wiki/Live-Coding-and-Strudeltutor).
 
 ## Update
 
@@ -52,4 +52,4 @@ git pull --ff-only
 
 This preserves existing banks and skips dependency/browser installation. Omit those skip options when you need updated dependencies or newly added banks. Restart Tompouce normally to load a new executable. Installation does not restart a running session or replace saved tutorial progress.
 
-For source builds, see [Development](Development.md). For sound output problems, see [Troubleshooting](Troubleshooting.md).
+For source builds, see [Development](https://github.com/ekollof/tompouce/wiki/Development). For sound output problems, see [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting).

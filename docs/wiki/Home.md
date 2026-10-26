@@ -2,7 +2,7 @@
 
 Tompouce is a terminal live-coding environment for music. It embeds Strudel 1.2.6 in QuickJS, schedules patterns locally, and renders audio in C. The Notcurses editor, native audio engine, optional Chromium companion and MCP interface work with the same session.
 
-Start with [Getting started](Getting-Started.md), then try the bundled 22-lesson Strudeltutor. A simple synth pattern works without sample banks or a browser:
+Start with [Getting started](https://github.com/ekollof/tompouce/wiki/Getting-Started), then try the bundled 22-lesson Strudeltutor. A simple synth pattern works without sample banks or a browser:
 
 ```js
 setcpm(108 / 4)
@@ -15,15 +15,15 @@ Press F5 to evaluate and Ctrl+P to play or stop.
 
 | Guide | What you will find |
 | --- | --- |
-| [Getting started](Getting-Started.md) | Installation, first sound and updates |
-| [Live coding and Strudeltutor](Live-Coding-and-Strudeltutor.md) | Editing, lessons, songs, saves and pattern fundamentals |
-| [Prebake setup files](Prebakes.md) | Reusable helpers, automatic setup and the Switch Angel starter |
-| [Sounds and samples](Sounds-and-Samples.md) | F6, drum machines, GM synths, wavetables and imports |
-| [Visuals and themes](Visuals-and-Themes.md) | Inline views, Kitty graphics and live recoloring |
-| [Companion and integrations](Companion-and-Integrations.md) | Browser controls, MCP, MIDI and OSC |
-| [Development](Development.md) | CMake/Ninja, tests, architecture and contributions |
-| [Troubleshooting](Troubleshooting.md) | Silence, failed evaluation, missing sounds and tutorial updates |
-| [Learn Strudel](Learn-Strudel.md) | Official workshops, reference pages and practice ideas |
+| [Getting started](https://github.com/ekollof/tompouce/wiki/Getting-Started) | Installation, first sound and updates |
+| [Live coding and Strudeltutor](https://github.com/ekollof/tompouce/wiki/Live-Coding-and-Strudeltutor) | Editing, lessons, songs, saves and pattern fundamentals |
+| [Prebake setup files](https://github.com/ekollof/tompouce/wiki/Prebakes) | Reusable helpers, automatic setup and the Switch Angel starter |
+| [Sounds and samples](https://github.com/ekollof/tompouce/wiki/Sounds-and-Samples) | F6, drum machines, GM synths, wavetables and imports |
+| [Visuals and themes](https://github.com/ekollof/tompouce/wiki/Visuals-and-Themes) | Inline views, Kitty graphics and live recoloring |
+| [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations) | Browser controls, MCP, MIDI and OSC |
+| [Development](https://github.com/ekollof/tompouce/wiki/Development) | CMake/Ninja, tests, architecture and contributions |
+| [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting) | Silence, failed evaluation, missing sounds and tutorial updates |
+| [Learn Strudel](https://github.com/ekollof/tompouce/wiki/Learn-Strudel) | Official workshops, reference pages and practice ideas |
 
 ## Project and community
 

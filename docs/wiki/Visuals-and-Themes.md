@@ -35,4 +35,4 @@ F2 accepts `/theme omarchy`, `/theme pywal`, `/theme auto` and `/theme off`. The
 
 XDG environment variables relocate these roots. Files are checked once per second, including atomic replacements and theme symlink changes. Invalid/missing palettes retain the last valid colors. Explicit pattern/visual colors take precedence; backgrounds preserve terminal transparency.
 
-See [Troubleshooting](Troubleshooting.md) if graphics or colors do not update.
+See [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting) if graphics or colors do not update.

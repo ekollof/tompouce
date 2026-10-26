@@ -32,7 +32,7 @@ In vi normal mode, `:` opens local commands, including `:w`, `:e`, `:q`, `:help`
 
 ## Reusable setup
 
-For reusable helpers shared across songs, see [Prebake setup files](Prebakes.md).
+For reusable helpers shared across songs, see [Prebake setup files](https://github.com/ekollof/tompouce/wiki/Prebakes).
 That guide covers automatic startup setup and the optional Switch Angel starter.
 
 ## Work through the tutorial
@@ -80,4 +80,4 @@ note("c4 e4 g4 c5").s('triangle')
 
 `.every(4, x => x.rev())` transforms cycles 0, 4, 8, and so on in the pinned runtime. It starts on the first cycle of each group, rather than waiting until the fourth.
 
-Continue with [Learn Strudel](Learn-Strudel.md) and the [full key reference](https://github.com/ekollof/tompouce/blob/master/README.md#terminal-ui).
+Continue with [Learn Strudel](https://github.com/ekollof/tompouce/wiki/Learn-Strudel) and the [full key reference](https://github.com/ekollof/tompouce/blob/master/README.md#terminal-ui).

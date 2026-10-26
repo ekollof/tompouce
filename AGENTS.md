@@ -20,6 +20,9 @@ Strudel runtime, a browser companion and MCP support.
   wiki; after editing those pages, sync them to a scratch clone of the
   `tompouce.wiki` repo and push. The wiki backend only exists after the first
   page is created in the browser, and plain `git` needs SSH auth for it.
+  Cross-links must use rendered wiki URLs
+  (`https://github.com/ekollof/tompouce/wiki/Page`). A `Page.md` link is served
+  as raw Markdown.
 
 ## Website
 

@@ -102,5 +102,5 @@ disables automatic setup on the next evaluation.
 If the loader is unknown, restart the updated executable and check
 `command -v tompouce`. If a helper is unknown, check the file location and await
 its loader before use. Installer refusal of an existing file preserves edits;
-back it up before deliberately replacing it. See [Troubleshooting](Troubleshooting.md)
+back it up before deliberately replacing it. See [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting)
 for evaluation and executable-version issues.

@@ -636,6 +636,23 @@ node. A fractional onset previously let the legacy oscillator envelope stop
 the voice one sample before that tail. Nested `FX(...)` chains remain outside
 these gates.
 
+Six cleanup-clock regressions extend the `kabel-` matrix to 30 cases. Two
+accelerated shared-PCM samples end naturally at .125 seconds but retain an
+.8-second worklet delay, both with and without an explicit `fxr` extension.
+The delayed output previously vanished because the fade followed the natural
+sample's note-off; both now correlate above 0.9999999. Three graph-source cases
+cover raw releases of 0, .005 and .01 seconds with `.fxr(.005)`; a fourth checks
+an `audioin()` effect with zero release. These correlate above 0.9999999,
+including the former .96819 failure. Thresholds, gain bounds and lag stay
+unchanged. Artifacts: `/tmp/tompouce-fxr-clock-final/report.json`.
+
+Graph gate, fade and cleanup anchors now retain the original hap and raw
+release control. Natural sample envelopes keep their own transport gate, and
+source ADSR minima do not change the outer fade. Effect graphs drain silence
+after naturally ending samples even without an `fxr` extension, and cleanup
+follows the generic processor's 128-frame quantum. Callback regressions check
+the independent clocks and a half-fade with a sub-minimum raw release.
+
 ## MIDI channel routing and delivery
 
 `node scripts/midi-reference-qa.mjs` compares 206 cases against the deployed

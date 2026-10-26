@@ -896,9 +896,12 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->vatt = ev->att;
     v->vrel = ev->rel;
     v->graph_end=v->note_off_time+fmax(0,v->vrel);
+    v->graph_gate_end=v->note_off_time;
+    v->graph_fade_start=v->graph_end;
     if (native_synth_effect(ev->native_synth) || native_synth_graph(ev->native_synth)) {
         v->fx_release=ev->fx_release;
-        v->graph_end=v->note_off_time+fmax(v->vrel,v->fx_release);
+        v->graph_fade_start=v->graph_gate_end+ev->graph_release;
+        v->graph_end=v->graph_gate_end+fmax(ev->graph_release,v->fx_release);
     }
     v->vdec = ev->dec;
     v->vsus = ev->sus;
@@ -1399,11 +1402,11 @@ typedef struct {
 } VoiceMix;
 
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
-    /* Same anchors as the web release node: full level until note_off+release,
-       then a linear fade to note_off+fxr. graph_end can be that deadline. */
-    if (v->fx_release>v->vrel && audio_time>v->note_off_time+v->vrel) {
-        double span=v->fx_release-v->vrel;
-        double fade=fmax(0,(v->note_off_time+v->fx_release-audio_time)/span);
+    /* Source transport may shorten note_off_time. The outer release node
+       keeps the original hap and raw-release anchors instead. */
+    if (v->graph_end>v->graph_fade_start && audio_time>v->graph_fade_start) {
+        double span=v->graph_end-v->graph_fade_start;
+        double fade=fmax(0,(v->graph_end-audio_time)/span);
         l*=fade; r*=fade;
     }
     double left = v->pan <= 0 ? 1 : 1-v->pan;
@@ -1440,7 +1443,8 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
    One graph reads the first input channel and supplies both output channels. */
 static void mix_graph_effect(Voice *v,double left,double right,VoiceMix *mix) {
     double gate=v->gate_end-v->start_time;
-    native_synth_process(v->native_state,audio_time,gate,v->freq,v->start_time,left,right,&left,&right);
+    native_synth_process(v->native_state,audio_time,v->graph_gate_end-v->start_time,
+                         v->freq,v->start_time,left,right,&left,&right);
     left=dsp_process(&v->dsp,left*v->amp,v->age,gate);
     right=dsp_process(&v->dsp_right,right*v->amp,v->age,gate);
     route_voice(v,left,right,mix);
@@ -1697,8 +1701,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 double cut_gain=source_cut_gain(V);
                 /* audioin() keeps feeding silence after the source ends.
                    A graph source keeps running with its gate low instead. */
-                if (native_synth_effect(V->native_program) && V->fx_release>V->vrel) {
-                    if (audio_time>=V->graph_end) { V->active=0; continue; }
+                if (native_synth_effect(V->native_program)) {
+                    if (native_synth_quantum_time(audio_time)>=V->graph_end) { V->active=0; continue; }
                     /* Fractional onsets leave age a sample behind the output
                        clock, so the cleanup deadline is the note-off clock. */
                     if (V->source_finished || audio_time>=V->note_off_time+V->vrel ||
@@ -1806,7 +1810,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         }
                     }
                     if (V->smppos < lower || V->smppos >= smp_lim) {
-                        if (V->fx_release>V->vrel) V->source_finished=1;
+                        if (native_synth_effect(V->native_program)) V->source_finished=1;
                         else V->active=0;
                     }
                     continue;
@@ -1897,7 +1901,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double rt = audio_time - V->release_time;
                         if (rt >= r) {
                             envtarget = 0;
-                            if (!(native_synth_effect(V->native_program) && V->fx_release>V->vrel && audio_time<V->graph_end))
+                            if (!(native_synth_effect(V->native_program) && audio_time<V->graph_end))
                                 V->active = 0;
                         }
                         else envtarget = V->release_start_level * (1.0 - rt/r);

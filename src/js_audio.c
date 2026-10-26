@@ -248,6 +248,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     ev->att = envelope[0]; ev->dec = envelope[1];
     ev->sus = envelope[2]; ev->rel = envelope[3];
     ev->fx_release = control(v,"FXrelease",0,0,60);
+    ev->graph_release = control(v,"release",.01,0,60);
     ev->smp = ev->wt = ev->midi_chan = ev->midi_note = -1;
     ev->delay_send = control(v,"delay",0,0,1);
     ev->delay_time = cJSON_HasObjectItem(v,"delaytime") ? control(v,"delaytime",0,0,1)

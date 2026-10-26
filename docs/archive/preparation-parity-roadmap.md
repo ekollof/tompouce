@@ -531,3 +531,11 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       waveshaping, filters and tails; the eight earlier effect-tail gates pass
       unchanged. Native callback tests cover explicit stereo output and zero
       event gain. Other native control combinations remain separate checks.
+
+## Independent graph cleanup clocks
+
+- [x] Retain the original hap gate and raw release for graph fades and cleanup,
+      independently of natural sample transport and source ADSR minima. Drain
+      effects after natural sample endings even without an `fxr` extension.
+      Six new web PCM regressions cover delayed natural samples and short raw
+      releases; all 30 Kabelsalat comparisons pass with unchanged thresholds.

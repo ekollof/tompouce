@@ -98,6 +98,32 @@ static void test_effect_release(void) {
     }
 }
 
+static void test_graph_cleanup_anchors(void) {
+    clear_voices(); audio_time=0; playing=1;
+    AudioEvent event=prepare("note(69).s('sine').gain(.4).clip(.05).release(0).K(sine(sFreq).mul(.1).out()).fxr(.005)");
+    assert(event.rel==.01 && event.graph_release==0);
+    audio_trigger_event(&event);
+    assert(fabs(voices[0].graph_gate_end-.1)<1e-12);
+    assert(fabs(voices[0].graph_fade_start-.1)<1e-12);
+    assert(fabs(voices[0].graph_end-.105)<1e-12);
+    audio_time=.1025;
+    VoiceMix mix={0}; route_voice(&voices[0],1,1,&mix);
+    assert(fabs(mix.left-.5)<1e-12 && fabs(mix.right-.5)<1e-12);
+    clear_voices(); native_synth_release(event.native_synth);
+
+    /* Natural sample transport changes its source gate, never the worklet's
+       original hap gate or the post-effects fade/cleanup anchors. */
+    audio_time=0;
+    event=prepare("note(69).s('sine').gain(.2).worklet('audioin().add(sGate.mul(.1)).out()').fxr(.5)");
+    audio_trigger_event(&event);
+    voices[0].note_off_time=voices[0].gate_end=.125;
+    audio_time=.8;
+    mix=(VoiceMix){0}; mix_graph_effect(&voices[0],.25,-.5,&mix);
+    assert(fabs(mix.left-.07)<1e-12 && fabs(mix.right-.07)<1e-12);
+    assert(voices[0].graph_gate_end==2 && voices[0].graph_end==2.5);
+    clear_voices(); native_synth_release(event.native_synth);
+}
+
 static void test_graph_source_release(void) {
     const char *codes[]={
         "note(69).clip(.05).release(.01).K(sine(sFreq).mul(.08).add(x=>x.delay(.1).mul(.5)).out()).fxr(.5)",
@@ -301,6 +327,7 @@ int main(void) {
     test_gm();
     test_retiring_resources();
     test_effect_release();
+    test_graph_cleanup_anchors();
     test_effect_late();
     test_graph_source_release();
     test_graph_quantum();

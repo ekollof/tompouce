@@ -25,6 +25,8 @@ the graph runs after the source envelope and before event gain and native DSP.
 Both graph outputs receive downstream effects independently. In addition,
 `.fxr(seconds)` retains and fades tails after the source release (bounded to
 60 seconds). This does not establish support for arbitrary nested `FX` chains.
+The fade/cleanup anchors use the original hap and raw `release`, independently
+of source-envelope minima or a sample's natural ending.
 
 The synth category includes 125 `gm_` names (General MIDI, no FluidSynth required):
 

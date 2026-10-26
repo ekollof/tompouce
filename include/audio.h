@@ -60,6 +60,7 @@ typedef struct Voice {
     double release_time;
     double gate_end;
     double graph_end;  /* original cleanup deadline, independent of source stop */
+    double graph_gate_end, graph_fade_start; /* immutable original hap anchors */
     double fx_release;
     int source_finished; /* drain downstream effects with zero input */
     // wavetable state (valid when inst == INST_WT)

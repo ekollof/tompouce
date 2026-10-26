@@ -398,6 +398,10 @@ graph. Graph sources keep running, with the gate low, and a linear fade runs
 from the pattern-release deadline to the effects deadline. Delay length does
 not extend either deadline. Accepted graphs retain their state across program
 changes and voice retirement.
+The cleanup and fade use the original hap end and the raw `release` control;
+natural sample endings do not move them. The source ADSR's minimum release is
+separate: `.release(0).fxr(.005)` still fades over five milliseconds after the
+hap end, while a naturally ending sample can leave a much later delay tail.
 General nested `FX(...)` chains remain outside this coverage.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache

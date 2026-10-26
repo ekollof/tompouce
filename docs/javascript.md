@@ -339,8 +339,17 @@ directly into the carrier. `.fm13(x)` sends operator 1 into operator 3. An
 operator disconnected from the carrier has no audible effect. Matrix sends
 modulate frequency, not phase. Fixed per-voice 128-frame buffers preserve
 dependency order and feedback history without callback allocation.
-Envelope/onset combinations, additional cyclic graphs, non-sine modulator
-waveforms and frequency-range boundaries need further checks.
+Eight waveform gates cover triangle, square, sawtooth and white/pink/brown
+modulators (correlations 0.99074–0.9999996, RMS ratios 0.94389–1.00847).
+Triangle, square and sawtooth follow the polyBLEP oscillator; noise loops the
+shared two-second buffers and has no frequency input. Six onset gates combine
+envelopes with late starts (0.99015–0.9999996, RMS ratios 1.00108–1.01167).
+An enveloped operator that feeds another operator advances through the silent
+head of the onset quantum at gain 1. Four cyclic graphs exceed 0.9999996
+correlation, and five frequency-boundary gates exceed 0.999992, all on the same
+0.99/RMS gates. A sine at ±Nyquist is silent. From Nyquist/2^(1/3) up to that
+rail its level is 3·log2(Nyquist/|f|), and phase keeps advancing at the clamped
+frequency.
 
 Static `detune` controls unison spread where supported; it does not transpose
 basic oscillators or samples. Five further browser gates cover sine, triangle,

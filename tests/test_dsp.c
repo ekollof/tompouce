@@ -286,6 +286,53 @@ static void test_fm_matrix(void) {
     for (int i=0;i<4096;i++) assert(isfinite(dsp_frequency(&state,440,i/SR,.5)));
 }
 
+static void test_fm_wave_and_range(void) {
+    cJSON *value=cJSON_Parse("{\"fmi\":1,\"fmh\":100}"); assert(value);
+    DspParams p; dsp_params_read(&p,value); cJSON_Delete(value);
+    DspState state; dsp_init(&state,&p);
+    for (int i=0;i<32;i++) {
+        double rendered=dsp_frequency(&state,440,i/SR,.5);
+        assert(fabs(rendered)<=SR*.5+1e-9);
+        assert(fabs(rendered-440)<1e-3);
+    }
+    value=cJSON_Parse("{\"fmi\":30,\"fmh\":2}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); dsp_init(&state,&p);
+    int outside=0;
+    for (int i=0;i<128;i++) {
+        double rendered=dsp_frequency(&state,440,i/SR,.5);
+        assert(isfinite(rendered));
+        if (fabs(rendered)>SR*.5) outside=1;
+    }
+    assert(outside);
+    value=cJSON_Parse("{\"fmi\":0.5,\"fmh\":2,\"fmwave\":\"sawtooth\"}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); dsp_init(&state,&p);
+    double phase=0; float rate=880;
+    for (int i=0;i<16;i++) {
+        double wave=dsp_oscillator(0,phase,rate,.5);
+        float modulation=(float)((float)wave*.5f)*rate;
+        assert(fabs(dsp_frequency(&state,440,i/SR,.5)-440*(1+modulation/440.0))<1e-5);
+        phase=fmod(phase+2*M_PI*rate/SR,2*M_PI);
+    }
+    value=cJSON_Parse("{\"fmi\":0.25,\"fmwave\":\"white\"}"); assert(value);
+    dsp_params_read(&p,value); assert(dsp_prepare_fm(&p)); cJSON_Delete(value);
+    dsp_init(&state,&p);
+    const float *buffer=p.fm_noise[0]; assert(buffer);
+    for (int i=0;i<8;i++) {
+        float modulation=(float)((float)buffer[i]*.25f)*440.f;
+        assert(fabs(dsp_frequency(&state,440,i/SR,.5)-440*(1+modulation/440.0))<1e-5);
+    }
+    value=cJSON_Parse("{\"fmi2\":0.5,\"fmwave2\":\"pink\",\"fmi12\":1}"); assert(value);
+    dsp_params_read(&p,value); assert(dsp_prepare_fm(&p)); cJSON_Delete(value);
+    dsp_init(&state,&p);
+    for (int i=0;i<256;i++) assert(fabs(dsp_frequency(&state,440,i/SR,.5)-440)<1e-9);
+    assert(dsp_oscillator_nyquist_gain(880)==1 && dsp_oscillator_nyquist_gain(-880)==1);
+    assert(dsp_oscillator_nyquist_gain((float)(SR*.5))==0);
+    assert(dsp_oscillator_nyquist_gain(-(float)(SR*.5))==0);
+    assert(dsp_oscillator_nyquist_gain(30000)==0);
+    assert(fabsf(dsp_oscillator_nyquist_gain(21120)-3.f*log2f(22050.f/21120.f))<1e-6f);
+    puts("FM waveforms follow the OscillatorNode frequency range");
+}
+
 static void test_pitch_envelope_defaults(void) {
     DspParams p;
     cJSON *value=cJSON_Parse("{\"penv\":12}"); assert(value);
@@ -460,6 +507,7 @@ int main(void) {
     test_inactive_fast_paths();
     test_fm_source_semantics();
     test_fm_matrix();
+    test_fm_wave_and_range();
     test_supersaw();
     test_source_controls();
     test_periodic_limits();

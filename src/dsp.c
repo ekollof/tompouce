@@ -207,6 +207,18 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     }
 }
 
+int dsp_prepare_fm(DspParams *p) {
+    if (!p) return 0;
+    for (int i = 0; i < 8; i++) {
+        int shape = (int)p->p[DSP_FMBASE + i * 8 + 7];
+        if (shape < 4 || shape > 6) continue;
+        const float *buffer = dsp_prepare_noise(shape - 4);
+        if (!buffer) return 0;
+        p->fm_noise[shape - 4] = buffer;
+    }
+    return 1;
+}
+
 static double held_envelope(double t, double a, double d, double s) {
     if (t < a) return a > 0 ? t / a : 1;
     if (t < a + d) return 1 - (1 - s) * (t - a) / d;
@@ -441,6 +453,16 @@ double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gat
     return pow(2,cents/1200);
 }
 
+float dsp_oscillator_nyquist_gain(float frequency) {
+    /* The basic sine keeps one partial. The top pitch range culls it, and the
+       range below interpolates toward that empty table. */
+    float nyquist=(float)(SR*.5);
+    float mag=fabsf(frequency);
+    if (!(mag<nyquist)) return 0;
+    if (mag<=nyquist*exp2f(-1.f/3.f)) return 1;
+    return 3.f*log2f(nyquist/mag);
+}
+
 void dsp_oscillator_onset(DspState *state,double onset) {
     if (!isfinite(onset*SR)) return;
     double fm_frame=ceil(onset*SR-1e-7);
@@ -478,25 +500,87 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
     }
     if (!s->fm_active) return freq;
     /* WebAudio pulls complete modulator quanta. Fixed voice-owned buffers
-       preserve graph dependency order and feedback without callback allocation. */
+       preserve graph dependency order and feedback without callback allocation.
+       OscillatorNode frequency is clamped to ±Nyquist; the constant depth gain
+       keeps the unclamped harmonicity product. Noise modulators loop the same
+       two-second buffers as source noise and have no frequency input. */
     if (s->fm_frame>=128) {
+        const float nyquist=(float)(SR*.5);
+        /* An enveloped operator's GainNode stays at its default of 1 until
+           setValueAtTime(begin). In the onset quantum that begins before the
+           note, upstream operators are pulled for that head and advance the
+           phases of the operators they feed. The carrier does not read its
+           own modulator until the note, so a direct envelope is unchanged. */
+        if (s->fm_initial_frames && s->fm_initial_frames<128) {
+            unsigned skip=128-s->fm_initial_frames;
+            float head[8][128];
+            memset(head,0,sizeof head);
+            for (unsigned at=0;at<s->fm_count;at++) {
+                unsigned i=s->fm_order[at];
+                int feeds=0, incoming=0;
+                for (unsigned j=1;j<9;j++) if (s->control.matrix[i][j]) feeds=1;
+                for (unsigned source=0;source<8;source++) if (s->control.matrix[source][i+1] &&
+                    (s->control.fm_envelopes&(1u<<source))) {
+                    for (unsigned j=1;j<9;j++) if (s->control.matrix[source][j]) incoming=1;
+                }
+                if (!(feeds && (s->control.fm_envelopes&(1u<<i))) && !incoming) continue;
+                const double *op=p+DSP_FMBASE+i*8;
+                int shape=(int)op[7];
+                for (unsigned frame=0;frame<skip;frame++) {
+                    float frequency=(float)(base*op[1]);
+                    if (shape<4 || shape>6) for (unsigned source=0;source<8;source++) {
+                        double index=s->control.matrix[source][i+1];
+                        if (index) frequency+=(float)((float)(head[source][frame]*(float)index)*
+                            (float)(base*p[DSP_FMBASE+source*8+1]));
+                    }
+                    if (frequency>nyquist) frequency=nyquist;
+                    else if (frequency<-nyquist) frequency=-nyquist;
+                    double phase=s->fm_phase[i],wave=sin(phase);
+                    if (shape==1) wave=dsp_oscillator(2,phase,frequency,.5);
+                    else if (shape==2) wave=dsp_oscillator(1,phase,frequency,.5);
+                    else if (shape==3) wave=dsp_oscillator(0,phase,frequency,.5);
+                    else if (shape<4 || shape>6) {
+                        float gain=dsp_oscillator_nyquist_gain(frequency);
+                        if (gain!=1.f) wave*=gain;
+                    }
+                    head[i][frame]=(float)wave;
+                    s->fm_phase[i]=fmod(phase+2*M_PI*frequency/SR,2*M_PI);
+                }
+            }
+        }
         for (unsigned at=0;at<s->fm_count;at++) {
             unsigned i=s->fm_order[at];
             const double *op=p+DSP_FMBASE+i*8;
+            int shape=(int)op[7];
             for (unsigned frame=0;frame<128;frame++) {
                 float frequency=(float)(base*op[1]);
-                for (unsigned source=0;source<8;source++) {
+                /* A noise BufferSource has no frequency parameter, so matrix
+                   sends into it are dropped. */
+                if (shape<4 || shape>6) for (unsigned source=0;source<8;source++) {
                     double index=s->control.matrix[source][i+1];
                     if (index) frequency+=(float)((float)(s->fm_buffer[source][frame]*(float)index)*
                         (float)(base*p[DSP_FMBASE+source*8+1]));
                 }
-                double phase=s->fm_phase[i],wave=sin(phase),u=phase/(2*M_PI); u-=floor(u);
-                switch ((int)op[7]) {
-                case 1: wave=4*fabs(u-.5)-1; break;
-                case 2: wave=u<.5?1:-1; break;
-                case 3: wave=2*u-1; break;
-                case 4: case 5: case 6: wave=dsp_noise(s,(int)op[7]-4); break;
-                default: break;
+                if (frequency>nyquist) frequency=nyquist;
+                else if (frequency<-nyquist) frequency=-nyquist;
+                double phase=s->fm_phase[i],wave=sin(phase);
+                if (shape==1) wave=dsp_oscillator(2,phase,frequency,.5);
+                else if (shape==2) wave=dsp_oscillator(1,phase,frequency,.5);
+                else if (shape==3) wave=dsp_oscillator(0,phase,frequency,.5);
+                else if (shape>=4 && shape<=6) {
+                    const float *buffer=s->control.fm_noise[shape-4];
+                    double pos=s->fm_noise_pos[i];
+                    unsigned a=(unsigned)pos;
+                    if (a>=88200) a=0;
+                    unsigned b=a+1<88200?a+1:0;
+                    double fraction=pos-a;
+                    wave=buffer?buffer[a]+(buffer[b]-buffer[a])*fraction:0;
+                    pos+=1;
+                    if (pos>=88200) pos-=88200;
+                    s->fm_noise_pos[i]=pos;
+                } else {
+                    float gain=dsp_oscillator_nyquist_gain(frequency);
+                    if (gain!=1.f) wave*=gain;
                 }
                 double env=(s->control.fm_envelopes&(1u<<i))?
                     scheduled_envelope(age+frame/SR,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5]):1;
@@ -512,7 +596,9 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
             (float)(base*p[DSP_FMBASE+i*8+1]));
     s->fm_frame++;
     if (s->fm_initial_frames && !--s->fm_initial_frames) s->fm_frame=128;
-    return clamp(base?freq*(1+mod/base):freq,-SR*16,SR*16);
+    /* Values inside ±Nyquist keep the established expression. The caller
+       clamps this frequency parameter and applies the sine-table fade. */
+    return base?freq*(1+(double)mod/base):freq;
 }
 
 static double mod_wave(int shape, double skew, double phase) {

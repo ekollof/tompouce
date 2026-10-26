@@ -352,6 +352,9 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
     if (noise_color>=0 && !(ev->dsp.source_noise=dsp_prepare_noise(noise_color))) {
         log_console("oscillator: noise-buffer allocation failed"); return 0;
     }
+    if (!dsp_prepare_fm(&ev->dsp)) {
+        log_console("oscillator: FM noise-buffer allocation failed"); return 0;
+    }
     if (ev->inst==INST_NATIVE || cJSON_HasObjectItem(value,"_nativeProgram")) {
         ev->native_synth=native_synth_prepare(value,ev->freq,ev->duration);
         if (!ev->native_synth) { log_console("native synth: unsupported program or preparation limit exceeded"); return 0; }

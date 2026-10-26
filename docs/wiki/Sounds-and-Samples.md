@@ -56,8 +56,12 @@ zero-length segments and short gates. Thirteen matrix comparisons cover selected
 chains, parallel/cross sends, operator 8, signed modulation, numbered envelopes
 and feedback. `.fm2(x)` sends operator 2 into operator 1; `.fm20(x)` sends it
 directly into the carrier. `.fm13(x)` sends operator 1 into operator 3.
-Disconnected operators have no audible effect. More envelope/onset combinations,
-cyclic graphs, non-sine waveforms and frequency extremes need further checks.
+Disconnected operators have no audible effect. Triangle, square and sawtooth
+modulators follow those oscillator shapes. White, pink and brown modulators
+loop noise and ignore frequency sends. A sine fades out across the top
+third-octave and is silent at the Nyquist frequency, while its phase keeps
+moving. An FM envelope on an operator that feeds another operator is already
+open during the silent head of a late note.
 
 ## Wavetables
 

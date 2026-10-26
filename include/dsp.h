@@ -40,6 +40,8 @@ typedef struct {
     unsigned fm_envelopes;
     double noise_mix;
     const float *source_noise;
+    /* White, pink and brown modulator buffers. Null unless that wave is used. */
+    const float *fm_noise[3];
     const DspPeriodic *periodic;
     int periodic_kind, periodic_numeric;
     int n_partials;
@@ -56,6 +58,7 @@ typedef struct {
     double ladder[4], ladder_g, ladder_k;
     double fm_phase[8];
     float fm_buffer[8][128];
+    double fm_noise_pos[8];
     unsigned fm_order[8], fm_count, fm_frame;
     unsigned fm_initial_frames;
     double phaser_z[6], phaser_feedback;
@@ -95,6 +98,9 @@ double dsp_filter_frequency(const DspParams *params, int type, double age, doubl
 void dsp_init(DspState *state, const DspParams *p);
 double dsp_process(DspState *state, double sample, double age, double gate);
 double dsp_frequency(DspState *state, double freq, double age, double gate);
+/* Sine wavetable gain: 1 below Nyquist/2^(1/3), then 3*log2(Nyquist/|f|),
+   and 0 at ±Nyquist. Phase still advances at the clamped frequency. */
+float dsp_oscillator_nyquist_gain(float frequency);
 /* OscillatorNode a-rate automation starts at the first quantum's array head,
    even when audible output begins part-way through that quantum. */
 void dsp_oscillator_onset(DspState *state, double onset);
@@ -110,6 +116,8 @@ double dsp_oscillator(int waveform, double phase, double frequency, double width
 /* Preparation only; immutable, bounded process-lifetime caches. */
 int dsp_prepare_periodic(DspParams *params);
 const float *dsp_prepare_noise(int color);
+/* Preparation only. Noise-waveform operators share the source noise buffers. */
+int dsp_prepare_fm(DspParams *params);
 double dsp_additive(DspState *state, double phase, double frequency);
 double dsp_source_noise(DspState *state);
 double dsp_pulse(DspState *state, double frequency);

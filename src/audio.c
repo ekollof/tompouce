@@ -1418,6 +1418,9 @@ void audio_trigger_event(AudioEvent *ev) {
             log_console("oscillator: noise-buffer allocation failed"); return;
         }
     }
+    if (ev->dsp.enabled && !dsp_prepare_fm(&ev->dsp)) {
+        log_console("oscillator: FM noise-buffer allocation failed"); return;
+    }
     NativeSynthState *prepared=ev->native_synth?native_synth_state_new(ev->native_synth):NULL;
     if (ev->native_synth && !prepared) {
         NativeSynthState *retired[VOICE_SLOTS*2]; int count=0;
@@ -2013,15 +2016,26 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     // oscillator
                     freq = dsp_frequency(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time);
-                    double phaseinc = (2*M_PI * freq)/SR;
+                    /* OscillatorNode clamps frequency to ±Nyquist and keeps
+                       advancing phase there. A sine fades out across the top
+                       third-octave because that partial is culled. */
+                    double render_freq=freq;
+                    float sine_gain=1;
+                    if (V->dsp.fm_active) {
+                        double nyquist=SR*.5;
+                        if (render_freq>nyquist) render_freq=nyquist;
+                        else if (render_freq<-nyquist) render_freq=-nyquist;
+                        sine_gain=dsp_oscillator_nyquist_gain((float)render_freq);
+                    }
+                    double phaseinc = (2*M_PI * render_freq)/SR;
                     double sample = 0;
                     int w = V->inst;
                     switch (w) {
-                        case INST_SINE: sample = sin(V->phase); break;
+                        case INST_SINE: sample = sin(V->phase)*sine_gain; break;
                         case INST_WT: {
                             double pos = V->wtpos / WT_SIZE;
                             sample = wt_sample(V->wt, pos);
-                            V->wtpos += freq * WT_SIZE / SR;
+                            V->wtpos += render_freq * WT_SIZE / SR;
                             if (V->wtpos >= WT_SIZE) V->wtpos -= WT_SIZE * floor(V->wtpos / WT_SIZE);
                             break;
                         }
@@ -2046,19 +2060,19 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         case INST_PINK: case INST_BROWN:
                             sample=V->dsp.control.enabled?dsp_source_noise(&V->dsp):dsp_noise(&V->dsp,w==INST_PINK?1:2); break;
                         case INST_SUPERSAW:
-                            if (audio_time+1e-10>=V->source_begin) sample=dsp_supersaw(&V->dsp,freq);
+                            if (audio_time+1e-10>=V->source_begin) sample=dsp_supersaw(&V->dsp,render_freq);
                             else V->dsp.supersaw_l=V->dsp.supersaw_r=0;
                             break;
                         case INST_PULSE:
-                            if (audio_time+1e-10>=V->source_begin) sample=dsp_pulse(&V->dsp,(float)freq);
+                            if (audio_time+1e-10>=V->source_begin) sample=dsp_pulse(&V->dsp,(float)render_freq);
                             break;
-                        case INST_ADDITIVE: sample = dsp_additive(&V->dsp,V->phase,freq); break;
-                        default: sample = sin(V->phase); break;
+                        case INST_ADDITIVE: sample = dsp_additive(&V->dsp,V->phase,render_freq); break;
+                        default: sample = sin(V->phase)*sine_gain; break;
                     }
                     if (V->dsp.control.enabled) {
-                        if (V->inst == INST_SAW) sample = dsp_oscillator(0,V->phase,freq,.5);
-                        else if (V->inst == INST_SQUARE) sample = dsp_oscillator(1,V->phase,freq,pwuse >= 0 ? pwuse : .5);
-                        else if (V->inst == INST_TRI) sample = dsp_oscillator(2,V->phase,freq,.5);
+                        if (V->inst == INST_SAW) sample = dsp_oscillator(0,V->phase,render_freq,.5);
+                        else if (V->inst == INST_SQUARE) sample = dsp_oscillator(1,V->phase,render_freq,pwuse >= 0 ? pwuse : .5);
+                        else if (V->inst == INST_TRI) sample = dsp_oscillator(2,V->phase,render_freq,.5);
                     }
                     if (V->lpf_hz > 0.0 || V->lfo_tgt == 3) {
                         double base = (V->lfo_tgt == 3) ? fc : V->lpf_hz;

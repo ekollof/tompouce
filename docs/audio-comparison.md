@@ -8,9 +8,7 @@ now enter frequency inputs, numbered operators chain into the preceding stage,
 and only carrier-connected operators render. Fixed voice-owned 128-frame buffers
 preserve dependency ordering, feedback history and Float32 gain stages. The
 thirteen corrected comparisons exceed 0.9999991 correlation with RMS ratios
-1.00105–1.00128 at zero lag, under unchanged gates. Additional cyclic graphs,
-non-sine waveforms, frequency boundaries and envelope/onset combinations remain
-outside this coverage.
+1.00105–1.00128 at zero lag, under unchanged gates.
 
 Nine `fm-adsr-` gates cover attack/decay/sustain/release defaults, explicit
 linear/exponential curves, short attack/decay gates and zero-length segments.
@@ -20,7 +18,7 @@ Missing segments use the REPL's minima and decay-dependent sustain default;
 the FM curve defaults to exponential. Correlations exceed 0.9999996 with RMS
 ratios 1.00072–1.00113 at zero lag, under unchanged gates. The former decay-only
 render failed at 0.9192 correlation. Selected operator-matrix behavior is covered
-separately above; envelope/onset combinations remain open.
+separately above.
 
 Five `fm-frequency-` gates cover basic harmonicity, static detune, carrier
 pitch envelopes, vibrato and fractional onset. Initial correlations ranged
@@ -30,6 +28,32 @@ modulators have no amplitude envelope, carrier pitch automation does not change
 their frequency, and their first a-rate block follows oscillator onset
 alignment. Explicit FM ADSR and selected matrix routing are covered separately
 above.
+
+Eight `fm-wave-` gates cover triangle, square, sawtooth, a numbered sawtooth
+operator, a square envelope and white/pink/brown modulators. Triangle, square
+and sawtooth use the polyBLEP oscillator. Noise modulators loop the same
+two-second buffers as source noise and ignore frequency sends. Correlations are
+0.99074–0.9999996 with RMS ratios 0.94389–1.00847 at zero lag. Square is the
+low end of that range.
+
+Six `fm-onset-` gates combine FM envelopes with late onsets, including a
+numbered operator, a constant-gain chain, a quantum-aligned envelope and carrier
+pitch automation. An enveloped operator that feeds another operator is pulled
+through the silent head of the onset quantum at its default gain of 1; a direct
+carrier envelope is not. Correlations are 0.99015–0.9999996 with RMS ratios
+1.00108–1.01167. The numbered late case is the low end.
+
+Four `fm-cycle-` gates add a three-operator loop, self-feedback, a signed mutual
+loop and an eighth-operator cycle. Correlations exceed 0.9999996 with RMS
+ratios 1.00103–1.00106.
+
+Five `fm-range-` gates cover harmonicity 64, a high note, index 24, harmonicity
+−48 and a low note. Sine operators and the carrier follow OscillatorNode's
+band-limited table: full level below Nyquist/2^(1/3), then 3·log2(Nyquist/|f|),
+and silence at ±Nyquist, while phase advances at the clamped frequency.
+Correlations exceed 0.999992 with RMS ratios 1.00102–1.00111. All of these
+retain the existing 0.99 correlation and 0.85–1.15 RMS gates.
+
 Five `static-detune-` cases additionally cover four basic oscillators and a
 shared-PCM sample: the REPL does not apply static detune as transposition.
 Correlations exceed 0.9990 with RMS ratios 0.9951–1.0017. Unison spread remains

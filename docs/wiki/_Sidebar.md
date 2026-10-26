@@ -11,4 +11,4 @@
 - [Troubleshooting](Troubleshooting.md)
 - [Learn Strudel](Learn-Strudel.md)
 
-[Source](https://github.com/ekollof/tompouce) · [Discussions](https://github.com/ekollof/tompouce/discussions) · [Issues](https://github.com/ekollof/tompouce/issues)
+[Website](https://ekollof.github.io/tompouce/) · [Source](https://github.com/ekollof/tompouce) · [Discussions](https://github.com/ekollof/tompouce/discussions) · [Issues](https://github.com/ekollof/tompouce/issues)

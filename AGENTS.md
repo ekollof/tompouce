@@ -21,6 +21,28 @@ Strudel runtime, a browser companion and MCP support.
   `tompouce.wiki` repo and push. The wiki backend only exists after the first
   page is created in the browser, and plain `git` needs SSH auth for it.
 
+## Website
+
+`site/` is the GitHub Pages site at <https://ekollof.github.io/tompouce/>.
+`.github/workflows/pages.yml` deploys that directory when a push to `master`
+changes `site/**` or the workflow, and on `workflow_dispatch`. Pages uses the
+Actions source. Do not publish `docs/` as the site root. A push to `master` is
+what publishes the site.
+
+Edit `site/index.html` and `site/styles.css`. Keep page asset URLs relative so
+they resolve under `/tompouce/`. Preview from `site/index.html` before pushing.
+The README logo is `docs/images/logo.jpg`; the site copies are `site/logo.jpg`
+and the favicon. Update both when the mark changes. `site/screenshot.jpg` is
+the landing-page capture; `docs/images/tompouce.png` stays the README screenshot.
+Keep the page's claims aligned with the README.
+
+Social previews read the Open Graph and Twitter card tags in `site/index.html`.
+`site/og.jpg` is the 1200×630 card. Its `og:image` and `twitter:image` URLs are
+absolute (`https://ekollof.github.io/tompouce/og.jpg`) and the declared
+`og:image:width` and `og:image:height` must match the file. Regenerate the card
+when the logo, title or description changes, and keep that tag text identical
+to the page description. Link caches may keep an older card after deploy.
+
 ## Build and verification
 
 ```sh

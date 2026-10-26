@@ -4,7 +4,7 @@
 
 New to Strudel? Start with [Strudeltutor](Live-Coding-and-Strudeltutor.md) or the [official learning resources](Learn-Strudel.md).
 
-Ask questions and share patterns in [GitHub Discussions](https://github.com/ekollof/tompouce/discussions).
+The project site is [ekollof.github.io/tompouce](https://ekollof.github.io/tompouce/). Ask questions and share patterns in [GitHub Discussions](https://github.com/ekollof/tompouce/discussions).
 
 These pages live in the repository alongside the code and are mirrored to the
 [project wiki](https://github.com/ekollof/tompouce/wiki), which serves them with

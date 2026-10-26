@@ -15,7 +15,7 @@ A plain `git clone https://github.com/ekollof/tompouce.git` works anonymously; a
 
 The default installation puts the runtime in `~/.local/lib/tompouce` and its launcher in `~/.local/bin`. The installer uses sudo for distro dependencies, builds in an isolated directory, and installs pinned banks separately. Node/npm is unnecessary for normal installation because JavaScript bundles are committed.
 
-Default banks include Dirt, piano, drum machines, uzu, AKWF wavetables and gm webaudiofont packs, about 473 MiB. `--all-banks` adds VCSL and mridangam, bringing the total to roughly 3 GiB. Installed banks work offline. Debian/Fedora package plans have automated coverage; actual package-manager execution still needs validation on those distributions.
+Default banks include Dirt-Samples, Salamander piano, Tidal drum machines, the uzu drumkit, AKWF wavetable banks and gm webaudiofont packs, about 473 MiB. `--all-banks` adds VCSL and mridangam, bringing the total to roughly 3 GiB. Installed banks work offline. Debian/Fedora package plans have automated coverage; actual package-manager execution still needs validation on those distributions.
 
 Useful installer options:
 

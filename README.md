@@ -64,9 +64,9 @@ and installs the binary, companion assets, licenses and examples under
 `~/.local/lib/tompouce`, with a command in `~/.local/bin`. No Node/npm is
 needed for installation: both JavaScript bundles are included in the project.
 
-Default sound banks: Dirt-Samples, Salamander piano, tidal drum machines and
-uzu-drumkit and AKWF wavetable banks (roughly 456 MiB). They are installed beside the binary and work
-offline. `./install.sh --all-banks` also installs the VCSL and mridangam catalog
+Default sound banks: Dirt-Samples, Salamander piano, Tidal drum machines,
+uzu drumkit, AKWF wavetable banks and the gm webaudiofont packs (roughly
+473 MiB). They are installed beside the binary and work offline. `./install.sh --all-banks` also installs the VCSL and mridangam catalog
 samples (roughly 3 GiB total). Repository revisions are pinned in
 `scripts/banks.lock.json`; downloaded files get SHA-256 receipts for safe resume,
 and upstream README/license files are retained. Existing modified sound files

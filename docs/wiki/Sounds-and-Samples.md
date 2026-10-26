@@ -95,4 +95,14 @@ redirects, 45 s timeout); specs mirror the web `samples('github:…')` form
 with the same user/repo defaults. A local folder literally named `github:*`
 is unreachable through folder import; rename it.
 
+## Shared effect tails
+
+Zero delay time/feedback stops new delay sends and parameter changes while old
+echoes continue. A mono impulse response follows the REPL's changing input
+width: after the last stereo source connection ends, its tail becomes mono.
+The left convolution history continues and the right history pauses until
+stereo input returns. Thirteen browser comparisons cover selected shared
+delay controls and fixed-IR tails; natural/pitch-modulated sample lifetimes,
+live reconnections and nested `FX` routing need additional checks.
+
 See the [native audio reference](https://github.com/ekollof/tompouce/blob/master/docs/javascript.md) for sample-map syntax, cache bounds, supported effects and decoder behavior.

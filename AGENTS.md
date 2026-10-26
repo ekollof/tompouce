@@ -125,6 +125,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   queued/voice references and bounded caches. Keep existing lock windows short.
   Convolution selects its CPU kernel before rendering; retain the portable C
   fallback, per-kernel target flags and `TOMPOUCE_SIMD` verification override.
+  Mono-IR input-width transitions pause the right convolution history; preserve
+  both channel clocks through cloning, reuse and stereo reconnection.
   Coalesce identical kernel preparations outside the callback. Reserve reverb
   random segments under the cache lock, generate from private state, and keep
   cache-hit random advancement logarithmic while preserving the stream.

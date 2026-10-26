@@ -20,7 +20,7 @@ catalogs. Set `TOMPOUCE_BANKS` for another installation root.
 
 `build/tests/render_audio` builds the real native callback and event/sample resolver
 into a separate executable. It queries the pinned QuickJS runtime one cycle at
-a time, resolves samples and shared delay automation before rendering, and
+a time, resolves samples and prepares shared delay/room connections before rendering, and
 triggers each event at its due frame. Delay decisions use preparation-time
 state like the live commit path, matching the web's preparation-time parameter
 guards. It opens no PortAudio device. Its output is interleaved stereo float32
@@ -487,6 +487,37 @@ dispatch order without overflow, and rendering must be bit-identical across
 1/8,192-frame callbacks. This proves accepted callbacks survive voice
 stealing; it does not establish live timer-jitter parity under preparation
 load or timer-creation failure side effects.
+
+## Shared sends and mono-IR tail width
+
+Thirteen `shared-` cases compare eight delay-control scenarios (send toggles,
+zero feedback, negative delay time, gain/postgain-zero notes, orbit switches,
+stack order and fractional onsets) and five reverb scenarios using the exact
+shared mono IR and stereo source PCM. The IR's hash is recorded separately.
+The room cases include a single clipped source, room-send toggles, a silent
+send, orbit changes and combined delay/reverb.
+
+The first reverb captures failed at correlations 0.038..0.725. Their left tails
+already matched; the right tail differed after source cleanup. Chromium's
+[reverb channel matrix](https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/platform/audio/reverb.cc)
+runs only the left convolver for mono input + mono IR, leaving the right
+history paused. The output then upmixes to both channels. Native kernels now
+retain their IR channel count and independent history clocks; room preparation
+retains the stereo send's cleanup deadline. No history allocation, freeing or
+channel rebuilding occurs in the callback. Tests check a delayed impulse
+across mono/stereo transitions, right-clock suspension and deep cloning under
+each forced convolution backend.
+
+The offline renderer now prepares room sends alongside delay automation,
+matching the eager web renderer's preparation-time graph connections and IR
+reuse. All 13 cases pass unchanged gates. Delay correlations exceed 0.99974;
+room correlations exceed 0.999999 with RMS ratios 0.9930..0.9937. That small
+remaining level difference is not corrected or normalized out.
+
+These gates verify the selected clipped-source lifetimes. Natural and
+pitch-modulated sample endings, source eviction, live reconnections, kernel
+changes and nested/control-output routing still need independent checks.
+Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
 

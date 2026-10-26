@@ -112,6 +112,24 @@ try {
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
   const cases = [
+    {name:'shared-room-single',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.3).clip(.05).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99},
+    ...[
+      ['send-toggle',`.room("1 0 1")`],
+      ['postgain-zero',`.room(1).postgain("1 0 1")`],
+      ['orbit-switch',`.room(1).orbit("1 2 1")`],
+      ['delay-send',`.room(.5).delay(.5).delaytime(.075).delayfeedback(.5)`],
+    ].map(([name,controls])=>({name:`shared-room-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
+      code:`s('stretch_fixture').fast(3).gain(.3).clip(.05).ir('mono_fixture')${controls}.dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
+    ...[
+      ['send-toggle',`note("c4*3").delay("1 0 1").delaytime(.075).delayfeedback(.7)`],
+      ['feedback-zero',`note("c4*3").delay(1).delaytime(.075).delayfeedback(".7 0 .4")`],
+      ['time-negative',`note("c4*2").delay(1).delaytime(".075 -1").delayfeedback(.7)`],
+      ['postgain-zero',`note("c4*3").delay(1).delaytime(".05 .075 .1").delayfeedback(.7).postgain("1 0 1")`],
+      ['gain-zero',`note("c4*3").delay(1).delaytime(".05 .075 .1").delayfeedback(.7).gain(".5 0 .5")`],
+      ['orbit-switch',`note("c4*3").delay(1).delaytime(".05 .075 .1").delayfeedback(.7).orbit("1 2 1")`],
+      ['stack-order',`stack(note("c4*2").delaytime(.05),note("c5").late(.25).delaytime(.1)).delay(1).delayfeedback(.7)`],
+      ['fractional',`note("c4*3").delay(1).delaytime(".05 .075 .1").delayfeedback(".5 .7 .4").late(.137)`],
+    ].map(([name,pattern])=>({name:`shared-delay-${name}`,sound:'sine',code:`${pattern}.s('sine')${name==='gain-zero'?'':'.gain(.5)'}.clip(.05).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
     ...[
       ['baseline',''],
       ['release',`.penv(7).patt(.02).pdec(.1).psus(.3).panchor(0).prel(.2).release(.3)`],
@@ -324,6 +342,7 @@ try {
       const spec=${JSON.stringify(spec)};
       if(spec.prebake)await evaluate(${JSON.stringify(starter??'')},__comparisonTranspiler.transpiler,{addReturn:false});
       if(spec.fixture){const bytes=Uint8Array.from(atob(spec.mono?${JSON.stringify(monoFixture.toString('base64'))}:${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.sound]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
+      if(spec.fixtureIR){const bytes=Uint8Array.from(atob(${JSON.stringify(monoFixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.fixtureIR]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
       let selected=pattern.filterValues(v=>v.s===spec.sound);
@@ -383,7 +402,7 @@ try {
     const metrics = compare(nativeBytes, wav, spec.window);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
-    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
+    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.fixtureIR?{sharedIrSha256:hash(monoFixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
     await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
     console.log(spec.name, JSON.stringify(metrics), passed === null ? 'DIAGNOSTIC' : passed ? 'PASS' : 'FAIL');
     await call('Target.closeTarget', { targetId: page.targetId }, null);

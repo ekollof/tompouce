@@ -125,6 +125,7 @@ static double room_parameters[N_ORBITS][6];
 static int room_samples[N_ORBITS];
 static unsigned room_defined[N_ORBITS];
 static int room_created[N_ORBITS];
+static double room_stereo_until[N_ORBITS];
 static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic unsigned prepared_rooms;
 enum { ROOM_REQUESTS=32 };
@@ -747,7 +748,18 @@ void audio_prepare_room(AudioEvent *event) {
             atomic_load(&requested_ir[event->orbit])==event->ir_kernel;
         RoomState *room=event->ir_kernel && !reuse?prepare_room_state(event->ir_kernel):NULL;
         RoomState *garbage=NULL;
+        int stereo=event->has_pan || event->stretch_buffer || event->inst==INST_SUPERSAW ||
+            event->inst==INST_PULSE || native_synth_stereo(event->native_synth);
+        if (event->smp>=0) {
+            float *pcm; int frames,channels;
+            smp_get_stereo(event->smp,&pcm,&frames,&channels);
+            stereo|=channels==2;
+        }
         pthread_mutex_lock(&voice_lock);
+        /* Sends are connected at preparation time, including future and
+           silent notes. Source cleanup keeps that channel width alive. */
+        if (stereo && !event->control_only) room_stereo_until[event->orbit]=fmax(room_stereo_until[event->orbit],
+            event->time+event->duration+fmax(event->fx_release,event->rel+.01));
         if (event->room_params_valid) {
             for (int i=0;i<4;i++) room_parameters[event->orbit][i]=event->dsp.p[room_fields[i]];
             room_parameters[event->orbit][4]=event->room_speed;
@@ -1537,7 +1549,8 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     const ConvKernel *kernel=convolvers[orbit].kernel;
     if (kernel) {
         double left, right;
-        convolution_process(&convolvers[orbit],mix->room_l,mix->room_r,&left,&right);
+        int stereo=kernel->channels!=1 || native_synth_quantum_time(audio_time)<room_stereo_until[orbit];
+        convolution_process_input(&convolvers[orbit],mix->room_l,mix->room_r,stereo,&left,&right);
         mix->left += left; mix->right += right;
         return;
     }
@@ -2188,6 +2201,7 @@ void audio_init(void) {
     pending_delay_count=0; pending_delay_serial=0;
     memset(web_delay_created,0,sizeof(web_delay_created));
     memset(room_created,0,sizeof(room_created));
+    memset(room_stereo_until,0,sizeof(room_stereo_until));
     atomic_store(&prepared_rooms,0);
     room_failures=0;
     room_error_count=0;

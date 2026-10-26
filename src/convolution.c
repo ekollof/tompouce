@@ -38,6 +38,7 @@ static ConvKernel *build_kernel(const float *stereo, int frames, int channels, i
     ConvKernel *kernel = calloc(1,sizeof(*kernel));
     if (!kernel) return NULL;
     kernel->parts = (unsigned)(frames-1)/CONV_BLOCK;
+    kernel->channels=(unsigned)channels;
     size_t bins = (size_t)kernel->parts*2*CONV_FFT;
     if (bins) {
         kernel->tail = calloc(bins,sizeof(*kernel->tail));
@@ -180,22 +181,25 @@ void convolution_set(ConvState *state, const ConvKernel *kernel) {
     memset(state->wet,0,sizeof(state->wet));
     memset(state->overlap,0,sizeof(state->overlap));
     state->position = state->block = state->filled = state->remaining = 0; state->kernel = kernel;
+    state->right_position=state->right_block=state->right_filled=state->right_remaining=0;
 }
 
-static void process_block(ConvState *state) {
+static void process_block(ConvState *state,int ch) {
     const ConvKernel *kernel = state->kernel;
     ConvolutionAccumulate accumulate=convolution_accumulator();
     unsigned slots=kernel->parts+1;
-    unsigned slot = state->block;
+    unsigned *block=ch?&state->right_block:&state->block;
+    unsigned *filled=ch?&state->right_filled:&state->filled;
+    unsigned slot = *block;
     ConvComplex *base = state->history;
-    for (int ch = 0; ch < 2; ch++) {
+    {
         ConvComplex *spectrum = base + ((size_t)ch*slots + slot)*CONV_FFT;
         memset(spectrum,0,CONV_FFT*sizeof(*spectrum));
         for (unsigned i = 0; i < CONV_BLOCK; i++) spectrum[i].re = state->input[ch][i];
         transform(spectrum,0);
         ConvComplex sum[CONV_FFT] = {{0}};
         unsigned parts = kernel->parts;
-        if (parts > state->filled+1) parts = state->filled+1;
+        if (parts > *filled+1) parts = *filled+1;
         unsigned read=slot;
         for (unsigned part = 0; part < parts; part++) {
             const ConvComplex *x = base + ((size_t)ch*slots + read)*CONV_FFT;
@@ -209,27 +213,41 @@ static void process_block(ConvState *state) {
             state->overlap[ch][i] = sum[i+CONV_BLOCK].re;
         }
     }
-    state->block = slot+1==slots?0:slot+1;
-    if (state->filled < slots) state->filled++;
+    *block = slot+1==slots?0:slot+1;
+    if (*filled < slots) (*filled)++;
 }
 
-void convolution_process(ConvState *state, double left, double right, double *wet_left, double *wet_right) {
-    *wet_left = *wet_right = 0;
+static double process_channel(ConvState *state,int ch,double input) {
+    unsigned *remaining=ch?&state->right_remaining:&state->remaining;
+    unsigned *position=ch?&state->right_position:&state->position;
+    if (!*remaining) return 0;
+    (*remaining)--;
+    unsigned at=*position;
+    state->input[ch][at]=(float)input;
+    double wet=state->wet[ch][at];
+    for (unsigned i=0;i<CONV_BLOCK;i++)
+        wet+=state->input[ch][(at+CONV_BLOCK-i)%CONV_BLOCK]*state->kernel->head[ch][i];
+    if (++(*position)==CONV_BLOCK) {
+        if (state->kernel->parts) process_block(state,ch);
+        *position=0;
+    }
+    return wet;
+}
+
+void convolution_process_input(ConvState *state,double left,double right,int stereo_input,double *wet_left,double *wet_right) {
+    *wet_left=*wet_right=0;
     if (!state->kernel) return;
-    if (left != 0 || right != 0) state->remaining = (state->kernel->parts+2)*CONV_BLOCK;
-    if (!state->remaining) return;
-    state->remaining--;
-    unsigned position = state->position;
-    state->input[0][position] = (float)left; state->input[1][position] = (float)right;
-    double wet[2];
-    for (int ch = 0; ch < 2; ch++) {
-        wet[ch] = state->wet[ch][position];
-        for (unsigned i = 0; i < CONV_BLOCK; i++)
-            wet[ch] += state->input[ch][(position+CONV_BLOCK-i)%CONV_BLOCK]*state->kernel->head[ch][i];
+    int mono=!stereo_input && state->kernel->channels==1;
+    if (left!=0 || (!mono && right!=0)) {
+        state->remaining=(state->kernel->parts+2)*CONV_BLOCK;
+        if (!mono) state->right_remaining=state->remaining;
     }
-    *wet_left = wet[0]; *wet_right = wet[1];
-    if (++state->position == CONV_BLOCK) {
-        if (state->kernel->parts) process_block(state);
-        state->position = 0;
-    }
+    *wet_left=process_channel(state,0,left);
+    /* Chromium's mono input/mono IR path runs only the left convolver.
+       Keep the right history paused so a later stereo connection resumes it. */
+    *wet_right=mono?*wet_left:process_channel(state,1,stereo_input?right:left);
+}
+
+void convolution_process(ConvState *state,double left,double right,double *wet_left,double *wet_right) {
+    convolution_process_input(state,left,right,1,wet_left,wet_right);
 }

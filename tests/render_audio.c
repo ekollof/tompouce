@@ -77,6 +77,10 @@ int main(int argc, char **argv) {
         if (event.dsp.p[DSP_ROOM]>0 && event.room_sample<0)
             events[used-1].ir_kernel=convolution_prepare_reverb(event.dsp.p[DSP_SIZE],
                 event.dsp.p[DSP_ROOMFADE],event.dsp.p[DSP_ROOMLP],event.dsp.p[DSP_ROOMDIM]);
+        /* The eager web renderer connects room sends while scheduling all
+           haps, not at their audible onsets. Retain the same graph width and
+           custom-IR reuse snapshots during offline preparation. */
+        audio_prepare_room(&events[used-1]);
     }
     qsort(events,(size_t)used,sizeof(*events),compare_events);
     int seed_supersaw=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request,"seedSupersaw"));

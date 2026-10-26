@@ -548,7 +548,15 @@ controls are resolved in hap order, the kernel FFT is submitted to the same
 preparation pool as other source work. The callback uses an
 immediate 128-tap head plus 128-frame FFT partitions for its tail, preserving
 zero onset latency.
-Stereo channels remain separate. Prepared impulse changes select the shared
+Stereo IR channels remain separate. With a mono IR, the web convolver switches
+to mono output when its stereo source connections expire: only the left
+history advances, and its output is duplicated. The right history stays paused
+until a later stereo connection resumes it. Native convolution follows that
+behavior without callback allocations. Five shared-PCM IR checks cover clipped
+source cleanup, room-send toggles, silent sends, orbit switching and combined
+delay/reverb. Natural or pitch-modulated sample lifetimes and live reconnection
+timing still need separate comparisons.
+Prepared impulse changes select the shared
 convolver immediately and reset that orbit's tail on the next audio frame;
 an earlier accepted note does not restore its old impulse at onset.
 

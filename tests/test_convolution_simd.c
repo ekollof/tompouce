@@ -64,6 +64,36 @@ static void streaming_equivalence(ConvolutionAccumulate accumulate) {
 /* Demand-sized histories: a state that was never reserved must stay silent
    rather than write past a smaller buffer, and reserve must size exactly to
    the attached kernel so unused CONV_MAX_FRAMES slots are never allocated. */
+static void mono_input_transition(ConvolutionAccumulate accumulate) {
+    float impulse[600]={0}; impulse[0]=impulse[1]=1;
+    impulse[514]=impulse[515]=.5;
+    ConvKernel *kernel=convolution_kernel(impulse,300,1,0); assert(kernel && kernel->channels==1);
+    ConvState state={0},clone={0};
+    assert(convolution_state_reserve(&state,kernel->parts)); convolution_set(&state,kernel);
+    MixBackend backend={accumulate,"transition-test"}; atomic_store(&selected_backend,&backend);
+    double left,right;
+    for (unsigned frame=0;frame<328;frame++) {
+        int stereo=frame<200;
+        convolution_process_input(&state,frame==0?1:0,frame==0?-2:0,stereo,&left,&right);
+        if (!frame) assert(left==1 && right==-2);
+        if (!stereo) assert(left==right);
+        if (frame==257) assert(fabs(left-.5)<1e-6);
+    }
+    assert(state.right_position==200%CONV_BLOCK);
+    assert(convolution_state_clone(&clone,&state));
+    for (unsigned frame=328;frame<700;frame++) {
+        double other_left,other_right;
+        convolution_process_input(&state,0,0,1,&left,&right);
+        convolution_process_input(&clone,0,0,1,&other_left,&other_right);
+        assert(left==other_left && right==other_right);
+        /* The right channel resumes at its old frame 200, so its delayed
+           impulse emerges 128 frames later than the left one did. */
+        if (frame==385) assert(fabs(left)<1e-6 && fabs(right+1)<1e-6);
+    }
+    atomic_store(&selected_backend,&portable_backend);
+    convolution_state_free(&state); convolution_state_free(&clone); convolution_kernel_free(kernel);
+}
+
 static void demand_sized_history(void) {
     enum { frames=3000 };
     float *pcm=calloc((size_t)frames*2,sizeof(*pcm));
@@ -176,6 +206,7 @@ int main(void) {
     convolution_simd_init(); assert(chosen==convolution_accumulator());
     printf("Convolution backend: %s\n",convolution_simd_name());
     kernel_equivalence(chosen); streaming_equivalence(chosen);
+    mono_input_transition(chosen);
     puts("Exact kernel/streaming PCM parity, ring wrap, tails, replacement and vector bounds passed");
     demand_sized_history();
     return 0;

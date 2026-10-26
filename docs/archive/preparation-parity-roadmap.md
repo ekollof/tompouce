@@ -556,3 +556,13 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       worklet hash. Wait until the first active worklet quantum before advancing
       native supersaw phases, and keep OscillatorNode automation offsets off
       worklets. Other source/FM combinations remain explicit follow-up work.
+
+## Shared sends and mono-IR tails
+
+- [x] Add eight shared-delay and five fixed-IR browser gates. Follow the web's
+      mono-IR input-width transition by pausing the right history and duplicating
+      the continuing left output after stereo sends disconnect. Retain separate
+      history clocks across cloning/reconnection without callback allocation.
+      Prepare offline room sends before rendering, like the eager web player.
+      Natural sample lifetimes, source eviction, live reconnections and nested
+      routing remain explicit follow-up work.

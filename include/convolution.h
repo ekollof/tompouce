@@ -11,6 +11,7 @@ typedef struct { float re, im; } ConvComplex;
 typedef struct ConvKernel {
     float head[2][CONV_BLOCK];
     unsigned parts;
+    unsigned channels;
     ConvComplex *tail;
 } ConvKernel;
 typedef struct {
@@ -23,6 +24,7 @@ typedef struct {
     ConvComplex *history;
     unsigned slots;
     unsigned position, block, filled, remaining;
+    unsigned right_position, right_block, right_filled, right_remaining;
 } ConvState;
 /* Generator/worker only: size the history for a kernel with `parts` tail
    blocks, retaining its existing history. The caller must exclusively own
@@ -50,4 +52,8 @@ void convolution_kernel_free(ConvKernel *kernel);
 /* Callback safe: no allocation, I/O, or locks. */
 void convolution_set(ConvState *state, const ConvKernel *kernel);
 void convolution_process(ConvState *state, double left, double right, double *wet_left, double *wet_right);
+/* Mono input + mono IR processes only the left history and duplicates output.
+   The right history/clock is paused until stereo input reconnects. Stereo IRs
+   still process both histories, using the mono input on both sides. */
+void convolution_process_input(ConvState *state,double left,double right,int stereo_input,double *wet_left,double *wet_right);
 #endif

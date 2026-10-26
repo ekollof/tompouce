@@ -86,12 +86,12 @@ and measured divergences are recorded in the archive.
       cases and selected audio gates: live oneshot evaluation/grid timing,
       bank-specific sounds, bmod/FX routing and external devices. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
-- [ ] Extend FM checks beyond the five carrier/frequency and nine ADSR cases:
-      multiple operators, matrix routing, envelope/onset combinations and
-      additional source/frequency combinations need independent comparisons.
-      Preserve the verified no-envelope default, harmonicity-scaled depth, independent
-      modulator frequency and fractional onset alignment. Keep source-specific
-      pitch and unison-width controls distinct.
+- [ ] Extend FM checks beyond the five carrier/frequency, nine ADSR and thirteen
+      matrix cases: envelope/onset combinations, additional cyclic graphs,
+      non-sine modulator waveforms and frequency-range boundaries need independent
+      comparisons. Preserve numbered chains, explicit carrier sends, signed
+      modulation and quantum feedback. Keep source-specific pitch and unison-width
+      controls distinct.
 
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and

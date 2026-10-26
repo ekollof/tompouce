@@ -144,6 +144,8 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   retune the modulator. Keep its no-envelope default and first-quantum alignment.
   Explicit FM ADSR uses the shared AudioParam endpoint scheduler, exponential
   default curve and REPL segment minima; never square a linear envelope.
+  FM matrix sends modulate frequency; numbered operators chain into their
+  predecessor. Preserve carrier reachability and fixed quantum feedback buffers.
   Static detune is unison spread, not generic source transposition.
   BufferSource detune is k-rate; preserve first-evaluation event clamping and
   cache its ratio per 128-frame quantum without moving source onset.

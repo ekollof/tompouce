@@ -600,3 +600,13 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       pitch AudioParam endpoint scheduler for actual linear/exponential ramps
       and gates truncated in attack/decay; retain pitch PCM gates unchanged.
       Envelope/onset combinations and operator matrices remain follow-up work.
+
+## FM operator routing
+
+- [x] Add thirteen selected sine-modulator matrix gates. Route numbered
+      operators into their predecessor and explicit sends into the requested
+      frequency input, including the carrier. Retain signed indices/harmonicity,
+      numbered envelopes and selected self/two-node feedback through fixed
+      per-voice quantum buffers. Disconnected operators no longer mix into the
+      carrier. Further cyclic graphs, waveform/frequency bounds and combined
+      envelope/onset checks remain separate work.

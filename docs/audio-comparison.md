@@ -1,5 +1,17 @@
 # Browser/native audio comparison
 
+Thirteen `fm-matrix-` gates check selected sine-modulator chains, parallel and
+cross sends, explicit carrier sends, disconnected operators, operator 8,
+negative indices/harmonicity, numbered envelopes and self/two-node feedback.
+The first six previously failed with correlations 0.073–0.981. Matrix sends
+now enter frequency inputs, numbered operators chain into the preceding stage,
+and only carrier-connected operators render. Fixed voice-owned 128-frame buffers
+preserve dependency ordering, feedback history and Float32 gain stages. The
+thirteen corrected comparisons exceed 0.9999991 correlation with RMS ratios
+1.00105–1.00128 at zero lag, under unchanged gates. Additional cyclic graphs,
+non-sine waveforms, frequency boundaries and envelope/onset combinations remain
+outside this coverage.
+
 Nine `fm-adsr-` gates cover attack/decay/sustain/release defaults, explicit
 linear/exponential curves, short attack/decay gates and zero-length segments.
 FM now shares the existing AudioParam endpoint scheduler with pitch automation,
@@ -7,8 +19,8 @@ preserving exponential zero endpoints and arithmetic clipping at short gates.
 Missing segments use the REPL's minima and decay-dependent sustain default;
 the FM curve defaults to exponential. Correlations exceed 0.9999996 with RMS
 ratios 1.00072–1.00113 at zero lag, under unchanged gates. The former decay-only
-render failed at 0.9192 correlation. Combined envelope/onset and operator-matrix
-behavior remain outside this coverage.
+render failed at 0.9192 correlation. Selected operator-matrix behavior is covered
+separately above; envelope/onset combinations remain open.
 
 Five `fm-frequency-` gates cover basic harmonicity, static detune, carrier
 pitch envelopes, vibrato and fractional onset. Initial correlations ranged
@@ -16,8 +28,8 @@ from -0.016 to 0.865; corrected renders exceed 0.999998 with RMS ratios
 1.00106–1.00135 at zero lag. FM depth scales by modulator frequency, default
 modulators have no amplitude envelope, carrier pitch automation does not change
 their frequency, and their first a-rate block follows oscillator onset
-alignment. Explicit FM ADSR is covered separately above; matrix routing remains
-outside these gates.
+alignment. Explicit FM ADSR and selected matrix routing are covered separately
+above.
 Five `static-detune-` cases additionally cover four basic oscillators and a
 shared-PCM sample: the REPL does not apply static detune as transposition.
 Correlations exceed 0.9990 with RMS ratios 0.9951–1.0017. Unison spread remains

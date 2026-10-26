@@ -52,8 +52,12 @@ basic oscillators or samples, matching the REPL. Use `note`, `freq` or sample
 FM depth follows harmonicity, and carrier pitch automation leaves the modulator
 frequency unchanged. FM has no amplitude envelope until FM ADSR controls are
 specified. Nine browser gates cover FM ADSR defaults, linear/exponential curves,
-zero-length segments and short gates. Envelope/onset combinations and operator
-matrices need further checks.
+zero-length segments and short gates. Thirteen matrix comparisons cover selected
+chains, parallel/cross sends, operator 8, signed modulation, numbered envelopes
+and feedback. `.fm2(x)` sends operator 2 into operator 1; `.fm20(x)` sends it
+directly into the carrier. `.fm13(x)` sends operator 1 into operator 3.
+Disconnected operators have no audible effect. More envelope/onset combinations,
+cyclic graphs, non-sine waveforms and frequency extremes need further checks.
 
 ## Wavetables
 

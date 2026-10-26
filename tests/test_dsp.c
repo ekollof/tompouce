@@ -242,7 +242,9 @@ static void test_fm_source_semantics(void) {
        76 of its values, then the next full modulator block starts at 128. */
     for (int i=0;i<300;i++) {
         int frame=i<76?i:i+52;
-        double expected=440*(1+sin(2*M_PI*880*frame/SR));
+        float signal=(float)sin(2*M_PI*880*frame/SR);
+        float modulation=(float)((float)(signal*.5f)*880.f);
+        double expected=440*(1+modulation/440.0);
         assert(fabs(dsp_frequency(&state,440,i/SR,.5)-expected)<1e-8);
     }
     cJSON_AddNumberToObject(value,"fmattack",.1);
@@ -250,7 +252,8 @@ static void test_fm_source_semantics(void) {
     assert(p.p[DSP_FMBASE+2]==.1 && p.p[DSP_FMBASE+3]==.001);
     assert(p.p[DSP_FMBASE+4]==1 && p.p[DSP_FMBASE+5]==.01 && p.p[DSP_FMBASE+6]==1);
     dsp_init(&state,&p); state.fm_phase[0]=M_PI/2;
-    assert(fabs(dsp_frequency(&state,440,.05,.5)-440*(1+sqrt(.001)))<1e-8);
+    float modulation=(float)((float)((float)sqrt(.001)*.5f)*880.f);
+    assert(fabs(dsp_frequency(&state,440,.05,.5)-440*(1+modulation/440.0))<1e-8);
     cJSON_AddStringToObject(value,"fmenv","linear");
     dsp_params_read(&p,value); dsp_init(&state,&p); state.fm_phase[0]=M_PI/2;
     assert(fabs(dsp_frequency(&state,440,.05,.5)-660)<1e-8);
@@ -263,6 +266,24 @@ static void test_fm_source_semantics(void) {
     dsp_params_read(&p,value);
     assert(p.fm_envelopes==3 && p.p[DSP_FMBASE+8+2]==.001 && p.p[DSP_FMBASE+8+5]==.01);
     cJSON_Delete(value);
+}
+
+static void test_fm_matrix(void) {
+    cJSON *value=cJSON_Parse("{\"fmi\":0.5,\"fmi2\":0.25,\"fmh2\":3}"); assert(value);
+    DspParams p; dsp_params_read(&p,value); cJSON_Delete(value);
+    assert(p.matrix[0][0]==.5 && p.matrix[1][1]==.25 && p.matrix[1][0]==0);
+    DspState state; dsp_init(&state,&p);
+    assert(state.fm_count==2 && state.fm_order[0]==1 && state.fm_order[1]==0);
+    value=cJSON_Parse("{\"fmi2\":0.5}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); dsp_init(&state,&p);
+    assert(!state.fm_active && dsp_frequency(&state,440,0,.5)==440);
+    value=cJSON_Parse("{\"fmi80\":-0.25}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); dsp_init(&state,&p);
+    assert(state.fm_count==1 && state.fm_order[0]==7 && p.matrix[7][0]==-.25);
+    value=cJSON_Parse("{\"fmi\":0.5,\"fmi2\":0.25,\"fmi12\":0.1}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); dsp_init(&state,&p);
+    assert(state.fm_count==2);
+    for (int i=0;i<4096;i++) assert(isfinite(dsp_frequency(&state,440,i/SR,.5)));
 }
 
 static void test_pitch_envelope_defaults(void) {
@@ -438,6 +459,7 @@ int main(void) {
     puts("native DSP/Strudel audio controls ok");
     test_inactive_fast_paths();
     test_fm_source_semantics();
+    test_fm_matrix();
     test_supersaw();
     test_source_controls();
     test_periodic_limits();

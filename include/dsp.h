@@ -34,7 +34,7 @@ enum {
 typedef struct {
     int enabled;
     double p[DSP_COUNT];
-    double matrix[8][8];
+    double matrix[8][9]; /* source -> carrier (0) or operator (1..8) */
     double partials[32], phases[32];
     double supersaw_detune; /* total unison width in semitones, not pitch cents */
     unsigned fm_envelopes;
@@ -54,8 +54,10 @@ typedef struct {
     DspBiquad filter[6], formant[5];
     double formant_gain[5];
     double ladder[4], ladder_g, ladder_k;
-    double fm_phase[8], fm_last[8];
-    unsigned fm_initial_frames, fm_skip_frames;
+    double fm_phase[8];
+    float fm_buffer[8][128];
+    unsigned fm_order[8], fm_count, fm_frame;
+    unsigned fm_initial_frames;
     double phaser_z[6], phaser_feedback;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;

@@ -182,8 +182,9 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
             double *dest = p->p + DSP_FMBASE + i * 8 + j;
             if (j>=2 && j<=5 && (cJSON_HasObjectItem(value,name) ||
                 (i==0 && cJSON_HasObjectItem(value,fields[j])))) p->fm_envelopes|=1u<<i;
-            if (i == 0) *dest = number(value, fields[j], *dest, 0, maximum[j]);
-            *dest = number(value, name, *dest, 0, maximum[j]);
+            double minimum=j<2?-64:0;
+            if (i == 0) *dest = number(value, fields[j], *dest, minimum, maximum[j]);
+            *dest = number(value, name, *dest, minimum, maximum[j]);
             if (j == 6) {
                 const cJSON *x = cJSON_GetObjectItemCaseSensitive(value, name);
                 if (!x && i == 0) x = cJSON_GetObjectItemCaseSensitive(value, fields[j]);
@@ -196,10 +197,12 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
             }
         }
         dsp_read_adsr(value,adsr_keys,defaults,p->p+DSP_FMBASE+i*8+2);
-        for (int j = 0; j < 8; j++) {
+        for (int j = 0; j < 9; j++) {
             char name[32];
-            snprintf(name, sizeof(name), "fmi%d%d", i + 1, j + 1);
-            p->matrix[i][j] = number(value, name, 0, -64, 64);
+            snprintf(name, sizeof(name), "fmi%d%d", i + 1, j);
+            /* Upstream reserves 1->0, 2->1, ... for the numbered index;
+               explicit matrix aliases do not override these default edges. */
+            p->matrix[i][j] = j==i?p->p[DSP_FMBASE+i*8]:number(value, name, 0, -64, 64);
         }
     }
 }
@@ -284,6 +287,16 @@ static double ladder_filter(DspState *s, double x) {
     return y;
 }
 
+static void fm_visit(DspState *s,unsigned node,unsigned char visited[8]) {
+    /* Visiting before recursion bounds cycles. A back edge reads the prior
+       quantum; forward dependencies render before their destination. */
+    if (visited[node]) return;
+    visited[node]=1;
+    for (unsigned source=0;source<8;source++)
+        if (s->control.matrix[source][node+1]) fm_visit(s,source,visited);
+    s->fm_order[s->fm_count++]=node;
+}
+
 void dsp_init(DspState *s, const DspParams *p) {
     memset(s, 0, sizeof(*s));
     s->control = *p;
@@ -329,9 +342,11 @@ void dsp_init(DspState *s, const DspParams *p) {
     /* Cache which per-sample paths can change the signal. The controls are a
        copy fixed for the voice's lifetime, so this is computed once here. */
     s->pitch_active = p->p[DSP_PENV] != 0 || p->p[DSP_VIB] > 0;
-    s->fm_active = 0;
-    for (int i = 0; i < 8; i++)
-        if (p->p[DSP_FMBASE + i*8] != 0) { s->fm_active = 1; break; }
+    unsigned char visited[8]={0};
+    for (unsigned i=0;i<8;i++) s->control.matrix[i][i]=p->p[DSP_FMBASE+i*8];
+    for (unsigned i=0;i<8;i++) if (s->control.matrix[i][0]) fm_visit(s,i,visited);
+    s->fm_active=s->fm_count>0;
+    s->fm_frame=128;
     int active = 0;
     for (int type = 0; type < 3 && !active; type++)
         if (p->p[type*7] > 0) active = 1;
@@ -431,8 +446,8 @@ void dsp_oscillator_onset(DspState *state,double onset) {
     double fm_frame=ceil(onset*SR-1e-7);
     /* Upstream modulators start immediately but are first pulled in the
        carrier's onset quantum; skipped silent quanta do not advance phase. */
-    state->fm_skip_frames=(unsigned)fmod(fmax(0,fm_frame),128);
-    state->fm_initial_frames=128-state->fm_skip_frames;
+    unsigned fm_skip_frames=(unsigned)fmod(fmax(0,fm_frame),128);
+    state->fm_initial_frames=128-fm_skip_frames;
     if (!state->pitch_active) return;
     double frame=onset*SR;
     if (!isfinite(frame)) return;
@@ -462,34 +477,42 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
         if (pitch_age>=0) freq*=dsp_pitch_multiplier(&s->control,pitch_age,gate);
     }
     if (!s->fm_active) return freq;
-    /* OscillatorNode consumes the first a-rate array from its head even
-       when it starts part-way through the quantum. The modulator itself
-       renders all 128 samples before the next carrier quantum pulls it. */
-    unsigned advance=1;
-    if (s->fm_initial_frames && !--s->fm_initial_frames) advance+=s->fm_skip_frames;
-    double modulation[8];
-    for (int i = 0; i < 8; i++) {
-        const double *op = p + DSP_FMBASE + i * 8;
-        if (op[0] == 0) { modulation[i] = 0; continue; }
-        double phase = s->fm_phase[i];
-        for (int j = 0; j < 8; j++) phase += s->fm_last[j] * s->control.matrix[j][i];
-        double env = (s->control.fm_envelopes&(1u<<i))?
-            scheduled_envelope(age,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5]):1;
-        double wave = sin(phase), u = phase/(2*M_PI); u -= floor(u);
-        switch ((int)op[7]) {
-        case 1: wave = 4*fabs(u-.5)-1; break;
-        case 2: wave = u < .5 ? 1 : -1; break;
-        case 3: wave = 2*u-1; break;
-        case 4: case 5: case 6: wave = dsp_noise(s,(int)op[7]-4); break;
-        default: break;
+    /* WebAudio pulls complete modulator quanta. Fixed voice-owned buffers
+       preserve graph dependency order and feedback without callback allocation. */
+    if (s->fm_frame>=128) {
+        for (unsigned at=0;at<s->fm_count;at++) {
+            unsigned i=s->fm_order[at];
+            const double *op=p+DSP_FMBASE+i*8;
+            for (unsigned frame=0;frame<128;frame++) {
+                float frequency=(float)(base*op[1]);
+                for (unsigned source=0;source<8;source++) {
+                    double index=s->control.matrix[source][i+1];
+                    if (index) frequency+=(float)((float)(s->fm_buffer[source][frame]*(float)index)*
+                        (float)(base*p[DSP_FMBASE+source*8+1]));
+                }
+                double phase=s->fm_phase[i],wave=sin(phase),u=phase/(2*M_PI); u-=floor(u);
+                switch ((int)op[7]) {
+                case 1: wave=4*fabs(u-.5)-1; break;
+                case 2: wave=u<.5?1:-1; break;
+                case 3: wave=2*u-1; break;
+                case 4: case 5: case 6: wave=dsp_noise(s,(int)op[7]-4); break;
+                default: break;
+                }
+                double env=(s->control.fm_envelopes&(1u<<i))?
+                    scheduled_envelope(age+frame/SR,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5]):1;
+                s->fm_buffer[i][frame]=(float)((float)wave*(float)env);
+                s->fm_phase[i]=fmod(phase+2*M_PI*frequency/SR,2*M_PI);
+            }
         }
-        modulation[i] = wave * op[0] * op[1] * env;
-        s->fm_phase[i] += advance*2*M_PI*base*op[1]/SR;
-        s->fm_phase[i] = fmod(s->fm_phase[i], 2*M_PI);
+        s->fm_frame=0;
     }
-    double mod = 0;
-    for (int i = 0; i < 8; i++) { mod += modulation[i]; s->fm_last[i] = modulation[i]; }
-    return clamp(freq * (1 + mod), -SR * 16, SR * 16);
+    float mod=0;
+    for (unsigned i=0;i<8;i++) if (s->control.matrix[i][0])
+        mod+=(float)((float)(s->fm_buffer[i][s->fm_frame]*(float)s->control.matrix[i][0])*
+            (float)(base*p[DSP_FMBASE+i*8+1]));
+    s->fm_frame++;
+    if (s->fm_initial_frames && !--s->fm_initial_frames) s->fm_frame=128;
+    return clamp(base?freq*(1+mod/base):freq,-SR*16,SR*16);
 }
 
 static double mod_wave(int shape, double skew, double phase) {

@@ -332,8 +332,15 @@ quantum follows the carrier's a-rate array alignment. Nine further browser
 gates cover explicit FM ADSR defaults, linear and exponential ramps, zero-length
 segments and gates ending during attack or decay. FM defaults to exponential
 ramps with the REPL's segment minima and decay-dependent sustain default.
-Envelope/onset combinations, operator matrices and other source/frequency
-combinations need further checks.
+Thirteen matrix gates additionally cover selected sine-modulator chains,
+parallel/cross sends, operator 8, signed indices/harmonicity, numbered envelopes
+and feedback. `.fm2(x)` sends operator 2 into operator 1; `.fm20(x)` sends it
+directly into the carrier. `.fm13(x)` sends operator 1 into operator 3. An
+operator disconnected from the carrier has no audible effect. Matrix sends
+modulate frequency, not phase. Fixed per-voice 128-frame buffers preserve
+dependency order and feedback history without callback allocation.
+Envelope/onset combinations, additional cyclic graphs, non-sine modulator
+waveforms and frequency-range boundaries need further checks.
 
 Static `detune` controls unison spread where supported; it does not transpose
 basic oscillators or samples. Five further browser gates cover sine, triangle,

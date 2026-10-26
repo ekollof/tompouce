@@ -93,6 +93,7 @@ Useful focused checks:
 - `node scripts/effects-reference-qa.mjs`
 - `node scripts/companion-qa.mjs`
 - `node scripts/csound-native-qa.mjs`
+- `cmake --build build --target compare-audio` (Strudel.cc PCM; see Fidelity)
 
 PTY and integration scripts accept `TOMPOUCE_TEST_BINARY` to verify the installed
 executable. `TOMPOUCE_TEST_FILTER` selects PTY cases. Browser/audio integration
@@ -234,6 +235,45 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 Target live-performance behavior against the actual Strudel web REPL, not only
 the pinned event fixtures. Narrow green gates do not establish full parity.
 See `docs/javascript.md`, `docs/audio-comparison.md` and `TODO.md` for coverage.
+
+Compare native PCM with strudel.cc through `scripts/compare-audio.mjs`. Do not
+add another capture harness. The browser side loads https://strudel.cc/ and
+calls `renderPatternAudio`. Pattern evaluation, sample decoding and WebAudio
+rendering come from that site. Only the source transpiler is the pinned 1.2.6
+package. The native side is `build/tests/render_audio`, which runs the real
+callback offline and opens no audio device. The harness owns a disposable
+Chromium profile and does not attach to a running Tompouce session.
+
+It is a network diagnostic, not part of `ctest`. It needs Chromium (`CHROMIUM`
+overrides the executable), `npm ci --ignore-scripts` under `js/`, and HTTPS
+access to strudel.cc. Sample catalogs come from `assets/banks` or the user-local
+install; `TOMPOUCE_BANKS` selects another root. `TOMPOUCE_RENDER_AUDIO` overrides
+the renderer path.
+
+```sh
+cmake --build build --target compare-audio
+TOMPOUCE_COMPARE_FILTER=kabel- node scripts/compare-audio.mjs /tmp/tompouce-comparison
+```
+
+`TOMPOUCE_COMPARE_FILTER` keeps cases whose `name` contains that string. Pass
+an output directory; the default is `/tmp/tompouce-comparison`. Each case writes
+its source, native PCM, browser WAV, events and a `report.json`. A gated case
+passes only when correlation is at least its `correlation` value (normally
+0.99), the native/browser RMS ratio is inside 0.85–1.15, and the captures share
+the requested duration at lag 0. There is no time shift or gain correction.
+`correlation: null` is diagnostic and must stay that way. A failure is evidence
+to inspect. Do not loosen a threshold, regenerate a baseline, or bump packages
+to make it pass. The hosted player can change under an unchanged checkout.
+
+Add a focused case in the script's case list when audible synthesis, envelopes,
+effects or scheduling should match the site. Required fields are `name`, `code`,
+`sound`, `cycles`, `cps`, `window` and `correlation`. The browser keeps haps
+whose `s` equals `sound`, so set an explicit `.s(...)` that matches it; a `K()`
+graph still needs that sound. Render length is `cycles / cps` seconds and
+`window` must stay within it. Levels should stay below clipping. Record the
+measured correlation in `docs/audio-comparison.md`. Passing a subset does not
+establish full-song, decoder or synthesis parity.
+
 Remaining areas requiring independent checks include missing duck targets,
 nested/control-output routing, shared delay/reverb automation and tails,
 voice-pool policy, large backend render bursts, additional Csound loader failure

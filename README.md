@@ -5,6 +5,7 @@
 </p>
 
 Source: [ekollof/tompouce](https://github.com/ekollof/tompouce).
+Site: [ekollof.github.io/tompouce](https://ekollof.github.io/tompouce/).
 
 A terminal live-coding environment for music, inspired by Strudel, built in C.
 

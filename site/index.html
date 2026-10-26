@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tompouce</title>
+  <meta name="description" content="A terminal live-coding environment for music, inspired by Strudel, built in C.">
+  <link rel="icon" href="logo.jpg" type="image/jpeg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="status" aria-hidden="true">
+    <span>Tompouce</span>
+    <span>live coding</span>
+    <span>F5 eval</span>
+    <span>Ctrl+P play</span>
+  </header>
+
+  <main id="content">
+    <section class="hero">
+      <img class="logo" src="logo.jpg" width="168" height="168" alt="Tompouce logo: a layered pastry with a waveform in the icing">
+      <div>
+        <h1>Tompouce</h1>
+        <p class="lede">A terminal live-coding environment for music, inspired by Strudel, built in C.</p>
+        <p class="links">
+          <a class="button" href="https://github.com/ekollof/tompouce">Source</a>
+          <a class="button" href="https://github.com/ekollof/tompouce/wiki">Documentation</a>
+          <a class="button ghost" href="https://github.com/ekollof/tompouce/discussions">Discussions</a>
+        </p>
+      </div>
+    </section>
+
+    <figure class="screen">
+      <figcaption>Bell dub, with the editor, waveform, spectrum and console</figcaption>
+      <img src="screenshot.jpg" alt="Tompouce running Bell dub with inline waveform and spectrum visualizations and console">
+    </figure>
+
+    <section class="split">
+      <article>
+        <h2>Install</h2>
+        <p>Linux x86_64. The installer supports Arch/Omarchy, Debian/Ubuntu and Fedora. Run it as your user; it uses sudo only for distro packages.</p>
+        <pre><code>git clone https://github.com/ekollof/tompouce.git
+cd tompouce
+./install.sh
+~/.local/bin/tompouce</code></pre>
+        <p class="note">Add <code>--no-browser</code> for a terminal-only install. Sound banks are downloaded beside the binary and keep working offline.</p>
+      </article>
+      <article>
+        <h2>First sound</h2>
+        <p>Type this in the editor. Press F5 to evaluate. If transport is stopped, press Ctrl+P.</p>
+        <pre><code><span class="fn">setcpm</span>(108 / 4)
+<span class="fn">note</span>(<span class="str">"c4 e4 g4 c5"</span>).<span class="fn">s</span>(<span class="str">'triangle'</span>).<span class="fn">gain</span>(0.4)</code></pre>
+        <p class="note">Press F2 and enter <code>/tutor</code> for 22 lessons. F1 is the keybinding reference.</p>
+      </article>
+    </section>
+
+    <section class="points">
+      <h2>In the terminal</h2>
+      <ul>
+        <li>Strudel patterns run in QuickJS. Audio is rendered in C.</li>
+        <li>Write, evaluate and listen in one keyboard-driven session, with vi editing.</li>
+        <li>Output goes through PipeWire, PulseAudio, JACK or ALSA.</li>
+        <li>A Chromium companion is optional. The engine keeps running natively.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Original project code is <a href="https://github.com/ekollof/tompouce/blob/master/LICENSE">AGPL-3.0-or-later</a>. Dependencies and sound banks keep their own licenses.</p>
+    <p><a href="https://github.com/ekollof/tompouce">ekollof/tompouce</a> · <a href="https://github.com/ekollof/tompouce/issues">Issues</a> · <a href="https://github.com/ekollof/tompouce/wiki">Wiki</a></p>
+  </footer>
+</body>
+</html>

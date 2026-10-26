@@ -86,10 +86,12 @@ and measured divergences are recorded in the archive.
       cases and selected audio gates: live oneshot evaluation/grid timing,
       bank-specific sounds, bmod/FX routing and external devices. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
-- [ ] Extend pitch comparisons to additional FM/frequency combinations beyond
-      the selected oscillator, sample, pulse, supersaw, bytebeat/ZzFX and
-      Kabelsalat gates. Keep startup, source replacement and detune semantics
-      distinct rather than applying one envelope model to every source.
+- [ ] Extend FM checks beyond the five carrier/frequency cases: explicit FM
+      ADSR defaults/curves, multiple operators, matrix routing and additional
+      source/frequency combinations need independent comparisons. Preserve the
+      verified no-envelope default, harmonicity-scaled depth, independent
+      modulator frequency and fractional onset alignment. Keep source-specific
+      pitch and unison-width controls distinct.
 
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and

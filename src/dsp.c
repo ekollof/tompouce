@@ -81,7 +81,7 @@ static int symbol(const cJSON *obj, const char *key, const char *const *names, i
 void dsp_params_read(DspParams *p, const cJSON *value) {
     dsp_params_init(p); p->enabled = 1;
     /* Superdough's supersaw uses detune ?? n ?? .18 as total frequency
-       spread in semitones; other oscillators use detune as pitch cents. */
+       spread in semitones, separate from pitch-envelope/vibrato cents. */
     p->supersaw_detune = number(value,"detune",number(value,"n",.18,-9600,9600),-9600,9600);
     p->noise_mix=number(value,"noise",0,0,1);
     for (int i = 0; i < DSP_FMBASE; i++)
@@ -173,6 +173,8 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
             char name[32];
             snprintf(name, sizeof(name), "%s%d", fields[j], i + 1);
             double *dest = p->p + DSP_FMBASE + i * 8 + j;
+            if (j>=2 && j<=5 && (cJSON_HasObjectItem(value,name) ||
+                (i==0 && cJSON_HasObjectItem(value,fields[j])))) p->fm_envelopes|=1u<<i;
             if (i == 0) *dest = number(value, fields[j], *dest, 0, maximum[j]);
             *dest = number(value, name, *dest, 0, maximum[j]);
             if (j == 6) {
@@ -414,6 +416,12 @@ double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gat
 }
 
 void dsp_oscillator_onset(DspState *state,double onset) {
+    if (!isfinite(onset*SR)) return;
+    double fm_frame=ceil(onset*SR-1e-7);
+    /* Upstream modulators start immediately but are first pulled in the
+       carrier's onset quantum; skipped silent quanta do not advance phase. */
+    state->fm_skip_frames=(unsigned)fmod(fmax(0,fm_frame),128);
+    state->fm_initial_frames=128-state->fm_skip_frames;
     if (!state->pitch_active) return;
     double frame=onset*SR;
     if (!isfinite(frame)) return;
@@ -433,6 +441,7 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
        exactly zero, so the result is freq unchanged (freq is bounded well
        inside the clamp range by the event layer). */
     if (!s->pitch_active && !s->fm_active) return freq;
+    double base=freq;
     if (s->pitch_active) {
         double pitch_age=age+s->pitch_onset_fraction;
         if (s->pitch_initial_frames) {
@@ -442,13 +451,19 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
         if (pitch_age>=0) freq*=dsp_pitch_multiplier(&s->control,pitch_age,gate);
     }
     if (!s->fm_active) return freq;
+    /* OscillatorNode consumes the first a-rate array from its head even
+       when it starts part-way through the quantum. The modulator itself
+       renders all 128 samples before the next carrier quantum pulls it. */
+    unsigned advance=1;
+    if (s->fm_initial_frames && !--s->fm_initial_frames) advance+=s->fm_skip_frames;
     double modulation[8];
     for (int i = 0; i < 8; i++) {
         const double *op = p + DSP_FMBASE + i * 8;
         if (op[0] == 0) { modulation[i] = 0; continue; }
         double phase = s->fm_phase[i];
         for (int j = 0; j < 8; j++) phase += s->fm_last[j] * s->control.matrix[j][i];
-        double env = dsp_envelope(age, gate, op[2], op[3], op[4], op[5]);
+        double env = (s->control.fm_envelopes&(1u<<i))?
+            dsp_envelope(age, gate, op[2], op[3], op[4], op[5]):1;
         if (op[6] > 0) env *= env;
         double wave = sin(phase), u = phase/(2*M_PI); u -= floor(u);
         switch ((int)op[7]) {
@@ -458,8 +473,8 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
         case 4: case 5: case 6: wave = dsp_noise(s,(int)op[7]-4); break;
         default: break;
         }
-        modulation[i] = wave * op[0] * env;
-        s->fm_phase[i] += 2*M_PI*freq*op[1]/SR;
+        modulation[i] = wave * op[0] * op[1] * env;
+        s->fm_phase[i] += advance*2*M_PI*base*op[1]/SR;
         s->fm_phase[i] = fmod(s->fm_phase[i], 2*M_PI);
     }
     double mod = 0;

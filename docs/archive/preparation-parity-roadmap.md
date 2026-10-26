@@ -583,3 +583,12 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       the deployed REPL. Remove native-only detune transposition for these
       generated sources; retain oscillator/sample/graph handling. Six new gates
       pass without changing reference thresholds.
+
+## FM frequency and static detune
+
+- [x] Add five FM and five static-detune browser comparisons. Match FM depth
+      to harmonicity, omit the implicit FM amplitude envelope, preserve
+      modulator frequency under carrier pitch changes and align the first
+      fractional onset quantum. Remove generic static-detune transposition;
+      retain unison spread and pitch automation. Explicit FM ADSR and operator
+      matrices remain follow-up work.

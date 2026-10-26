@@ -44,6 +44,16 @@ selects another supported SF2/SF3 file at startup. Native GM plays the web's
 default (first) soundfont variant per name; the browser's additional `.n()`
 soundfont variants are not replicated.
 
+## Pitch controls
+
+Static `detune` controls unison spread where supported; it does not transpose
+basic oscillators or samples, matching the REPL. Use `note`, `freq` or sample
+`speed` for transposition. Pitch envelopes and vibrato still change pitch.
+FM depth follows harmonicity, and carrier pitch automation leaves the modulator
+frequency unchanged. FM has no amplitude envelope until FM ADSR controls are
+specified. Selected browser comparisons cover these behaviors; explicit FM
+envelope curves and operator matrices need further checks.
+
 ## Wavetables
 
 The wavetable category contains 65 Strudel `wt_` banks with 4,358 variants, alongside procedural `wt:` oscillators:

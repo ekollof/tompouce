@@ -140,6 +140,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   Pitch ADSR defaults and segment minima follow the REPL. Preserve oscillator
   a-rate automation alignment for partial first quanta; do not shift amplitude
   envelopes, sample transport or worklet startup to emulate it.
+  FM depth scales by modulator frequency; carrier pitch automation must not
+  retune the modulator. Keep its no-envelope default and first-quantum alignment.
+  Static detune is unison spread, not generic source transposition.
   BufferSource detune is k-rate; preserve first-evaluation event clamping and
   cache its ratio per 128-frame quantum without moving source onset.
   Worklet gate/fade/cleanup anchors retain the original hap and raw release;

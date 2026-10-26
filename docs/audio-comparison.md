@@ -1,5 +1,17 @@
 # Browser/native audio comparison
 
+Five `fm-frequency-` gates cover basic harmonicity, static detune, carrier
+pitch envelopes, vibrato and fractional onset. Initial correlations ranged
+from -0.016 to 0.865; corrected renders exceed 0.999998 with RMS ratios
+1.00106–1.00135 at zero lag. FM depth scales by modulator frequency, default
+modulators have no amplitude envelope, carrier pitch automation does not change
+their frequency, and their first a-rate block follows oscillator onset
+alignment. Explicit FM ADSR and matrix routing remain outside these gates.
+Five `static-detune-` cases additionally cover four basic oscillators and a
+shared-PCM sample: the REPL does not apply static detune as transposition.
+Correlations exceed 0.9990 with RMS ratios 0.9951–1.0017. Unison spread remains
+a separate source control. All ten retain the existing 0.99/RMS thresholds.
+
 The six `generated-pitch-` cases independently check pitch envelopes, vibrato
 and detune on `z_sine` and custom bytebeat. The deployed player ignores these
 controls for these generated sources. Removing native-only detune transposition

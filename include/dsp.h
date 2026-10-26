@@ -37,6 +37,7 @@ typedef struct {
     double matrix[8][8];
     double partials[32], phases[32];
     double supersaw_detune; /* total unison width in semitones, not pitch cents */
+    unsigned fm_envelopes;
     double noise_mix;
     const float *source_noise;
     const DspPeriodic *periodic;
@@ -54,6 +55,7 @@ typedef struct {
     double formant_gain[5];
     double ladder[4], ladder_g, ladder_k;
     double fm_phase[8], fm_last[8];
+    unsigned fm_initial_frames, fm_skip_frames;
     double phaser_z[6], phaser_feedback;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;

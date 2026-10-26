@@ -324,7 +324,17 @@ source. Pulse and supersaw start in the first quantum whose head is later than
 their Float32 begin parameter; supersaw phases stay still before then.
 Kabelsalat graph sources retain their own frequency/gate logic: pattern pitch
 controls on the replaced source do not automatically modulate `sFreq`.
-Other source and FM/frequency combinations remain outside these gates.
+Five FM/frequency gates cover harmonicity-scaled depth, carrier pitch
+envelopes/vibrato, static detune and fractional onset. FM modulators retain
+their base frequency when carrier pitch automation changes, and have no
+amplitude envelope unless FM ADSR controls are supplied. Their first render
+quantum follows the carrier's a-rate array alignment. Explicit FM ADSR curves,
+operator matrices and other source/frequency combinations need further checks.
+
+Static `detune` controls unison spread where supported; it does not transpose
+basic oscillators or samples. Five further browser gates cover sine, triangle,
+sawtooth, square and a shared-PCM sample. Use `note`, `freq` or sample `speed`
+for transposition; `penv` and `vib` still automate pitch.
 
 On basic waveforms, numeric `n` selects the number of harmonic coefficients;
 zero retains the stock oscillator. `partials` overrides `n`. Custom waves use

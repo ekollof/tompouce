@@ -115,7 +115,7 @@ static void test_supersaw(void) {
     assert(js_audio_event(hap,0,1,&event) && event.dsp.supersaw_detune==.5);
     cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(value,"s"),"sawtooth");
     cJSON_AddNumberToObject(value,"detune",1200);
-    assert(js_audio_event(hap,0,1,&event) && event.freq==880);
+    assert(js_audio_event(hap,0,1,&event) && event.freq==440);
     cJSON_Delete(hap);
 }
 
@@ -230,6 +230,24 @@ static void test_inactive_fast_paths(void) {
     DspState fm_state; dsp_init(&fm_state, &fm);
     assert(fm_state.fm_active);
     puts("inactive DSP fast paths are bit-identical");
+}
+
+static void test_fm_source_semantics(void) {
+    cJSON *value=cJSON_Parse("{\"fmi\":0.5,\"fmh\":2}"); assert(value);
+    DspParams p; dsp_params_read(&p,value);
+    assert(!p.fm_envelopes);
+    DspState state; dsp_init(&state,&p);
+    dsp_oscillator_onset(&state,.274);
+    /* First pulled modulator block starts at phase zero. The carrier reads
+       76 of its values, then the next full modulator block starts at 128. */
+    for (int i=0;i<300;i++) {
+        int frame=i<76?i:i+52;
+        double expected=440*(1+sin(2*M_PI*880*frame/SR));
+        assert(fabs(dsp_frequency(&state,440,i/SR,.5)-expected)<1e-8);
+    }
+    cJSON_AddNumberToObject(value,"fmattack",.1);
+    dsp_params_read(&p,value); assert(p.fm_envelopes==1);
+    cJSON_Delete(value);
 }
 
 static void test_pitch_envelope_defaults(void) {
@@ -404,6 +422,7 @@ int main(void) {
     event_queue_clear();
     puts("native DSP/Strudel audio controls ok");
     test_inactive_fast_paths();
+    test_fm_source_semantics();
     test_supersaw();
     test_source_controls();
     test_periodic_limits();

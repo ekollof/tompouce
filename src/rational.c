@@ -2,6 +2,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #if !defined(__SIZEOF_INT128__)
 #error native fractions need a 128-bit integer type
@@ -16,7 +17,13 @@ struct RationalHost {
     JSValue proto;
     JSValue methods[RATIONAL_OPS];
     JSAtom atom_s, atom_n, atom_d;
+    JSValue span_proto, span_constructor, hap_constructor, span_methods[RATIONAL_SPAN_OPS];
+    JSAtom atom_begin, atom_end;
+    JSValue hap_proto, hap_methods[2];
+    JSAtom hap_fields[5];
 };
+
+static JSValue make_span(JSContext *ctx, RationalHost *host, Rational begin, Rational end);
 
 static ri128 ri128_max(void) {
     return (ri128)(((ru128)1 << 127) - 1);
@@ -51,6 +58,14 @@ static int rational_norm(ri128 num, ri128 den, Rational *out) {
         if (num == ri128_min()) return -1;
         sign = -1;
         num = -num;
+    }
+    /* Clock products normally remain small. Avoid software int128 division
+       in their gcd and reduction, retaining the wide path for large products. */
+    if (num<=INT64_MAX && den<=INT64_MAX) {
+        uint64_t n=(uint64_t)num,d=(uint64_t)den,a=n,b=d;
+        while (b) { uint64_t rem=a%b; a=b; b=rem; }
+        out->s=sign; out->n=(int64_t)(n/a); out->d=(int64_t)(d/a);
+        return 0;
     }
     ri128 g = igcd(num, den);
     if (!g) return -1;
@@ -116,7 +131,7 @@ int rational_lcm(Rational a, Rational b, Rational *out) {
     }
     ri128 g = igcd(a.n, b.n);
     if (!g) return -1;
-    return rational_norm((a.n / g) * (ri128)b.n, g * igcd(a.d, b.d), out);
+    return rational_norm((a.n / g) * (ri128)b.n, igcd(a.d, b.d), out);
 }
 
 static int whole(Rational a, int ceil, Rational *out) {
@@ -137,9 +152,11 @@ int rational_compare(Rational a, Rational b, int *out) {
 }
 
 static const char *const rational_names[RATIONAL_OPS] = {
-    "add", "sub", "mul", "div", "compare", "equals", "mod", "gcd", "lcm", "floor", "ceil"
+    "add", "sub", "mul", "div", "compare", "equals", "mod", "gcd", "lcm", "floor", "ceil",
+    "sam", "nextSam", "cyclePos", "wholeCycle", "lt", "lte", "gt", "gte", "eq", "ne", "min", "max"
 };
-static const uint8_t rational_lengths[RATIONAL_OPS] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1};
+static const uint8_t rational_lengths[RATIONAL_OPS] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1,
+    0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
 
 static void clear_exception(JSContext *ctx) {
     JSValue exception = JS_GetException(ctx);
@@ -228,6 +245,11 @@ static int read_fraction(JSContext *ctx, const RationalHost *host, JSValueConst 
     return read_object(ctx, host, value, out);
 }
 
+static int read_number(JSContext *ctx, JSValueConst value, Rational *out) {
+    int64_t integer;
+    return read_i64(ctx,value,&integer) && normalize_parts(integer,1,out);
+}
+
 static int read_operand(JSContext *ctx, const RationalHost *host, int argc, JSValueConst *argv, Rational *out) {
     if (argc <= 0) { out->s = 1; out->n = 0; out->d = 1; return 1; }
     if (argc >= 2) {
@@ -235,13 +257,7 @@ static int read_operand(JSContext *ctx, const RationalHost *host, int argc, JSVa
         if (!read_i64(ctx, argv[0], &n) || !read_i64(ctx, argv[1], &d)) return 0;
         return normalize_parts(n, d, out);
     }
-    if (read_i64(ctx, argv[0], &out->n)) {
-        if (out->n == INT64_MIN) return 0;
-        out->s = out->n < 0 ? -1 : 1;
-        if (out->n < 0) out->n = -out->n;
-        out->d = 1;
-        return 1;
-    }
+    if (read_number(ctx,argv[0],out)) return 1;
     if (JS_IsObject(argv[0])) return read_object(ctx, host, argv[0], out);
     return 0;
 }
@@ -276,23 +292,50 @@ JSValue rational_dispatch(JSContext *ctx, RationalHost *host, int magic,
     if (!host) return JS_ThrowTypeError(ctx, "fraction runtime is unavailable");
     if (!read_fraction(ctx, host, this_val, &left))
         return call_original(ctx, host, magic, this_val, argc, argv);
+    if (magic==RATIONAL_WHOLE_CYCLE) {
+        Rational end;
+        if (!rational_floor(left,&result) && !rational_add(result,(Rational){1,1,1},&end))
+            return make_span(ctx,host,result,end);
+        return call_original(ctx,host,magic,this_val,argc,argv);
+    }
+    if (magic==RATIONAL_SAM || magic==RATIONAL_NEXT_SAM || magic==RATIONAL_CYCLE_POS) {
+        int status=rational_floor(left,&result);
+        if (!status && magic==RATIONAL_NEXT_SAM)
+            status=rational_add(result,(Rational){1,1,1},&result);
+        if (!status && magic==RATIONAL_CYCLE_POS) status=rational_sub(left,result,&result);
+        return !status?make_fraction(ctx,host,result):call_original(ctx,host,magic,this_val,argc,argv);
+    }
     if (magic == RATIONAL_FLOOR || magic == RATIONAL_CEIL) {
         if (!places_are_unit(ctx, argc, argv))
             return call_original(ctx, host, magic, this_val, argc, argv);
         int ok = magic == RATIONAL_CEIL ? rational_ceil(left, &result) : rational_floor(left, &result);
-        return ok ? make_fraction(ctx, host, result) : call_original(ctx, host, magic, this_val, argc, argv);
+        return ok == 0 ? make_fraction(ctx, host, result) : call_original(ctx, host, magic, this_val, argc, argv);
     }
     if (magic == RATIONAL_MOD && argc <= 0) {
-        return rational_mod_self(left, &result) ? make_fraction(ctx, host, result)
+        return rational_mod_self(left, &result) == 0 ? make_fraction(ctx, host, result)
             : call_original(ctx, host, magic, this_val, argc, argv);
     }
-    if (!read_operand(ctx, host, argc, argv, &right))
+    int operand_argc=magic>=RATIONAL_LT && argc>1?1:argc;
+    if (!read_operand(ctx, host, operand_argc, argv, &right))
         return call_original(ctx, host, magic, this_val, argc, argv);
-    if (magic == RATIONAL_COMPARE || magic == RATIONAL_EQUALS) {
+    if (magic == RATIONAL_COMPARE || magic == RATIONAL_EQUALS || magic>=RATIONAL_LT) {
         int order;
         if (rational_compare(left, right, &order))
             return call_original(ctx, host, magic, this_val, argc, argv);
-        return magic == RATIONAL_EQUALS ? JS_NewBool(ctx, order == 0) : JS_NewInt32(ctx, order);
+        switch (magic) {
+        case RATIONAL_COMPARE: return JS_NewInt32(ctx,order);
+        case RATIONAL_EQUALS: case RATIONAL_EQ: return JS_NewBool(ctx,order==0);
+        case RATIONAL_NE: return JS_NewBool(ctx,order!=0);
+        case RATIONAL_LT: return JS_NewBool(ctx,order<0);
+        case RATIONAL_LTE: return JS_NewBool(ctx,order<=0);
+        case RATIONAL_GT: return JS_NewBool(ctx,order>0);
+        case RATIONAL_GTE: return JS_NewBool(ctx,order>=0);
+        case RATIONAL_MIN: case RATIONAL_MAX:
+            if ((magic==RATIONAL_MIN && order<0) || (magic==RATIONAL_MAX && order>0))
+                return JS_DupValue(ctx,this_val);
+            return argc>0?JS_DupValue(ctx,argv[0]):JS_UNDEFINED;
+        default: return call_original(ctx,host,magic,this_val,argc,argv);
+        }
     }
     int ok = -1;
     switch (magic) {
@@ -305,14 +348,313 @@ JSValue rational_dispatch(JSContext *ctx, RationalHost *host, int magic,
     case RATIONAL_LCM: ok = rational_lcm(left, right, &result); break;
     default: return call_original(ctx, host, magic, this_val, argc, argv);
     }
-    return ok ? make_fraction(ctx, host, result) : call_original(ctx, host, magic, this_val, argc, argv);
+    return ok == 0 ? make_fraction(ctx, host, result) : call_original(ctx, host, magic, this_val, argc, argv);
 }
 
-int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *method) {
+/* Only ordinary pinned clock objects take span shortcuts. Accessors, proxies,
+   subclasses and out-of-range fractions retain the original JS operations. */
+static int pinned_object(JSContext *ctx, JSValueConst obj, JSValueConst expected) {
+    if (!JS_IsObject(obj) || JS_GetClassID(obj)!=JS_GetClassID(expected)) return 0;
+    JSValue proto=JS_GetPrototype(ctx,obj);
+    int same=JS_StrictEq(ctx,proto,expected);
+    JS_FreeValue(ctx,proto);
+    return same;
+}
+
+static int own_data(JSContext *ctx, JSValueConst obj, JSAtom atom, JSValue *out) {
+    JSPropertyDescriptor desc;
+    if (JS_GetOwnProperty(ctx,&desc,obj,atom)!=1) return 0;
+    int data=!(desc.flags&JS_PROP_GETSET);
+    *out=data?desc.value:JS_UNDEFINED;
+    if (!data) JS_FreeValue(ctx,desc.value);
+    JS_FreeValue(ctx,desc.getter); JS_FreeValue(ctx,desc.setter);
+    return data;
+}
+
+static int clock_fraction(JSContext *ctx, RationalHost *host, JSValueConst value, Rational *out) {
+    if (!pinned_object(ctx,value,host->proto)) return 0;
+    JSValue n=JS_UNDEFINED,d=JS_UNDEFINED,s=JS_UNDEFINED;
+    int64_t num,den,sign;
+    int ok=own_data(ctx,value,host->atom_n,&n) && own_data(ctx,value,host->atom_d,&d) &&
+        own_data(ctx,value,host->atom_s,&s) && read_i64(ctx,n,&num) && read_i64(ctx,d,&den) && read_i64(ctx,s,&sign);
+    release(ctx,n,d,s);
+    if (!ok) return 0;
+    ri128 folded=(ri128)num*sign;
+    return folded>=INT64_MIN && folded<=INT64_MAX && normalize_parts((int64_t)folded,den,out);
+}
+
+static int clock_span(JSContext *ctx, RationalHost *host, JSValueConst value, Rational *begin, Rational *end) {
+    if (!pinned_object(ctx,value,host->span_proto)) return 0;
+    JSValue b=JS_UNDEFINED,e=JS_UNDEFINED;
+    int ok=own_data(ctx,value,host->atom_begin,&b) && own_data(ctx,value,host->atom_end,&e) &&
+        clock_fraction(ctx,host,b,begin) && clock_fraction(ctx,host,e,end);
+    JS_FreeValue(ctx,b); JS_FreeValue(ctx,e);
+    return ok;
+}
+
+JSValue rational_create(JSContext *ctx, RationalHost *host, JSValueConst value) {
+    if (!host) return JS_NULL; /* Bundle initialization still uses the parser. */
+    Rational result;
+    if (JS_IsObject(value)) {
+        if (!clock_fraction(ctx,host,value,&result)) return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+    } else {
+        if (!read_number(ctx,value,&result)) return JS_NULL;
+    }
+    if (rational_norm((ri128)result.s*result.n,result.d,&result)) return JS_NULL;
+    return make_fraction(ctx,host,result);
+}
+
+static JSValue make_span(JSContext *ctx, RationalHost *host, Rational begin, Rational end) {
+    Rational b,e;
+    if (rational_norm((ri128)begin.s*begin.n,begin.d,&b) || rational_norm((ri128)end.s*end.n,end.d,&e))
+        return JS_ThrowRangeError(ctx,"clock span out of range");
+    JSValue obj=JS_NewObjectProto(ctx,host->span_proto);
+    if (JS_IsException(obj)) return obj;
+    JSValue bv=make_fraction(ctx,host,b);
+    if (JS_IsException(bv)) { JS_FreeValue(ctx,obj); return bv; }
+    if (JS_SetProperty(ctx,obj,host->atom_begin,bv)<0) {
+        JS_FreeValue(ctx,obj); return JS_EXCEPTION;
+    }
+    JSValue ev=make_fraction(ctx,host,e);
+    if (JS_IsException(ev)) { JS_FreeValue(ctx,obj); return ev; }
+    if (JS_SetProperty(ctx,obj,host->atom_end,ev)<0) {
+        JS_FreeValue(ctx,obj); return JS_EXCEPTION;
+    }
+    return obj;
+}
+
+static int clock_order(Rational a, Rational b) {
+    int order; rational_compare(a,b,&order); return order;
+}
+
+JSValue rational_hap_dispatch(JSContext *ctx, RationalHost *host, int magic,
+                             JSValueConst self, int argc, JSValueConst *argv) {
+    if (!host || magic<0 || magic>1) return JS_ThrowTypeError(ctx,"native hap unavailable");
+    if (!argc || !JS_IsFunction(ctx,argv[0]) || !pinned_object(ctx,self,host->hap_proto))
+        return JS_Call(ctx,host->hap_methods[magic],self,argc,argv);
+    JSValue fields[5];
+    /* Check data descriptors before invoking callbacks. Subsequent reads retain
+       upstream ordering, including mutations made by the callback. */
+    for (int i=0;i<4;i++) {
+        JSValue value;
+        if (!own_data(ctx,self,host->hap_fields[i],&value)) {
+            if (JS_HasException(ctx)) return JS_EXCEPTION;
+            return JS_Call(ctx,host->hap_methods[magic],self,argc,argv);
+        }
+        JS_FreeValue(ctx,value);
+    }
+    fields[0]=JS_GetProperty(ctx,self,host->hap_fields[0]);
+    if (magic==0) {
+        fields[1]=JS_GetProperty(ctx,self,host->hap_fields[1]);
+        JSValue value=JS_GetProperty(ctx,self,host->hap_fields[2]);
+        fields[2]=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&value);
+        JS_FreeValue(ctx,value);
+    } else {
+        if (JS_ToBool(ctx,fields[0])) {
+            JSValue whole=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&fields[0]);
+            JS_FreeValue(ctx,fields[0]); fields[0]=whole;
+        } else { JS_FreeValue(ctx,fields[0]); fields[0]=JS_UNDEFINED; }
+        fields[1]=JS_UNDEFINED; fields[2]=JS_UNDEFINED;
+        if (!JS_IsException(fields[0])) {
+            JSValue part=JS_GetProperty(ctx,self,host->hap_fields[1]);
+            fields[1]=JS_IsException(part)?JS_EXCEPTION:JS_Call(ctx,argv[0],JS_UNDEFINED,1,&part);
+            JS_FreeValue(ctx,part);
+            if (!JS_IsException(fields[1])) fields[2]=JS_GetProperty(ctx,self,host->hap_fields[2]);
+        }
+    }
+    fields[3]=JS_UNDEFINED; fields[4]=JS_FALSE;
+    JSValue out=JS_EXCEPTION;
+    if (!JS_HasException(ctx)) {
+        fields[3]=JS_GetProperty(ctx,self,host->hap_fields[3]);
+        if (JS_IsUndefined(fields[3])) { JS_FreeValue(ctx,fields[3]); fields[3]=JS_NewObject(ctx); }
+        if (!JS_IsException(fields[3])) {
+            out=JS_NewObjectProto(ctx,host->hap_proto);
+            if (!JS_IsException(out)) for (int i=0;i<5;i++) {
+                if (JS_SetProperty(ctx,out,host->hap_fields[i],JS_DupValue(ctx,fields[i]))<0) {
+                    JS_FreeValue(ctx,out); out=JS_EXCEPTION; break;
+                }
+            }
+        }
+    }
+    for (int i=0;i<5;i++) JS_FreeValue(ctx,fields[i]);
+    return out;
+}
+
+JSValue rational_triangle(JSContext *ctx, RationalHost *host, int argc, JSValueConst *argv) {
+    Rational begin,end,rate,phase,two={1,2,1};
+    int32_t a,b;
+    if (!host || argc!=6 || !clock_span(ctx,host,argv[0],&begin,&end) ||
+        !clock_fraction(ctx,host,argv[1],&rate) || !clock_fraction(ctx,host,argv[2],&phase) ||
+        rate.s<0 || !rate.n || !JS_IsNumber(argv[3]) || !JS_IsNumber(argv[4]) ||
+        JS_ToInt32(ctx,&a,argv[3]) || JS_ToInt32(ctx,&b,argv[4]) || a<0 || a>1 || b<0 || b>1)
+        return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+    /* Operations originate in the adapter, but remain bounded at this boundary. */
+    int array=JS_IsArray(ctx,argv[5]);
+    if (array!=1) return array<0?JS_EXCEPTION:JS_NULL;
+    JSValue length=JS_GetPropertyStr(ctx,argv[5],"length");
+    uint32_t count;
+    int valid=JS_ToUint32(ctx,&count,length)==0;
+    JS_FreeValue(ctx,length);
+    if (!valid || count>256) return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+    struct { int kind; double k; } ops[256];
+    for (uint32_t i=0;i<count;i++) {
+        JSValue op=JS_GetPropertyUint32(ctx,argv[5],i);
+        if (JS_IsException(op)) return op;
+        JSValue type=JS_GetPropertyStr(ctx,op,"t");
+        if (JS_IsException(type)) { JS_FreeValue(ctx,op); return type; }
+        const char *name=JS_IsString(type)?JS_ToCString(ctx,type):NULL;
+        int kind=name?(!strcmp(name,"mul")?0:!strcmp(name,"add")?1:
+            !strcmp(name,"bipolar")?2:!strcmp(name,"unipolar")?3:-1):-1;
+        JS_FreeCString(ctx,name); JS_FreeValue(ctx,type);
+        double k=0;
+        if (kind==0 || kind==1) {
+            JSValue v=JS_GetPropertyStr(ctx,op,"k");
+            if (!JS_IsNumber(v) || JS_ToFloat64(ctx,&k,v) || !isfinite(k)) kind=-1;
+            JS_FreeValue(ctx,v);
+        }
+        JS_FreeValue(ctx,op);
+        if (kind<0) return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+        ops[i].kind=kind; ops[i].k=k;
+    }
+    if (rational_mul(begin,rate,&begin) || rational_add(begin,phase,&begin) || rational_mul(begin,two,&begin) ||
+        rational_mul(end,rate,&end) || rational_add(end,phase,&end) || rational_mul(end,two,&end) ||
+        clock_order(begin,end)>0) return JS_NULL;
+    JSValue out=JS_NewArray(ctx);
+    if (JS_IsException(out)) return out;
+    for (unsigned i=0;i<8192;i++) {
+        Rational index,next,half,offset,time,ub,ue;
+        if (rational_floor(begin,&index)) goto unsupported;
+        int64_t signed_index=index.s*index.n;
+        if (signed_index>9007199254740991LL || signed_index< -9007199254740991LL) goto unsupported;
+        next=end;
+        if (clock_order(begin,end) && (rational_add(index,(Rational){1,1,1},&next))) goto unsupported;
+        if (clock_order(next,end)>0) next=end;
+        if (rational_div(begin,two,&half) || rational_floor(half,&half) ||
+            rational_sub(index,half,&offset) || rational_sub(begin,offset,&time)) goto unsupported;
+        double value=fmod((double)time.s*(double)time.n/(double)time.d,1.0);
+        int kind=signed_index%2==0?a:b;
+        if (kind) value=1-value;
+        for (uint32_t j=0;j<count;j++) {
+            switch (ops[j].kind) {
+            case 0: value*=ops[j].k; break;
+            case 1: value+=ops[j].k; break;
+            case 2: value=value*2-1; break;
+            default: value=(value+1)/2; break;
+            }
+        }
+        if (rational_div(begin,two,&ub) || rational_sub(ub,phase,&ub) || rational_div(ub,rate,&ub) ||
+            rational_div(next,two,&ue) || rational_sub(ue,phase,&ue) || rational_div(ue,rate,&ue)) goto unsupported;
+        JSValue span=make_span(ctx,host,ub,ue);
+        if (JS_IsException(span)) goto failed;
+        JSValue context=JS_NewObject(ctx), locations=JS_NewArray(ctx);
+        if (JS_IsException(context) || JS_IsException(locations)) {
+            JS_FreeValue(ctx,span); JS_FreeValue(ctx,context); JS_FreeValue(ctx,locations); goto failed;
+        }
+        if (JS_SetPropertyStr(ctx,context,"locations",locations)<0) {
+            JS_FreeValue(ctx,span); JS_FreeValue(ctx,context); goto failed;
+        }
+        JSValue args[]={JS_UNDEFINED,span,JS_NewFloat64(ctx,value),context};
+        JSValue hap=JS_CallConstructor(ctx,host->hap_constructor,4,args);
+        JS_FreeValue(ctx,span); JS_FreeValue(ctx,context);
+        if (JS_IsException(hap)) goto failed;
+        if (JS_SetPropertyUint32(ctx,out,i,hap)<0) goto failed;
+        if (!clock_order(next,end)) return out;
+        begin=next;
+    }
+unsupported:
+    JS_FreeValue(ctx,out); return JS_NULL;
+failed:
+    JS_FreeValue(ctx,out); return JS_EXCEPTION;
+}
+
+JSValue rational_span_dispatch(JSContext *ctx, RationalHost *host, int magic,
+                               JSValueConst self, int argc, JSValueConst *argv) {
+    if (!host || magic<0 || magic>=RATIONAL_SPAN_OPS) return JS_ThrowTypeError(ctx,"clock span unavailable");
+    if (magic==RATIONAL_SPAN_WITH_TIME && argc>0 && JS_IsFunction(ctx,argv[0]) && pinned_object(ctx,self,host->span_proto)) {
+        JSValue begin=JS_GetProperty(ctx,self,host->atom_begin);
+        if (JS_IsException(begin)) return begin;
+        JSValue b=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&begin); JS_FreeValue(ctx,begin);
+        if (JS_IsException(b)) return b;
+        /* The first callback can change self.end: read it only afterward. */
+        JSValue end=JS_GetProperty(ctx,self,host->atom_end);
+        if (JS_IsException(end)) { JS_FreeValue(ctx,b); return end; }
+        JSValue e=JS_Call(ctx,argv[0],JS_UNDEFINED,1,&end); JS_FreeValue(ctx,end);
+        if (JS_IsException(e)) { JS_FreeValue(ctx,b); return e; }
+        Rational rb,re;
+        JSValue result;
+        if (clock_fraction(ctx,host,b,&rb) && clock_fraction(ctx,host,e,&re)) result=make_span(ctx,host,rb,re);
+        else if (JS_HasException(ctx)) result=JS_EXCEPTION;
+        else { JSValue args[2]={b,e}; result=JS_CallConstructor(ctx,host->span_constructor,2,args); }
+        JS_FreeValue(ctx,b); JS_FreeValue(ctx,e); return result;
+    }
+    Rational begin,end,other_begin,other_end,result;
+    if (!clock_span(ctx,host,self,&begin,&end)) goto fallback;
+    switch (magic) {
+    case RATIONAL_SPAN_INTERSECTION:
+        if (!argc || !clock_span(ctx,host,argv[0],&other_begin,&other_end)) goto fallback;
+        {
+            Rational b=clock_order(begin,other_begin)>0?begin:other_begin;
+            Rational e=clock_order(end,other_end)<0?end:other_end;
+            int order=clock_order(b,e);
+            if (order>0 || (!order && ((!clock_order(b,end) && clock_order(begin,end)<0) ||
+                (!clock_order(b,other_end) && clock_order(other_begin,other_end)<0)))) return JS_UNDEFINED;
+            return make_span(ctx,host,b,e);
+        }
+    case RATIONAL_SPAN_CYCLES:
+        {
+            Rational first,last;
+            if (rational_floor(begin,&first) || rational_floor(end,&last)) goto fallback;
+            ri128 width=(ri128)last.s*last.n-(ri128)first.s*first.n;
+            if (width>8190) goto fallback;
+            JSValue spans=JS_NewArray(ctx);
+            if (JS_IsException(spans)) return spans;
+            unsigned count=0;
+            int order=clock_order(begin,end);
+            while (order<=0) {
+                Rational next;
+                if (rational_floor(begin,&next) || rational_add(next,(Rational){1,1,1},&next)) {
+                    JS_FreeValue(ctx,spans); goto fallback;
+                }
+                if (!order || clock_order(next,end)>=0) next=end;
+                JSValue span=make_span(ctx,host,begin,next);
+                if (JS_IsException(span)) { JS_FreeValue(ctx,spans); return span; }
+                if (JS_SetPropertyUint32(ctx,spans,count++,span)<0) { JS_FreeValue(ctx,spans); return JS_EXCEPTION; }
+                if (!clock_order(next,end)) break;
+                begin=next; order=clock_order(begin,end);
+            }
+            return spans;
+        }
+    case RATIONAL_SPAN_DURATION:
+        if (rational_sub(end,begin,&result)) goto fallback;
+        return make_fraction(ctx,host,result);
+    case RATIONAL_SPAN_MIDPOINT:
+        if (rational_sub(end,begin,&result) || rational_div(result,(Rational){1,2,1},&result) ||
+            rational_add(begin,result,&result)) goto fallback;
+        return make_fraction(ctx,host,result);
+    case RATIONAL_SPAN_EQUALS:
+        if (!argc || !clock_span(ctx,host,argv[0],&other_begin,&other_end)) goto fallback;
+        return JS_NewBool(ctx,!clock_order(begin,other_begin) && !clock_order(end,other_end));
+    case RATIONAL_SPAN_CYCLE_ARC:
+        if (rational_floor(begin,&result) || rational_sub(end,result,&end) || rational_sub(begin,result,&begin)) goto fallback;
+        return make_span(ctx,host,begin,end);
+    default: break;
+    }
+fallback:
+    if (JS_HasException(ctx)) return JS_EXCEPTION;
+    return JS_Call(ctx,host->span_methods[magic],self,argc,argv);
+}
+
+int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *method, JSCFunctionMagic *span_method, JSCFunctionMagic *hap_method) {
     if (host_out) *host_out = NULL;
     RationalHost *host = calloc(1, sizeof(*host));
     if (!host) return 0;
     host->proto = JS_UNDEFINED;
+    host->span_proto = JS_UNDEFINED;
+    host->span_constructor=JS_UNDEFINED;
+    host->hap_constructor=JS_UNDEFINED;
+    host->hap_proto=JS_UNDEFINED;
+    for (int i=0;i<2;i++) host->hap_methods[i]=JS_UNDEFINED;
+    for (int i=0;i<RATIONAL_SPAN_OPS;i++) host->span_methods[i]=JS_UNDEFINED;
     for (int i = 0; i < RATIONAL_OPS; i++) host->methods[i] = JS_UNDEFINED;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue wrapper = JS_GetPropertyStr(ctx, global, "Fraction");
@@ -326,8 +668,53 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
     host->atom_s = JS_NewAtom(ctx, "s");
     host->atom_n = JS_NewAtom(ctx, "n");
     host->atom_d = JS_NewAtom(ctx, "d");
-    if (!host->atom_s || !host->atom_n || !host->atom_d) {
+    host->atom_begin=JS_NewAtom(ctx,"begin"); host->atom_end=JS_NewAtom(ctx,"end");
+    if (!host->atom_s || !host->atom_n || !host->atom_d || !host->atom_begin || !host->atom_end) {
         rational_free(ctx, host); return 0;
+    }
+    global=JS_GetGlobalObject(ctx);
+    host->hap_constructor=JS_GetPropertyStr(ctx,global,"Hap");
+    JSValue span=JS_GetPropertyStr(ctx,global,"TimeSpan");
+    host->span_constructor=span;
+    host->span_proto=JS_GetPropertyStr(ctx,span,"prototype");
+    JS_FreeValue(ctx,global);
+    if (!JS_IsObject(host->span_proto) || !JS_IsFunction(ctx,host->hap_constructor)) { rational_free(ctx,host); return 0; }
+    host->hap_proto=JS_GetPropertyStr(ctx,host->hap_constructor,"prototype");
+    static const char *const fields[]={"whole","part","value","context","stateful"};
+    for (int i=0;i<5;i++) {
+        host->hap_fields[i]=JS_NewAtom(ctx,fields[i]);
+        if (!host->hap_fields[i]) { rational_free(ctx,host); return 0; }
+    }
+    static const char *const hap_names[]={"withValue","withSpan"};
+    for (int i=0;i<2;i++) {
+        host->hap_methods[i]=JS_GetPropertyStr(ctx,host->hap_proto,hap_names[i]);
+        JSValue native=JS_NewCFunctionMagic(ctx,hap_method,hap_names[i],1,JS_CFUNC_generic_magic,i);
+        if (!JS_IsFunction(ctx,host->hap_methods[i]) || JS_IsException(native)) {
+            JS_FreeValue(ctx,native); rational_free(ctx,host); return 0;
+        }
+        if (JS_SetPropertyStr(ctx,host->hap_proto,hap_names[i],native)<0) { rational_free(ctx,host); return 0; }
+    }
+    static const char *const names[]={"intersection","spanCycles","duration","midpoint","equals","cycleArc","withTime"};
+    for (int i=0;i<RATIONAL_SPAN_OPS;i++) {
+        int getter=i==RATIONAL_SPAN_CYCLES || i==RATIONAL_SPAN_DURATION;
+        JSAtom atom=JS_NewAtom(ctx,names[i]);
+        if (!atom) { rational_free(ctx,host); return 0; }
+        if (getter) {
+            JSPropertyDescriptor desc;
+            int found=JS_GetOwnProperty(ctx,&desc,host->span_proto,atom);
+            if (found!=1) { JS_FreeAtom(ctx,atom); rational_free(ctx,host); return 0; }
+            host->span_methods[i]=desc.getter;
+            JS_FreeValue(ctx,desc.value); JS_FreeValue(ctx,desc.setter);
+        } else host->span_methods[i]=JS_GetProperty(ctx,host->span_proto,atom);
+        if (!JS_IsFunction(ctx,host->span_methods[i])) {
+            JS_FreeAtom(ctx,atom); rational_free(ctx,host); return 0;
+        }
+        JSValue native=JS_NewCFunctionMagic(ctx,span_method,names[i],getter?0:1,JS_CFUNC_generic_magic,i);
+        int ok=!JS_IsException(native);
+        if (ok) ok=getter?JS_DefinePropertyGetSet(ctx,host->span_proto,atom,native,JS_UNDEFINED,JS_PROP_CONFIGURABLE)>=0:
+            JS_SetProperty(ctx,host->span_proto,atom,native)>=0;
+        JS_FreeAtom(ctx,atom);
+        if (!ok) { rational_free(ctx,host); return 0; }
     }
     for (int i = 0; i < RATIONAL_OPS; i++) {
         host->methods[i] = JS_GetPropertyStr(ctx, proto, rational_names[i]);
@@ -351,9 +738,18 @@ void rational_free(JSContext *ctx, RationalHost *host) {
     if (ctx) {
         for (int i = 0; i < RATIONAL_OPS; i++) JS_FreeValue(ctx, host->methods[i]);
         JS_FreeValue(ctx, host->proto);
+        JS_FreeValue(ctx,host->span_proto);
+        JS_FreeValue(ctx,host->span_constructor);
+        JS_FreeValue(ctx,host->hap_constructor);
+        JS_FreeValue(ctx,host->hap_proto);
+        for (int i=0;i<2;i++) JS_FreeValue(ctx,host->hap_methods[i]);
+        for (int i=0;i<5;i++) if (host->hap_fields[i]) JS_FreeAtom(ctx,host->hap_fields[i]);
+        for (int i=0;i<RATIONAL_SPAN_OPS;i++) JS_FreeValue(ctx,host->span_methods[i]);
         if (host->atom_s) JS_FreeAtom(ctx, host->atom_s);
         if (host->atom_n) JS_FreeAtom(ctx, host->atom_n);
         if (host->atom_d) JS_FreeAtom(ctx, host->atom_d);
+        if (host->atom_begin) JS_FreeAtom(ctx,host->atom_begin);
+        if (host->atom_end) JS_FreeAtom(ctx,host->atom_end);
     }
     free(host);
 }

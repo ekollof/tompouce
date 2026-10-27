@@ -20,6 +20,18 @@ enum {
     RATIONAL_LCM,
     RATIONAL_FLOOR,
     RATIONAL_CEIL,
+    RATIONAL_SAM,
+    RATIONAL_NEXT_SAM,
+    RATIONAL_CYCLE_POS,
+    RATIONAL_WHOLE_CYCLE,
+    RATIONAL_LT,
+    RATIONAL_LTE,
+    RATIONAL_GT,
+    RATIONAL_GTE,
+    RATIONAL_EQ,
+    RATIONAL_NE,
+    RATIONAL_MIN,
+    RATIONAL_MAX,
     RATIONAL_OPS
 };
 
@@ -38,8 +50,17 @@ int rational_ceil(Rational a, Rational *out);
 int rational_compare(Rational a, Rational b, int *out);
 
 typedef struct RationalHost RationalHost;
-int rational_bind(JSContext *ctx, RationalHost **host, JSCFunctionMagic *method);
+enum { RATIONAL_SPAN_INTERSECTION, RATIONAL_SPAN_CYCLES, RATIONAL_SPAN_DURATION,
+       RATIONAL_SPAN_MIDPOINT, RATIONAL_SPAN_EQUALS, RATIONAL_SPAN_CYCLE_ARC,
+       RATIONAL_SPAN_WITH_TIME, RATIONAL_SPAN_OPS };
+int rational_bind(JSContext *ctx, RationalHost **host, JSCFunctionMagic *method, JSCFunctionMagic *span_method, JSCFunctionMagic *hap_method);
 void rational_free(JSContext *ctx, RationalHost *host);
 JSValue rational_dispatch(JSContext *ctx, RationalHost *host, int magic,
                           JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue rational_span_dispatch(JSContext *ctx, RationalHost *host, int magic,
+                               JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue rational_create(JSContext *ctx, RationalHost *host, JSValueConst value);
+JSValue rational_triangle(JSContext *ctx, RationalHost *host, int argc, JSValueConst *argv);
+JSValue rational_hap_dispatch(JSContext *ctx, RationalHost *host, int magic,
+                             JSValueConst self, int argc, JSValueConst *argv);
 #endif

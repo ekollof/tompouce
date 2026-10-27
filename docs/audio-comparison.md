@@ -46,6 +46,13 @@ legato, root/above voicing and the native fraction clock are in that renderer.
 IDs 13587 and 78179 still stop on the first cycle at the unchanged 200 ms CPU
 budget. ID 112818 still needs `initHydra`. This pass did not reload strudel.cc.
 
+The fraction dispatcher now uses native results only on successful integer
+operations and falls back to fraction.js on overflow or invalid arithmetic.
+Regression checks cover division/modulo by zero, results beyond int64 and LCM
+with shared numerator factors. Voicing reset also resets the adapter's default
+dictionary. `voicing-reset-default` independently compares the five restored
+C-major notes with the deployed REPL after selecting and resetting `lefthand`.
+
 Triangle and inverted-triangle fastcat controls, including numeric fast, slow,
 early, late, and range, are now sampled in C. Uniform saw, sine, square, and
 noise signals stay in the pattern engine; sampling those one value at a time
@@ -59,6 +66,37 @@ query budget. Coastline remains close to that wall deadline: on a machine
 with load average about 3, some four-cycle renders were interrupted at 200 ms
 while the query thread's CPU time stayed under it. ID 112818 still needs
 `initHydra`.
+
+Further clock optimization adds native fraction cloning, cycle helpers,
+TimeSpan intersection/splitting and callback-based transformations, and Hap
+value/span transformations. Triangle clock splitting and Hap construction are
+now fused into one bounded native query instead of crossing the host boundary
+once per raw sample batch and then assembling the fragments in JavaScript.
+Numeric parsing, general pattern functions and uniform waveforms stay in JS.
+Native triangle output is checked directly against the JS fallback, including
+negative times, fractional rates, shifts and signed zero. Callback mutations,
+exceptions, point intersections, reversed spans and wide-integer fallback have
+focused regression checks.
+
+Isolated full-cycle compile-stage probes for 13587 measured roughly 375–425 ms
+before these changes and 241–279 ms afterward, with the same 539 haps. These
+probes use the existing compilation budget, not a raised query budget, and are
+profiling evidence only. Both original compositions still fail the unchanged
+200 ms query gate. The remaining pattern application work includes 20,791 Hap
+value transformations, 11,370 span transformations and 9,490 context merges per
+first cycle; native arithmetic alone has not resolved the query deadline.
+The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
+all 39 musical Bakery compositions that finish querying matching, the empty
+entry empty, and the five-event voicing-reset check matching. The two query
+timeouts remain failures. The two ungated PCM diagnostics remain ungated
+(fractional room switch correlation 0.989538; Arpoon opening 0.945504).
+
+An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
+composition (112818) without rewriting its source. Its four-cycle event
+comparison matches all 112 events from the deployed REPL. Visual graphs,
+buffer capture and visual callbacks are inert; a once-per-evaluation console
+message makes that limitation explicit. This establishes musical event
+compatibility for this composition, not Hydra rendering support.
 
 Thirteen `fm-matrix-` gates check selected sine-modulator chains, parallel and
 cross sends, explicit carrier sends, disconnected operators, operator 8,

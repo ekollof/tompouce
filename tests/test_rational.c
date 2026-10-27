@@ -30,9 +30,15 @@ int main(void) {
     assert(rational_mod(R(1, 1, 2), R(1, 0, 1), &out));
     assert(!rational_gcd(R(1, 1, 6), R(1, 1, 4), &out)); same(out, 1, 1, 12);
     assert(!rational_lcm(R(1, 5, 8), R(1, 3, 7), &out)); same(out, 1, 15, 1);
+    assert(!rational_lcm(R(1, 2, 3), R(1, 4, 5), &out)); same(out, 1, 4, 1);
+    assert(!rational_lcm(R(1, 2, 3), R(1, 4, 3), &out)); same(out, 1, 4, 3);
+    assert(!rational_lcm(R(1, 0, 1), R(1, 4, 5), &out)); same(out, 1, 0, 1);
     assert(!rational_lcm(R(1, 0, 1), R(1, 0, 1), &out)); same(out, 1, 0, 1);
     assert(!rational_add(R(1, 9999999, 10000000), R(1, 1, 10000000), &out)); same(out, 1, 1, 1);
     assert(rational_mul(R(1, 1, 1LL << 40), R(1, 1, 1LL << 40), &out));
+    assert(!rational_mul(R(1, INT64_MAX, INT64_MAX), R(1, INT64_MAX, INT64_MAX), &out)); same(out, 1, 1, 1);
+    assert(!rational_add(R(1, INT64_MAX, INT64_MAX), R(1, INT64_MAX, INT64_MAX), &out)); same(out, 1, 2, 1);
+    assert(!rational_add(R(1, INT64_MAX, 1), R(-1, INT64_MAX, 1), &out)); same(out, 1, 0, 1);
     int order = 0;
     assert(!rational_compare(R(1, 1, 3), R(1, 1, 2), &order) && order < 0);
     assert(!rational_compare(R(1, 2, 4), R(1, 1, 2), &order) && order == 0);

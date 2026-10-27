@@ -798,10 +798,80 @@ int main(int argc, char **argv) {
         "if (F(7,3).mod(1).show()!=='1/3' || F(-5,3).mod().show()!=='-2/1') throw new Error('mod');"
         "if (F(1,6).gcd(F(1,4)).show()!=='1/12') throw new Error('gcd');"
         "if (F(5,8).lcm(3,7).show()!=='15/1') throw new Error('lcm');"
+        "if (F(2,3).lcm(4,5).show()!=='4/1') throw new Error('lcm shared numerator gcd');"
+        "for(const op of ['div','mod']){let threw=false;try{F(1)[op](0)}catch(e){threw=true}"
+        "if(!threw)throw new Error(op+' zero must throw');}"
+        "if(F(1,1099511627776).mul(F(1,1099511627776)).show()!=='1/1208925819614629174706176')throw new Error('multiply bigint fallback');"
+        "if(F(BigInt('9223372036854775807')).add(BigInt(1)).show()!=='9223372036854775808/1')throw new Error('add bigint fallback');"
         "if (!F(1,2).equals(F(2,4)) || F(1,3).compare(F(1,2))!==-1) throw new Error('order');"
         "if (Number(F(1,2).add(0.5))!==1 || F(1,3).add('1/6').show()!=='1/2') throw new Error('fallback');"
         "if (F(-4).abs().show()!=='4/1') throw new Error('abs');"
         "note(60)", &program);
+    assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query(
+        "const check=(v,m)=>{if(!v)throw Error(m)};const F=Fraction._original;"
+        "for(const x of [-7,-1,0,1,7]){const f=F(x,3),s=Math.floor(x/3);"
+        "check(Number(f.sam())===s&&Number(f.nextSam())===s+1,'cycle bounds');"
+        "check(f.cyclePos().equals(f.sub(s)),'cycle position');"
+        "check(f.wholeCycle().equals(new TimeSpan(s,s+1)),'whole cycle');"
+        "check(f.lt(F(9),0)&&f.lte(F(9),0)&&!f.gt(F(9),0),'ignored comparison arguments');}"
+        "const f=F(1,3),g=F(1,3),clone=F(f);"
+        "class CustomFraction extends F{};const custom=new CustomFraction(1,3);check(custom instanceof CustomFraction&&custom.equals(f),'subclass constructor');"
+        "check(clone!==f&&clone.equals(f)&&clone instanceof F,'clone');clone.n=BigInt(2);check(f.n===BigInt(1),'clone independence');"
+        "check(f.min(g)===g&&f.max(g)===g&&f.min(F(1))===f,'min max identity');"
+        "const sect=(a,b)=>{const l=a.begin.max(b.begin),r=a.end.min(b.end);"
+        "if(l.gt(r)||(l.equals(r)&&((l.equals(a.end)&&a.begin.lt(a.end))||(l.equals(b.end)&&b.begin.lt(b.end)))))return;"
+        "return new TimeSpan(l,r)};"
+        "for(let i=-4;i<=4;i++)for(let j=i;j<=4;j++){const a=new TimeSpan(F(i,3),F(j,3));"
+        "check(a.duration.equals(a.end.sub(a.begin)),'duration');"
+        "check(a.midpoint().equals(a.begin.add(a.end).div(2)),'midpoint');"
+        "check(a.cycleArc().begin.equals(a.begin.sub(a.begin.floor())),'cycle arc');"
+        "for(let k=-3;k<=3;k++){const b=new TimeSpan(F(k,2),F(k+1,2)),x=a.intersection(b),y=sect(a,b);"
+        "check((x===undefined&&y===undefined)||(x&&y&&x.equals(y)),'intersection');}"
+        "const pieces=a.spanCycles;check(pieces.length>0,'split');"
+        "check(pieces[0].begin.equals(a.begin)&&pieces[pieces.length-1].end.equals(a.end),'split endpoints');"
+        "for(let k=0;k<pieces.length;k++){check(pieces[k].duration.lte(1),'split length');"
+        "if(k)check(pieces[k-1].end.equals(pieces[k].begin),'split continuity');}}"
+        "check(new TimeSpan(2,1).spanCycles.length===0,'reversed');"
+        "const wide=new TimeSpan(F(BigInt(2)**BigInt(80)),F(BigInt(2)**BigInt(80)+BigInt(1)));check(wide.duration.equals(1),'wide fallback');"
+        "const span=new TimeSpan(0,1);let calls=0;const changed=span.withTime(t=>{if(!calls++)span.end=F(2);return t.add(1)});"
+        "check(calls===2&&changed.begin.equals(1)&&changed.end.equals(3),'callback ordering');"
+        "calls=0;const numeric=span.withTime(t=>{calls++;return Number(t)+1});"
+        "check(calls===2&&numeric.equals(new TimeSpan(1,3)),'numeric callback fallback');"
+        "let reads=0;const accessor=new TimeSpan(0,1);Object.defineProperty(accessor,'begin',{get(){reads++;return F(0)}});"
+        "check(accessor.intersection(new TimeSpan(0,2)).equals(new TimeSpan(0,1))&&reads>0,'accessor fallback');"
+        "let threw=false;try{span.withTime(()=>{throw Error('sentinel')})}catch(e){threw=e.message==='sentinel'}check(threw,'callback exception');"
+        "const context={locations:[]},h=new Hap(span,span,3,context);h.stateful=true;"
+        "const v=h.withValue(x=>{h.context=undefined;return x+1});"
+        "check(v.value===4&&v.whole===span&&v.part===span&&v.stateful===false&&v.context!==context,'hap value');"
+        "h.context=context;calls=0;const q=h.withSpan(s=>{calls++;return new TimeSpan(s.begin,s.end)});"
+        "check(calls===2&&q.whole!==span&&q.part!==span&&q.value===3&&q.context===context&&!q.stateful,'hap span');"
+        "const continuous=new Hap(undefined,span,1,context);calls=0;continuous.withSpan(s=>{calls++;return s});check(calls===1,'continuous span');"
+        "note(60)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    haps = query(
+        "const expected=chord('C').voicing().queryArc(0,1).map(h=>h.value.note);"
+        "if(expected.length!==5)throw new Error('default voicing');"
+        "setDefaultVoicings('lefthand');resetVoicings();"
+        "const actual=chord('C').voicing().queryArc(0,1).map(h=>h.value.note);"
+        "if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('voicing reset');"
+        "chord('C').voicing()", &program);
+    assert(cJSON_GetArraySize(haps)==5);
+    cJSON_Delete(haps); javascript_free(program);
+    haps = query(
+        "const nativeTriangle=__hostTriangle;"
+        "if(nativeTriangle(null,Fraction(1),Fraction(0),0,1,[])!==null)throw Error('invalid triangle span');"
+        "if(nativeTriangle(new TimeSpan(0,1),Fraction(0),Fraction(0),0,1,[])!==null)throw Error('zero triangle rate');"
+        "if(nativeTriangle(new TimeSpan(0,1),Fraction(1),Fraction(0),0,1,new Array(257))!==null)throw Error('triangle operation bound');"
+        "for(const wave of [tri,itri,tri2,itri2])for(const rate of [1,3,0.5])for(const shift of [-0.25,0,0.3]){"
+        "const base=wave.fast(rate).early(shift);for(const p of [base,base.range(-3,7)]){"
+        "const native=p.queryArc(-0.7,0.8);__hostTriangle=()=>null;"
+        "let reference;try{reference=p.queryArc(-0.7,0.8)}finally{__hostTriangle=nativeTriangle}"
+        "if(native.length!==reference.length)throw Error('triangle count');"
+        "for(let i=0;i<native.length;i++)if(!native[i].part.equals(reference[i].part)||!Object.is(native[i].value,reference[i].value))throw Error('triangle fallback difference');}}"
+        "note(60)",&program);
     assert(cJSON_GetArraySize(haps)==1);
     cJSON_Delete(haps); javascript_free(program);
     haps = query(
@@ -814,6 +884,7 @@ int main(int argc, char **argv) {
         "if(!Object.is(a[i].value,b[i].value))throw new Error(label+' value '+a[i].value+' vs '+b[i].value+' neg '+Object.is(a[i].value,-0)+'/'+Object.is(b[i].value,-0));"
         "}}"
         "const arc=(pat,b,e)=>pat.queryArc(b,e);"
+        "same(arc(tri.fast(2),0.25,0.25),arc(tri.fast(2),0.25,0.25),'point triangle');"
         "same(arc(tri.fast(1),0,1),arc(tri,0,1),'tri');"
         "same(arc(tri.fast(1),-0.3,0.4),arc(tri,-0.3,0.4),'tri-neg');"
         "same(arc(cosine,0,1),arc(sine.early(Fraction(1).div(4)),0,1),'cosine');"
@@ -857,6 +928,29 @@ int main(int argc, char **argv) {
         "if(!Object.is(hostNoise[1],berlinAt(-0.2,1)))throw new Error('host berlin '+hostNoise[1]);"
         "note(60)", &program);
     assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    int hydra_log_start=console_count_get();
+    haps = query(
+        "await initHydra({feedStrudel:1,detectAudio:true});await initHydra();"
+        "let called=0;const callback=()=>{called++;return 1};"
+        "await s0.initCam();s1.init({src:'https://example.invalid/never-fetch'});"
+        "src(s0).kaleid(H('<4 5 6>')).diff(osc(callback,.5,5)).modulateScale(noise(2)).out(o0);"
+        "shape(3).add(solid(1)).blend(voronoi(2)).mult(gradient()).out(o1);"
+        "H(callback);render(o0);hush();"
+        "if(called)throw new Error('Hydra callback executed');"
+        "if(a.fft[0]!==0)throw new Error('Hydra placeholder FFT');"
+        "$: note(60).s('sine');$: note(64).s('triangle')", &program);
+    assert(cJSON_GetArraySize(haps)==2);
+    int hydra_warnings=0;
+    for(int i=hydra_log_start;i<console_count_get();i++)
+        if(strstr(console_line(i),"Hydra visuals are unavailable")) hydra_warnings++;
+    assert(hydra_warnings==1);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("await initHydra();osc(10).color(1,0,0).out()",&program);
+    assert(cJSON_GetArraySize(haps)==0);
+    cJSON_Delete(haps); javascript_free(program);
+    haps=query("await initHydra();src(s0)",&program);
+    assert(cJSON_GetArraySize(haps)==0);
     cJSON_Delete(haps); javascript_free(program);
     puts("JavaScript/Strudel runtime ok");
     return 0;

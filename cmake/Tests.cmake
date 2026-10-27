@@ -243,7 +243,7 @@ foreach(name audio audio_performance stretch convolution_prepare room duck_onset
         list(APPEND sources src/sampler.c)
     endif()
     if(name STREQUAL "javascript")
-        list(APPEND sources src/javascript.c src/slider.c)
+        list(APPEND sources src/javascript.c src/slider.c src/rational.c)
     endif()
     if(name STREQUAL "csound")
         list(APPEND sources src/javascript.c)

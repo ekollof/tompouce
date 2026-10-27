@@ -110,7 +110,11 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 - `src/javascript.c` owns the serialized QuickJS context. `js/runtime.mjs`
   adapts pinned Strudel 1.2.6; `js/dist/runtime.js` is the committed bundle.
   `src/rational.c` installs integer fraction arithmetic on the pinned Fraction
-  prototype after the bundle loads. `src/signal_wave.c` samples `tri`/`itri`
+  prototype after the bundle loads, and supplies bounded native span/hap helpers
+  and fused triangle queries. `js/fraction-native.mjs` accelerates ordinary clock
+  clones; unsupported values retain the pinned constructor. Preserve callback
+  ordering, fresh fraction/span objects and wide-integer fallbacks.
+  `src/signal_wave.c` samples `tri`/`itri`
   fastcat controls through numeric fast, slow, early, late, and range. Uniform
   saw, sine, square, and noise signals stay in JavaScript: one host sample per
   query missed coastline's deadline. Floats, strings and results that do not fit

@@ -5,6 +5,7 @@ import { completionHeader } from './completions.mjs';
 await mkdir('dist', { recursive: true });
 const result = await build({
   entryPoints: ['runtime.mjs'], bundle: true, format: 'iife', platform: 'browser',
+  alias: {'fraction.js': './fraction-native.mjs'},
   target: 'es2022', minify: true, write: false, legalComments: 'inline',
   define: { 'process.env.NODE_ENV': '"production"' },
 });

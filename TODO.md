@@ -69,12 +69,26 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
+- [ ] Resolve the `Random bells` historical event-fixture mismatch at cycle 0,
+      event 3 (bass F2 versus D2), also reproduced on unmodified 6811028.
+      Check the legato-rotation adapter against the web and preserve the fixture.
+- [ ] Restore the Node live-control reference runner's runtime bootstrap:
+      the triangle host adapter currently throws `native signals unavailable`
+      when `__hostSignal` is absent. Preserve an independent JavaScript
+      reference path rather than requiring the native implementation in Node.
+
 - [ ] The Bakery corpus's nine initial event differences now match the saved
       2026-10-27 REPL events, including coastline (78185). Triangle fastcat
       controls are sampled in C; uniform saw, sine, square, and noise signals
       stay in JavaScript. IDs 13587 and 78179 still exceed the existing 200 ms
-      query budget: one-cycle `queryArc` measured about 480–580 ms.
-      The Hydra example remains covered by the separate visualizer task. See
+      query budget. Native fraction clones, span operations, hap transformations
+      and fused triangle queries reduced isolated one-cycle `queryArc` profiles
+      from roughly 375–425 ms to 241–279 ms (539 haps); these compile-stage probes
+      do not establish a passing query-budget gate. Investigate native pattern
+      application/composition next: this query still performs 20,791 value
+      transformations, 11,370 span transformations and 9,490 context merges.
+      The Hydra example can now evaluate musical branches through inert visual
+      placeholders; actual graphics remain covered by the separate `/hydra` task. See
       [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.

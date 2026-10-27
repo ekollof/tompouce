@@ -84,6 +84,10 @@ export function installNativeSignals(core) {
   const querySig = (sig, state) => {
     const span = state && state.span;
     if (!span) return null;
+    if (typeof globalThis.__hostTriangle === 'function') {
+      const native = globalThis.__hostTriangle(span, sig.rate, sig.phase, sig.waveA, sig.waveB, sig.ops);
+      if (native !== null) return native;
+    }
     const domainBegin = span.begin.mul(sig.rate).add(sig.phase);
     const domainEnd = span.end.mul(sig.rate).add(sig.phase);
     const seed = seedOf(state);

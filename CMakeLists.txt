@@ -168,6 +168,7 @@ add_library(tompouce_core STATIC
 add_dependencies(tompouce_core embedded_resources)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(src/convolution_mix.c PROPERTIES COMPILE_OPTIONS "-O3;-ffp-contract=off;-funroll-loops")
+    set_source_files_properties(src/rational.c PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 target_link_libraries(tompouce_core PUBLIC tompouce_options quickjs tree_sitter_javascript)
 add_executable(tompouce src/main.c)

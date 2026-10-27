@@ -20,6 +20,9 @@ conditionals, arithmetic, alignment, scales, voicings, and signals. Integer
 fraction arithmetic on the pattern clock runs in the host. `tri`, `itri`, and
 their bipolar forms, with numeric fast, slow, early, late, and range, are
 sampled in the host too. Saw, sine, square, and noise stay in JavaScript.
+Ordinary fraction clones, cycle bounds, span intersections/splitting and hap
+value/span transformations also have native paths. Custom objects, accessors
+and values beyond the native integer range retain the JavaScript paths.
 Fractional numbers and fraction strings still use the pinned fraction.js parser.
 Variables, closures, functions, arrays, loops, and async functions execute as JavaScript.
 Double quoted strings and backticks use Strudel mini-notation; single quoted
@@ -504,6 +507,14 @@ opts into the smaller set. Supplemental local manifests preserve the REPL's
 `mridangam_*` and individual `wt_digital_*` names without renaming historical
 entries. Absent installed manifests still require explicit maps. Sample
 recordings are downloaded during installation rather than bundled in Git.
+
+`await initHydra(...)` is accepted as an audio-only compatibility placeholder.
+It enables inert Hydra source/texture chains, `s0`–`s3`/`o0`–`o3` buffers and
+`H()`, while musical branches continue to evaluate. Options such as
+`feedStrudel` and `detectAudio` are ignored; there is no visual rendering,
+audio/video capture, resource fetching or execution of visual callbacks.
+The console reports this limitation once per evaluation. The placeholder
+does not open a browser; the planned `/hydra` browser visualizer is separate.
 
 ## Pitch compensation and convolution
 

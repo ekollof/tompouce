@@ -452,6 +452,7 @@ static const char *const strudel_global_words[] = {
     "imag",
     "inhabit",
     "inhabitmod",
+    "initHydra",
     "innerBind",
     "inside",
     "inv",

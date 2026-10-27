@@ -600,6 +600,25 @@ static JSValue host_fraction(JSContext *ctx, JSValueConst this_val, int argc, JS
     JsProgram *program = JS_GetContextOpaque(ctx);
     return rational_dispatch(ctx, program ? program->fractions : NULL, magic, this_val, argc, argv);
 }
+static JSValue host_hap(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    return rational_hap_dispatch(ctx,program?program->fractions:NULL,magic,self,argc,argv);
+}
+
+static JSValue host_span(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {
+    JsProgram *program = JS_GetContextOpaque(ctx);
+    return rational_span_dispatch(ctx, program ? program->fractions : NULL, magic, this_val, argc, argv);
+}
+static JSValue host_fraction_create(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    (void)this_val;
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    return argc?rational_create(ctx,program?program->fractions:NULL,argv[0]):JS_NULL;
+}
+static JSValue host_triangle(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    (void)this_val;
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    return rational_triangle(ctx,program?program->fractions:NULL,argc,argv);
+}
 
 void javascript_activate_sliders(JsProgram *p) { if (p) slider_bank_activate(p->sliders); }
 const char *javascript_source(const JsProgram *p) { return p?p->source:NULL; }
@@ -626,8 +645,10 @@ static int initialize(JsProgram *p, char *error, int n) {
     int h = JS_SetPropertyStr(ctx, global, "__hostPrebake", JS_NewCFunction(ctx, host_prebake, "__hostPrebake", 1));
     int i = JS_SetPropertyStr(ctx, global, "__hostCsound", JS_NewCFunction(ctx, host_csound, "__hostCsound", 2));
     int j = JS_SetPropertyStr(ctx, global, "__hostSignal", JS_NewCFunction(ctx, host_signal, "__hostSignal", 3));
+    int k = JS_SetPropertyStr(ctx,global,"__hostFractionCreate",JS_NewCFunction(ctx,host_fraction_create,"__hostFractionCreate",1));
+    int l = JS_SetPropertyStr(ctx,global,"__hostTriangle",JS_NewCFunction(ctx,host_triangle,"__hostTriangle",6));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0 || k < 0 || l < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {
@@ -646,7 +667,7 @@ static int initialize(JsProgram *p, char *error, int n) {
         return 0;
     }
     JS_FreeValue(ctx, value);
-    if (!rational_bind(ctx, &p->fractions, host_fraction)) {
+    if (!rational_bind(ctx, &p->fractions, host_fraction, host_span, host_hap)) {
         if (error && n > 0) snprintf(error, (size_t)n, "could not install native fractions");
         return 0;
     }

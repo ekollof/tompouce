@@ -42,6 +42,10 @@ const selectVoicings = globalThis.setDefaultVoicings;
 if (typeof selectVoicings === 'function') {
   globalThis.setDefaultVoicings = (dict) => { voicingDictionary = dict; return selectVoicings(dict); };
 }
+const resetVoicings = globalThis.resetVoicings;
+if (typeof resetVoicings === 'function') {
+  globalThis.resetVoicings = () => { voicingDictionary = 'ireal'; return resetVoicings(); };
+}
 const previousLegato = core.Pattern.prototype._euclidLegato;
 const previousLegatoRot = core.Pattern.prototype._euclidLegatoRot;
 function alignedLegato(pulses, steps, rotation, pat, rotated) {
@@ -456,6 +460,52 @@ function formatConsole(values) {
 globalThis.console = Object.fromEntries(['log', 'warn', 'error', 'info', 'debug'].map(
   (name) => [name, (...values) => __hostLog(formatConsole(values))],
 ));
+/* Hydra placeholders hold no graph or resources and never invoke callbacks. */
+let hydraWarned = false;
+const hydraNoop = () => undefined;
+let hydraPlaceholder;
+const hydraChain = () => hydraPlaceholder;
+const hydraZero = () => 0;
+hydraPlaceholder = new Proxy(Object.create(null), {
+  get(_target, key) {
+    if (key === 'then' || key === '_Pattern') return undefined;
+    if (key === Symbol.toPrimitive) return hydraZero;
+    if (typeof key === 'symbol') return undefined;
+    if (key === 'out') return hydraNoop;
+    if (key === 'toJSON') return () => null;
+    return hydraChain;
+  },
+});
+/**
+ * Accept Hydra source while playing only its musical patterns. This terminal
+ * placeholder installs inert source/texture chains, buffers and H(); it does
+ * not render, capture audio/video, fetch resources or invoke visual callbacks.
+ * Logs the missing visual support once per evaluation. Browser /hydra support
+ * is a separate planned feature.
+ * @name initHydra
+ * @param {object} options accepted and ignored, including feedStrudel
+ * @example
+ * await initHydra({feedStrudel:1})
+ * src(s0).kaleid(H("<4 5 6>")).diff(osc(1,.5,5)).out()
+ * $: note("c3 e3 g3").s('sine')
+ */
+globalThis.initHydra = async (_options) => {
+  if (!hydraWarned) {
+    hydraWarned = true;
+    __hostLog('Hydra visuals are unavailable: visual calls are ignored; musical patterns still play.');
+  }
+  for (const name of ['src','osc','noise','shape','solid','voronoi','gradient'])
+    globalThis[name] = hydraChain;
+  for (let i=0;i<4;i++) {
+    globalThis[`s${i}`] = hydraPlaceholder;
+    globalThis[`o${i}`] = hydraPlaceholder;
+  }
+  globalThis.H = hydraZero;
+  for (const name of ['render','hush','setResolution','setFunction']) globalThis[name] = hydraNoop;
+  globalThis.a = Object.freeze({fft:Object.freeze(Array(8).fill(0)),
+    setBins:hydraNoop,setSmooth:hydraNoop,setCutoff:hydraNoop,setScale:hydraNoop,show:hydraNoop,hide:hydraNoop});
+  for (const name of ['time','speed','fps','width','height']) globalThis[name] = 0;
+};
 /**
  * Register a named pattern branch for playback. Branches are stacked together.
  * An id beginning or ending with an underscore mutes that branch; '$' ids
@@ -972,6 +1022,7 @@ function prepare(code) {
 }
 
 globalThis.__compile = async (code, bpm = 120, prebake = '') => {
+  hydraWarned = false;
   resetPrebakes();
   midiMaps.clear();
   liveSliderReaders.clear();
@@ -990,7 +1041,7 @@ globalThis.__compile = async (code, bpm = 120, prebake = '') => {
   compiledVisualSites=visualSites;
   nextProbe=visualSites.length;
   const value = await Function(`"use strict";return (async()=>{${observeBranches(result.output)}})()`)();
-  let pattern = value;
+  let pattern = value === hydraPlaceholder ? core.silence : value;
   if (collecting.size) {
     const branches = Array.from(collecting.entries());
     const isSolo = ([id]) => id.length > 1 && id.startsWith('S');

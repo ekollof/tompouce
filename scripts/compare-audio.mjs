@@ -116,6 +116,8 @@ try {
   for (const example of bakery.examples)
     if (hash(example.code)!==example.sha256) throw Error(`Bakery source hash mismatch: ${example.id}`);
   const cases = [
+    {name:'voicing-reset-default',code:"setDefaultVoicings('lefthand');resetVoicings();chord('C').voicing()",
+      sound:'',cycles:1,cps:.5,window:1,correlation:null,eventsOnly:true},
     ...bakery.examples.map(example=>({name:`bakery-${example.id}`,title:example.title,
       source:example.entries,code:example.code,sound:'',cycles:4,cps:.5,window:1,
       correlation:null,eventsOnly:true})),

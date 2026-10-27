@@ -70,10 +70,11 @@ Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
 - [ ] The Bakery corpus's nine initial event differences now match the saved
-      2026-10-27 REPL events, including coastline (78185). IDs 13587 and 78179
-      still exceed the existing 200 ms query CPU budget; the native fraction
-      clock does not bring "Computer says no" under that limit. The Hydra
-      example remains covered by the separate visualizer task. See
+      2026-10-27 REPL events, including coastline (78185). Triangle fastcat
+      controls are sampled in C; uniform saw, sine, square, and noise signals
+      stay in JavaScript. IDs 13587 and 78179 still exceed the existing 200 ms
+      query budget: one-cycle `queryArc` measured about 480–580 ms.
+      The Hydra example remains covered by the separate visualizer task. See
       [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.

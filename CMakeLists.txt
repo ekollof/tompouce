@@ -164,7 +164,7 @@ add_library(tompouce_core STATIC
     src/sounds.c src/sound_store.c src/terminal_graphics.c src/visual.c src/visual_render.c
     src/audio_output.c src/native_synth.c src/osc_output.c src/reverb_impulse.c src/duck_onset.c
     src/stretch.c src/gm_synth.c src/prep_profile.c src/prep_pool.c src/prep_cpu.c
-    src/rational.c)
+    src/rational.c src/signal_wave.c)
 add_dependencies(tompouce_core embedded_resources)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(src/convolution_mix.c PROPERTIES COMPILE_OPTIONS "-O3;-ffp-contract=off;-funroll-loops")

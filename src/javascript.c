@@ -4,6 +4,7 @@
 #include "midi.h"
 #include "websamp.h"
 #include "rational.h"
+#include "signal_wave.h"
 #include <quickjs.h>
 #include <ctype.h>
 #include <limits.h>
@@ -526,6 +527,75 @@ static JSValue host_csound(JSContext *ctx, JSValueConst self, int argc, JSValueC
     if (result==CSOUND_UPDATE_REJECTED) log_console("%s",error);
     return JS_UNDEFINED;
 }
+static void clear_exception(JSContext *ctx) {
+    JSValue exception = JS_GetException(ctx);
+    JS_FreeValue(ctx, exception);
+}
+
+static int signal_length(JSContext *ctx, JSValueConst value, int *length) {
+    if (!JS_IsArray(ctx, value)) return -1;
+    JSValue property = JS_GetPropertyStr(ctx, value, "length");
+    int32_t count = 0;
+    int failed = JS_ToInt32(ctx, &count, property);
+    JS_FreeValue(ctx, property);
+    if (failed || count < 0 || count > 8192) {
+        if (failed) clear_exception(ctx);
+        return -1;
+    }
+    *length = (int)count;
+    return 0;
+}
+
+static JSValue host_signal(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    (void)this_val;
+    if (argc < 3) return JS_NULL;
+    int count = 0, kinds_n = 0;
+    if (signal_length(ctx, argv[0], &kinds_n) || signal_length(ctx, argv[1], &count) || kinds_n != count) return JS_NULL;
+    double seed = 0;
+    if (JS_ToFloat64(ctx, &seed, argv[2])) {
+        clear_exception(ctx);
+        return JS_NULL;
+    }
+    if (!count) return JS_NewArray(ctx);
+    int *kinds = malloc((size_t)count * sizeof *kinds);
+    double *times = malloc((size_t)count * sizeof *times);
+    double *samples = malloc((size_t)count * sizeof *samples);
+    if (!kinds || !times || !samples) {
+        free(kinds); free(times); free(samples);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    int ok = 1;
+    for (int i = 0; i < count; i++) {
+        JSValue kind = JS_GetPropertyUint32(ctx, argv[0], (uint32_t)i);
+        JSValue time = JS_GetPropertyUint32(ctx, argv[1], (uint32_t)i);
+        int32_t id = 0;
+        if (JS_ToInt32(ctx, &id, kind) || JS_ToFloat64(ctx, &times[i], time)) ok = 0;
+        else kinds[i] = (int)id;
+        JS_FreeValue(ctx, kind);
+        JS_FreeValue(ctx, time);
+        if (!ok) break;
+    }
+    if (!ok || signal_wave_fill(kinds, times, count, seed, samples)) {
+        clear_exception(ctx);
+        free(kinds); free(times); free(samples);
+        return JS_NULL;
+    }
+    JSValue out = JS_NewArray(ctx);
+    if (JS_IsException(out)) {
+        free(kinds); free(times); free(samples);
+        return out;
+    }
+    for (int i = 0; i < count; i++) {
+        if (JS_SetPropertyUint32(ctx, out, (uint32_t)i, JS_NewFloat64(ctx, samples[i])) < 0) {
+            free(kinds); free(times); free(samples);
+            JS_FreeValue(ctx, out);
+            return JS_ThrowOutOfMemory(ctx);
+        }
+    }
+    free(kinds); free(times); free(samples);
+    return out;
+}
+
 static JSValue host_fraction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {
     JsProgram *program = JS_GetContextOpaque(ctx);
     return rational_dispatch(ctx, program ? program->fractions : NULL, magic, this_val, argc, argv);
@@ -555,8 +625,9 @@ static int initialize(JsProgram *p, char *error, int n) {
     int g = JS_SetPropertyStr(ctx, global, "__hostMidiKeys", JS_NewCFunction(ctx, host_midi_keys, "__hostMidiKeys", 1));
     int h = JS_SetPropertyStr(ctx, global, "__hostPrebake", JS_NewCFunction(ctx, host_prebake, "__hostPrebake", 1));
     int i = JS_SetPropertyStr(ctx, global, "__hostCsound", JS_NewCFunction(ctx, host_csound, "__hostCsound", 2));
+    int j = JS_SetPropertyStr(ctx, global, "__hostSignal", JS_NewCFunction(ctx, host_signal, "__hostSignal", 3));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {

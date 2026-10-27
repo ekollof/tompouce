@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export async function completionHeader(bundle) {
   const context = vm.createContext({
     __hostLog() {}, __hostSlider(_id, value) { return value; },
+    __hostSignal() { return null; },
     performance: { now: () => 0 },
     console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
   });

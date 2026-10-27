@@ -6,11 +6,13 @@ import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
 import { semitones as intervalSemitones } from '@tonaljs/interval';
 import { installNative, prepareNative } from './native-synth.mjs';
+import { installNativeSignals } from './signal-native.mjs';
 import { queryFraction } from './query-time.mjs';
 import {installPrebakes,resetPrebakes,runPrebake,prepareAudioDefaults,isPrebaking} from './prebake.mjs';
 import {TextEncoder as Utf8TextEncoder} from './text-encoding.mjs';
 
 Object.assign(globalThis, core, mini, tonal);
+installNativeSignals(core);
 globalThis.TextEncoder ??= Utf8TextEncoder;
 /**
  * Resolve a note/frequency object like Superdough, including its fallback

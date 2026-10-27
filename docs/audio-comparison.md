@@ -46,6 +46,20 @@ legato, root/above voicing and the native fraction clock are in that renderer.
 IDs 13587 and 78179 still stop on the first cycle at the unchanged 200 ms CPU
 budget. ID 112818 still needs `initHydra`. This pass did not reload strudel.cc.
 
+Triangle and inverted-triangle fastcat controls, including numeric fast, slow,
+early, late, and range, are now sampled in C. Uniform saw, sine, square, and
+noise signals stay in the pattern engine; sampling those one value at a time
+in C made coastline miss the same deadline. Against the saved 2026-10-27
+browser events, all 39 captured compositions still match, including coastline's
+10 events at 0.75 cps. This check did not reload strudel.cc. One-cycle
+`queryArc` during compilation, outside the 200 ms query entry, measured about
+480–580 ms and 539 haps for both IDs. Their fourth patterns alone measured
+about 430–570 ms, both still 456 haps. Neither finishes inside the unchanged
+query budget. Coastline remains close to that wall deadline: on a machine
+with load average about 3, some four-cycle renders were interrupted at 200 ms
+while the query thread's CPU time stayed under it. ID 112818 still needs
+`initHydra`.
+
 Thirteen `fm-matrix-` gates check selected sine-modulator chains, parallel and
 cross sends, explicit carrier sends, disconnected operators, operator 8,
 negative indices/harmonicity, numbered envelopes and self/two-node feedback.

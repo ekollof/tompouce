@@ -110,7 +110,10 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
 - `src/javascript.c` owns the serialized QuickJS context. `js/runtime.mjs`
   adapts pinned Strudel 1.2.6; `js/dist/runtime.js` is the committed bundle.
   `src/rational.c` installs integer fraction arithmetic on the pinned Fraction
-  prototype after the bundle loads. Floats, strings and results that do not fit
+  prototype after the bundle loads. `src/signal_wave.c` samples `tri`/`itri`
+  fastcat controls through numeric fast, slow, early, late, and range. Uniform
+  saw, sine, square, and noise signals stay in JavaScript: one host sample per
+  query missed coastline's deadline. Floats, strings and results that do not fit
   int64 keep the original fraction.js methods. Preserve package locks and
   historical event references. Do not regenerate baselines or loosen thresholds
   to make a regression pass.

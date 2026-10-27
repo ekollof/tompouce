@@ -1,5 +1,44 @@
 # Browser/native audio comparison
 
+## Bakery composition corpus
+
+`tests/fixtures/strudel-bakery.json` preserves the 42 compositions shown on the
+first Featured and Last Creations pages of <https://strudel.cc/bakery/> on
+2026-10-27 (21 entries each). Original source, authorship comments, share URLs,
+Bakery IDs and SHA-256 hashes are retained. Similarly titled versions remain
+separate; this is a dated snapshot, not the Bakery's entire historical archive.
+Composition rights remain with the original authors.
+
+Use the existing comparison harness to query all branches for four cycles:
+
+```sh
+cmake --build build --target render_audio
+TOMPOUCE_COMPARE_FILTER=bakery- node scripts/compare-audio.mjs /tmp/tompouce-bakery
+```
+
+These cases use the renderer's `eventsOnly` mode, which skips audio/sample
+preparation and writes events and effective tempo instead of PCM. The browser
+uses the deployed REPL with a stopped, owned offline clock, including its label,
+stack and tempo behavior. Neither side opens an audio device. Original sources
+are not rewritten, branches are not filtered, and execution budgets are unchanged.
+The native process uses isolated configuration/cache roots. Browser sample-map
+imports still require network access.
+
+The report distinguishes event matches, differences, empty patterns and native
+or browser failures; a failed case does not prevent later compositions from
+running. Any difference/failure produces a nonzero exit. Empty patterns are
+reported separately from musical coverage. Event values use the existing
+example suite's relative numeric tolerance of 1e-7. Existing PCM cases retain
+their thresholds and behavior. This corpus establishes no full-song PCM claim.
+
+The initial run recorded 29 event matches, nine differences, three native
+failures and one comments-only empty pattern. Differences: IDs 13794, 13763,
+13622, 13366, 13294, 13267, 105781, 78185 and 32267. IDs 13587 and 78179 hit
+the existing 200 ms query CPU budget; ID 112818 requires `initHydra`. No runtime
+fixes or budget changes were made as part of adding the corpus. Captures and
+errors are recorded per case in the requested output directory, including a
+complete `report.json`; results can change with the hosted REPL.
+
 Thirteen `fm-matrix-` gates check selected sine-modulator chains, parallel and
 cross sends, explicit carrier sends, disconnected operators, operator 8,
 negative indices/harmonicity, numbered envelopes and self/two-node feedback.

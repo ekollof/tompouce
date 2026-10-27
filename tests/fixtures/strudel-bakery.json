@@ -1,0 +1,554 @@
+{
+  "source": "https://strudel.cc/bakery/",
+  "retrieved": "2026-10-27",
+  "selection": "First visible page: 21 featured and 21 latest entries; source variants are preserved verbatim.",
+  "license": "Original authorship and any licensing declarations are preserved in code. No additional composition license is assigned.",
+  "examples": [
+    {
+      "title": "Bug From Heaven (wip)",
+      "id": 14221,
+      "entries": [
+        {
+          "id": 14221,
+          "section": "featured",
+          "url": "https://strudel.cc/?4ThlIhpx72Mb"
+        }
+      ],
+      "code": "// \"Bug From Heaven (wip)\"\n// song @by Tim Smith\n// script @by eefano\nsetcps(100/60/2)\nconst standardtuning = [40,45,50,55,59,64];\nconst fingering = \n{A:\"0:0:2:2:2:0\",Am:\"0:0:2:2:1:0\",A7:\"x:0:2:0:2:0\",D:\"x:0:0:2:3:2\",Dm:\"x:0:0:2:3:1\",D7:\"x:0:0:2:1:2\",\n E:\"0:2:2:1:0:0\",Em:\"0:2:2:0:0:0\",E7:\"0:2:2:1:3:0\",G7:\"3:2:0:0:0:1\",C:\"x:3:2:0:1:0\",Dx:\"x:0:0:2:3:2\",Ds:\"x:0:0:1:3:0\"\n};\nconst gstrum = \n{u:\"<[[1,[~ 3@10],4]@2 ~]!2 [1,4,5]>*3\", \n v:\"<[[0,[~ 3@10],5]@2 ~]!2 [0,3,4]>*3\", \n w:\"<[[1,[~ 3@10],4]@2 ~]!2 [1,2,3]>*3\", \n x:\"<[1,[~ 2@50],[~ ~ 4@50]]>\",\n z:\"<[[3,4,5] ~]*2>\"\n};\nconst bstrum = {u:\"<[1 2]>\", v:\"<[2 1]>\", w:\"<[1 0]>\", x:\"~\", z:\"~\"};\n\nconst gString = register('gString', (n, pat) => \n  (pat.fmap((v) => { if(v[n]=='x') return note(0).velocity(0);\n      return note(v[n]+standardtuning[n]); } \n  ).innerJoin()));\nconst guitar = (strums,fingers,tuning=standardtuning) => (strums.pickOut(\n    [fingers.pickOut(fingering).gString(0),fingers.pickOut(fingering).gString(1),fingers.pickOut(fingering).gString(2)\n    ,fingers.pickOut(fingering).gString(3),fingers.pickOut(fingering).gString(4),fingers.pickOut(fingering).gString(5)]));\nconst split = register('split', (deflt, callback, pat) => callback(deflt.map((d,i)=> pat.withValue((v)=>{\n  const isobj = v.value !== undefined; const value = isobj ? v.value : v;\n  const result = Array.isArray(value)?(i<value.length?value[i]:d):(i==0?value:d);\n  return (i==0 && isobj) ? {...v,value:result} : result; }))));\n\ngtr: \"<~@2 [[0 1]!2]@16 2@3 3@8>\".pickRestart([\"<Am:u:6 E:v:5 Am:u:4 E:v:3>\",\"<Am:u:2 A:w:7>\",\"<Am:u:2 E:x A:x>\",\"<Dx:z Ds:z>\"])\n  .split([0,0,0],s=>s[0].layer(\n  x=>guitar(s[1].pick(gstrum),x).s(\"gm_acoustic_guitar_steel:1\").release(.1).gain(.8).room(.5).hpf(300).lpf(5000).late(1/64),\n  x=>guitar(s[1].pick(bstrum),x).s(\"gm_pizzicato_strings:1\").transpose(-12).release(.1).gain(.65).room(.6).lpf(1000),\n  x=>chord(x).anchor(\"g5\").voicing().s(\"gm_string_ensemble_1\").gain(.1).room(1).layer(p=>p.pan(1),p=>p.pan(0).late(.1))\n    ).transpose(s[2]))\n\ndrm: \"< 0@2 [0,1]@17 2 ~ 0@8>\".pick([\n     s(\"<rd>*2\"),\n     s(\"<~ sd>*2\"),\n     s(\"<rd>\")\n  ]).bank(\"BossDR110\").room(1).lpf(1800).gain(.6)\n\nuff: \"<[gm_acoustic_guitar_steel:1,gm_string_ensemble_1,gm_pizzicato_strings:1] ~@1000>\".gain(0)\n// @version 1.1",
+      "sha256": "0b074398be607a29ecc897204fcaf9b0e731603c147c940ee51922847586dcfc"
+    },
+    {
+      "title": "(4S,4aS,8aR)-4,8a-Dimethyloctahydronaphthalen-4a(2H)-ol dub",
+      "id": 14201,
+      "entries": [
+        {
+          "id": 14201,
+          "section": "featured",
+          "url": "https://strudel.cc/?dUVTuMaibFzF"
+        }
+      ],
+      "code": "// \"(4S,4aS,8aR)-4,8a-Dimethyloctahydronaphthalen-4a(2H)-ol dub\" @by superlocrianlizardbuzzard\n\n// minimal synth colors\n// writing a string comprising several lines with backticks ``\n$: note(`<\n[<[[d4] [g3]] [d4, d5]>] [- [[a#3, a#4] [a3, a4]@7] [e4, e5]] [<[a4, a5] -> <- - [d4, d5]> [g3, g4]] [[a#3, a#4] [f4, f5]] [-] [-]\n<[e3, e4] [e4 d4]> <[d3, d4] [d4 db4]> [g3,g4] [f#3@5, f#4@5 -] [e3, e4] <- - [- b3, b4]>\n>/2`.sub(0))\n.s(\"[square, sawtooth]\").fm(3)\n  .adsr(\"[.2:2:.2:.2]\")\n  .lpf(277).lpenv(5).lpa(-1).lpd(-1).lpq(3)\n  .distort(\"[2:.1]\")\n  .velocity(perlin.range(0.5, 0.3).slow(1.5))\n  .late(perlin.range(0.04, 0.3).slow(2))\n  .gain(.7)\n  .mask(\"<0!12 1!8 0!12 1!4 0!4>\")\n  .when(\"<0!8 1!4 0!12>\", x=>x.hush())\n  .when(\"<0!24 1!4>\", x=>x.hush())\n.room(\"[.3, .5]\")\n  //.hush()\n\nsetcps(150/60/4)\n\nconst drumstruct = \"Linn9000\"\n\n// synth build on pentatonics and accidentals\n// raising a note with an accidental behind the note\n$: n(`<\n  <[1,2,3,4,5,6]!2 [0, 1,7,3,9,5,6]>\n  [ <[0,1, 2, 3, 4, 5, 8, 7, 6, 5]!2 [0,1 ,2 , 7, 6, 5, 3, 4, 5, 8]>] \n  <[0, 1#,2#,3,4,5,6]!6 [6#,2#,9#,5,11]>\n  <[0bb, 2bb, 3bb, 4bb, 5bb, 6bb] [0##, 2#, 3##, 4#, 5##]>\n  >`)\n  .scale(\"<G!12 E!12>:<minor!2 major!2>:pentatonic\")\n  .s(\"triangle\").adsr(\"[<.1 .125 .15 .2 .3 .4 .35 .25 .12>/3:1:0:0]\")\n.lpf(777).lpa(2.8).lpf(777).lpf(777).lpenv(\"<2>\")\n  .fm(\"<1.5 2.5 3.5 4.5 3.5 2.5>/3\").fmh(\".99\").fmenv(-.2).vib(\"<6!5 5>:.2\")\n  .room(.5)\n  .velocity(.1)\n.hpf(999)\n.mask(\"<0!7 1!999>\")\n\n// pianos build on pentatonics and accidentals\n// regarding tonality change, G major is close to E minor, so G minor / major switching to E minor / major is subjectively smooth enough\n$: n(`\n  <\n  < [0, 2, 5, 6]!2 [1,7,3,9,5,6]>\n  [ [0,1, 2],      <[ 8, 7, 6]!2  [- 7 [6, 5] [3, 4] 5 8]!1>] \n  <[0, 1#,2#,3,4,5,6]!6 [6#,2#,9#,5,11]>\n  <<[0bb, 2bb, 3bb 4bb 5bb 6bb]  [0bb, 2bb, 3bb, 4bb, 5bb, 6bb]> [0##, 2#, 3##, 4#, 5##]>\n  >\n  `).scale(\"<G2!12 E2!12>:<minor!2 major!2>:pentatonic\")\n  .s(\"kawai\")\n  .delay(\"[.3:.1:.3]\")\n  .room(.2).rlp(50)\n.velocity(\"<.7 .5>*<1 8 1 4>\".sub(.3))\n.clip(1.7)\n.hpf(555)\n//.hush()\n\n// kick drum \n$: note(\"<g1!3 e1!3>/4\")\n  .sound(\"sine\")\n  .penv(32).pdec(0.2)\n  .adsr(\"0:1:0:0\")\n  .pcurve(1)\n  .velocity(5)\n  .lpf(33)\n  .coarse(\"<0!4 4!4>/4\")\n  .mask(\"<1 0!3>\")\n\n// drums - when chaining functions, it does not matter if there is a whitespace in between\nconst sweep = 9\n\n$: stack(\ns(\"bd\").struct(\"x(<3!4 5 3!3>, 8, <0 2 0 1 0 1>)\")  .bank(\"RolandTR606\") .gain(\"[2 1 1]\") .mask(\"<0!8 1!992>\")\n  ,\ns(\"hh\").struct(\"x(<7 9 9 8 9 13>, 16, <0 0 2 0>)\").velocity(\"<.5 .2>*<16!3 8!3 16!2>\".add(0))   .bank(drumstruct)\n    .speed(cosine.range(1.15, 1.35).slow(sweep)) .mask(\"<0!4 1!996>\")\n\n  .when(\"<0!8 1!8>\", x=>x.superimpose(x=>x.gain(.1).late(1/16)))\n  ,\n  s(\"<rim>\").struct(\"x(<0 [2 0]>, 4, 2)\").room(\"<.1!3 .2 >/2\") .speed(\"[.79, .8]\")  .bank(drumstruct) .gain(.4) .fast(\"<1!4 2!8>\")\n  ,\n  s(\"[cp, <->]\").struct(\"x(<0 1>, 8, <2 4>)*<1!6 2!2>\").room(\"<.3!3 .4 >/2\") .speed(\"[1.11, 1.14]\")  .bank(\"LinnDrum\") .gain(.05)\n  .fast(\"<1!6 2!2>\").hpf(1111).mask(\"<0!8 1!8>\")\n  )\n  .superimpose(x=>x.speed(cosine.range(1.15, 1.35).slow(sweep + 0.1).gain(.4))\n)\n  .lpf(2222).ftype(\"12db\").late(\"<0 0.01>*2\")\n\n// bass\n$: n(\"<<4!9 5 4!2> 3 <1!5 1b> 0 0 1 <2 2 2 1> 3>*<4!5 5>\")\n  .add(5)\n  .scale(\"<G1!12 E1!12>:<minor major>:pentatonic\")\n  .s(\"gm_acoustic_bass:1\")\n.velocity(\"<1.8 1.1>*<4!5 5>\".add(1.5))\n  .lpf(222)\n.ply(\"<1!8 1!4 2!2 1!2>\")\n.mask(\"<0!8 1!992>\")\n.when(\"<0!16 1!8>\", x=>x.struct(\"[x@1 x@3]*<4!5 5>\").velocity(\"<[2.3 1.1@3][1.8 1.1@3]>*<4!5 5>\"))\n\n// imposing a rhythmn on everything with all, when, an arrow function and struct\nall(\n  x=>x.hpf(\"<999 888 777 667 0!999>/2\")\n  .postgain(.5)\n  .when(\"<0!8 1!4 0!12>\", x=>x.struct(\"x(3,8)\")\n  .stack(s(\"[cp(<0 0 0 3>,8)]\").speed(\"[1.11, 1.14]\").bank(drumstruct))\n  .lpf(saw.range(222, 2222).slow(4)).shape(saw.range(.1, .5).slow(4)))\n\n  .when(\"<0!24 1!4>\", x=>x.struct(\"x(5,8)\").lpf(saw.range(222, 2222).slow(4)) .shape(saw.range(.1, .5).slow(4)).ply(\"<1!24 1!4 1!24 1 [1 2] [1 2] 2 1!999>\"))\n   )\n    \n    \n  \n\n\n// @version 1.1",
+      "sha256": "47b07193dc8ec9e32a58a0e173d1313bc2ee213763c6cf7b2243dce02bdaf76e"
+    },
+    {
+      "title": "dash on the train",
+      "id": 14082,
+      "entries": [
+        {
+          "id": 14082,
+          "section": "featured",
+          "url": "https://strudel.cc/?o6g5EvceDlmR"
+        }
+      ],
+      "code": "// @title dash on the train @by todepond\n\n$: note(\"[C G], <D Fb B C A>*[0.5,2]\")\n  // .rev()\n  .sound(\"sawtooth\").cpm(30).gain(.4)\n.lpf(\"<100 200 300 400 500 600 700 800 900 1000 1100 1200 1300 1400 1300 1200 1100 1000 900 800 700 600 500 400 300 200>/4\")\n  .room(1)\n  // .jux(pan)\n  .pan(\"<0 1>/2\")  \n.delay(1)\n.roomsize(\"10\")\n// .slow(\"1, .5, .25\") // swap to this\n\n  // $: note(\"F\")\n  //   .sound(\"piano\").cpm(30)\n  //  .lpf(800)\n\n  \n.slow(\".1275\").gain(.8)\n\n// @version 1.1",
+      "sha256": "ce0cb6ca99753efad5e5e122cd8e43083eb0062758aca257fc3eddc7f52e2205"
+    },
+    {
+      "title": "Another Satellite",
+      "id": 13962,
+      "entries": [
+        {
+          "id": 13962,
+          "section": "featured",
+          "url": "https://strudel.cc/?WUmfoaROg9Kv"
+        }
+      ],
+      "code": "// \"Another Satellite\" (work in progress)\n// song @by XTC\n// script @by eefano\nsetcps(119/60)\nsamples({'gtr': {'g3': 'https://cdn.freesound.org/previews/705/705412_11110011-lq.mp3'}})\nconst split = register('split', (deflt, callback, pat) => \n  callback(deflt.map((d,i)=>pat.withValue((v)=>Array.isArray(v)?(i<v.length?v[i]:d):(i==0?v:d)))));\n\ngtr: \"<0:.6@2 1:.6@8 2@2 3@2.5 1:.6!2>/16\".split([0,1],(y)=>y[0].pickRestart([\n  \"<bb2@7 eb3>/2\",\n  \"<[bb2@3 eb3]!2 [c#3 f#3] [e3 d3] [g2@3 f3] [bb2@3 eb3] g2@2 >/8\",\n  \"<a3 g3 a3 f3 g3 f3 g3 e3>/4\",\n  \"<a3 g3 a3 f3 g3 f3 c3@4>/4\"\n]).s('gtr').begin(.045).end(.5).clip(1).note().gain(.9).room(2).gain(.8).velocity(y[1]))\n\nvox: \"<~@2 0:0.6@8 1 2 1 3@1.5 [4:.06,5:.06]!2>/16\".split([0,1],(y)=>y[0].pickRestart([\n  `<~ d4:.7!3 d4:1 c4:.7!4 ~ f4 ~ d4@2:1 c4:1 bb3 ~ d4:.7!3 d4:1 c4:.7!4 d4!2 f4 d4!2 d4:1 db4 db4@3:1 ab3 ab3@2 ~@2\n  [db4!3]@6 db4 db4@2:1 d4 d4 ~ d4 ~@3 d4@2 d4 d4@2 d4 e4 d4@3 b3 b3@2:1 a3:1 g3@2 ~\n  ~ d4 d4@2 c4!3 c4@2 f4 d4@2:1 c4:1 bb3@3:1 g3:1 f3@2:1 c4@4:1:4 c#4@10:1 ~@22>*2`,\n  `<~@4 e4@4 e4@3 d4 db4@2:1 b3@2:1 a3@4 a4@3 a4!2 e4 e4@3:1 d4:1 c4@2>*2`,\n  `<~@4 d4@4 d4@3:1 c4:1 b3@2 a3@2:1 c4@4:1:4 b3@4:1:-1 ~@4>*2`,\n  `<~@4 [d4:1 e4:1 d4:1 c4:1 b3:1 a3]@12 c4:1:4@8 d4:1:2@8 a3:1:-4@8 ~@8>*2`,\n  `<~ d4:.5!2 d4@2:1 c4:.5!3 c4 ~ f4 ~ d4@2:1 c4:1 bb3 ~@2 d4:0.5 d4@2:1 c4:.5 c4:1 bb3:.5 bb3@2:1 f3@2:1 c4:1:4@3 ~@2 >*2`,\n  `<~ f4:.5!2 f4@2:1 eb4:.5!3 eb4 ~ bb4 ~ f4@2:1 eb4:1 d4 ~@2 f4:0.5 f4@2:1 eb4:.5 eb4:1 d4:.5 d4@2:1 bb3@2:1 eb4:1:4@3 ~@2 >*2`,\n]).split([0,.9,0],(x)=>note(x[0]).clip(x[1]).penv(x[2])).patt('.2').s('gm_oboe').lpf(30000).room(.5).gain(1.7).velocity(y[1]))\n\n$: s(\"<hh*2>\").bank(\"RolandMT32\").gain(.05).room(.2)\n$: s(\"<bd ~ ~ <bd ~>>*2\").bank(\"RolandMT32\").gain(\"<0.4 0.2>\").room(.2)\n$: s(\"<[[~ ~ rim]!5]@15 ~>*2\").bank(\"RolandMT32\").gain(.2).room(.2)\n\n\n// @version 1.1",
+      "sha256": "bec2643191236d25a3fffdbd75b79acd16cf39d8c90ff17d4af424fc97aad978"
+    },
+    {
+      "title": "Polish cow song",
+      "id": 13909,
+      "entries": [
+        {
+          "id": 13909,
+          "section": "featured",
+          "url": "https://strudel.cc/?9KFnyOYWmx2_"
+        }
+      ],
+      "code": "// \"Polish cow song\" @by Rogolop\n// \"Gdzie jest biały węgorz ? (Zejście)\" by Cypis\n// Abridged\n\nsetcpm(120)\n// DRUMS\n$: sound(\"<bd sd>\").bank(\"RolandTR909\").gain(\"0.3\")\n// VIOLIN\n$: n(`< -!16\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2 \n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n>`).scale(\"A:minor\").transpose(\"<[8P 0]>\").sound(\"gm_violin:6\").room(0.5).gain(\"3\")\n.velocity(`< .9 .7 .4 .2    .9 .7 .4 .2    .9 .7 .4 .2    .2 .2 .2 .2 >`)\n// BASS\n$: n(`< -!15 [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n>`).scale(\"A:minor\").transpose(\"<-15P>\").sound(\"gm_fretless_bass\").decay(0.3).room(0.2).gain(\"3\")\n// INTRO\n$: n(`<\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n>`).scale(\"A:minor\").sound(\"gm_accordion:1\").decay(0.5).room(0.3).gain(\"3\").pan(\"0.4\")\n// CHORUS\n$: n(`< -!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n>`).scale(\"A:minor\").transpose(\"-8P\").sound(\"gm_bassoon:0\").decay(0.5).room(0.3).gain(\"3\").pan(0.6)\n// VERSE\n$: n(`< -!32 -!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n>`).scale(\"A:minor\").transpose(\"-8P\").sound(\"gm_synth_bass_2:0\").room(0.3)\n  .gain(\"2.5\").pan(0.5)\n\n// @version 1.1",
+      "sha256": "d6820ad59394cfcb89835349c297096f69009e0348c36cdba14e2ab3153559e2"
+    },
+    {
+      "title": "Outrun June 25",
+      "id": 13850,
+      "entries": [
+        {
+          "id": 13850,
+          "section": "featured",
+          "url": "https://strudel.cc/?gyCZOciyjqxS"
+        }
+      ],
+      "code": "//\"Outrun June 25\" @by shadesDrawn\nvar cpm = 28;\n\nstack(\n\nnote(`\n[f3 ab3 g3]\n[eb3 g3 c3]\n[f3 bb3 ab3]\n[eb3 c3 g3 f3]\n`)\n  .slow(4)\n  .euclidRot(4,16,2)\n  .sound(\"sawtooth\")\n  .fm(0)\n  .lpf(800)\n  //.release(2)\n  .decay(0.12)\n  .pan(0.3)\n  .gain(1.0)\n  .delay(sine.range(0,0.75).slow(10))\n  .mask(\"<0!4 1!500>\")\n  //.phaser(1).phasersweep(2000)\n,\n\nnote(`\n[f5]\n`)\n  .euclidRot(3,16,10)\n  .sound(\"sine\")\n  .fm(0)\n  .lpf(400)\n  .pan(0.8)\n  .mask(\"<0!8 1!500>\")\n  .postgain(sine.range(0.6,1.6).slow(24))\n,\n\nnote(`\n[c5@0.5 f4@0.5 f5@3]\n[eb5@0.5 f5@0.5 bb4@3]\n[db5@0.5 c5@0.5 f4@3]\n[f4@0.5 g4@0.5 bb4 ab4 g4]\n`)\n  .slow(4)\n  .sound(\"piano\")\n  .gain(0.5)\n  .clip(3)\n  .postgain(sine.range(1,0).slow(24))\n  .mask(\"<0!8 1!500>\")\n  .pan(0.65)\n,\n\nnote(`\n[f1 ~ ~ f1 ~ ~ f1 ~ ~ f1 ~ ~ f1 ~ ~ f1]\n[db1 ~ ~ db1 ~ ~ db1 ~ ~ eb1 ~ ~ eb1 ~ ~ eb1]\n`)\n  .slow(2)\n  .sound(\"gm_synth_bass_2:0\")\n  .lpf(800)\n  .pan(0.4)\n  .release(0.25)\n  .room(0.2)\n,\n  \nsound(\"bd!4\")\n  .bank(\"RolandTR909\")\n  .gain(0.35)\n  .room(0.15)\n,\n\nsound(\"~ hh ~ [hh hh] ~ hh ~ hh\")\n  .bank(\"RolandTR909\")\n  .gain(0.08)\n  .crush(5)\n,\n\nsound(\"~ sd ~ [sd ~ ~ sd]\")\n  .bank(\"RolandTR909\")\n  .gain(\"0.15 0.15 0.15 0.15 0.09\")\n,\n\nnote(`\n[f4 g4 f4 g4 ab4 g4 f4@2]\n[eb4 f4 eb4 f4 c4 db4 eb4@2]\n[f4 g4 f4 g4 bb4 g4 ab4@2]\n[~ eb4 c4 bb3@2 g4@2 f4]\n`)\n  .slow(4)\n  .sound(\"gm_electric_guitar_clean:4\")\n  .lpf(2000)\n  .pan(0.65)\n  .gain(1)\n  .phaser(4).phasersweep(2000)\n  .mask(\"<0!20 1!12>\")\n,\n\n).cpm(cpm)\n// @version 1.1",
+      "sha256": "fe79ba3def82c7144e40e35e9d5a2bd4c364c3eb8ede6f82b2dcffdd28640853"
+    },
+    {
+      "title": "Common West African bell v240624",
+      "id": 13821,
+      "entries": [
+        {
+          "id": 13821,
+          "section": "featured",
+          "url": "https://strudel.cc/?DDNzTHyVj6A1"
+        }
+      ],
+      "code": "// \"Common West African bell v240624\" @by Prince Lucija\nsetcpm(134/4)\nstack(\n  s(\"bd:3(<4!7 <3 6>>,12)\") ,\n  s(\"sd:3(<2!3 3>,12,3)\"),\n  s(\"hh:3(2,3,1)*4\"),\n  s(\"rim(1,3,2)*4\"),\n  s(\"perc:2(7,12,3)\"),  // standard african bell pattern\n  s(\"perc:0(3,12,3)\")\n)\n  .bank(\"BossDR550\")\n  .lpf(rand.rangex(550,20000).fast(12))\n  .lpe(1)\n  .end(rand.rangex(0.1,.5))\n  .lpq(saw.range(1,9).slow(8))\n  .crush(rand.range(4,32))\n  .pan(rand)\n  .room(saw.range(.01,.4).slow(4))\n  .delay(saw.range(.01,.3).slow(4))\n  .dt(rand.range(.001,.1).fast(12))\n  .dfb(\".5\")\n\n\n\n// @version 1.1",
+      "sha256": "0bd70ed8610e3f3aeb2b00989049da81a66f752487213dc25ebbacca2a27f091"
+    },
+    {
+      "title": "theres no soul here",
+      "id": 13794,
+      "entries": [
+        {
+          "id": 13794,
+          "section": "featured",
+          "url": "https://strudel.cc/?OEkKcZ3CdeeA"
+        }
+      ],
+      "code": "// \"theres no soul here\" @by froos\n// @date 23-08-21\n// @version 1.0\n\nlet chords = arrange(\n    [16, \"<Fm!3 [Fm!3 Em]>/2\"],\n    [16,\"<Fm <Cm C>>/2\"],\n    [8,\"<Db>/2\"],\n    [8,\"<Gb>/2\"],\n  ).chord()\n\nsetcpm(91/2)\n\nlet warble = x=>x.add(note(perlin.range(0,.5)))\n\nlet guitar = chords.s(\"sawtooth\")\n  .dict('legacy').voicing().fm(8).fmh(1.0009).gain(.25)\n  .lpf(perlin.range(900,4000)).lpq(8)\n  .struct(\"[~ x]*2\").clip(.5).delay(\".5:.125:.8\").room(1)\n  .layer(warble)\n  //.hush()\n\nlet piano = n(\"<0 4 2>*[<3 2>/32]\")\n  .set(chords).s('piano').dict('legacy').voicing()\n  .inside(2,juxBy(.5,rev))\n  .lpf(2000).gain(.5).room(perlin.slow(2))\n  .layer(warble)\n  //.hush()\n\nlet bass = n(\"2\").set(chords).anchor(chords.rootNotes(1))\n  .dict('legacy').voicing()\n  .s(\"gm_acoustic_bass\")\n  .sometimesBy(\"0 .5\",add(note(\"12\")))\n  .ply(2).clip(.5).ply(\"<1!4 [2 3]>\")\n  .lpf(900).lpq(2).attack(.02).ds(\".1:.5\").release(.02)\n  .layer(warble)\n  .gain(3)\n  //.hush()\n\nlet drums = s(\"bd [~@3 bd:0:.5?],~@1.02 [sd,rim],hh*4\")\n  .gain(.8).bank('RolandTR707').speed(.8)\n  .off(-1/8, x=>x.mul(gain(.25)).degrade().speed(.7))\n  //.hush()\n\n\n//////////////////////////////\n// PR: https://github.com/tidalcycles/strudel/issues/670\nlet binpatn = (dec, len) => seq(\n  ...(typeof dec === 'string' ? [1] :\n    dec.toString(2)\n    .padStart(len, '0')\n    .split('')\n    .map(Number)\n     )\n)\n// registers a binpat mask with the given length\nlet maskn = (n) => register('mask'+n, (dec, pat) => \n  pat.mask(\n    reify(dec).fmap(v => binpatn(v, n)).squeezeJoin()\n  ), false)\n\nlet mask2 = maskn(2)\nlet mask3 = maskn(3)\nlet mask4 = maskn(4)\n//////////////////////////////\n\n\nstack(\n  drums .mask4(\"<0 0 0 1 x!4 7 x x x 9 x x x x x 0 0 0 0>/2\"),\n  guitar.mask4(\"<0 0 0 0 0!4 x x x x x x x x x x x 9 x x x x>/2\"),\n  piano .mask4(\"<x x x x x!4 x x x x x x x x x x x x x x x x x x>/2\"),\n  bass  .mask4(\"<0 0 x x x!4 x x x x x x x x 0 0 0 1 x x x x x x x x>/2\"),\n)\n.add(room(.25))\n",
+      "sha256": "0a7d8325d3954a84dfc85a3d3c74cf8977446e37372ec974ccdb7af1ce828297"
+    },
+    {
+      "title": "Elvens on Mars",
+      "id": 13763,
+      "entries": [
+        {
+          "id": 13763,
+          "section": "featured",
+          "url": "https://strudel.cc/?KzWm4qorFbWF"
+        }
+      ],
+      "code": "/*  @title Elvens on Mars\n    @by Prince Lucija \n    @url https://prin.lu            \n    @version 1.0 \n\n    I was watching this 12tone video \n    https://www.youtube.com/watch?v=pY27JurC1Y0 \n    about 'Life on Mars?' track by David Bowie....\n    some pretty interesting chord progressions there...\n*/\n\nstack(\n  n(\"[0 .. 11]\")\n\n  // .chord(\"<Fm Fm7 Fm9 Fm11>\".slow(2))\n  .chord(\"<<[Fm7|Fm9|Fm11] <Ab7 Ab9>> Cm7 Ebm9 <F7 Dm7 B>>\".slow(2))  \n\n  .voicing()\n  .add(note(\"-12, -24.2, <.1 [.1, 12.1]>\".slow(8)))\n  .s(\"square, triangle, sawtooth\".fast(8))\n  .lpf(saw.rangex(50,cosine.range(10,10).slow(6)).slow(8))\n  .lpe(rand.range(3,6).slow(8))\n  .lpq(saw.range(1,1).slow(8))\n  .room(rand.range(0.1,1.5).slow(1))\n  .gain(\".2\")\n  .dist(\"3:.17\")\n  .hpf(rand.rangex(10,200).slow(8))\n  .pan(rand)\n  .delay(\".1:0.5\")\n,\n  // --------------------------------------//\n  s(` bd <~ bd> [~|hh] ~    \n      hh ~ [hh|bd] [~|bd] \n      [sd|cp] ~ [~|hh|bd] [hh|oh]\n    `)\n  .bank(\"RolandTR909\")\n  .end(rand.rangex(\n    .01, tri.range(.1, .9).slow(4)\n  ))\n  .distort(\"2:.8\")\n  .lpf(saw.rangex(\n    cosine.range(4000,2000).slow(2), 5000).slow(8))\n  \n  .delay(\"<0.01@3 0.5>\")\n  .dt(\"[0.01|0.02|0.03]*4\")\n  .dfb(\"0.4\")\n  .room(saw.rangex(.001,.4).slow(4))\n).cpm(40).scope()",
+      "sha256": "509081d2eb3af4d1d38b4dcf18fa618a7b9da932cccb2d19e530739bfc4b04ff"
+    },
+    {
+      "title": "more 7s",
+      "id": 13745,
+      "entries": [
+        {
+          "id": 13745,
+          "section": "featured",
+          "url": "https://strudel.cc/?pt6WNylxzqyQ"
+        }
+      ],
+      "code": "// \"more 7s\" by @yaxu\n\nsetcps(0.25)\nsamples('github:yaxu/spicule/master')\n\n$: n(\"2 - 4 - 6 8 9\")\n  .s(\"claus\")\n  .s_expand(\n    \"4 3 2 1 1 1\",\n    \"2 2 2\".div(3)\n  )\n  .clip(1).speed(2).color(\"blue\")\n  .jux(x => x.rev().speed(0.75).color(\"green\"))\n  .steps(14)\n  ._pianoroll()\n\n$: s(\"hh hh ~ hh:3 ~ hh:3 ~\").steps(7)\n   .room(0.5).sz(2).speed(2)\n   ._pianoroll()\n\n\n\n\n// @version 1.1",
+      "sha256": "9d632e2f1516b201c898607598e37018b2504e2e54e0908d951ded3cc7567264"
+    },
+    {
+      "title": "Riding the 46 Cycles",
+      "id": 13682,
+      "entries": [
+        {
+          "id": 13682,
+          "section": "featured",
+          "url": "https://strudel.cc/?-oOPkuOScUdp"
+        }
+      ],
+      "code": "//\"Riding the 46 Cycles\" @by shadesDrawn (drums by superdirtspatz)\nvar cpm = 30;\nsamples('github:yaxu/clean-breaks')\n\nstack(\n\nnote(`\n[<e5 [d5 g5]>]\n[<d5 a5>]\n[<c5 [e5 d5]>]\n[<b4 b5>]\n`)\n  .slow(4)\n  .euclidRot(6,16,10)\n  .sound(\"sine\")\n  .fm(0.0)\n  .delay(sine.range(0,0.5).slow(18))\n  .gain(sine.range(0.9,0).slow(24))\n  .crush(8)\n  .pan(0.3)\n  .mask(\"<0!8 1!500>\")\n  //.hush()\n,\n\nnote(`\n[[e3,a3,c4]@2 [e3,a3,c4] [e3,a3,c4]\n[e3,a3,d4]@2 [e3,a3,d4] [e3,a3,d4]\n[e3,a3,b3]@2 [e3,a3,b3] [e3,a3,b3]\n[e3,a3,c4]@2 [e3,a3,c4] [e3,a3,c4]]!3\n\n[[e3,a3,e4]@2 [e3,a3,e4] [e3,a3,e4]\n[e3,a3,f4]@2 [e3,a3,f4] [e3,a3,f4]\n[e3,a3,g4]@2 [e3,a3,g4] [e3,a3,g4]\n[e3,a3,d4]@2 [e3,a3,d4] [e3,a3,d4]]\n`)\n  .slow(4)\n  .sound(\"sawtooth\")\n  .fm(sine.range(0,4).slow(6))\n  .lpf(1000)\n  .decay(0.3)\n  .pan(0.6)\n  .gain(sine.range(1.2,0.2).slow(20))\n  .mask(\"<0!24 1!500>\")\n  //.hush()\n,\n\nnote(`\n[d1@2 d1 d2@2 d1 g1 a1]\n[g1@2 g1 g2@2 g1 b1 c2]\n[a1@2 a1 a2@2 a1 c2 d2]!2\n\n[d1@2 d1 d2@2 d1 g1 a1]\n[g1@2 g1 g2@2 g1 b1 c2]\n[a1@2 a1 a2@2 a1 c2 d2]\n[a1@2 a1 a2@2 a1 c3 b2]\n\n`)\n  .slow(8)\n  .sound(\"gm_acoustic_bass\")\n  .gain(2)\n  .room(1)\n  .lpf(200)\n  .clip(0.7)\n  .release(0.3)\n  //.hush()\n,\n\nnote(`\n[f4,e5]\n[<[f4,d5] [f4,g5]>]\n[<[e4,c5] [[e4,a5]@2 [f4,e5] [f3,d5]]>]@2\n`)\n  .slow(4)\n  .sound(\"gm_epiano2\")\n  //.lpf(1800)\n  //.fm(2)\n  .release(3)\n  .attack(0.3)\n  .phaser(1)\n  .phasersweep(1000)\n  .pan(0.75)\n  .gain(1.5)\n  //.gain(\"<1.4!8 0!8>\")\n  //.hush()\n,\n\n//Drums from \"46 cycles\" by superdirtspatz\ns(\"movement\")\n  .loopAt(2)\n  .chop(\"<16!20 8!2 16!10>\")\n  .velocity(\"<.25 .45>*8\")\n  .struct(`<\n  x(8,8)!8 \n  x(8,8)!3 \n  x(11,16)\n  x(8,8)!3 \n  x(13,16)\n    >`)\n.when(\"<0!24 1!4 0!20>\", x=>x.shape(.1).lpf(saw.range(222, 3333).slow(4)).lpq(saw.range(8, 2).slow(4))\n       .delay(\"[.5:<0.01 0.02 0.03 0.04 0.05 0.06 0.07 [0.08 0.11]>*2:.5]\"))\n  \n.when(\"<0!30 1!4 0!12>\", x=>x.lpf(3333).shape(.3).superimpose(x=>x.late(saw.range(.00005, 0.007).slow(4))))\n  .gain(1.0)\n  //.hush()\n,\n  \n).cpm(cpm)\n// @version 1.1",
+      "sha256": "964c4c44e1a77733323b0a250060d1ce8e5208e97eb16be18c58b70fd8c98275"
+    },
+    {
+      "title": "Lavatera de Lenguaje Versátil 2024 06 17",
+      "id": 13678,
+      "entries": [
+        {
+          "id": 13678,
+          "section": "featured",
+          "url": "https://strudel.cc/?Q19qe1_UCJg1"
+        }
+      ],
+      "code": "//\"Lavatera de Lenguaje Versátil 2024 06 17\" @by Ángel Jara\nsetcps(105/60/4)\nsamples({ loopAmen02: 'https://cdn.freesound.org/previews/736/736476_16019844-hq.mp3' })\n\n  bateria00:\n  s(\"loopAmen02\").chop(8).color(\"#909\").slow(1).loopAt(1)\n  ._pianoroll({ labels: 1,cycles : 1 })\n    // .hush()\nbateria01:\n  s(\"-!7 [sd*16]\")\n    .degradeBy(0.5)\n    .gain(rand.range(0.5,0.9)).color(\"#f00\").slow(8)\n  ._pianoroll({ labels: 1, cycles : 8    })\n// .hush()\n\nlaMelodia:\nnote(irand(16).segment(32).scale(\"C3:dorian@3 Db3:diminished D3:dorian@3 Ab:lydian:dominant\"))\n   .degradeBy(0.6)\n  .ribbon(\"<321324!3 85244>\", 16) \n  .slow(2)\n  .lpf(2000)\n  .s(\"sawtooth\").room(0.5).gain(rand.range(0.5,0.9))\n  .legato(rand.range(0.125,1.9)).color(\"#00f\")\n._pianoroll({ labels: 1 , cycles : 2 })\n// .hush()\n\nelArpegio:\nnote(\"[c2, ds3, as3, d4]@3 [ds2, g3, as3, e4] [d3, f3, c4, e3]@3[cs2, g3, b3, f4]\")\n  .arp(\"[1 2 0 3] [0 4 2 3] [4 5 0 1][2 1 3 0]\").s(\"sawtooth\")\n  .lpf(650)\n  .slow(2).color(\"#0f0\")\n._pianoroll({ labels: 1 , cycles : 2 })\n// .hush()\n\nelAcorde:\nnote(\"[c2, ds3, as3, d4]@3 [ds2, g3, as3, e4] [d3, f3, c4, e3]@3[cs2, g3, b3, f4]\").s(\"sine\").legato(0.9).slow(2).color(\"#6fb\")\n._pianoroll({ labels: 1 , cycles : 2 })\n// .hush()\nElBajo:\n  note(\"[c2(3,6,<0 1>)]@3 cs2 [d2(3,6, 1)]@3 cs2\").add(note(-0)).s(\"sawtooth\").legato(0.5)\n    .distort(1.5)\n    .slow(2)\n  .lpf(sine.range(\"<600!8 400!8 300!8 600!8 800!8 400!8 >\",\"<700!8 800!8 1200!8 1700!8 2400!8 800!8>\").slow(2))\n  .lpq(12).gain(rand.range(0.5,0.9)).color(\"#ff1\")\n  ._pianoroll({ labels: 1 , cycles : 2 })\n// hush()\n// Cm9 C#o7 Dm9 Db7lydian\n\n// @version 1.1",
+      "sha256": "d3e9d6bf1698412d1ca6e759fb03cc90cc1b6b8929ea4d8b998e4917f80b5f12"
+    },
+    {
+      "title": "Oleander de Operación Lógica 2024 06 16",
+      "id": 13649,
+      "entries": [
+        {
+          "id": 13649,
+          "section": "featured",
+          "url": "https://strudel.cc/?Ep6rV7YHAkum"
+        }
+      ],
+      "code": "//\"Oleander de Operación Lógica 2024 06 16\" @by Ángel Jara\nsetcps(143/60/4)\n\n\n  bateria00:\n  s(\"bd [bd bd - bd], sd(2,4,1), hh*8\").color(\"#939\")\n  ._pianoroll({ labels: 1 })\n    // .hush()\nbateria01:\n  s(\"-!7 [- [sd*12]@3]\").gain(rand.range(0.5,0.9)).color(\"#f39\").slow(8)\n  ._pianoroll({ labels: 1, cycles : 8    })\n// .hush()\n\nElBajo:\n  note(\"[d3@ a1 a2][a1 e1@2 d1][- cs2 a1 ds1 ][a2 c1@3]\").add(note(-0)).s(\"sawtooth\").legato(0.5)\n    .distort(3)\n    .slow(1)\n  .lpf(sine.range(\"<600!8 400!8 300!8 600!8 800!8 400!8 >\",\"<700!8 800!8 1200!8 1700!8 2400!8 800!8>\").slow(2))\n  .lpq(rand.range(4,\"<[18 25 36 25 10 20 15 9 32 12 10 20 12 18]!3 [10 25 10 9 10 10 10 10 40 10 32]>\")).gain(rand.range(0.5,0.9)).color(\"#ff9\")\n  ._pianoroll({ labels: 1 , vertical: 1, cycles : 1 })\n\n// Am7\n\n// @version 1.1",
+      "sha256": "47721b5b7b11733696a109dc03eb64626c54444d3a4e91bbeb524477a9f2256b"
+    },
+    {
+      "title": "G.T.A. Hoffmann",
+      "id": 13622,
+      "entries": [
+        {
+          "id": 13622,
+          "section": "featured",
+          "url": "https://strudel.cc/?5LIFSouqiJLB"
+        }
+      ],
+      "code": "// \"G.T.A. Hoffmann\" @by superdirtspatz\n\nsamples('github:yaxu/clean-breaks')\n\nlet p1 = n(\"[0, 5, <10 12 10!2>]@2 <[3, 5][3 <[7, 5][6,5]>@2]>@3 3@2 [3, <6 7 6>]/2\")\n  .scale(\"<G F <D D D A>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n\nlet p2 = n(\"[[5, <<1 0> 2 3>, 0], <10 10 <12 9 10>>]@2 <[3, 5, 2][3 <[7 5][6 5]>@2]>@3 3@2 [3, <6 7 6>]\")\n  .add.squeeze(n(\"<0 [0 1 2]>\"))\n  .scale(\"<G F <D>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n  .when(\"<0 0 0 0 0 1>\", x=>x.ply(2)).ply(2)\n\nlet p3 = n(\"[[5, <<1 0> 2 3>, 0], <10 10 <12 9 10>>]@2 <[3, 5, 2][3 <[7, 5][6, 5]>@2]>@3 3@2 [3, <6 7 6>]\")\n  .add.squeeze(n(\"<0 [0 1] 0 [0 1 0]>\"))\n  .scale(\"<G F <D>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n  .when(\"<0 0 0 0 0 1>\", x=>x.ply(2))//.ply(2)\n\n// pianos\nx1: \"< p1@12 p2@12 p3@8>\".pick({p1, p2, p3})\n  //.ply(2)\n  .shape(\"<.777@12 .8@12 .822@12>\").gain(.111)\n  .when(\"<0!10 1!2>\", x=>x.ply(2))\n\n  //.hush()\n\n\n// using phasing by using different speeds\n\nlet d1 = s(\"<eeloil [sport sport]>/2\")\n  .fit()\n//  .splice(8, \"[0 1 2 3 4 5 6 7]\")\n.mul(speed(\"1, <1.005 1.003 1.001>/2.718\"))\n  .shape(.35).gain(.2).scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n//  .jux(rev)\n\nlet d2 = s(\"<[sport sport]>/2\")\n  .fit()\n  .splice(8, \"[0 1 2 3 4 5 6 7]\")\n.mul(speed(\"1, <1.005 1.004 1.003 1.002 1.001>/1.5\"))\n  .shape(.35).gain(.2).scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n//  .jux(rev)\n\nlet d3 = s(\"<[sport sport]>/2\")\n  .fit()\n  .splice(8, \"[1 1 <2!2 [[2, 2] [2]] 2!3> 3 4 5 6 <7!5 [1 2]>]\")\n  .when(\"<0!12 1 0!5>\", x=>x.ply(\"[2 1]\").shape(\"<.35 .1>*8*2\"))\n.mul(speed(\"1, < 1.001>/1.5\"))\n  .shape(.35).gain(.2)\n  \n  .stack(s(\"hh*<4!7 8!2>\").bank(\"RolandTR707\").velocity(\"<.4 .1>*<4!7 8!2>\"))\n  \n         .scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n\n\nx2: \"< d1@12 d1@12 d2@8 d1@12 d1@12 d3@8>\".pick({d1, d2, d3}).mask(\"<0 1!999>\")\n\n//kicks\nx3: note(\"<G1 D1 <D1 D1 D1 A1>>\")\n  .struct(\"x@2 - - [- <- x>] - -\")\n  .s(\"sine\")\n  .decay(1.977)\n  .pdec(.41).penv(32)\n  .pcurve(1).lpf(277).velocity(5).dist(1)\n//.off(\"[.625, < ~ ~ .5>] \", x => x.velocity(3))\n  .mask(\"<1 0>\")\n\nx4: chord(\"[<Gm Fm <Dm Dm D>>!2 -!2]\").voicing()\n  .add(note(\"[0, 12]\"))\n  .dec(.2).delay(\".777:.1:.888\")\n  .orbit(9).s(\"[triangle, sine]\")\n  .lpf(200).fm(8)\n  .lpd(.1).lpenv(\"<<2.5 -3>!2 -3>\").lpq(sine.range(4.5, 7.5).slow(7.77))\n.shape(.15).gain(.111)\n.mask(\"<0 0 0 0 0 0 1 1 1>\")\n\n// dub stabs with high delay feedback\nx5: chord(\"[<Gm Fm <Dm Dm D>>!1 -!2]\").voicing()\n  .late(.75)\n  .add(note(\"[0, 12]\"))\n  .dec(.4)\n   .delay(.777)\n  .delaytime(.1)\n  .delayfeedback(.555)\n  .sometimesBy(.3, x=>x.delayfeedback(.777))\n  .sometimesBy(.1, x=>x.delayfeedback(.888))\n\n  \n  //.delay(\".777:.1:<.555 .555 .555 .777>\")\n \n  .orbit(9).room(1)\n  .s(\"[triangle, sine]\")\n  .lpf(222).fm(12)\n  .lpd(.1).lpenv(\"<<2.5 2.75 3>!2 3>\").lpq(sine.range(4.5, 7.5).slow(7.77))\n.shape(.35).gain(.111)\n.mask(\"<0!12 0!12 1!8>\")\n\n//all(x=>x.coarse(8).lpf(777))\n\n\n// @version 1.1",
+      "sha256": "a699d9a5ccf865c5cdc9abdfe15857599142bccc28353e42b90f54d9175f87de"
+    },
+    {
+      "title": "Bergheini auf dem Weg nach Hause",
+      "id": 13621,
+      "entries": [
+        {
+          "id": 13621,
+          "section": "featured",
+          "url": "https://strudel.cc/?xOKzOq28QWdD"
+        }
+      ],
+      "code": "// \"Bergheini auf dem Weg nach Hause\" @by $$$otter\nsetcps(2.5)\n\n$: s(\"bd*4\").struct(\"<[x ~ x x]!32 x x>\")\n.bank(\"Linn9000\")\n.velocity(\"<1 ~ .05 .1>*4\")\n.compressor(\"-10:8:10:0.14:3\").gain(.8)\n.room(.2)\n.mask(\"<[1 1] 1 1 0 1!16>/32\")\n\n$: s(\"bd\")\n.bank('YamahaRM50')\n.compressor(\"-10:8:10:0.14:3\").gain(.7)\n.mask(\"<[0 1] 1 1 0 1!16>/32\")\n\n$: s(\"hh*2\").struct(\"<[~ x]!16 x*4 x*8>\")\n.bank(\"OberheimDMX\")\n.velocity(\"<[.05 .07 .08] .15>\")\n.compressor(\"-20:20:10:3:6\").gain(.35)\n.room(.8).roomsize(.5)\n.mask(\"<[0 0] 1 1 1 1!16>/32\")\n\n$: chord(\"<Am Am7 C Gm>/8\").dict('ireal').anchor('A3')\n.voicing()\n.sound('gm_ocarina')\n.off(.2, x=>x.velocity(\"<.4 .2 .3>*16\"))\n.room(.8)\n.delay(.1)\n.gain(\"<0 0 [.3 .4.5 .6] .7 .7!16>/32\")\n.mask(\"<[0 0] 0 1 1 1!16>/32\".early(.05))\n\n$: n(\"[1 2 4 7]\").chord(\"<Am Gm>/8\").dict('ireal')\n.voicing()\n.sound(\"sine\")\n.fm(\"1 3 5\")\n.fmattack(\".3 .7 2\")\n.fmh(\"1 5 7 9\")\n.velocity(.66)\n.room(\"<1 3!8>/16\")\n.mask(\"<[0 0] 0 0 1 1!16>/32\".early(.05))\n\n$: n(\"[1 2 4 7] [1 3 8]\".euclid(3,8)).chord(\"<Am Gm>/8\").dict('ireal')\n.voicing()\n.sound(\"sine\")\n.fm(\"1 3 5\")\n.fmattack(.6)\n.fmh(2)\n.velocity(.66)\n.room(\"<1 3!8>/16\")\n.mask(\"<[0 0] 0 0 0 1!16>/32\".early(.05))\n\n$: n(\"[[1 2 4 7] [1 3 8]] [[1 2 4 5 7] [1 3 8]]\").sometimesBy(.4, x=>x.add(2))\n.chord(\"<Am Gm Am7>\").dict('ireal')\n.voicing().slow(4)\n.sound(\"square\")\n.fm(\"1 3 5\")\n.fmattack(.4)\n.fmh(4)\n.velocity(.33)\n.room(\"<1 3!8>/16\")\n.mask(\"<[0 0] 0 0 0 0 1!5 0 1!4 0 1!3>/32\".early(.05))\n\n\n\nall(x=>x.gain(1.5))\n// @version 1.1",
+      "sha256": "afc343b9959c44a6b65f6c8657df900f872a7d8d87c69ffbc03d4142ed8bb772"
+    },
+    {
+      "title": "Computer says no",
+      "id": 13587,
+      "entries": [
+        {
+          "id": 13587,
+          "section": "featured",
+          "url": "https://strudel.cc/?rgvSDadZiHq9"
+        }
+      ],
+      "code": "// @title Computer says no\n// @by Reinbim\n\np1: stack(s(\"[[bd bd cp hh*2] | [bd:2 ~ hh lt:2] | [[hh,bd:3] hh:2 hh cp]]\")\n      .fast(3)\n      .swing(0.5)\n      .decay(\"<0.1 .5 .3>*4\")\n      .sometimes(x=>x.speed(\"<0.2 0.5 1>*3\"))\n      .velocity(rand.range(0.1,1).fast(20))\n      .sometimesBy(0.01,x=>x.echo(5,1/32,0.5))\n      .room(0.1)\n      .lpf(\"[1000 2000] <3000 6000 500>*2\")\n      .lpe(sine.range(5,20))\n      .gain(2.2)\n    .bank(\"RolandTR909\")\n)\n\np2: stack(s(\"[[sh hh*2 [<~ oh>] rim]]\").cut(1)\n      .fast(3)\n      .swing(0.5)\n      .decay(\"<0.1 .5 .3>*4\")\n      .velocity(rand.range(0.1,1).fast(10))\n      .sometimesBy(0.2,x=>x.jux(rev))\n      .bpf(\"<8000 4000>\")\n      .room(0.2)\n      .gain(1)\n    .bank(\"AlesisHR16\")\n)\n\np3: stack(n(\"0 8 4 7\".add(\"<0 [3 8] 7 4 1>/8\")).scale(\"A:major\") \n    .s(\"<square supersaw>*2\")\n    .off(0.25, x=>x.transpose(\"-12\"))\n    .decay(perlin.range(0.1, 0.5).slow(4))\n    .release(perlin.range(0.7, 2.5).slow(3))\n    .fast(3)\n    .lpf(perlin.range(500, 3000))\n    .lpe(20)\n)\n\np4: stack(n(\"[0,9,2,5]! | [~ [4,3,1,12]] | [[0,9,2,5] [7,2,0,4]]\".slow(3)\n    .sometimes(x=>x.add(\"< 1 2 5 8>\".slow(4)).transpose(\"1\"))).jux(rev)\n    .scale(\"A:major\") \n    .swing(4)\n    .s(\"<triangle>\")\n    .off(0.25, x=>x.transpose(\"24\"))\n    .decay(perlin.range(1, 2).slow(4))\n    .release(perlin.range(2, 5).slow(3))\n    .fast(5)\n    .room(2)\n    .gain(0.1)\n    .lpf(tri.range(0, 5000).fast(10))\n    .lpe(20)\n)\n// @version 1.1",
+      "sha256": "6b82aed7f52ee58590bfa98b8d440c08877173cb94a27583387a4e79e77588f2"
+    },
+    {
+      "title": "Bakery 13446",
+      "id": 13446,
+      "entries": [
+        {
+          "id": 13446,
+          "section": "featured",
+          "url": "https://strudel.cc/?cLZdnmQv_sfo"
+        }
+      ],
+      "code": "samples('https://raw.githubusercontent.com/tidalcycles/Dirt-Samples/master/strudel.json')\nstack(n(\"1 2 3 4 5 [6 7], 14 15 16 17\".s_expand(\"5 3 2 1 1 2 3 5\")).sound(\"tabla2\"),\nsound(\"balafon balafon:4 - clap - clap -\".fast(6))\n).slow(6)\n// @version 1.1",
+      "sha256": "cfa8bd9533590250b4b671e872f173f2389072a1233ae547835555fd5c1fbc0f"
+    },
+    {
+      "title": "Bakery 13366",
+      "id": 13366,
+      "entries": [
+        {
+          "id": 13366,
+          "section": "featured",
+          "url": "https://strudel.cc/?bbI7dpe_6WD6"
+        }
+      ],
+      "code": "/* man in finance @by v10101a \n+ \"das ist bass\" @by enelg,froos\n*/\n\nsamples({\n  finance:  ['man-in-finance/finance_00.wav', 'man-in-finance/finance_01.wav', 'man-in-finance/finance_02.wav', 'man-in-finance/murrayhill.wav']\n}, 'github:sandpills/v10101a-samples/main/');\n\n\n$: n(\"<1 0>\").s(\"finance\").slow(2).clip(1)\n  .mask(\"<1 1 1 0>/4\")\n\n$: n(\"0\").s(\"finance\").slow(2).clip(1.4)\n  .struct(\"1(<3 5>,8)\")\n  .mask(\"<0 0 0 1>/4\").gain(0.8).room(1.2)\n\n$: note(\"<a1 c2>/2\")\n.sound(\"supersaw\")\n.euclidLegato(9,16)\n.ftype('24db')\n.lpf(tri.rangex(2000,400).slow(8))\n.lpenv(6)\n.dist(\"2:.4\")\n.echo(2, 1/16, .7)\n.mul(gain(\"[.5 1!3]*4\")) //side chain\n.add(note(\"<[0 5]*4 [5 10]*4>\"))\n// .hush()\n\n$: s(\"oh*16\")\n  .bank(\"RolandTR909\")\n  .decay(sine.range(.2,.4))\n  .dist(\"1:.3\")\n  .mul(gain(\"[<0!3 1> .2 1 <0!3 .2>]*4\")) //groove\n  .mul(gain(\"[.2 1!3]*4\")) //side chain\n  .pan(tri.range(.7,.3))\n  .hpf(800)\n  .room(.1)\n  .mask(\"<0 1>/8\")\n  // .hush()\n\n$: s(\"bd*4\").bank('RolandTR909').dist(\"1:1\")\n\n.scope()\n// @version 1.1",
+      "sha256": "115d582be71dbc82a86235debb07260b0cc52500680c42a5f7d467d14d39868b"
+    },
+    {
+      "title": "polyrhythms",
+      "id": 13357,
+      "entries": [
+        {
+          "id": 13357,
+          "section": "featured",
+          "url": "https://strudel.cc/?8F2i3iUI0G6A"
+        }
+      ],
+      "code": "// \"polyrhythms\"\n\nstack(\n  n(\"0\").cpm(120*0/64),\nn(\"1\").cpm(120*1/64),\nn(\"2\").cpm(120*2/64),\nn(\"3\").cpm(120*3/64),\nn(\"4\").cpm(120*4/64),\nn(\"5\").cpm(120*5/64),\nn(\"6\").cpm(120*6/64),\nn(\"7\").cpm(120*7/64),\nn(\"8\").cpm(120*8/64),\nn(\"9\").cpm(120*9/64),\nn(\"10\").cpm(120*10/64),\nn(\"11\").cpm(120*11/64),\nn(\"12\").cpm(120*12/64),\nn(\"13\").cpm(120*13/64),\nn(\"14\").cpm(120*14/64),\nn(\"15\").cpm(120*15/64),\nn(\"16\").cpm(120*16/64),\nn(\"17\").cpm(120*17/64),\nn(\"18\").cpm(120*18/64),\nn(\"19\").cpm(120*19/64),\nn(\"20\").cpm(120*20/64),\nn(\"21\").cpm(120*21/64),\nn(\"22\").cpm(120*22/64),\nn(\"23\").cpm(120*23/64),\nn(\"24\").cpm(120*24/64),\nn(\"25\").cpm(120*25/64),\nn(\"26\").cpm(120*26/64),\nn(\"27\").cpm(120*27/64),\nn(\"28\").cpm(120*28/64),\nn(\"29\").cpm(120*29/64),\nn(\"30\").cpm(120*30/64),\nn(\"31\").cpm(120*31/64),\nn(\"32\").cpm(120*32/64),\nn(\"33\").cpm(120*33/64),\nn(\"34\").cpm(120*34/64),\nn(\"35\").cpm(120*35/64),\nn(\"36\").cpm(120*36/64),\nn(\"37\").cpm(120*37/64),\nn(\"38\").cpm(120*38/64),\nn(\"39\").cpm(120*39/64),\nn(\"40\").cpm(120*40/64),\nn(\"41\").cpm(120*41/64),\nn(\"42\").cpm(120*42/64),\nn(\"43\").cpm(120*43/64),\nn(\"44\").cpm(120*44/64),\nn(\"45\").cpm(120*45/64),\nn(\"46\").cpm(120*46/64),\nn(\"47\").cpm(120*47/64),\nn(\"48\").cpm(120*48/64),\nn(\"49\").cpm(120*49/64),\nn(\"50\").cpm(120*50/64),\nn(\"51\").cpm(120*51/64),\nn(\"52\").cpm(120*52/64),\nn(\"53\").cpm(120*53/64),\nn(\"54\").cpm(120*54/64),\nn(\"55\").cpm(120*55/64),\nn(\"56\").cpm(120*56/64),\nn(\"57\").cpm(120*57/64),\nn(\"58\").cpm(120*58/64),\nn(\"59\").cpm(120*59/64),\nn(\"60\").cpm(120*60/64),\nn(\"61\").cpm(120*61/64),\nn(\"62\").cpm(120*62/64),\nn(\"63\").cpm(120*63/64),\n).sound(\"piano\").scale(\"C:major:pentatonic\")\n\n// @version 1.1",
+      "sha256": "00a0e4d5101e5fb626e14a45e8ac6609b4d8e0475d9670c7142d8646f4b8b863"
+    },
+    {
+      "title": "strudel 1.1 demo",
+      "id": 13294,
+      "entries": [
+        {
+          "id": 13294,
+          "section": "featured",
+          "url": "https://strudel.cc/?k9PFXoqrM9ZR"
+        }
+      ],
+      "code": "// \"strudel 1.1 demo\"\n\n$: note(\"<d d d a a# d3 f4>*15\".sub(12))\n  .gain(1).s(\"sawtooth\").fanchor(0)\n  .lpf(mousex.range(0,1000)).lpenv(mousey.range(0,8))\n  .ftype('ladder')\n  .lpq(7).color('cyan')\n  // .drive(3)\n  .distort(\"1.5:.7\")\n  ._scope()\n\n$: s(\"bd*5\").bank('RolandTR909')\n._punchcard({height:16,labels:1})\n$_: s(\"hh*10\").dec(.1).bank('RolandTR909').gain(sine.fast(4))\n._punchcard({height:16,labels:1})\n$: gain(\"[0 1]*2.5\").chord(\"<Dm9 Gm9>\").voicing()\n  .delay(\".6:.1:.8\").room(1).dec(.1).s(\"sine\").fm(2)\n  .lastOf(4, x=>x\n    .gain(\"[.3 1]*5\")\n    .add(note(saw.mul(2)))\n    .struct(\"x*20\")\n    .dec(.1).delay(0))\n._pitchwheel()\n\nall(x=>x.color('cyan'))\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n// @version 1.1",
+      "sha256": "ffc8e555d58f7f2be2304837062a5be87fbfad5658aad5a34572bb5df084b235"
+    },
+    {
+      "title": "Euclid test",
+      "id": 13267,
+      "entries": [
+        {
+          "id": 13267,
+          "section": "featured",
+          "url": "https://strudel.cc/?KQiYAKIDY3r_"
+        }
+      ],
+      "code": "//\"Euclid test\" @by shadesDrawn\n\nvar cpm = 30;\n\nstack(\n  \nnote(\"<[c2,c1] [ab0,ab1] [f0,f1] [g0,g1]>\")\n  .euclidRot(3,16,14)\n  .sound(\"gm_synth_bass_2:1\")\n  .decay(1.2)\n  .room(1)\n  .gain(1.6)\n  .pan(0.5)\n,\n\nnote(\"<eb4 f4 g4 d4>\")\n  .euclidLegatoRot(3,16,14)\n  .sound(\"sine\")\n  .fm(1)\n  .crush(sine.range(7,14).slow(20))\n  .release(0.4)\n  .gain(0.35)\n  .pan(0.7)\n,\n\nnote(`\n[eb4 g3 d4 c4@2 d4 eb4 c4]\n[d4 eb4 g3 d4 c4@2 d4 eb4]\n[c4 d4 eb4 g3 d4 c4@2 d4]\n[eb4 c4 d4 eb4 g3 d4 c4@2]\n`)\n  .slow(4)\n  .sound(\"gm_electric_guitar_clean:4\")\n  .decay(0.3)\n  .crush(8)\n  .gain(sine.range(0.1,0.5).slow(8))\n  .pan(0.3)\n,\n\nnote(`\n[g3 ab3 f3 g3 d4 eb4 c4 d4]\n`)\n  .slow(1)\n  .sound(\"gm_electric_guitar_clean:4\")\n  .decay(0.3)\n  .crush(8)\n  .gain(sine.range(0.4,0.1).slow(8))\n  .pan(0.6)\n,\n\nsound(\"<bd [bd bd]> <bd ~> bd bd\")\n  .bank(\"RolandTR909\")\n  .gain(0.25)\n,\n\nsound(\"hh*8\")\n  .bank(\"RolandTR909\")\n  .gain(0.1)\n  .degradeBy(0.33)\n,\n\nn(\"<0 1 2 3 4 5 6 7 8 0 0>\")\n  .sound(\"numbers\")\n  .crush(10)\n  .delay(0.5)\n  .gain(sine.range(0.1,0.4).slow(15))\n  .pan(sine.range(0,1).slow(10))\n  .mask(\"<0!11 1!500>\")\n,\n\n).cpm(cpm)\n// @version 1.1",
+      "sha256": "df18b04b3e7e729083f723d8a4daeaf62e0ec848c39e534a5408dd809c751edb"
+    },
+    {
+      "title": "Bakery 220919",
+      "id": 220919,
+      "entries": [
+        {
+          "id": 220919,
+          "section": "latest",
+          "url": "https://strudel.cc/?t3-ppaspJzwY"
+        }
+      ],
+      "code": "\nsetcpm(134/4)\nstack(\n  s(\"bd:3(<4!7 <3 6>>,12)\") ,\n  \n  s(\"jazz\").n(floor(rand.range(1,6))).euclid(floor(rand.range(1, 6)),8),\n\n//  s(\"sd:3(<2!3 3>,12,3)\"),\n  s(\"hh:4(2,3,1)*4\"),\n//  s(\"rim(1,3,2)*4\"),\n//  s(\"perc:3(7,12,3)\"),  // standard african bell pattern\n//  s(\"perc:0(<3 2 7>,12,3)\")\n)\n//  .bank(\"BossDR550\")\n  .lpf(rand.rangex(550,20000).fast(12))\n .lpe(1)\n//  .end(rand.rangex(0.1,.5))\n//  .lpq(saw.range(1,9).slow(8))\n//  .crush(rand.range(4,32))\n  .pan(rand)\n  .room(saw.range(.01,.4).slow(4))\n// .delay(saw.range(.01,.3).slow(4))\n//  .dt(rand.range(.001,.1).fast(12))\n//  .dfb(\".5\")\n  .pianoroll({labels:1, vertical:1, cycles:4,})\n\n\n\n// @version 1.2",
+      "sha256": "f0cea7b33fd5d75a6360586cdf4bb4fb1c485b679cc8ca36141c04aa5b53716b"
+    },
+    {
+      "title": "Bakery 112818",
+      "id": 112818,
+      "entries": [
+        {
+          "id": 112818,
+          "section": "latest",
+          "url": "https://strudel.cc/?5b0E6fEg2aMv"
+        }
+      ],
+      "code": "// 1. Initialize Hydra visuals with Strudel audio feed\nawait initHydra({ feedStrudel: 1 })\n// 2. Hydra visual setup (audio-reactive cleanliness visuals)\nsrc(s0)\n  .kaleid(H(\"<4 5 6>\"))\n  .diff(osc(1, 0.5, 5))\n  .modulateScale(osc(2, -0.25, 1))\n  .out()\n// 3. Drum groove – daily rhythm of cleaning\n$: s(\"bd*4,[hh:0:<.5 1>]*8,~ rim\")\n  .bank(\"RolandTR909\")\n  .speed(0.9)\n// 4. Bass – underlying cleanliness structure\n$: note(\"[<g1!3 <bb1 <f1 d1>>>]*3\")\n  .s(\"sawtooth\")\n  .room(0.75)\n  .sometimes(add(note(12)))\n  .clip(0.3)\n  .lpa(0.05)\n  .lpenv(-4)\n  .lpf(2000)\n  .lpq(8)\n  .ftype(\"24db\")\n// 5. (Optional) Melody layer – rising satisfaction\n$: note(\"[b4 d5 e5 f#5] [e5 f#5 g5 a5] [f#5 g5 a5 b5]\")\n  .s(\"sine\")\n  .gain(0.8)\n  .room(0.3)\n  .lpf(1200)\n  .color(\"white\")\n// 6. Audio → Visual FFT sync\nall(x => x.fft(4).scope({ pos: 0, smear: 0.95 }))\n// @version 1.2",
+      "sha256": "945127faa3c388f1acd6107bade56bcd75c4417d36fc74afb8ac802e32477399"
+    },
+    {
+      "title": "G.T.A. Hoffmann",
+      "id": 105781,
+      "entries": [
+        {
+          "id": 105781,
+          "section": "latest",
+          "url": "https://strudel.cc/?Qm3zohrBUY-h"
+        }
+      ],
+      "code": "// \"G.T.A. Hoffmann\" @by superdirtspatz\n\nsamples('github:yaxu/clean-breaks')\n\nlet p1 = n(\"[0, 5, <10 12 10!2>]@2 <[3, 5][3 <[7, 5][6,5]>@2]>@3 3@2 [3, <6 7 6>]/2\")\n  .scale(\"<G F <D D D A>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n\nlet p2 = n(\"[[5, <<1 0> 2 3>, 0], <10 10 <12 9 10>>]@2 <[3, 5, 2][3 <[7 5][6 5]>@2]>@3 3@2 [3, <6 7 6>]\")\n  .add.squeeze(n(\"<0 [0 1 2]>\"))\n  .scale(\"<G F <D>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n  .when(\"<0 0 0 0 0 1>\", x=>x.ply(2)).ply(2)\n\nlet p3 = n(\"[[5, <<1 0> 2 3>, 0], <10 10 <12 9 10>>]@2 <[3, 5, 2][3 <[7, 5][6, 5]>@2]>@3 3@2 [3, <6 7 6>]\")\n  .add.squeeze(n(\"<0 [0 1] 0 [0 1 0]>\"))\n  .scale(\"<G F <D>>:<minor minor <minor minor major>>:pentatonic\")\n  .velocity(\"[.66 [.99 | .91 | .84]]*2\")\n  .s(\"piano\")\n  .when(\"<0 0 0 0 0 1>\", x=>x.ply(2))//.ply(2)\n\n// pianos\nx1: \"< p1@12 p2@12 p3@8>\".pick({p1, p2, p3})\n  //.ply(2)\n  .shape(\"<.777@12 .8@12 .822@12>\").gain(.111)\n  .when(\"<0!10 1!2>\", x=>x.ply(2))\n\n  //.hush()\n\n\n// using phasing by using different speeds\n\nlet d1 = s(\"<eeloil [sport sport]>/2\")\n  .fit()\n//  .splice(8, \"[0 1 2 3 4 5 6 7]\")\n.mul(speed(\"1, <1.005 1.003 1.001>/2.718\"))\n  .shape(.35).gain(.2).scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n//  .jux(rev)\n\nlet d2 = s(\"<[sport sport]>/2\")\n  .fit()\n  .splice(8, \"[0 1 2 3 4 5 6 7]\")\n.mul(speed(\"1, <1.005 1.004 1.003 1.002 1.001>/1.5\"))\n  .shape(.35).gain(.2).scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n//  .jux(rev)\n\nlet d3 = s(\"<[sport sport]>/2\")\n  .fit()\n  .splice(8, \"[1 1 <2!2 [[2, 2] [2]] 2!3> 3 4 5 6 <7!5 [1 2]>]\")\n  .when(\"<0!12 1 0!5>\", x=>x.ply(\"[2 1]\").shape(\"<.35 .1>*8*2\"))\n.mul(speed(\"1, < 1.001>/1.5\"))\n  .shape(.35).gain(.2)\n  \n  .stack(s(\"hh*<4!7 8!2>\").bank(\"RolandTR707\").velocity(\"<.4 .1>*<4!7 8!2>\"))\n  \n         .scope()\n.mask(\"<0!9 0 0 0 0 0 0 1 1 1>\".invert())\n\n\nx2: \"< d1@12 d1@12 d2@8 d1@12 d1@12 d3@8>\".pick({d1, d2, d3}).mask(\"<0 1!999>\")\n\n//kicks\nx3: note(\"<G1 D1 <D1 D1 D1 A1>>\")\n  .struct(\"x@2 - - [- <- x>] - -\")\n  .s(\"sine\")\n  .decay(1.977)\n  .pdec(.41).penv(32)\n  .pcurve(1).lpf(277).velocity(5).dist(1)\n//.off(\"[.625, < ~ ~ .5>] \", x => x.velocity(3))\n  .mask(\"<1 0>\")\n\nx4: chord(\"[<Gm Fm <Dm Dm D>>!2 -!2]\").voicing()\n  .add(note(\"[0, 12]\"))\n  .dec(.2).delay(\".777:.1:.888\")\n  .orbit(9).s(\"[triangle, sine]\")\n  .lpf(200).fm(8)\n  .lpd(.1).lpenv(\"<<2.5 -3>!2 -3>\").lpq(sine.range(4.5, 7.5).slow(7.77))\n.shape(.15).gain(.111)\n.mask(\"<0 0 0 0 0 0 1 1 1>\")\n\n// dub stabs with high delay feedback\nx5: chord(\"[<Gm Fm <Dm Dm D>>!1 -!2]\").voicing()\n  .late(.75)\n  .add(note(\"[0, 12]\"))\n  .dec(.4)\n   .delay(.777)\n  .delaytime(.1)\n  .delayfeedback(.555)\n  .sometimesBy(.3, x=>x.delayfeedback(.777))\n  .sometimesBy(.1, x=>x.delayfeedback(.888))\n\n  \n  //.delay(\".777:.1:<.555 .555 .555 .777>\")\n \n  .orbit(9).room(1)\n  .s(\"[triangle, sine]\")\n  .lpf(222).fm(12)\n  .lpd(.1).lpenv(\"<<2.5 2.75 3>!2 3>\").lpq(sine.range(4.5, 7.5).slow(7.77))\n.shape(.35).gain(.111)\n.mask(\"<0!12 0!12 1!8>\")\n\n//all(x=>x.coarse(8).lpf(777))\n\n\n// @version 1.2",
+      "sha256": "c920cf079b9d730b107cdf8d1c7ccd164b32484c2f5ec13d54cd366ca24937ac"
+    },
+    {
+      "title": "coastline",
+      "id": 78185,
+      "entries": [
+        {
+          "id": 78185,
+          "section": "latest",
+          "url": "https://strudel.cc/?HQzKuqkdSa-K"
+        }
+      ],
+      "code": "// \"coastline\" @by eddyflux\n// @version 1.0\nsamples('github:eddyflux/crate')\nsetcps(.75)\nlet chords = chord(\"<Bbm9 Fm9>/4\").dict('ireal')\nstack(\n  stack( // DRUMS\n    s(\"bd\").struct(\"<[x*<1 2> [~@3 x]] x>\"),\n    s(\"~ [rim, sd:<2 3>]\").room(\"<0 .2>\"),\n    n(\"[0 <1 3>]*<2!3 4>\").s(\"hh\"),\n    s(\"rd:<1!3 2>*2\").mask(\"<0 0 1 1>/16\").gain(.5)\n  ).bank('crate')\n  .mask(\"<[0 1] 1 1 1>/16\".early(.5))\n  , // CHORDS\n  chords.offset(-1).voicing().s(\"gm_epiano1:1\")\n  .phaser(4).room(.5)\n  , // MELODY\n  n(\"<0!3 1*2>\").set(chords).mode(\"root:g2\")\n  .voicing().s(\"gm_acoustic_bass\"),\n  chords.n(\"[0 <4 3 <2 5>>*2](<3 5>,8)\")\n  .anchor(\"D5\").voicing()\n  .segment(4).clip(rand.range(.4,.8))\n  .room(.75).shape(.3).delay(.25)\n  .fm(sine.range(3,8).slow(8))\n  .lpf(sine.range(500,1000).slow(8)).lpq(5)\n  .rarely(ply(\"2\")).chunk(4, fast(2))\n  .gain(perlin.range(.6, .9))\n  .mask(\"<0 1 1 0>/16\")\n)\n.late(\"[0 .01]*4\").late(\"[0 .01]*2\").size(4)",
+      "sha256": "32a8f3ab7c49ff69a1a4a3edcaec606c5ea021de686b82470397dcba14fb4b24"
+    },
+    {
+      "title": "Computer says no",
+      "id": 78179,
+      "entries": [
+        {
+          "id": 78179,
+          "section": "latest",
+          "url": "https://strudel.cc/?EiFhVtJjNgQP"
+        }
+      ],
+      "code": "// @title Computer says no\n// @by Reinbim\n\np1: stack(s(\"[[bd bd cp hh*2] | [bd:2 ~ hh lt:2] | [[hh,bd:3] hh:2 hh cp]]\")\n      .fast(3)\n      .swing(0.5)\n      .decay(\"<0.1 .5 .3>*4\")\n      .sometimes(x=>x.speed(\"<0.2 0.5 1>*3\"))\n      .velocity(rand.range(0.1,1).fast(20))\n      .sometimesBy(0.01,x=>x.echo(5,1/32,0.5))\n      .room(0.1)\n      .lpf(\"[1000 2000] <3000 6000 500>*2\")\n      .lpe(sine.range(5,20))\n      .gain(2.2)\n    .bank(\"RolandTR909\")\n)\n\np2: stack(s(\"[[sh hh*2 [<~ oh>] rim]]\").cut(1)\n      .fast(3)\n      .swing(0.5)\n      .decay(\"<0.1 .5 .3>*4\")\n      .velocity(rand.range(0.1,1).fast(10))\n      .sometimesBy(0.2,x=>x.jux(rev))\n      .bpf(\"<8000 4000>\")\n      .room(0.2)\n      .gain(1)\n    .bank(\"AlesisHR16\")\n)\n\np3: stack(n(\"0 8 4 7\".add(\"<0 [3 8] 7 4 1>/8\")).scale(\"A:major\") \n    .s(\"<square supersaw>*2\")\n    .off(0.25, x=>x.transpose(\"-12\"))\n    .decay(perlin.range(0.1, 0.5).slow(4))\n    .release(perlin.range(0.7, 2.5).slow(3))\n    .fast(3)\n    .lpf(perlin.range(500, 3000))\n    .lpe(20)\n)\n\np4: stack(n(\"[0,9,2,5]! | [~ [4,3,1,12]] | [[0,9,2,5] [7,2,0,4]]\".slow(3)\n    .sometimes(x=>x.add(\"< 1 2 5 8>\".slow(4)).transpose(\"1\"))).jux(rev)\n    .scale(\"A:major\") \n    .swing(4)\n    .s(\"<triangle>\")\n    .off(0.25, x=>x.transpose(\"24\"))\n    .decay(perlin.range(1, 2).slow(4))\n    .release(perlin.range(2, 5).slow(3))\n    .fast(5)\n    .room(2)\n    .gain(0.1)\n    .lpf(tri.range(0, 5000).fast(10))\n    .lpe(20)\n)\n// @version 1.2",
+      "sha256": "465c2b62dfdec5d6414c3fb85642f51e65f05fe52b25a84505a497ab4004031e"
+    },
+    {
+      "title": "sonst passt es aber? :) und wenn ich das bin? Was wäre daran schlimm?",
+      "id": 78177,
+      "entries": [
+        {
+          "id": 78177,
+          "section": "latest",
+          "url": "https://strudel.cc/?_0MQZ2elO0hw"
+        }
+      ],
+      "code": "//\"sonst passt es aber? :) und wenn ich das bin? Was wäre daran schlimm?\" @by Chicca\n// @version 1.2",
+      "sha256": "e07be8d8e74940a27e275147defcc956ec4e556a04a0e8bd2a26e8422944258e"
+    },
+    {
+      "title": "Who is Deadmou5?",
+      "id": 49673,
+      "entries": [
+        {
+          "id": 49673,
+          "section": "latest",
+          "url": "https://strudel.cc/?wX06grWNpnR4"
+        }
+      ],
+      "code": "//\"Who is Deadmou5?\" @by Chicca\n// \"follow me on TikTok: Calmed.Chicca\"\nstack(\ns(\"bd sd ~ cp\").gain(0.9).bank(\"akaixr10\"),\ns(\"hh*4\").gain(0.5).sound(\"space\")\n.note(\"a2 c3 d3 e3\").gain(0.8)\n.release(0.4)\n).cps(0.9)\n// @version 1.2",
+      "sha256": "b67573110ecb3d46fdf85ec78141f9645182c4df8d282ba704783482c5bc95e4"
+    },
+    {
+      "title": "Who is Deadmou5?",
+      "id": 44372,
+      "entries": [
+        {
+          "id": 44372,
+          "section": "latest",
+          "url": "https://strudel.cc/?QN5lqrktpU7j"
+        }
+      ],
+      "code": "//\"Who is Deadmou5?\" @by Chicca\n\nstack(\ns(\"bd sd ~ cp\").gain(0.9).bank(\"akaixr10\"),\ns(\"hh*4\").gain(0.5).sound(\"space\")\n.note(\"a2 c3 d3 e3\").gain(0.8)\n.release(0.4)\n).cps(0.9)\n// @version 1.2",
+      "sha256": "50b2cfd7d8a90345f6e4c4f59e494b04a78cd1f2e37e211f0f66b5f869fd858a"
+    },
+    {
+      "title": "Industrial for Elise Pattern",
+      "id": 32488,
+      "entries": [
+        {
+          "id": 32488,
+          "section": "latest",
+          "url": "https://strudel.cc/?d8tG5H5_JbPI"
+        }
+      ],
+      "code": "//\"Industrial for Elise Pattern\" @by Chicca\nstack(\n// Harter Industrial Kick\ns(\"bd ~ ~ ~\").gain(1.5).distort(0.8).cutoff(120),\n// Industrial Für Elise (verzerrt und aggressiv)\nnote(\"e3 d#3 e3 d#3\")\n.s(\"sawtooth\")\n.cutoff(300)\n.distort(0.7)\n.gain(0.8)\n.room(0.1),\n// Aggressive Industrial Bass\nnote(\"c1 ~ c2 ~ c1 c2 ~ c1\")\n.s(\"sawtooth\")\n.cutoff(200)\n.distort(0.9)\n.gain(1.0),\n// Metallische Percussion\ns(\"~ [metal:1 metal:2] ~ metal:3\")\n.gain(0.7).distort(0.6).room(0.05)\n)\n// @version 1.2",
+      "sha256": "e71fd5b728007d2a5dc65823db05eb46ba65102c33a7a302d18e4e63785f4e39"
+    },
+    {
+      "title": "Bakery 32268",
+      "id": 32268,
+      "entries": [
+        {
+          "id": 32268,
+          "section": "latest",
+          "url": "https://strudel.cc/?8KVqx9_zfsTh"
+        }
+      ],
+      "code": "$: sound(`\n<bd*3 [hh:1 hh:1 hh:1]*2 casio:2 - hh:1>*4 ,\n< - - - metal:1 - >*4 ,\n< - - - - metal >*4`).cpm(213/7) \n$: note(\"<36 a 60 f e>*4\").sound(\"triangle\").cpm(213/7) \n$: note(\"<c d>*0.2\").sound(\"triangle\").cpm(213/7) \n//$: note(\"<36>\").sound(\"triangle\").cpm(213/7) \n// @version 1.2",
+      "sha256": "b56353f0d62ad987e3e1ba21cbd2baf5b3c5d47edbf9a55ed12a400aa42a1fa0"
+    },
+    {
+      "title": "Euclid test",
+      "id": 32267,
+      "entries": [
+        {
+          "id": 32267,
+          "section": "latest",
+          "url": "https://strudel.cc/?f-EDw2-VuFjK"
+        }
+      ],
+      "code": "//\"Euclid test\" @by shadesDrawn\n\nvar cpm = 30;\n\nstack(\n  \nnote(\"<[c2,c1] [ab0,ab1] [f0,f1] [g0,g1]>\")\n  .euclidRot(3,16,14)\n  .sound(\"gm_synth_bass_2:1\")\n  .decay(1.2)\n  .room(1)\n  .gain(1.6)\n  .pan(0.5)\n,\n\nnote(\"<eb4 f4 g4 d4>\")\n  .euclidLegatoRot(3,16,14)\n  .sound(\"sine\")\n  .fm(1)\n  .crush(sine.range(7,14).slow(20))\n  .release(0.4)\n  .gain(0.35)\n  .pan(0.7)\n,\n\nnote(`\n[eb4 g3 d4 c4@2 d4 eb4 c4]\n[d4 eb4 g3 d4 c4@2 d4 eb4]\n[c4 d4 eb4 g3 d4 c4@2 d4]\n[eb4 c4 d4 eb4 g3 d4 c4@2]\n`)\n  .slow(4)\n  .sound(\"gm_electric_guitar_clean:4\")\n  .decay(0.3)\n  .crush(8)\n  .gain(sine.range(0.1,0.5).slow(8))\n  .pan(0.3)\n,\n\nnote(`\n[g3 ab3 f3 g3 d4 eb4 c4 d4]\n`)\n  .slow(1)\n  .sound(\"gm_electric_guitar_clean:4\")\n  .decay(0.3)\n  .crush(8)\n  .gain(sine.range(0.4,0.1).slow(8))\n  .pan(0.6)\n,\n\nsound(\"<bd [bd bd]> <bd ~> bd bd\")\n  .bank(\"RolandTR909\")\n  .gain(0.25)\n,\n\nsound(\"hh*8\")\n  .bank(\"RolandTR909\")\n  .gain(0.1)\n  .degradeBy(0.33)\n,\n\nn(\"<0 1 2 3 4 5 6 7 8 0 0>\")\n  .sound(\"numbers\")\n  .crush(10)\n  .delay(0.5)\n  .gain(sine.range(0.1,0.4).slow(15))\n  .pan(sine.range(0,1).slow(10))\n  .mask(\"<0!11 1!500>\")\n,\n\n).cpm(cpm)\n// @version 1.2",
+      "sha256": "07928dc19e4561a2f52a825ae5f3e339764717ea4f12ed4fa54d7732ea11f29c"
+    },
+    {
+      "title": "Who is Deadmou5e",
+      "id": 32188,
+      "entries": [
+        {
+          "id": 32188,
+          "section": "latest",
+          "url": "https://strudel.cc/?BgrNpxjqZALC"
+        }
+      ],
+      "code": "//\"Who is Deadmou5e\" @by Chicca\n\nstack(\ns(\"bd sd ~ cp\").gain(0.9).bank(\"akaixr10\"),\ns(\"hh*4\").gain(0.5).sound(\"space\")\n.note(\"a2 c3 d3 e3\").gain(0.8)\n.release(0.4)\n).cps(0.9)\n// @version 1.2",
+      "sha256": "31310502d21e8074088215fef9ba2474ae1b88d53cd8f5fea2208864118517ea"
+    },
+    {
+      "title": "Du willst'n Beat? Da hast ein :)",
+      "id": 32182,
+      "entries": [
+        {
+          "id": 32182,
+          "section": "latest",
+          "url": "https://strudel.cc/?HgZ2rwotUtUp"
+        }
+      ],
+      "code": "// \"Du willst'n Beat? Da hast ein :)\"@by Chicca\nnote(\"c2 ~ c2 c3 ~ c2 c3 c2\")\n.s(\"sawtooth\").octave(2)\n.cutoff(sine.range(200, 800).fast(2))\n\n// @version 1.2",
+      "sha256": "7a583bcbf57d70e6a9e358e1ed49e306f4154ca2a722bf14a65f54bdd28db353"
+    },
+    {
+      "title": "I wanna go to Festival",
+      "id": 32180,
+      "entries": [
+        {
+          "id": 32180,
+          "section": "latest",
+          "url": "https://strudel.cc/?YZGPvycBtPcy"
+        }
+      ],
+      "code": "// \"I wanna go to Festival\" @by Chicca\n// \"follow me on TikTok: Calmed.Chicca\"\nnote(\"[c2 ~ c3]/3 [c2 c3 c2]/5 [c3 ~ c2]/7\")\n.s(\"sawtooth\")\n.cutoff(sine.range(100, 1000).fast(\"[3 5 7]/4\"))\n// Psychedelische Delay-Kaskaden\n.delay(\"[0.125 0.25 0.375]/3\")\n.delayfeedback(0.6)\n.room(0.4)\n\n// @version 1.2",
+      "sha256": "9710f7eaf829d2fc60851bf3ecfb109fd73dfd87723e599f5b1f0c10c9ac8fc1"
+    },
+    {
+      "title": "\"adivinanza melodía audioperceptiva\"",
+      "id": 32179,
+      "entries": [
+        {
+          "id": 32179,
+          "section": "latest",
+          "url": "https://strudel.cc/?EVHu_O8-PqNq"
+        }
+      ],
+      "code": "//@title \"adivinanza melodía audioperceptiva\"\n//@by Ángel Jara\nsetcps(90/60/4)\nn(irand(7).struct(\"x*4 -!3\")).scale(\"C4:major\").s(\"square\").ribbon(15, 1).slow(2)\n//ribbon(15, 1) cambiando la magnitud \"15\" cambia la adivinanza\n// @version 1.2",
+      "sha256": "213fabe928d000a84972cd00c5999040f16ff97f3d80c100afe242dd96677df9"
+    },
+    {
+      "title": "Bakery 32176",
+      "id": 32176,
+      "entries": [
+        {
+          "id": 32176,
+          "section": "latest",
+          "url": "https://strudel.cc/?ksjx3nTz6FIN"
+        }
+      ],
+      "code": "// @by Chicca\nnote(\"c2 ~ c2 c3 ~ c2 c3 c2\")\n.s(\"sawtooth\").octave(2)\n.cutoff(sine.range(200, 800).fast(2))\n\n// @version 1.2",
+      "sha256": "57ca41ac1e292c4893246ff33ae2582c22239d870698b810c4b7edb1be5b046b"
+    },
+    {
+      "title": "Bakery 32170",
+      "id": 32170,
+      "entries": [
+        {
+          "id": 32170,
+          "section": "latest",
+          "url": "https://strudel.cc/?CRCUrpdhNs-w"
+        }
+      ],
+      "code": "samples('github:algorave-dave/samples')\nsamples('github:tidalcycles/dirt-samples')\n\nconst gainnn = [\n  \"2\",\n  \"{0.75 2.5}*4\",\n  \"{0.75 2.5!9 0.75 2.5!5 0.75 2.5 0.75 2.5!7 0.75 2.5!3 <2.5 0.75> 2.5}%16\",\n]\n\nconst Structures = [\n  \"~\",\n  \"x*4\"\n,\n  \"{x ~!9 x ~!5 x ~ x ~!7 x ~!3 < ~ x > ~}%16\",\n]\n\nconst gooo = 1\n// off/on\n\nbassline: note (\"[eb1, eb2]!16 [f2, f1]!16 [g2, g1]!16 [f2, f1]!8 [bb2, bb1]!8\")\n .sound(\"supersaw\")\n .slow(8)\n .postgain(2)\n .room(0.6)\n .lpf(slider(2000,300,2000))\n .room(0.4)\n .postgain(pick(gainnn, gooo))\n ._punchcard({height:200, width:1670})\nconst arpeggiator = [\n  \"{d4 bb3 eb3 d3 bb2 eb2}%16\",\n  \"{c4 bb3 f3 c3 bb2 f2}%16\",\n  \"{d4 bb3 g3 d3 bb2 g2}%16\",\n  \"{c4 bb3 f3 c3 bb2 f2}%16\",\n]\n\nmain_arp: note(pick(arpeggiator, \"<0 1 2 3>\".slow(2)))//.rev(0.05)\n .sound(\"supersaw\")\n .lpf(300)\n .sustain(0.5).release(0.01).attack(0)\n .room(0.6)\n .lpenv(slider(6,1.25,6))\n .postgain(pick(gainnn, gooo))\n ._punchcard({height:200, width:1670})\ndrums: stack(\n  s(\"tech:5\").postgain(6).pcurve(3).pdec(1).struct(pick(Structures, gooo)),\n)\n ._punchcard({height:200, width:1670})\n// @version 1.2",
+      "sha256": "f8b3e2aaaf272d26a752e93cd9dd72ad5f3ada393b8990d2e725768d2ea809f7"
+    },
+    {
+      "title": "Bakery 32169",
+      "id": 32169,
+      "entries": [
+        {
+          "id": 32169,
+          "section": "latest",
+          "url": "https://strudel.cc/?uucVJdyB8m76"
+        }
+      ],
+      "code": "s (\"bd hh cp sd [bd hh] cp sd perc [hh bd] bd\")\n// @version 1.2",
+      "sha256": "7d35c7d4a07ef3bd04b538aa6124f01923b87af54f9b129fec0d918a8cd5bdd1"
+    },
+    {
+      "title": "Bakery 32168",
+      "id": 32168,
+      "entries": [
+        {
+          "id": 32168,
+          "section": "latest",
+          "url": "https://strudel.cc/?IiBni8yORhib"
+        }
+      ],
+      "code": "// @by Chicca\nstack(\nnote(\"c4 d4 e4 f4 g4 a4 b4 c5\")\n.s(\"square\").gain(0.4)\n.cutoff(cosine.range(800, 4000).slow(4))\n.delay(0.25).delayfeedback(0.4),\ns(\"bd ~ ~ ~\").gain(1.1)\n)\n// @version 1.2",
+      "sha256": "efbe662a2ae455e28233b31690079b676e2f624ac1182d2ba14b7eef463be8ec"
+    },
+    {
+      "title": "Polish cow song",
+      "id": 32166,
+      "entries": [
+        {
+          "id": 32166,
+          "section": "latest",
+          "url": "https://strudel.cc/?lx5lH4NVAd1K"
+        }
+      ],
+      "code": "// \"Polish cow song\" @by Rogolop\n// \"Gdzie jest biały węgorz ? (Zejście)\" by Cypis\n// Abridged\n\nsetcpm(120)\n// DRUMS\n$: sound(\"<bd sd>\").bank(\"RolandTR909\").gain(\"0.3\")\n// VIOLIN\n$: n(`< -!16\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2 \n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n[7 -]*2!4    [4 -]*2!4    [3 -]*2!4    [3 -]*2!2 -!2\n>`).scale(\"A:minor\").transpose(\"<[8P 0]>\").sound(\"gm_violin:6\").room(0.5).gain(\"3\")\n.velocity(`< .9 .7 .4 .2    .9 .7 .4 .2    .9 .7 .4 .2    .2 .2 .2 .2 >`)\n// BASS\n$: n(`< -!15 [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n7 - - [- 2]    [4 4] [4 -] - [- -2]    [3 3] [3 3] - -    - - - [- 4]\n>`).scale(\"A:minor\").transpose(\"<-15P>\").sound(\"gm_fretless_bass\").decay(0.3).room(0.2).gain(\"3\")\n// INTRO\n$: n(`<\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!32\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n>`).scale(\"A:minor\").sound(\"gm_accordion:1\").decay(0.5).room(0.3).gain(\"3\").pan(\"0.4\")\n// CHORUS\n$: n(`< -!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n-!31 [4 4]\n[7 7] [4 4] 2 [- 4]    [- 4] [4 -] [4 -] [- 3]    [- 3] [3 -] [3 -] [- 4]    [7 7] [4 4] 2 4\n[7 7] [4 4] 2 [2 2]    [4 4] [4 4] [- 4] [- 4]    [3 3] [3 3] [3 -] [- 4]    [7 7] [4 4] 2 4\n>`).scale(\"A:minor\").transpose(\"-8P\").sound(\"gm_bassoon:0\").decay(0.5).room(0.3).gain(\"3\").pan(0.6)\n// VERSE\n$: n(`< -!32 -!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n[6 6] [[6 4] -] [[6 6] 6] [6 4]    [6 6] [6 6] [6# 6] [5 4]    [6 6#] [4 -] [6 6] [6# 4]    [- 6] [6 6] [7 6] [5 4]\n[6 6]!4    [6 6] [[6 7] -] [7 6] [7 4]    [- 6] - [6 6] [7 4]    [- 9] [8 7] [6 6] [7 4]\n-!32\n>`).scale(\"A:minor\").transpose(\"-8P\").sound(\"gm_synth_bass_2:0\").room(0.3)\n  .gain(\"2.5\").pan(0.5)\n\n// @version 1.2",
+      "sha256": "b77c2321a31f7197b0168094494c0a301c7ccf9b8a86e2a45f1b45357c2bb3c5"
+    },
+    {
+      "title": "Bug From Heaven (wip)",
+      "id": 32163,
+      "entries": [
+        {
+          "id": 32163,
+          "section": "latest",
+          "url": "https://strudel.cc/?SFo_qV8NiQqW"
+        }
+      ],
+      "code": "// \"Bug From Heaven (wip)\"\n// song @by Tim Smith\n// script @by eefano\nsetcps(100/60/2)\nconst standardtuning = [40,45,50,55,59,64];\nconst fingering = \n{A:\"0:0:2:2:2:0\",Am:\"0:0:2:2:1:0\",A7:\"x:0:2:0:2:0\",D:\"x:0:0:2:3:2\",Dm:\"x:0:0:2:3:1\",D7:\"x:0:0:2:1:2\",\n E:\"0:2:2:1:0:0\",Em:\"0:2:2:0:0:0\",E7:\"0:2:2:1:3:0\",G7:\"3:2:0:0:0:1\",C:\"x:3:2:0:1:0\",Dx:\"x:0:0:2:3:2\",Ds:\"x:0:0:1:3:0\"\n};\nconst gstrum = \n{u:\"<[[1,[~ 3@10],4]@2 ~]!2 [1,4,5]>*3\", \n v:\"<[[0,[~ 3@10],5]@2 ~]!2 [0,3,4]>*3\", \n w:\"<[[1,[~ 3@10],4]@2 ~]!2 [1,2,3]>*3\", \n x:\"<[1,[~ 2@50],[~ ~ 4@50]]>\",\n z:\"<[[3,4,5] ~]*2>\"\n};\nconst bstrum = {u:\"<[1 2]>\", v:\"<[2 1]>\", w:\"<[1 0]>\", x:\"~\", z:\"~\"};\n\nconst gString = register('gString', (n, pat) => \n  (pat.fmap((v) => { if(v[n]=='x') return note(0).velocity(0);\n      return note(v[n]+standardtuning[n]); } \n  ).innerJoin()));\nconst guitar = (strums,fingers,tuning=standardtuning) => (strums.pickOut(\n    [fingers.pickOut(fingering).gString(0),fingers.pickOut(fingering).gString(1),fingers.pickOut(fingering).gString(2)\n    ,fingers.pickOut(fingering).gString(3),fingers.pickOut(fingering).gString(4),fingers.pickOut(fingering).gString(5)]));\nconst split = register('split', (deflt, callback, pat) => callback(deflt.map((d,i)=> pat.withValue((v)=>{\n  const isobj = v.value !== undefined; const value = isobj ? v.value : v;\n  const result = Array.isArray(value)?(i<value.length?value[i]:d):(i==0?value:d);\n  return (i==0 && isobj) ? {...v,value:result} : result; }))));\n\ngtr: \"<~@2 [[0 1]!2]@16 2@3 3@8>\".pickRestart([\"<Am:u:6 E:v:5 Am:u:4 E:v:3>\",\"<Am:u:2 A:w:7>\",\"<Am:u:2 E:x A:x>\",\"<Dx:z Ds:z>\"])\n  .split([0,0,0],s=>s[0].layer(\n  x=>guitar(s[1].pick(gstrum),x).s(\"gm_acoustic_guitar_steel:1\").release(.1).gain(.8).room(.5).hpf(300).lpf(5000).late(1/64),\n  x=>guitar(s[1].pick(bstrum),x).s(\"gm_pizzicato_strings:1\").transpose(-12).release(.1).gain(.65).room(.6).lpf(1000),\n  x=>chord(x).anchor(\"g5\").voicing().s(\"gm_string_ensemble_1\").gain(.1).room(1).layer(p=>p.pan(1),p=>p.pan(0).late(.1))\n    ).transpose(s[2]))\n\ndrm: \"< 0@2 [0,1]@17 2 ~ 0@8>\".pick([\n     s(\"<rd>*2\"),\n     s(\"<~ sd>*2\"),\n     s(\"<rd>\")\n  ]).bank(\"BossDR110\").room(1).lpf(1800).gain(.6)\n\nuff: \"<[gm_acoustic_guitar_steel:1,gm_string_ensemble_1,gm_pizzicato_strings:1] ~@1000>\".gain(0)\n// @version 1.2",
+      "sha256": "244af32a8faf5e6b813ad2b3c1143a4db57890b336bcc7b11e717d9b02370d60"
+    }
+  ]
+}

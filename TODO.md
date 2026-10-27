@@ -69,6 +69,11 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
+- [ ] Investigate the Bakery composition corpus's nine initial event
+      differences and the two 200 ms query CPU-budget failures without
+      changing budgets. The Hydra example remains covered by the separate
+      visualizer task. See [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
+
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
       startup now have independent web comparisons. Nested `FX(...)` chains

@@ -25,9 +25,12 @@ int main(int argc, char **argv) {
     const cJSON *sound = cJSON_GetObjectItemCaseSensitive(request,"sound");
     const cJSON *cycles = cJSON_GetObjectItemCaseSensitive(request,"cycles");
     const cJSON *cps = cJSON_GetObjectItemCaseSensitive(request,"cps");
+    const cJSON *events_flag = cJSON_GetObjectItemCaseSensitive(request,"eventsOnly");
+    int events_only=cJSON_IsTrue(events_flag);
     if (!cJSON_IsString(code) || !cJSON_IsString(sound) || !cJSON_IsNumber(cycles) ||
         !cJSON_IsNumber(cps) || !isfinite(cycles->valuedouble) || cycles->valuedouble < 1 ||
-        cycles->valuedouble > 32 || !isfinite(cps->valuedouble) || cps->valuedouble < .1 || cps->valuedouble > 2) {
+        cycles->valuedouble > 32 || !isfinite(cps->valuedouble) || cps->valuedouble < .1 || cps->valuedouble > 2 ||
+        (events_flag && !cJSON_IsBool(events_flag))) {
         cJSON_Delete(request); return 1;
     }
     char error[512]; cJSON *metadata = NULL;
@@ -35,11 +38,15 @@ int main(int argc, char **argv) {
     if (!program) { fprintf(stderr,"%s\n",error); cJSON_Delete(request); return 1; }
     char *samples = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(metadata,"samples"));
     if (!samples) { cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
-    websamp_load_arguments(samples);
+    if (!events_only) websamp_load_arguments(samples);
     free(samples);
+    double query_cps=cps->valuedouble;
+    const cJSON *bpm=cJSON_GetObjectItemCaseSensitive(metadata,"bpm");
+    if (events_only && cJSON_IsNumber(bpm) && isfinite(bpm->valuedouble) && bpm->valuedouble>0)
+        query_cps=bpm->valuedouble/240;
     cJSON *haps = cJSON_CreateArray();
     for (double begin = 0; haps && begin < cycles->valuedouble; begin += 1) {
-        cJSON *part = javascript_query_cps(program,begin,fmin(begin+1,cycles->valuedouble),cps->valuedouble);
+        cJSON *part = javascript_query_cps(program,begin,fmin(begin+1,cycles->valuedouble),query_cps);
         if (!cJSON_IsArray(part)) { cJSON_Delete(part); cJSON_Delete(haps); haps = NULL; break; }
         cJSON *item;
         while ((item = cJSON_DetachItemFromArray(part,0))) {
@@ -48,6 +55,20 @@ int main(int argc, char **argv) {
         cJSON_Delete(part);
     }
     int count = cJSON_GetArraySize(haps);
+    if (events_only) {
+        cJSON *result=cJSON_CreateObject();
+        if (!result || !cJSON_IsArray(haps) || !cJSON_AddNumberToObject(result,"cps",query_cps) ||
+            !cJSON_AddItemToObject(result,"events",haps)) {
+            cJSON_Delete(result); cJSON_Delete(haps); cJSON_Delete(metadata);
+            javascript_free(program); cJSON_Delete(request); return 1;
+        }
+        char *json=cJSON_PrintUnformatted(result);
+        FILE *output=json?fopen(argv[2],"wb"):NULL;
+        int ok=output && fwrite(json,1,strlen(json),output)==strlen(json);
+        if (output && fclose(output)) ok=0;
+        free(json); cJSON_Delete(result); cJSON_Delete(metadata);
+        javascript_free(program); cJSON_Delete(request); return ok?0:1;
+    }
     AudioEvent *events = calloc((size_t)count+1,sizeof(*events));
     if (!events || !cJSON_IsArray(haps)) { fprintf(stderr,"pattern query failed\n"); free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
     int used = 0; const cJSON *hap;

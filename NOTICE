@@ -20,6 +20,8 @@ project license does not replace their notices. See:
 - js/query-time.mjs for the MIT-licensed accelerated fraction.js clock conversion
   (its notice is also embedded in js/dist/runtime.js);
 - tests/reference/web-cyclist.mjs for the AGPL Strudel scheduler test snapshot;
+- tests/fixtures/strudel-bakery.json for original community composition sources,
+  links and authorship comments; their authors retain their composition rights;
 - web/dist/licenses.txt for companion editor dependency notices;
 - README.md, "Sample banks", and the installed banks' licenses/ directory
   for sample attribution and license terms.

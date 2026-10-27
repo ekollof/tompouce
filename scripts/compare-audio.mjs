@@ -40,6 +40,7 @@ if (!nativeEnvironment.TOMPOUCE_BANKS && !nativeEnvironment.STRUDELTERM_BANKS) {
   }
 }
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'tompouce-browser-'));
+const bakeryHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tompouce-bakery-native-'));
 const browser = spawn(process.env.CHROMIUM ?? 'chromium', [
   '--headless', '--no-first-run', '--disable-gpu', '--remote-debugging-pipe',
   `--user-data-dir=${profile}`, 'about:blank',
@@ -111,7 +112,13 @@ try {
   await evaluate(transpiler.outputFiles[0].text);
   const corpus = JSON.parse(await fs.readFile('tests/fixtures/strudel-examples.json', 'utf8'));
   const arpoon = corpus.examples.find(example => example.title === 'Arpoon');
+  const bakery = JSON.parse(await fs.readFile('tests/fixtures/strudel-bakery.json', 'utf8'));
+  for (const example of bakery.examples)
+    if (hash(example.code)!==example.sha256) throw Error(`Bakery source hash mismatch: ${example.id}`);
   const cases = [
+    ...bakery.examples.map(example=>({name:`bakery-${example.id}`,title:example.title,
+      source:example.entries,code:example.code,sound:'',cycles:4,cps:.5,window:1,
+      correlation:null,eventsOnly:true})),
     ...[
       ['natural',''],['fast',`.speed(8).irspeed(8)`],['reverse',`.speed(-2).irspeed(-2)`],
       ['short-buffer',`.speed(8).irspeed(8).clip(1)`],
@@ -440,10 +447,48 @@ try {
     }
     if (!initialized) throw new Error('Capture page did not initialize');
     await evaluate(transpiler.outputFiles[0].text);
-    const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native.f32`);
+    const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native${spec.eventsOnly?'-events.json':'.f32'}`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
     const rendered = spawnSync(renderer, [request, native], { encoding: 'utf8', timeout: 120000,
-      env:{...nativeEnvironment,...(spec.fixture?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{})} });
+      env:{...nativeEnvironment,...(spec.fixture?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{}),
+        ...(spec.eventsOnly?{HOME:bakeryHome,XDG_CONFIG_HOME:bakeryHome,XDG_CACHE_HOME:bakeryHome}:{})} });
+    if (spec.eventsOnly) {
+      const result={...spec,codeSha256:hash(spec.code),mode:'events',passed:false};
+      if (rendered.status!==0) {
+        result.stage='native'; result.error=(rendered.stderr||String(rendered.error)).slice(-16000);
+      } else {
+        try {
+          const nativeEvents=JSON.parse(await fs.readFile(native,'utf8'));
+          const browserEvents=await evaluate(`(async()=>{
+            const context=new OfflineAudioContext(2,44100,44100);
+            setAudioContext(context);
+            const host=repl({getTime:()=>0,onSchedule:()=>{},setInterval:()=>1,clearInterval:()=>{},
+              transpiler:__comparisonTranspiler.transpiler});
+            await host.evaluate(${JSON.stringify(spec.code)},false);
+            if(host.state.evalError)throw host.state.evalError;
+            const pattern=host.scheduler.pattern;
+            if(!pattern)throw Error('Composition did not return a pattern');
+            const events=[];
+            for(let begin=0;begin<${spec.cycles};begin++)
+              events.push(...pattern.queryArc(begin,begin+1,{_cps:host.scheduler.cps})
+                .filter(h=>h.hasOnset()).map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})));
+            host.scheduler.stop();
+            return {events,cps:host.scheduler.cps};
+          })()`);
+          await fs.writeFile(path.join(out,`${spec.name}-browser-events.json`),JSON.stringify(browserEvents,null,2));
+          result.cps=nativeEvents.cps;
+          result.browserCps=browserEvents.cps;
+          result.nativeEvents=nativeEvents.events.length; result.browserEvents=browserEvents.events.length;
+          result.passed=Math.abs(nativeEvents.cps-browserEvents.cps)<1e-7 && compareEvents(nativeEvents.events,browserEvents.events);
+          result.stage=result.passed?(browserEvents.events.length?'events-match':'empty-pattern'):'events-differ';
+        } catch(error) { result.stage='browser'; result.error=String(error).slice(-16000); }
+      }
+      report.cases.push(result);
+      await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));
+      console.log(spec.name,result.stage,result.nativeEvents??'',result.browserEvents??'');
+      await call('Target.closeTarget',{targetId:page.targetId},null);
+      continue;
+    }
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
@@ -521,9 +566,23 @@ try {
   browser.kill();
   await new Promise(resolve => !browser.pid || browser.exitCode !== null ? resolve() : browser.once('exit', resolve));
   await fs.rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await fs.rm(bakeryHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 function hash(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
+function compareEvents(native,browser) {
+  const normalize=value=>Array.isArray(value)?value.map(normalize):
+    value && typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,normalize(value[k])])):value;
+  const ordered=events=>events.map(({begin,end,value})=>normalize({begin,end,value}))
+    .sort((a,b)=>a.begin-b.begin || a.end-b.end || JSON.stringify(a.value).localeCompare(JSON.stringify(b.value)));
+  const equal=(a,b)=>{
+    if(typeof a==='number' && typeof b==='number')return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a-b)<=1e-7*Math.max(1,Math.abs(b));
+    if(a===b)return true;
+    if(!a || !b || typeof a!=='object' || typeof b!=='object')return false;
+    const keys=Object.keys(a);return keys.length===Object.keys(b).length && keys.every(k=>Object.hasOwn(b,k) && equal(a[k],b[k]));
+  };
+  return equal(ordered(native),ordered(browser));
+}
 function compare(native, wav, seconds) {
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') throw new Error('Invalid WAV');
   let format, channels, rate, bits, data;

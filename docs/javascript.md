@@ -16,7 +16,9 @@ $: s("bd sd, hh*8").sometimes(x => x.ply(2)).crush("<16 8>")
 ```
 
 The upstream implementation supplies pattern constructors, time transforms,
-conditionals, arithmetic, alignment, scales, voicings, and signals. Variables,
+conditionals, arithmetic, alignment, scales, voicings, and signals. Integer
+fraction arithmetic on the pattern clock runs in the host; fractional numbers
+and fraction strings still use the pinned fraction.js parser. Variables,
 closures, functions, arrays, loops, and async functions execute as JavaScript.
 Double quoted strings and backticks use Strudel mini-notation; single quoted
 strings remain ordinary strings. `$:` plays concurrent patterns. Named labels

@@ -3,6 +3,7 @@
 #include "slider.h"
 #include "midi.h"
 #include "websamp.h"
+#include "rational.h"
 #include <quickjs.h>
 #include <ctype.h>
 #include <limits.h>
@@ -48,6 +49,7 @@ struct JsProgram {
     unsigned orchestra_calls;
     unsigned prebake_files;
     size_t prebake_bytes;
+    RationalHost *fractions;
 };
 
 static int interrupted(JSRuntime *runtime, void *opaque) {
@@ -377,6 +379,7 @@ void javascript_free(JsProgram *p) {
     if (atomic_fetch_sub_explicit(&p->refs,1,memory_order_acq_rel) != 1) return;
     csound_program_free(p->csound);
     free(p->csound_source);
+    if (p->context) rational_free(p->context, p->fractions);
     if (p->context) JS_FreeContext(p->context);
     if (p->runtime) JS_FreeRuntime(p->runtime);
     free(p->source);
@@ -523,6 +526,11 @@ static JSValue host_csound(JSContext *ctx, JSValueConst self, int argc, JSValueC
     if (result==CSOUND_UPDATE_REJECTED) log_console("%s",error);
     return JS_UNDEFINED;
 }
+static JSValue host_fraction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {
+    JsProgram *program = JS_GetContextOpaque(ctx);
+    return rational_dispatch(ctx, program ? program->fractions : NULL, magic, this_val, argc, argv);
+}
+
 void javascript_activate_sliders(JsProgram *p) { if (p) slider_bank_activate(p->sliders); }
 const char *javascript_source(const JsProgram *p) { return p?p->source:NULL; }
 
@@ -567,6 +575,10 @@ static int initialize(JsProgram *p, char *error, int n) {
         return 0;
     }
     JS_FreeValue(ctx, value);
+    if (!rational_bind(ctx, &p->fractions, host_fraction)) {
+        if (error && n > 0) snprintf(error, (size_t)n, "could not install native fractions");
+        return 0;
+    }
     return 1;
 }
 

@@ -9,7 +9,7 @@ function(tompouce_test name)
         set_tests_properties(${name} PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 120)
     endif()
 endfunction()
-foreach(name ai websamp editor terminal_render javascript dsp examples csound
+foreach(name ai websamp editor terminal_render javascript dsp examples csound rational
         audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security)
     tompouce_test(${name})
 endforeach()

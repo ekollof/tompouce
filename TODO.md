@@ -69,10 +69,12 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] Investigate the Bakery composition corpus's nine initial event
-      differences and the two 200 ms query CPU-budget failures without
-      changing budgets. The Hydra example remains covered by the separate
-      visualizer task. See [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
+- [ ] The Bakery corpus's nine initial event differences now match the saved
+      2026-10-27 REPL events, including coastline (78185). IDs 13587 and 78179
+      still exceed the existing 200 ms query CPU budget; the native fraction
+      clock does not bring "Computer says no" under that limit. The Hydra
+      example remains covered by the separate visualizer task. See
+      [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

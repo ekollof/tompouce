@@ -4,6 +4,7 @@ import * as mini from '@strudel/mini';
 import * as tonal from '@strudel/tonal';
 import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
+import { semitones as intervalSemitones } from '@tonaljs/interval';
 import { installNative, prepareNative } from './native-synth.mjs';
 import { queryFraction } from './query-time.mjs';
 import {installPrebakes,resetPrebakes,runPrebake,prepareAudioDefaults,isPrebaking} from './prebake.mjs';
@@ -30,6 +31,89 @@ globalThis.getFrequencyFromValue=(value,fallback=36)=>{
 installNative(core);
 const { transpiler } = transpileModule;
 installPrebakes(core,transpiler);
+
+/* The pinned Strudel packages predate the REPL's structure-only legato shift
+   and root/above voicing direction. Keep below/duck and non-positive legato
+   steps on the pinned functions. */
+let voicingDictionary = 'ireal';
+const selectVoicings = globalThis.setDefaultVoicings;
+if (typeof selectVoicings === 'function') {
+  globalThis.setDefaultVoicings = (dict) => { voicingDictionary = dict; return selectVoicings(dict); };
+}
+const previousLegato = core.Pattern.prototype._euclidLegato;
+const previousLegatoRot = core.Pattern.prototype._euclidLegatoRot;
+function alignedLegato(pulses, steps, rotation, pat, rotated) {
+  if (pulses < 1) return core.silence;
+  if (!(steps > 0)) return rotated ? previousLegatoRot.call(pat, pulses, steps, rotation) : previousLegato.call(pat, pulses, steps);
+  let onsets = core.bjorklund(pulses, steps);
+  const firstOnset = onsets.indexOf(1);
+  onsets = core.rotate(onsets, firstOnset);
+  const held = onsets.join('').split('1').slice(1).map((gap) => [gap.length + 1, true]);
+  return pat.struct(core.timeCat(...held).late(core.Fraction(rotation + firstOnset).div(steps)));
+}
+globalThis.euclidLegato = core.register('euclidLegato', (pulses, steps, pat) => alignedLegato(pulses, steps, 0, pat, false));
+globalThis.euclidLegatoRot = core.register('euclidLegatoRot', (pulses, steps, rotation, pat) => alignedLegato(pulses, steps, rotation, pat, true));
+
+const voicingDirection = Object.assign(Object.create(null), {below:(steps) => steps[steps.length - 1], duck:(steps) => steps[steps.length - 1], above:(steps) => steps[0], root:(steps) => steps[0]});
+const voicingSign = Object.assign(Object.create(null), {below:1, duck:1, above:-1, root:-1});
+const pitchClassNames = ['c','db','d','eb','e','f','gb','g','ab','a','bb','b'];
+const accidentalValue = Object.assign(Object.create(null), {b:-1, '#':1});
+function chordPitch(name) {
+  const [letter, ...signs] = String(name).split('');
+  return pitchClassNames.indexOf(letter.toLowerCase()) + signs.reduce((sum, sign) => sum + (accidentalValue[sign] ?? 0), 0);
+}
+function chordParts(chord) {
+  const match = String(chord ?? '').match(/^([A-G][b#]*)([^/]*)[/]?([A-G][b#]*)?$/);
+  if (!match) return [];
+  return match.slice(1);
+}
+function stepSemitones(step) {
+  const numeric = Number(step);
+  return Number.isNaN(numeric) ? intervalSemitones(step) : numeric;
+}
+function midiValue(value, octave) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return core.noteToMidi(value, octave);
+}
+function scaleDegree(notes, offset, octaves = 1) {
+  const midi = notes.map((note) => typeof note === 'string' ? core.noteToMidi(note) : note);
+  return midi[core._mod(offset, midi.length)] + Math.floor(offset / midi.length) * octaves * 12;
+}
+function renderVoicing({chord, dictionary, offset = 0, n, mode = 'below', anchor = 'c5', octaves = 1}) {
+  const [root, symbol] = chordParts(chord);
+  const rootChroma = chordPitch(root);
+  anchor = midiValue(anchor?.note || anchor, 4);
+  const anchorChroma = core._mod(anchor, 12);
+  const choices = dictionary[symbol].map((voicing) => (typeof voicing === 'string' ? voicing.split(' ') : voicing).map(stepSemitones));
+  const sign = voicingSign[mode];
+  let nearest, best = 0;
+  const shifts = choices.map((steps, index) => {
+    const diff = core._mod((anchorChroma - voicingDirection[mode](steps) - rootChroma) * sign, 12);
+    if (nearest === undefined || diff < nearest) { nearest = diff; best = index; }
+    return diff * sign;
+  });
+  if (mode === 'root') best = 0;
+  const index = core._mod(best + offset, choices.length);
+  const chosen = choices[index];
+  const target = voicingDirection[mode](chosen);
+  const base = anchor - shifts[index] + Math.ceil(offset / choices.length) * 12;
+  const sounding = chosen.map((step) => base - target + step);
+  const notes = (mode === 'duck' ? sounding.filter((midi) => midi !== anchor) : sounding).map((midi) => core.midi2note(midi));
+  return n === undefined ? notes : [scaleDegree(notes, n, octaves)];
+}
+globalThis.voicing = core.register('voicing', function (pat) {
+  return pat.fmap((value) => {
+    value = typeof value === 'string' ? {chord:value} : value;
+    let {dictionary = voicingDictionary, chord, anchor, offset, mode, n, octaves, ...rest} = value;
+    dictionary = typeof dictionary === 'string' ? tonal.voicingRegistry[dictionary] : {dictionary, mode:'below', anchor:'c5'};
+    try {
+      return core.stack(...renderVoicing({...dictionary, chord, anchor, offset, mode, n, octaves})).note().set(rest);
+    } catch {
+      core.logger(`[voicing]: unknown chord "${chord}"`);
+      return core.silence;
+    }
+  }).outerJoin();
+});
 const modules = { '@strudel/core': core, '@strudel/mini': mini, '@strudel/tonal': tonal, '@strudel/transpiler': transpileModule };
 globalThis.__strudelModules = modules;
 globalThis.__moduleSource = (name) => {
@@ -126,7 +210,7 @@ const liveSliderReaders = new Map();
  * @example
  * s("bd hh sd hh").wordfall({cycles:2,labels:1})
  */
-const visualKinds = {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7};
+const visualKinds = Object.assign(Object.create(null), {scope:1, tscope:1, pianoroll:2, punchcard:3, spiral:4, pitchwheel:5, spectrum:6, wordfall:7});
 const visualKind = name => visualKinds[name?.replace(/^_/, '')] ?? 0;
 const visualDefaults = (kind, inline) => kind===7 ? {vertical:1,labels:1} :
   kind===1 && inline ? {pos:.5,scale:1} : {};
@@ -827,9 +911,14 @@ function prepare(code) {
     visualAliases.add(alias);
     const site = {id, offset:property.start, kind, inline:property.name.startsWith('_'), options:{}};
     visualSites.push(site); edits.push([property.start,property.end,alias]);
-    core.Pattern.prototype[alias] = function (options = {}) { return attachVisual(site,this,options); };
+    /* scope and tscope are analyser sends on the REPL. The terminal view still
+       attaches here; the control is what comparison events record. */
+    const scoped = (pattern, options) => site.kind === 1
+      ? pattern.analyze(options && typeof options === 'object' && !core.isPattern(options) && Number.isFinite(options.id) ? options.id : 1)
+      : pattern;
+    core.Pattern.prototype[alias] = function (options = {}) { return attachVisual(site,scoped(this,options),options); };
     globalThis[alias] = function (options = {}) {
-      return core.isPattern(options) ? attachVisual(site,options) : pattern => attachVisual(site,pattern,options);
+      return core.isPattern(options) ? attachVisual(site,scoped(options),{}) : pattern => attachVisual(site,scoped(pattern,options),options);
     };
   }
   function visit(node) {

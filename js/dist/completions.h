@@ -224,6 +224,8 @@ static const char *const strudel_global_words[] = {
     "eqt",
     "errorLogger",
     "euclid",
+    "euclidLegato",
+    "euclidLegatoRot",
     "euclidRot",
     "euclidish",
     "euclidrot",

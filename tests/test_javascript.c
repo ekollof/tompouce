@@ -787,6 +787,23 @@ int main(int argc, char **argv) {
     }
     assert(found_chord);
     cJSON_Delete(haps); javascript_free(program);
+    haps = query(
+        "const F=Fraction._original;"
+        "if (String(F.prototype.add).indexOf('native code')<0) throw new Error('fraction method is not native');"
+        "const add=F(1,6).add(F(1,3));"
+        "if (add.show()!=='1/2') throw new Error('add '+add.show());"
+        "if (F(1,2).sub(F(1,3)).show()!=='1/6') throw new Error('sub');"
+        "if (F(2,3).mul(3,4).show()!=='1/2') throw new Error('mul');"
+        "if (Number(F(-5,2).floor())!==-3 || Number(F(5,2).ceil())!==3) throw new Error('whole');"
+        "if (F(7,3).mod(1).show()!=='1/3' || F(-5,3).mod().show()!=='-2/1') throw new Error('mod');"
+        "if (F(1,6).gcd(F(1,4)).show()!=='1/12') throw new Error('gcd');"
+        "if (F(5,8).lcm(3,7).show()!=='15/1') throw new Error('lcm');"
+        "if (!F(1,2).equals(F(2,4)) || F(1,3).compare(F(1,2))!==-1) throw new Error('order');"
+        "if (Number(F(1,2).add(0.5))!==1 || F(1,3).add('1/6').show()!=='1/2') throw new Error('fallback');"
+        "if (F(-4).abs().show()!=='4/1') throw new Error('abs');"
+        "note(60)", &program);
+    assert(cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
     puts("JavaScript/Strudel runtime ok");
     return 0;
 }

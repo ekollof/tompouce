@@ -39,6 +39,13 @@ fixes or budget changes were made as part of adding the corpus. Captures and
 errors are recorded per case in the requested output directory, including a
 complete `report.json`; results can change with the hosted REPL.
 
+A later native pass matched those saved browser events for all 39 compositions
+that captured them, including the nine former differences. Coastline (78185)
+now returns the same 10 events at 0.75 cps. Scope masking, structure-only
+legato, root/above voicing and the native fraction clock are in that renderer.
+IDs 13587 and 78179 still stop on the first cycle at the unchanged 200 ms CPU
+budget. ID 112818 still needs `initHydra`. This pass did not reload strudel.cc.
+
 Thirteen `fm-matrix-` gates check selected sine-modulator chains, parallel and
 cross sends, explicit carrier sends, disconnected operators, operator 8,
 negative indices/harmonicity, numbered envelopes and self/two-node feedback.

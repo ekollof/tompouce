@@ -517,15 +517,20 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
             memset(head,0,sizeof head);
             for (unsigned at=0;at<s->fm_count;at++) {
                 unsigned i=s->fm_order[at];
+                int shape=(int)p[DSP_FMBASE+i*8+7];
+                /* BufferSource noise has no oscillator frequency input. Its
+                   buffer cursor is consumed by the regular quantum below,
+                   not by the oscillator-only silent-head phase correction. */
+                if (shape>=4 && shape<=6) continue;
                 int feeds=0, incoming=0;
                 for (unsigned j=1;j<9;j++) if (s->control.matrix[i][j]) feeds=1;
                 for (unsigned source=0;source<8;source++) if (s->control.matrix[source][i+1] &&
-                    (s->control.fm_envelopes&(1u<<source))) {
+                    (s->control.fm_envelopes&(1u<<source)) &&
+                    s->control.p[DSP_FMBASE+source*8+7]<4) {
                     for (unsigned j=1;j<9;j++) if (s->control.matrix[source][j]) incoming=1;
                 }
                 if (!(feeds && (s->control.fm_envelopes&(1u<<i))) && !incoming) continue;
                 const double *op=p+DSP_FMBASE+i*8;
-                int shape=(int)op[7];
                 for (unsigned frame=0;frame<skip;frame++) {
                     float frequency=(float)(base*op[1]);
                     if (shape<4 || shape>6) for (unsigned source=0;source<8;source++) {
@@ -582,8 +587,14 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
                     float gain=dsp_oscillator_nyquist_gain(frequency);
                     if (gain!=1.f) wave*=gain;
                 }
+                double env_age=age+frame/SR;
+                /* BufferSource output retains the complete onset quantum.
+                   Its GainNode uses the default gain before the envelope's
+                   first event, even though the carrier starts mid-quantum. */
+                if (shape>=4 && shape<=6 && s->fm_initial_frames)
+                    env_age-=(128-s->fm_initial_frames)/SR;
                 double env=(s->control.fm_envelopes&(1u<<i))?
-                    scheduled_envelope(age+frame/SR,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5]):1;
+                    (env_age<0?1:scheduled_envelope(env_age,gate,0,op[6]>0,0,1,op[2],op[3],op[4],op[5])):1;
                 s->fm_buffer[i][frame]=(float)((float)wave*(float)env);
                 s->fm_phase[i]=fmod(phase+2*M_PI*frequency/SR,2*M_PI);
             }

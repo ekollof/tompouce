@@ -74,15 +74,22 @@ and installs the binary, companion assets, licenses and examples under
 `~/.local/lib/tompouce`, with a command in `~/.local/bin`. No Node/npm is
 needed for installation: both JavaScript bundles are included in the project.
 
-Default sound banks: Dirt-Samples, Salamander piano, Tidal drum machines,
-uzu drumkit, AKWF wavetable banks and the gm webaudiofont packs (roughly
-473 MiB). They are installed beside the binary and work offline. `./install.sh --all-banks` also installs the VCSL and mridangam catalog
-samples (roughly 3 GiB total). Repository revisions are pinned in
+Default sound banks include every standard REPL sample catalog: Dirt-Samples,
+Salamander piano, Tidal drum machines, uzu drumkit and wavetables, VCSL and
+mridangam. AKWF wavetable banks and all valid pinned GM font variants are also
+installed for offline use (roughly 3 GiB total). `--all-banks` remains an alias
+for this default; `--core-banks` selects a smaller install without VCSL,
+mridangam or additional GM variants (roughly 473 MiB). Repository revisions are pinned in
 `scripts/banks.lock.json`; downloaded files get SHA-256 receipts for safe resume,
 and upstream README/license files are retained. Existing modified sound files
 are not silently overwritten. Eight VCSL manifest paths omit a directory prefix;
 the installer fetches the original files from their pinned actual locations while
 preserving the manifest's local sample names and slot order.
+Supplemental manifests retain the REPL's `mridangam_*` and individual
+`wt_digital_*` names alongside the original pinned catalog names.
+The uzu-wavetables repository currently provides no separate license or README;
+its pinned manifest is retained with the bank attribution rather than assigning
+it a license from another waveform collection.
 
 Use `./install.sh --dry-run` to inspect the plan, `--prefix /absolute/path` for
 another installation, `--skip-deps` for preinstalled system packages, or
@@ -578,6 +585,7 @@ the required attribution for the CC-BY / CC-BY-SA banks.
 | `dough-samples/piano` | Salamander piano subset | CC-BY 3.0 | Alexander Holm |
 | `mrid` (+ `dough-samples/mrid` ref) | Mridangam samples | CC-BY-SA 4.0 — share adaptations alike | © Arthur Carabott 2022, performer Harishankar V Menon |
 | `VCSL` | Community sample library | CC0 | Sam Gossner / Versilian Studios, <https://github.com/sgossner/VCSL> |
+| `uzu-wavetables` | Digital and videogame wavetables | No separate license specified upstream; pinned manifest retained | <https://github.com/tidalcycles/uzu-wavetables> |
 | `Dirt-Samples` | SuperDirt/TidalCycles sample set | per upstream repo | TidalCycles, <https://github.com/tidalcycles/Dirt-Samples> |
 | `tidal-drum-machines` | Drum machine collection | per upstream repo | <https://github.com/ritchse/tidal-drum-machines> |
 | `vsco2-ce` | Chamber orchestra (SFZ) | CC0 (`LICENSE` in tree) | Recorded by Sam Gossner & Simon Dalzell, <https://github.com/sgossner/VSCO-2-CE> |

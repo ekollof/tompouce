@@ -119,9 +119,9 @@ notes survive Stop/evaluate/start; failed evaluation retains the prior pattern
 and transport state. Companion Apply, Evaluate and Play from stopped use the
 companion's current source with the same success-only activation. MCP
 `music_set_code` and `music_evaluate` expose optional `autostart: true`; their
-default remains false. Cold sound
-preparation that misses its onset is skipped rather than bursting late notes
-into the performance.
+default remains false. Cold sound preparation that misses its onset starts
+the note immediately if gate time remains, shortening its duration to retain
+the original note-off deadline. Notes whose gate has already ended are skipped.
 
 The terminal editor accepts the [Strudel REPL shortcuts](https://codeberg.org/uzu/strudel/src/branch/main/packages/codemirror/codemirror.mjs):
 Ctrl+Enter or Alt+Enter evaluates and starts playback; Ctrl+. or Alt+. stops
@@ -493,9 +493,13 @@ sample order. Explicit `samples()` maps take precedence. Without those
 installed manifests, load the catalogs explicitly with `samples()` (the
 `.piano()` helper also loads its map). VCSL and mridangam use the
 installed `dough-samples/vcsl.json` and `mridangam.json`, with recordings under
-`VCSL/` and `mrid/` at the bank root. These catalogs now register by default as
-well; absent installed manifests still require explicit maps. The entire
-browser catalog is not bundled.
+`VCSL/` and `mrid/` at the bank root. Installed catalogs register by default.
+The installer includes them by default, along with the
+`uzu-wavetables` catalog and all valid pinned GM font variants. `--core-banks`
+opts into the smaller set. Supplemental local manifests preserve the REPL's
+`mridangam_*` and individual `wt_digital_*` names without renaming historical
+entries. Absent installed manifests still require explicit maps. Sample
+recordings are downloaded during installation rather than bundled in Git.
 
 ## Pitch compensation and convolution
 

@@ -81,9 +81,23 @@ class InstallerTest(unittest.TestCase):
             result = subprocess.run(['bash', 'install.sh', '--dry-run', '--skip-deps', '--prefix', str(prefix)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('Salamander piano', result.stdout)
+            self.assertIn('VCSL', result.stdout)
+            self.assertIn('Mridangam', result.stdout)
+            self.assertIn('uzu wavetables', result.stdout)
             self.assertIn(str(prefix / 'lib/tompouce'), result.stdout)
             self.assertIn(str(prefix / 'bin/tompouce'), result.stdout)
             self.assertFalse(prefix.exists())
+
+    def test_core_bank_profile_is_explicit(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = subprocess.run(['bash', 'install.sh', '--dry-run', '--skip-deps',
+                                     '--core-banks', '--prefix', root+'/uncreated'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn('  bank: VCSL', result.stdout)
+            self.assertNotIn('  bank: Mridangam', result.stdout)
+            self.assertIn('  bank: uzu wavetables', result.stdout)
+            self.assertFalse((Path(root)/'uncreated').exists())
 
     def test_distro_commands(self):
         for family, package in [('arch', 'notcurses'), ('debian', 'libnotcurses-dev'),
@@ -155,6 +169,9 @@ class InstallerTest(unittest.TestCase):
         lock = {'sources': {'kit': source}, 'catalogs': [{
             'name': 'test kit', 'profile': 'core', 'manifest_source': 'kit', 'manifest': 'strudel.json',
             'destination': 'kit/strudel.json', 'audio_source': 'kit', 'audio_prefix': 'audio', 'samples': 'kit'}]}
+        lock['catalogs'][0].update(alias_prefix='web_', aliases={'one_drum': ['drums', 1]})
+        lock['catalogs'].append(dict(lock['catalogs'][0], name='optional kit', profile='all',
+                                     destination='optional/strudel.json', samples='optional'))
         manifest = {'_base': 'https://example.com/', 'drums': ['B.wav', 'a%20name.wav'], 'piano': {'C4': ['C4.wav']}}
         def fetched(url, maximum=0):
             if url.endswith('/strudel.json'):
@@ -169,6 +186,13 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue((Path(root) / 'kit/a name.wav').is_file())
             self.assertEqual(json.loads((Path(root) / 'kit/strudel.json').read_text()), manifest)
             self.assertEqual((Path(root) / 'licenses/kit/LICENSE').read_text(), 'license text')
+            self.assertTrue((Path(root) / 'optional/B.wav').is_file())
+            aliases = json.loads((Path(root)/'kit/web-repl-aliases.json').read_text())
+            self.assertEqual(aliases['web_drums'], manifest['drums'])
+            self.assertEqual(aliases['one_drum'], ['a%20name.wav'])
+        with tempfile.TemporaryDirectory() as root, patch.object(installer, 'fetch', side_effect=fetched):
+            installer.BankInstaller(Path(root), 2).install(lock, all_banks=False)
+            self.assertFalse((Path(root) / 'optional').exists())
 
     def test_gm_webaudiofont_lock_matches_native_table(self):
         """The pinned installer lock and the native first-font table agree (no network)."""
@@ -185,6 +209,16 @@ class InstallerTest(unittest.TestCase):
         native = dict(re.findall(r'\{"(gm_[a-z0-9_]+)","([A-Za-z0-9_-]+)"\}',
                                  (source / 'src/gm_synth.c').read_text()))
         self.assertEqual({name: font + '.js' for name, font in native.items()}, files)
+        variants = gm_lock['variants']
+        header = (source / 'src/gm_variants.h').read_text()
+        native_fonts = set(re.findall(r'"([A-Za-z0-9_-]+_sf2_file)"', header, re.IGNORECASE))
+        installed_fonts = {pack['file'][:-3] for pack in gm_lock['packs'] + variants}
+        self.assertEqual(native_fonts, installed_fonts)
+        self.assertEqual(len(installed_fonts), 866)
+        for pack in variants:
+            self.assertTrue(re.fullmatch(r'[A-Za-z0-9_-]+_sf2_file\.js', pack['file'], re.IGNORECASE))
+            self.assertTrue(re.fullmatch(r'[0-9a-f]{64}', pack['sha256']))
+            self.assertGreater(pack['bytes'], 0)
 
     def test_gm_webaudiofont_install_verifies_pins(self):
         pack, license_text = b'pack-bytes', b'license-bytes'
@@ -201,9 +235,17 @@ class InstallerTest(unittest.TestCase):
                     'source': {'repo': 'owner/fonts', 'branch': 'main', 'commit': 'b' * 40, 'license': 'MIT'},
                     'packs': [{'name': 'gm_epiano1', 'file': '0040_X_sf2_file.js',
                                'sha256': hashlib.sha256(pack).hexdigest(), 'bytes': len(pack)}],
+                    'variants': [{'name': 'gm_epiano1', 'file': '0041_X_SF2_file.js',
+                                  'sha256': hashlib.sha256(pack).hexdigest(), 'bytes': len(pack)}],
                     'license': {'file': 'LICENSE', 'sha256': hashlib.sha256(license_text).hexdigest()}}))
+                installer.install_gm_webaudiofont(Path(root) / 'core', 2, all_banks=False)
+                self.assertFalse((Path(root) / 'core/gm-webaudiofont/0041_X_SF2_file.js').exists())
                 installer.install_gm_webaudiofont(Path(root) / 'banks', 2)
                 self.assertEqual((Path(root) / 'banks/gm-webaudiofont/0040_X_sf2_file.js').read_bytes(), pack)
+                self.assertEqual((Path(root) / 'banks/gm-webaudiofont/0041_X_SF2_file.js').read_bytes(), pack)
+                with patch.object(installer, 'fetch', side_effect=AssertionError('resume fetched a pack')):
+                    # The license already has a valid receipt too.
+                    installer.install_gm_webaudiofont(Path(root) / 'banks', 2)
                 self.assertEqual((Path(root) / 'banks/licenses/webaudiofontdata/LICENSE').read_bytes(), license_text)
                 receipt = json.loads((Path(root) / 'banks/.install-receipt.json').read_text())
                 self.assertIn('gm-webaudiofont/0040_X_sf2_file.js', receipt)
@@ -213,6 +255,13 @@ class InstallerTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
                         installer.install_gm_webaudiofont(Path(root) / 'banks', 2)
                 self.assertFalse((Path(root) / 'banks/gm-webaudiofont/0040_X_sf2_file.js').exists())
+                invalid = json.loads((lock_path/'gm-webaudiofont.lock.json').read_text())
+                invalid['variants'][0]['file'] = '../escape_sf2_file.js'
+                (lock_path/'gm-webaudiofont.lock.json').write_text(json.dumps(invalid))
+                with patch.object(installer, 'fetch', side_effect=AssertionError('invalid variant fetched')):
+                    with self.assertRaisesRegex(ValueError, 'invalid gm pack lock entry'):
+                        installer.install_gm_webaudiofont(Path(root)/'refused', 2)
+                self.assertFalse((Path(root)/'refused').exists())
 
 
 if __name__ == '__main__':

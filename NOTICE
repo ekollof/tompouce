@@ -26,7 +26,8 @@ project license does not replace their notices. See:
 - gm_* sounds: at play time Tompouce fetches the same MIT-licensed
   WebAudioFont instrument packs the Strudel web REPL uses
   (https://github.com/surikov/webaudiofontdata, via the
-  felixroos/webaudiofontdata mirror). The packs are runtime-fetched, never
-  bundled; without network access gm_* falls back to the local SoundFont.
+  felixroos/webaudiofontdata mirror). The installer prefetches pinned packs
+  and preserves their MIT notice for offline use. Missing packs are fetched
+  lazily at runtime; unavailable packs fall back to the local SoundFont.
 
 Project source: https://github.com/ekollof/tompouce

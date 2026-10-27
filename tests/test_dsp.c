@@ -325,6 +325,27 @@ static void test_fm_wave_and_range(void) {
     dsp_params_read(&p,value); assert(dsp_prepare_fm(&p)); cJSON_Delete(value);
     dsp_init(&state,&p);
     for (int i=0;i<256;i++) assert(fabs(dsp_frequency(&state,440,i/SR,.5)-440)<1e-9);
+    /* A silent noise buffer feeding an oscillator must remain silent during
+       a fractional onset too, rather than introduce a phantom sine or phase
+       shift through the noise operator's envelope. */
+    static const float silent_noise[88200]={0};
+    value=cJSON_Parse("{\"fmi\":0.5,\"fmh\":2,\"fmi2\":0.3,\"fmwave2\":\"pink\",\"fmattack2\":0.04}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value);
+    p.fm_noise[1]=silent_noise;
+    DspState silent; dsp_init(&silent,&p); dsp_oscillator_onset(&silent,.274);
+    p.p[DSP_FMBASE+8]=0;
+    dsp_init(&state,&p); dsp_oscillator_onset(&state,.274);
+    for (int i=0;i<512;i++)
+        assert(fabs(dsp_frequency(&state,440,i/SR,.5)-dsp_frequency(&silent,440,i/SR,.5))<1e-9);
+    value=cJSON_Parse("{\"fmi\":0.25,\"fmwave\":\"white\",\"fmattack\":0.1}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value); assert(dsp_prepare_fm(&p));
+    dsp_init(&state,&p); dsp_oscillator_onset(&state,64/SR);
+    /* Before the envelope starts halfway through the first quantum, the
+       noise GainNode retains its default of 1, not the attack's minimum. */
+    for (int i=0;i<64;i++) {
+        float modulation=(float)(p.fm_noise[0][i]*.25f)*440.f;
+        assert(fabs(dsp_frequency(&state,440,i/SR,.5)-440*(1+modulation/440.0))<1e-5);
+    }
     assert(dsp_oscillator_nyquist_gain(880)==1 && dsp_oscillator_nyquist_gain(-880)==1);
     assert(dsp_oscillator_nyquist_gain((float)(SR*.5))==0);
     assert(dsp_oscillator_nyquist_gain(-(float)(SR*.5))==0);

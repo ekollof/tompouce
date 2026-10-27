@@ -1,21 +1,178 @@
 {
   "version": 1,
   "sources": {
-    "dough": {"repo": "felixroos/dough-samples", "commit": "9eacfc86ec4393e68a463ff52b01c19cfaa77f38", "credits": ["README.md"]},
-    "dirt": {"repo": "tidalcycles/Dirt-Samples", "commit": "c74fc80f8db8038f6a33648ffef5ac00a07ad402", "credits": ["README.md", "bass1/_readme_and_license.txt", "bass2/_readme_and_license.txt", "bass3/_readme_and_license.txt", "num/_readme_and_license.txt", "tabla2/__license.txt", "voodoo/ReadMe.txt"]},
-    "uzu": {"repo": "tidalcycles/uzu-drumkit", "commit": "2f3e05c70ab4d73ad053a1467adec89bd27377a0", "credits": ["LICENSE", "README.md"]},
-    "machines": {"repo": "ritchse/tidal-drum-machines", "commit": "6577395a4d05031728ced2ec3e5637fa89d8be48", "credits": ["README.md"]},
-    "vcsl": {"repo": "sgossner/VCSL", "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e", "credits": ["LICENSE", "README.md"], "path_prefixes": {"Struck Membranophones/": "Membranophones/Struck Membranophones/"}},
-    "mrid": {"repo": "yaxu/mrid", "commit": "5ba409cabb2893e6e8a52a15a2812c35585cdadb", "credits": ["README.md"]},
-    "waveforms": {"repo": "Bubobubobubobubo/Dough-Waveforms", "commit": "125801fa9a799117fd0a0350a195ab7c2f4cdf13", "archive_sha256": "9f2ef104c0974f6cbdf11879b7992fc14f981ed911813150c805161d969404f6", "credits": ["README.md"]}
+    "dough": {
+      "repo": "felixroos/dough-samples",
+      "commit": "9eacfc86ec4393e68a463ff52b01c19cfaa77f38",
+      "credits": [
+        "README.md"
+      ]
+    },
+    "dirt": {
+      "repo": "tidalcycles/Dirt-Samples",
+      "commit": "c74fc80f8db8038f6a33648ffef5ac00a07ad402",
+      "credits": [
+        "README.md",
+        "bass1/_readme_and_license.txt",
+        "bass2/_readme_and_license.txt",
+        "bass3/_readme_and_license.txt",
+        "num/_readme_and_license.txt",
+        "tabla2/__license.txt",
+        "voodoo/ReadMe.txt"
+      ]
+    },
+    "uzu": {
+      "repo": "tidalcycles/uzu-drumkit",
+      "commit": "2f3e05c70ab4d73ad053a1467adec89bd27377a0",
+      "credits": [
+        "LICENSE",
+        "README.md"
+      ]
+    },
+    "machines": {
+      "repo": "ritchse/tidal-drum-machines",
+      "commit": "6577395a4d05031728ced2ec3e5637fa89d8be48",
+      "credits": [
+        "README.md"
+      ]
+    },
+    "vcsl": {
+      "repo": "sgossner/VCSL",
+      "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+      "credits": [
+        "LICENSE",
+        "README.md"
+      ],
+      "path_prefixes": {
+        "Struck Membranophones/": "Membranophones/Struck Membranophones/"
+      }
+    },
+    "mrid": {
+      "repo": "yaxu/mrid",
+      "commit": "5ba409cabb2893e6e8a52a15a2812c35585cdadb",
+      "credits": [
+        "README.md"
+      ]
+    },
+    "waveforms": {
+      "repo": "Bubobubobubobubo/Dough-Waveforms",
+      "commit": "125801fa9a799117fd0a0350a195ab7c2f4cdf13",
+      "archive_sha256": "9f2ef104c0974f6cbdf11879b7992fc14f981ed911813150c805161d969404f6",
+      "credits": [
+        "README.md"
+      ]
+    },
+    "uzu_waveforms": {
+      "repo": "tidalcycles/uzu-wavetables",
+      "commit": "3432ce3f35746356728f9bea3fea4b76624f98cd",
+      "credits": [
+        "strudel.json"
+      ]
+    }
   },
   "catalogs": [
-    {"name": "Dirt-Samples", "manifest_source": "dirt", "manifest": "strudel.json", "destination": "Dirt-Samples/strudel.json", "audio_source": "dirt", "audio_prefix": "", "samples": "Dirt-Samples", "profile": "core"},
-    {"name": "Salamander piano", "manifest_source": "dough", "manifest": "piano.json", "destination": "dough-samples/piano.json", "audio_source": "dough", "audio_prefix": "piano", "samples": "dough-samples/piano", "profile": "core"},
-    {"name": "Tidal drum machines", "manifest_source": "dough", "manifest": "tidal-drum-machines.json", "destination": "dough-samples/tidal-drum-machines.json", "audio_source": "machines", "audio_prefix": "machines", "samples": "tidal-drum-machines/machines", "profile": "core"},
-    {"name": "uzu drumkit", "manifest_source": "uzu", "manifest": "strudel.json", "destination": "uzu-drumkit/strudel.json", "audio_source": "uzu", "audio_prefix": "", "samples": "uzu-drumkit", "profile": "core"},
-    {"name": "AKWF wavetable banks", "manifest_source": "waveforms", "manifest": "strudel.json", "destination": "Dough-Waveforms/strudel.json", "audio_source": "waveforms", "audio_prefix": "", "samples": "Dough-Waveforms", "profile": "core"},
-    {"name": "VCSL", "manifest_source": "dough", "manifest": "vcsl.json", "destination": "dough-samples/vcsl.json", "audio_source": "vcsl", "audio_prefix": "", "samples": "VCSL", "profile": "all"},
-    {"name": "Mridangam", "manifest_source": "dough", "manifest": "mridangam.json", "destination": "dough-samples/mridangam.json", "audio_source": "mrid", "audio_prefix": "", "samples": "mrid", "profile": "all"}
+    {
+      "name": "Dirt-Samples",
+      "manifest_source": "dirt",
+      "manifest": "strudel.json",
+      "destination": "Dirt-Samples/strudel.json",
+      "audio_source": "dirt",
+      "audio_prefix": "",
+      "samples": "Dirt-Samples",
+      "profile": "core"
+    },
+    {
+      "name": "Salamander piano",
+      "manifest_source": "dough",
+      "manifest": "piano.json",
+      "destination": "dough-samples/piano.json",
+      "audio_source": "dough",
+      "audio_prefix": "piano",
+      "samples": "dough-samples/piano",
+      "profile": "core"
+    },
+    {
+      "name": "Tidal drum machines",
+      "manifest_source": "dough",
+      "manifest": "tidal-drum-machines.json",
+      "destination": "dough-samples/tidal-drum-machines.json",
+      "audio_source": "machines",
+      "audio_prefix": "machines",
+      "samples": "tidal-drum-machines/machines",
+      "profile": "core"
+    },
+    {
+      "name": "uzu drumkit",
+      "manifest_source": "uzu",
+      "manifest": "strudel.json",
+      "destination": "uzu-drumkit/strudel.json",
+      "audio_source": "uzu",
+      "audio_prefix": "",
+      "samples": "uzu-drumkit",
+      "profile": "core"
+    },
+    {
+      "name": "AKWF wavetable banks",
+      "manifest_source": "waveforms",
+      "manifest": "strudel.json",
+      "destination": "Dough-Waveforms/strudel.json",
+      "audio_source": "waveforms",
+      "audio_prefix": "",
+      "samples": "Dough-Waveforms",
+      "profile": "core"
+    },
+    {
+      "name": "VCSL",
+      "manifest_source": "dough",
+      "manifest": "vcsl.json",
+      "destination": "dough-samples/vcsl.json",
+      "audio_source": "vcsl",
+      "audio_prefix": "",
+      "samples": "VCSL",
+      "profile": "all"
+    },
+    {
+      "name": "Mridangam",
+      "manifest_source": "dough",
+      "manifest": "mridangam.json",
+      "destination": "dough-samples/mridangam.json",
+      "audio_source": "mrid",
+      "audio_prefix": "",
+      "samples": "mrid",
+      "profile": "all",
+      "alias_prefix": "mridangam_"
+    },
+    {
+      "name": "uzu wavetables",
+      "manifest_source": "uzu_waveforms",
+      "manifest": "strudel.json",
+      "destination": "uzu-wavetables/strudel.json",
+      "audio_source": "uzu_waveforms",
+      "audio_prefix": "",
+      "samples": "uzu-wavetables",
+      "profile": "core",
+      "aliases": {
+        "wt_digital_bad_day": [
+          "wt_digital",
+          0
+        ],
+        "wt_digital_basique": [
+          "wt_digital",
+          1
+        ],
+        "wt_digital_crickets": [
+          "wt_digital",
+          2
+        ],
+        "wt_digital_curses": [
+          "wt_digital",
+          3
+        ],
+        "wt_digital_echoes": [
+          "wt_digital",
+          4
+        ]
+      }
+    }
   ]
 }

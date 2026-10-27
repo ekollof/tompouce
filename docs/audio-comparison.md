@@ -36,6 +36,17 @@ two-second buffers as source noise and ignore frequency sends. Correlations are
 0.99074–0.9999996 with RMS ratios 0.94389–1.00847 at zero lag. Square is the
 low end of that range.
 
+Twelve `fm-noise-onset-` gates combine white/pink/brown operators with explicit
+FM envelopes in direct and chained routing, including aligned, half-quantum
+and fractional starts. Noise BufferSources stay out of the oscillator-only
+silent-head phase correction; their sample cursors are consumed by the regular
+quantum. Their envelope retains the complete onset quantum, including the
+GainNode's default gain before its first scheduled event. These twelve
+cases exceed 0.9999987 correlation with RMS ratios 1.00095–1.00126 at zero lag
+under unchanged 0.99/0.85–1.15 gates. The original white and pink fractional
+cases failed at 0.97602 and 0.90991. These selected cases do not establish
+arbitrary noise-matrix or full-song parity.
+
 Six `fm-onset-` gates combine FM envelopes with late onsets, including a
 numbered operator, a constant-gain chain, a quantum-aligned envelope and carrier
 pitch automation. An enveloped operator that feeds another operator is pulled

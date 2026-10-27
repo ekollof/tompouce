@@ -107,12 +107,24 @@ static void test_duck_before_source_preparation(void) {
         js_audio_set_prep_observer(block_saw_preparation);
         pthread_t thread;
         assert(!pthread_create(&thread,NULL,duck_prep_probe,&probe));
+        double original_end=.1+audio_sec_per_cycle();
         (void)js_audio_schedule(tracks[0].javascript,.1,0,event_queue_generation());
         assert(!pthread_join(thread,NULL));
         js_audio_set_prep_observer(NULL);
         assert(probe.visible);
-        for (QNode *node=qhead;node;node=node->next)
-            assert(node->ev.control_only && node->ev.audio_prepared);
+        int sources=0;
+        for (QNode *node=qhead;node;node=node->next) {
+            if (node->ev.control_only) assert(node->ev.audio_prepared);
+            else {
+                /* Preparation completes after onset while gate time remains.
+                   Admit the source now, retaining its original note-off. */
+                sources++;
+                assert(!replace && node->ev.time>=.15);
+                assert(fabs(node->ev.time-audio_time_now())<1/SR);
+                assert(fabs(node->ev.time+node->ev.duration-original_end)<1/SR);
+            }
+        }
+        assert(sources==(replace?0:1));
         memset(web_duck,0,sizeof(web_duck));
     }
     event_queue_clear(); audio_time=0;

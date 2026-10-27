@@ -256,7 +256,7 @@ class BankInstaller:
             raise ValueError('source archive is missing catalog files')
         return contents
 
-    def install(self, lock, all_banks=False):
+    def install(self, lock, all_banks=True):
         used = set()
         for catalog in lock['catalogs']:
             if catalog['profile'] == 'all' and not all_banks:
@@ -266,6 +266,35 @@ class BankInstaller:
             path, record = self.download(catalog['destination'], raw_url(source, catalog['manifest']))
             self.receipt[path] = record
             manifest = json.loads((self.root / path).read_text())
+            aliases = {}
+            prefix = catalog.get('alias_prefix', '')
+            if prefix:
+                if not isinstance(prefix, str) or not re.fullmatch(r'[a-z0-9_]{1,64}', prefix):
+                    raise ValueError('invalid catalog alias prefix')
+                aliases.update({prefix + name: value for name, value in manifest.items()
+                                if not name.startswith('_')})
+            extra = catalog.get('aliases', {})
+            if not isinstance(extra, dict) or len(extra) > 1024:
+                raise ValueError('invalid catalog aliases')
+            for name, selection in extra.items():
+                if (not re.fullmatch(r'[A-Za-z0-9_]{1,128}', name) or
+                        not isinstance(selection, list) or len(selection) != 2 or
+                        not isinstance(selection[0], str) or not isinstance(selection[1], int)):
+                    raise ValueError('invalid catalog alias selection')
+                values = manifest.get(selection[0])
+                if not isinstance(values, list) or not 0 <= selection[1] < len(values):
+                    raise ValueError('catalog alias index out of range')
+                aliases[name] = [values[selection[1]]]
+            if aliases:
+                # Preserve pinned manifests and their historical names. The
+                # sidecar shares the sample directory, so aliases work offline.
+                if '_base' in manifest:
+                    aliases['_base'] = manifest['_base']
+                data = json.dumps(aliases, sort_keys=True).encode()
+                relative = str(PurePosixPath(catalog['samples']) / 'web-repl-aliases.json')
+                url = raw_url(source, catalog['manifest']) + '#aliases-' + hashlib.sha256(data).hexdigest()
+                path, record = self.download(relative, url, False, data)
+                self.receipt[path] = record
             audio_source = lock['sources'][catalog['audio_source']]
             tasks = []
             remote_paths = {}
@@ -301,9 +330,9 @@ class BankInstaller:
             self.save()
 
 
-def install_gm_webaudiofont(banks_root, jobs=8):
+def install_gm_webaudiofont(banks_root, jobs=8, all_banks=True):
     """Prefetch the pinned gm_* webaudiofont packs so gm sounds play offline
-    (about 17 MiB). Without these the engine fetches packs on first play and
+    (about 138 MiB for all variants). Without these the engine fetches packs on first play and
     falls back to the local SoundFont offline."""
     banks_root = Path(banks_root)
     path = SOURCE / 'scripts/gm-webaudiofont.lock.json'
@@ -319,29 +348,35 @@ def install_gm_webaudiofont(banks_root, jobs=8):
             raise ValueError('invalid gm pack lock source')
     if not re.fullmatch(r'[0-9a-f]{40}', source['commit']):
         raise ValueError('invalid gm pack lock commit')
-    if not gm_lock['packs'] or len(gm_lock['packs']) > 256:
+    packs = gm_lock['packs']
+    if all_banks:
+        variants = gm_lock.get('variants', [])
+        if not isinstance(variants, list):
+            raise ValueError('invalid gm variant list')
+        packs = packs + variants
+    if not packs or len(packs) > 2048:
         raise ValueError('invalid gm pack list')
     base = f"https://raw.githubusercontent.com/{source['repo']}/{source['commit']}/sound"
-    installer = BankInstaller(banks_root, jobs)
     total = 0
-    for pack in gm_lock['packs']:
+    for pack in packs:
         if (not isinstance(pack, dict) or not re.fullmatch(r'gm_[a-z0-9_]+', pack.get('name', '')) or
-                not re.fullmatch(r'[A-Za-z0-9_-]+_sf2_file\.js', pack.get('file', '')) or
+                not re.fullmatch(r'[A-Za-z0-9_-]+_sf2_file\.js', pack.get('file', ''), re.IGNORECASE) or
                 not re.fullmatch(r'[0-9a-f]{64}', pack.get('sha256', '')) or
                 not isinstance(pack.get('bytes'), int) or not 1 <= pack['bytes'] <= 2 * 1024 * 1024):
             raise ValueError('invalid gm pack lock entry')
         total += pack['bytes']
-    if total > 128 * 1024 * 1024:
+    if total > 256 * 1024 * 1024:
         raise ValueError('gm pack lock too large')
-    print(f'Installing gm webaudiofont packs ({len(gm_lock["packs"])} packs)…', flush=True)
+    installer = BankInstaller(banks_root, jobs)
+    print(f'Installing gm webaudiofont packs ({len(packs)} packs)…', flush=True)
     tasks = {}
-    for pack in gm_lock['packs']:
+    for pack in packs:
         relative = f"gm-webaudiofont/{pack['file']}"
         url = f"{base}/{quote(pack['file'], safe='/')}"
         local = banks_root / relative
         record = installer.receipt.get(relative)
         if (local.is_file() and not local.is_symlink() and isinstance(record, dict) and
-                record.get('url') == url and record.get('sha256') == digest(local)):
+                record.get('url') == url and record.get('sha256') == pack['sha256'] == digest(local)):
             continue
         tasks[relative] = url
     with ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -351,12 +386,10 @@ def install_gm_webaudiofont(banks_root, jobs=8):
             for count, future in enumerate(as_completed(futures), 1):
                 relative, url = futures[future]
                 data = future.result()
-                path, record = installer.download(relative, url, False, data)
-                if record['sha256'] != next(p['sha256'] for p in gm_lock['packs']
+                if hashlib.sha256(data).hexdigest() != next(p['sha256'] for p in packs
                                             if f"gm-webaudiofont/{p['file']}" == relative):
-                    local = banks_root / relative
-                    local.unlink(missing_ok=True)
                     raise ValueError(f'pinned gm pack checksum mismatch: {relative}')
+                path, record = installer.download(relative, url, False, data)
                 installer.receipt[path] = record
                 if count % 25 == 0 or count == len(tasks):
                     installer.save()
@@ -446,7 +479,10 @@ def copy_runtime(build, application, binary=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prefix', type=Path, default=Path.home() / '.local', help='installation prefix (default: ~/.local)')
-    parser.add_argument('--all-banks', action='store_true', help='also install VCSL and mridangam (about 3 GiB total banks)')
+    banks = parser.add_mutually_exclusive_group()
+    banks.add_argument('--all-banks', dest='all_banks', action='store_true', help='install all REPL catalogs and GM variants (default; about 3 GiB)')
+    banks.add_argument('--core-banks', dest='all_banks', action='store_false', help='smaller install without VCSL, mridangam or additional GM variants')
+    parser.set_defaults(all_banks=True)
     parser.add_argument('--skip-deps', action='store_true', help='use already installed system build dependencies')
     parser.add_argument('--skip-banks', action='store_true', help='build/install without downloading banks')
     parser.add_argument('--no-browser', action='store_true', help='do not install Chromium')
@@ -470,7 +506,7 @@ def main(argv=None):
         parser.error('unsafe Csound prefix')
     lock = json.loads((SOURCE / 'scripts/banks.lock.json').read_text())
     print(f'Install location: {application}\nCommand: {prefix / "bin/tompouce"}', flush=True)
-    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all (~3 GiB)' if args.all_banks else 'core drums, piano, drum machines, AKWF wavetables and gm webaudiofont packs (~473 MiB)'))
+    print('Banks: ' + ('skipped (--skip-banks)' if args.skip_banks else 'all REPL catalogs + GM variants (~3 GiB)' if args.all_banks else 'core drums, piano, drum machines, wavetables and first GM fonts (~473 MiB)'))
     if family:
         print('System packages: ' + ' '.join(dependency_command(family, release, not args.no_browser)))
     if args.dry_run:
@@ -546,7 +582,7 @@ def main(argv=None):
                 if available < minimum:
                     raise ValueError('not enough free disk space for the selected sound banks')
                 BankInstaller(application / 'assets/banks',args.jobs).install(lock,args.all_banks)
-                install_gm_webaudiofont(application / 'assets/banks',args.jobs)
+                install_gm_webaudiofont(application / 'assets/banks',args.jobs,args.all_banks)
             check_home = directory(build / 'check-home')
             check_env = dict(environment, HOME=str(check_home), XDG_CONFIG_HOME=str(check_home), XDG_CACHE_HOME=str(check_home),
                              TOMPOUCE_BANKS=str(application / 'assets/banks'), https_proxy='http://127.0.0.1:9',

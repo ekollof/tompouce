@@ -897,11 +897,21 @@ unsigned javascript_live_scope_mask(JsProgram *p, const char *source, int offset
     return mask;
 }
 
+static int warn_remember(JsProgram *p, const char *key) {
+    if (!p || !key || p->nwarned >= 32) return 0;
+    for (int i = 0; i < p->nwarned; i++) if (!strcmp(p->warned[i],key)) return 0;
+    snprintf(p->warned[p->nwarned++],64,"%.63s",key);
+    return 1;
+}
+
 void javascript_warn_control(JsProgram *p, const char *name) {
-    if (!p || !name || p->nwarned >= 32) return;
-    for (int i = 0; i < p->nwarned; i++) if (!strcmp(p->warned[i],name)) return;
-    snprintf(p->warned[p->nwarned++],64,"%.63s",name);
+    if (!warn_remember(p,name)) return;
     log_console("native audio: control '%s' is not implemented",name);
+}
+
+void javascript_warn_once(JsProgram *p, const char *key, const char *message) {
+    if (!message || !warn_remember(p,key)) return;
+    log_console("%s",message);
 }
 
 int javascript_visual_options(const JsProgram *p, unsigned mask, VisualOptions *out) {

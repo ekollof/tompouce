@@ -40,9 +40,11 @@ note("c4 e4 g4").s('gm_flute').gain(0.4)
 GM playback is local; no external MIDI connection is required. Without the
 packs and without network access, `gm_` sounds fall back to FluidSynth when
 available: the installer includes FluidR3 GM, and `TOMPOUCE_SOUNDFONT`
-selects another supported SF2/SF3 file at startup. Native GM plays the web's
-default (first) soundfont variant per name; the browser's additional `.n()`
-soundfont variants are not replicated.
+selects another supported SF2/SF3 file at startup. `.n()` and `sound:n`
+select the same WebAudioFont pack list as Strudel 1.2.6 and wrap the same
+way. A missing `n` plays the first pack. Packs that are not already installed
+are fetched on first play. Names outside that list, including the separate
+piano-program aliases, still use FluidSynth when it is available.
 
 ## Pitch controls
 

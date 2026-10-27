@@ -47,6 +47,8 @@ int javascript_visual_copy(JsProgram *program, unsigned mask, VisualNote *out, i
 int javascript_live_visual_copy(JsProgram *program, unsigned mask, int kind, VisualNote *out, int max,
                                 double *origin, double *seconds);
 void javascript_warn_control(JsProgram *program, const char *name);
+/* Log message once per program. key is the dedupe token, not the printed text. */
+void javascript_warn_once(JsProgram *program, const char *key, const char *message);
 int javascript_prepare_csound(JsProgram *program, const cJSON *metadata, char *error, size_t size);
 int javascript_prepare_csound_from(JsProgram *program, const cJSON *metadata,
                                    JsProgram *previous, char *error, size_t size);

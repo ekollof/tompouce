@@ -175,7 +175,7 @@ int visual_note(VisualNote *out, const cJSON *hap, double origin, double seconds
     else snprintf(out->label,sizeof(out->label),"%.2f",out->pitch);
     const char *custom = string(v,"label"); if (*custom) snprintf(out->label,sizeof(out->label),"%.63s",custom);
     snprintf(out->active_label,sizeof(out->active_label),"%.63s",string(v,"activeLabel"));
-    out->gain = number(v,"gain",1,0,16)*number(v,"velocity",1,0,1);
+    out->gain = number(v,"gain",1,0,16)*number(v,"velocity",1,0,16);
     if (visual_color(string(v,"color"),&out->color)) out->flags |= VISUAL_COLOR;
     out->flags |= visual_style(string(v,"markcss"));
     return isfinite(out->start) && isfinite(out->end) && isfinite(out->pitch) && out->pitch>=-128 && out->pitch<=255;

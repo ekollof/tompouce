@@ -237,7 +237,8 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     if (clip == 0) clip=1; /* Superdough's clip || 1 fallback. */
     ev->duration = fmin(60,ev->duration * clip);
     ev->duration = control(v,"duration",ev->duration,.00001,60);
-    ev->gain = control(v,"gain",.8,0,16) * control(v,"velocity",1,0,1) * control(v,"amp",1,0,16)
+    /* Superdough multiplies velocity with no 0..1 cap. 16 matches the other amplitude stages. */
+    ev->gain = control(v,"gain",.8,0,16) * control(v,"velocity",1,0,16) * control(v,"amp",1,0,16)
         * control(v,"busgain",1,0,16) * control(v,"overgain",1,0,16);
     ev->pan = control(v,"pan",.5,0,1) * 2 - 1;
     ev->has_pan=cJSON_HasObjectItem(v,"pan");
@@ -1041,9 +1042,18 @@ static void commit_source_hap(JsProgram *program, const HapPlan *plan,
         prep_job_release(&job->base); return;
     }
     if (job->event.time+1/SR<audio_time_now()) {
-        prep_profile_event(PREP_LATE_SOURCE,job->event.time,audio_time_now());
-        javascript_warn_control(program,"late sound preparation (note skipped)");
-        prep_job_release(&job->base); return;
+        /* Preparation missed the onset. A note that is still sounding starts
+           now and keeps its original end. One that has already ended is dropped. */
+        double now=audio_time_now();
+        prep_profile_event(PREP_LATE_SOURCE,job->event.time,now);
+        double late=now-job->event.time;
+        if (!isfinite(late) || !(job->event.duration>late+1/SR)) {
+            javascript_warn_once(program,"late sound preparation",
+                "native audio: sound preparation finished after the note ended; that note was skipped");
+            prep_job_release(&job->base); return;
+        }
+        job->event.duration-=late;
+        job->event.time=now;
     }
     pthread_mutex_lock(&tracks_lock);
     int current=generation==event_queue_generation();

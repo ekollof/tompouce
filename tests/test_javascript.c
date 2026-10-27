@@ -764,6 +764,29 @@ int main(int argc, char **argv) {
     assert(javascript_check("const p = x => x.fast(2);\np(note('c4'))",error,sizeof(error),&line));
     assert(!javascript_check("const p = ;",error,sizeof(error),&line));
     assert(!javascript_check("const p = 1;\nconst q = ;",error,sizeof(error),&line) && line == 2);
+    int logged = console_count_get();
+    haps = query("console.log('%c[voicing]: unknown chord \"Dx\"', 'background-color: black;color:white;border-radius:15px', 'tail'); note(60)", &program);
+    assert(cJSON_GetArraySize(haps) == 1);
+    int found_style = 0;
+    for (int i = logged; i < console_count_get(); i++) {
+        const char *message = console_line(i);
+        if (!strstr(message, "[voicing]: unknown chord \"Dx\" tail")) continue;
+        found_style = 1;
+        assert(!strstr(message, "%c") && !strstr(message, "background-color"));
+    }
+    assert(found_style);
+    cJSON_Delete(haps); javascript_free(program);
+    logged = console_count_get();
+    haps = query("chord('Dx').anchor('g5').voicing()", &program);
+    int found_chord = 0;
+    for (int i = logged; i < console_count_get(); i++) {
+        const char *message = console_line(i);
+        if (!strstr(message, "[voicing]: unknown chord \"Dx\"")) continue;
+        found_chord = 1;
+        assert(!strstr(message, "%c") && !strstr(message, "background-color"));
+    }
+    assert(found_chord);
+    cJSON_Delete(haps); javascript_free(program);
     puts("JavaScript/Strudel runtime ok");
     return 0;
 }

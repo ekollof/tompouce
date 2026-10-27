@@ -476,6 +476,18 @@ int main(void) {
     assert(event.dsp.p[DSP_HPF] == 400 && event.dsp.p[DSP_BEGIN] == .2);
     assert(event.dsp.p[DSP_FMBASE] == 2 && event.dsp.p[DSP_FMBASE+1] == 1.5);
     cJSON_Delete(hap);
+    hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"sine\",\"velocity\":5}}");
+    assert(js_audio_event(hap,0,1,&event) && fabs(event.gain-.8*5)<1e-12);
+    cJSON_Delete(hap);
+    hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"sine\",\"gain\":0.4,\"velocity\":2}}");
+    assert(js_audio_event(hap,0,1,&event) && fabs(event.gain-0.8)<1e-12);
+    cJSON_Delete(hap);
+    hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"sine\",\"velocity\":0.5}}");
+    assert(js_audio_event(hap,0,1,&event) && fabs(event.gain-0.4)<1e-12);
+    cJSON_Delete(hap);
+    hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"s\":\"sine\",\"velocity\":32}}");
+    assert(js_audio_event(hap,0,1,&event) && fabs(event.gain-.8*16)<1e-12);
+    cJSON_Delete(hap);
     hap = cJSON_Parse("{\"begin\":0,\"end\":1,\"value\":{\"gain\":0}}");
     assert(js_audio_event(hap,0,2,&event) && event.gain==0 && event.dsp.enabled);
     cJSON_Delete(hap);

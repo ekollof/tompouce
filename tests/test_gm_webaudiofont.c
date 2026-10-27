@@ -184,12 +184,41 @@ static void test_zone_math(void) {
     expect(!gm_waf_loop_fractions(&zones[0], 30000, 44100, NULL, &hi), "math null out rejected");
 }
 
+static int same(const char *got, const char *expect) {
+    return got && expect && !strcmp(got, expect);
+}
+
+static void test_variant_index(void) {
+    expect(gm_synth_default_fonts_match(), "index 0 matches the first-font table");
+    expect(gm_synth_font(NULL, 0) == NULL, "null name declines");
+    expect(gm_synth_font("gm_bright_acoustic_piano", 0) == NULL, "piano alias declines");
+    expect(gm_synth_font("not_a_gm", 1) == NULL, "unknown name declines");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", 0), "0253_Acoustic_Guitar_sf2_file"), "guitar n 0");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", 1), "0250_Aspirin_sf2_file"), "guitar n 1");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", 0.5), "0250_Aspirin_sf2_file"), "guitar half up");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", -0.5), "0253_Acoustic_Guitar_sf2_file"), "guitar negative half");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", 5), "0250_LK_AcousticSteel_SF2_file"), "guitar mixed-case stem");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", 10), "0253_Acoustic_Guitar_sf2_file"), "guitar wrap");
+    expect(same(gm_synth_font("gm_acoustic_guitar_steel", -1), "0254_GeneralUserGS_sf2_file"), "guitar negative");
+    expect(same(gm_synth_font("gm_pizzicato_strings", 0), "0450_Aspirin_sf2_file"), "pizz n 0");
+    expect(same(gm_synth_font("gm_pizzicato_strings", 1), "0450_Chaos_sf2_file"), "pizz n 1");
+    expect(same(gm_synth_font("gm_pizzicato_strings", 6), "0450_Aspirin_sf2_file"), "pizz wrap");
+    expect(same(gm_synth_font("gm_string_ensemble_1", nan("")), "0480_Aspirin_sf2_file"), "ensemble non-finite");
+    expect(gm_synth_font("gm_electric_bass_finger", 1) == NULL, "upstream typo stem declines");
+    expect(same(gm_synth_font("gm_electric_bass_finger", 2), "0330_Aspirin_sf2_file"), "index after typo");
+    expect(gm_synth_font("gm_slap_bass_2", 2) == NULL, "upstream spaced stem declines");
+    expect(gm_synth_font("gm_gunshot", 11) == NULL, "empty stem declines");
+    expect(same(gm_synth_font("gm_gunshot", 12), "1270_JCLive_sf2_file"), "gunshot wrap");
+    expect(same(gm_synth_font("gm_epiano1", 11), "0040_JCLive_sf2_file"), "epiano wrap");
+}
+
 int main(void) {
     test_b64_vectors();
     test_pack_parse();
     test_pack_bounds();
     test_zone_pick();
     test_zone_math();
+    test_variant_index();
     if (fails) {
         fprintf(stderr, "%d failed\n", fails);
         return 1;
@@ -245,18 +274,28 @@ static void test_installed_pipeline(void) {
     char *b64 = malloc(b64len);
     if (!b64) _exit(1);
     test_b64_encode(gapless_mono_mp3, gapless_mono_mp3_len, b64);
-    char text[8192];
+    char text[8192], text_n[8192];
     int tlen = snprintf(text, sizeof(text),
         "var _tone_pack={zones:[{midi:4,originalPitch:6000,"
         "keyRangeLow:0,keyRangeHigh:127,loopStart:100,loopEnd:1000,coarseTune:0,"
         "fineTune:18,sampleRate:22050,ahdsr:true,file:'%s'}]};", b64);
+    int tlen_n = snprintf(text_n, sizeof(text_n),
+        "var _tone_pack={zones:[{midi:4,originalPitch:6000,"
+        "keyRangeLow:0,keyRangeHigh:127,loopStart:100,loopEnd:1000,coarseTune:0,"
+        "fineTune:0,sampleRate:22050,ahdsr:true,file:'%s'}]};", b64);
     free(b64);
+    if (tlen_n <= 0 || tlen_n >= (int)sizeof(text_n)) { fprintf(stderr, "FAIL pipeline fixture n\n"); _exit(1); }
     if (tlen <= 0 || tlen >= (int)sizeof(text)) { fprintf(stderr, "FAIL pipeline fixture\n"); _exit(1); }
     /* gm_epiano1 resolves 0040_JCLive_sf2_file.js from the installed banks. */
     snprintf(pack, sizeof(pack), "%s/0040_JCLive_sf2_file.js", dir);
     FILE *f = fopen(pack, "wb");
     int wrote = f && fwrite(text, 1, (size_t)tlen, f) == (size_t)tlen;
     if (!f || fclose(f) != 0 || !wrote) { fprintf(stderr, "FAIL pipeline fixture\n"); _exit(1); }
+    /* n=1 is the next pinned epiano pack, not another copy of font 0. */
+    snprintf(pack, sizeof(pack), "%s/0040_FluidR3_GM_sf2_file.js", dir);
+    f = fopen(pack, "wb");
+    wrote = f && fwrite(text_n, 1, (size_t)tlen_n, f) == (size_t)tlen_n;
+    if (!f || fclose(f) != 0 || !wrote) { fprintf(stderr, "FAIL pipeline fixture n\n"); _exit(1); }
     banks_start_index(root);
     for (int i = 0; !banks_ready() && i < 500; i++) usleep(10000);
     if (!banks_ready()) { fprintf(stderr, "FAIL pipeline banks\n"); _exit(1); }
@@ -271,7 +310,7 @@ static void test_installed_pipeline(void) {
     cJSON *value = cJSON_Parse("{}");
     if (!value) { fprintf(stderr, "FAIL pipeline json\n"); _exit(1); }
     if (!gm_synth_prepare_sample(&event, value, 60.0)) { fprintf(stderr, "FAIL pipeline prepare\n"); rc = 1; goto done; }
-    /* Piano aliases share gm_piano's pack (same installed file, no refetch). */
+    /* Piano aliases are outside the pinned web table and must decline. */
     AudioEvent alias;
     memset(&alias, 0, sizeof(alias));
     snprintf(alias.token, sizeof(alias.token), "gm_bright_acoustic_piano");
@@ -291,6 +330,40 @@ static void test_installed_pipeline(void) {
     if (fabs(event.smp_speed-pow(2.0, 18.0/1200.0)) > 1e-12) {
         fprintf(stderr, "FAIL pipeline correction %f\n", event.smp_speed); goto done;
     }
+    cJSON *variant = cJSON_Parse("{\"n\":1}");
+    cJSON *wrapped = cJSON_Parse("{\"n\":11}");
+    if (!variant || !wrapped) {
+        fprintf(stderr, "FAIL pipeline variant json\n");
+        cJSON_Delete(variant);
+        cJSON_Delete(wrapped);
+        goto done;
+    }
+    AudioEvent n1;
+    memset(&n1, 0, sizeof(n1));
+    snprintf(n1.token, sizeof(n1.token), "gm_epiano1");
+    n1.freq = event.freq;
+    n1.smp = -1;
+    n1.smp_speed = 1.0;
+    dsp_params_init(&n1.dsp);
+    n1.dsp.enabled = 1;
+    if (!gm_synth_prepare_sample(&n1, variant, 60.0) || fabs(n1.smp_speed-1.0) > 1e-12) {
+        fprintf(stderr, "FAIL pipeline n=1 speed %f\n", n1.smp_speed); cJSON_Delete(variant); cJSON_Delete(wrapped); goto done;
+    }
+    AudioEvent nwrap;
+    memset(&nwrap, 0, sizeof(nwrap));
+    snprintf(nwrap.token, sizeof(nwrap.token), "gm_epiano1");
+    nwrap.freq = event.freq;
+    nwrap.smp = -1;
+    nwrap.smp_speed = 1.0;
+    dsp_params_init(&nwrap.dsp);
+    nwrap.dsp.enabled = 1;
+    if (!gm_synth_prepare_sample(&nwrap, wrapped, 60.0) ||
+        fabs(nwrap.smp_speed-pow(2.0, 18.0/1200.0)) > 1e-12) {
+        fprintf(stderr, "FAIL pipeline n wrap speed %f\n", nwrap.smp_speed);
+        cJSON_Delete(variant); cJSON_Delete(wrapped); goto done;
+    }
+    cJSON_Delete(variant);
+    cJSON_Delete(wrapped);
     if (!gm_synth_prepare_sample(&alias, value, 60.0) && alias.smp < 0) {
         /* Names outside the pinned web table keep the FluidSynth fallback:
            preparation declines and the resolver falls through. */
@@ -316,7 +389,7 @@ static void test_installed_pipeline(void) {
             }
             closedir(dp);
         }
-        if (js != 0 || wav != 1) { fprintf(stderr, "FAIL pipeline cache js=%d wav=%d\n", js, wav); goto done; }
+        if (js != 0 || wav != 2) { fprintf(stderr, "FAIL pipeline cache js=%d wav=%d\n", js, wav); goto done; }
     }
     rc = 0;
 done:

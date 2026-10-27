@@ -350,6 +350,7 @@ try {
     { name: 'prebake-accent', code: `note("60 64").s('sawtooth').lpf(1200).lpenv(2).velocity(.5).accent(2).gain(.4)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
     { name: 'prebake-delay', code: `note(69).s('sine').gain(.5).clip(.1).dly(.5).delaytime(.075)`,sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
     { name: 'sine-gaincurve-velocity', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).velocity(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'sine-velocity-above-one', code: `note(69).s('sine').gain(.4).velocity(2)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-gaincurve-delay', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).clip(.1).delay(.5).delaytime(.075).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-custom-default', code: `setDefault('gain',.5); resetDefaultValues(); note(69).s('sine')`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'piano-stretch', code: `note(60).s('piano').speed(.5).stretch(1).clip(.25).late(.125)`, sound: 'piano', cycles: 1, cps: .5, window: 2, correlation: .99 },

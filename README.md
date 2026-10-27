@@ -297,9 +297,11 @@ such as `gm_piano`, `gm_flute` and `gm_acoustic_bass`. For example:
 packs as the Strudel web REPL (MIT-licensed WebAudioFont data, preinstalled
 under `assets/banks/gm-webaudiofont/` and fetched on first play when
 missing), so levels, sustain loops and pitch match the browser; they do not
-require an external MIDI connection. Native playback provides the web's
-default (first) soundfont variant per name; the web client's additional
-variants selected by `n` are not replicated. Explicit sample maps
+require an external MIDI connection. `.n()` and `sound:n` select the same
+WebAudioFont pack list as Strudel 1.2.6 and wrap the same way; a missing `n`
+plays the first pack. Packs that are not already installed are fetched on
+first play. Names outside that list, including the separate piano-program
+aliases, still use FluidSynth when it is available. Explicit sample maps
 and imported sounds with the same name retain priority. Standard envelopes,
 pitch modulation, gain, pan and native effects apply; speed and stretch scale
 native GM pitch. GM notes are always note-gated like the web trigger.

@@ -268,7 +268,7 @@ Aliases registered by upstream Strudel map to the same controls.
 | --- | --- |
 | Sources | sine, triangle, sawtooth, square, pulse, supersaw/unison/stereo spread, white/pink/brown noise, procedural `wt:` tables, local and remote samples, ZzFX, bytebeat, bounded Kabelsalat graphs |
 | Harmonics | numeric `n` (up to 2,047 represented harmonics); `partials` and `phases` (32 explicit entries), normalized and bandlimited |
-| Amplitude | gain, velocity, amp, busgain, overgain, ADSR, clip/legato, duration, postgain, pan, dry |
+| Amplitude | gain, velocity (multiplied through 16, same ceiling as gain), amp, busgain, overgain, ADSR, clip/legato, duration, postgain, pan, dry |
 | Filters | low/high/band-pass, their Q values and ADSR/depth envelopes, fanchor, 12 dB / 24 dB filters and nonlinear low-pass ladder, vowel/formant filtering |
 | Filter LFOs | lp/hp/bp rate, sync, depth, depthfrequency, shape, dc, skew |
 | Modulation | pitch ADSR/anchor/curve, vibrato, pulse-width rate/sweep, tremolo/sync/depth/skew/phase/shape |

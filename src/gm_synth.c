@@ -24,7 +24,8 @@
 
 /* Strudel 1.2.6 gm_* names mapped to standard zero-based GM programs.
  * Its piano family combines programs 0..3 under gm_piano. Native playback
- * uses one installed SF2 voice per name, rather than browser font variants. */
+ * selects the pinned WebAudioFont list for that name; .n() / sound:n uses
+ * the same index as the web. */
 static const char *names[]={
     "gm_piano","gm_epiano1","gm_epiano2","gm_harpsichord","gm_clavinet",
     "gm_celesta","gm_glockenspiel","gm_music_box","gm_vibraphone","gm_marimba",
@@ -52,10 +53,9 @@ static const char *names[]={
 };
 int gm_synth_count(void) { return (int)(sizeof(names)/sizeof(*names)); }
 const char *gm_synth_name(int index) { return index>=0 && index<gm_synth_count()?names[index]:NULL; }
-/* Pinned first-font pack per gm_* name, extracted from the Strudel web
-   deployment (same webaudiofontdata repo as scripts/gm-webaudiofont.lock.json).
-   The web selects fonts[0] for the default sample index; the native path
-   plays that same pack. Piano aliases resolve through gm_piano. */
+/* Pinned first-font pack per gm_* name (index 0 of @strudel/soundfonts
+   1.2.6). Other indices live in gm_variants.h. Piano aliases are absent
+   from that table and keep the FluidSynth fallback. */
 static const struct { const char *name; const char *font; } gm_fonts[]={
     {"gm_accordion","0210_JCLive_sf2_file"},
     {"gm_acoustic_bass","0320_JCLive_sf2_file"},
@@ -183,6 +183,8 @@ static const struct { const char *name; const char *font; } gm_fonts[]={
     {"gm_woodblock","1150_JCLive_sf2_file"},
     {"gm_xylophone","0130_JCLive_sf2_file"},
 };
+
+#include "gm_variants.h"
 
 /* First-font pack file for a gm_* name, without extension. NULL when the name
    is not a pinned webaudiofont program (caller falls back to FluidSynth). */
@@ -690,18 +692,89 @@ static int gm_cache_dir(char *out, int n) {
 }
 
 /* Pinned font file names contain only these characters (checked before any
-   path join); the table above is trusted, the check is defense in depth. */
+   path join). The suffix matches case-insensitively: one listed steel-guitar
+   pack is 0250_LK_AcousticSteel_SF2_file. Upstream typos stay in the index
+   list so .n() still wraps, and fail this check. */
 static int gm_font_ok(const char *s) {
+    static const char suf[] = "_sf2_file";
     if (!s) return 0;
     size_t n = strlen(s);
-    if (n < 12 || n > 48) return 0;
-    if (strcmp(s+n-9,"_sf2_file") != 0) return 0;
+    size_t m = sizeof(suf)-1;
+    if (n < 12 || n > 48 || n < m) return 0;
+    for (size_t i = 0; i < m; i++) {
+        char c = s[n-m+i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c-'A'+'a');
+        if (c != suf[i]) return 0;
+    }
     for (size_t i = 0; i < n; i++) {
         char c = s[i];
         if (!(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') &&
             !(c >= '0' && c <= '9') && c != '_' && c != '-') return 0;
     }
     return 1;
+}
+
+/* Strudel getSoundIndex: missing/non-finite -> 0, Math.round (ties toward
+   +infinity), then a modulo that stays non-negative. */
+static int gm_sound_index(double n, int count) {
+    if (count <= 1) return 0;
+    if (!isfinite(n)) return 0;
+    if (n > 1e15 || n < -1e15) {
+        n = fmod(n,(double)count);
+        if (!isfinite(n)) return 0;
+    }
+    double shifted = n+0.5;
+    if (!isfinite(shifted)) return 0;
+    double rounded = floor(shifted);
+    double mod = fmod(rounded,(double)count);
+    if (!isfinite(mod)) return 0;
+    if (mod < 0) mod += (double)count;
+    if (!(mod >= 0 && mod < (double)count)) return 0;
+    return (int)mod;
+}
+
+int gm_synth_default_fonts_match(void) {
+    int nfonts = (int)(sizeof(gm_fonts)/sizeof(*gm_fonts));
+    int nspans = (int)(sizeof(gm_variant_spans)/sizeof(*gm_variant_spans));
+    int nflat = (int)(sizeof(gm_variant_fonts)/sizeof(*gm_variant_fonts));
+    if (nfonts != nspans || nfonts <= 0) return 0;
+    for (int i = 0; i < nfonts; i++) {
+        int found = 0;
+        for (int s = 0; s < nspans; s++) {
+            if (strcmp(gm_variant_spans[s].name,gm_fonts[i].name)) continue;
+            found = 1;
+            int begin = gm_variant_spans[s].begin;
+            int count = gm_variant_spans[s].count;
+            if (count < 1 || begin < 0 || begin >= nflat || count > nflat-begin) return 0;
+            if (strcmp(gm_variant_fonts[begin],gm_fonts[i].font)) return 0;
+            break;
+        }
+        if (!found) return 0;
+    }
+    for (int s = 0; s < nspans; s++) {
+        int found = 0;
+        for (int i = 0; i < nfonts; i++)
+            if (!strcmp(gm_fonts[i].name,gm_variant_spans[s].name)) { found = 1; break; }
+        if (!found) return 0;
+    }
+    return 1;
+}
+
+const char *gm_synth_font(const char *name, double n) {
+    if (!name) return NULL;
+    for (unsigned s = 0; s < sizeof(gm_variant_spans)/sizeof(*gm_variant_spans); s++) {
+        if (strcmp(name,gm_variant_spans[s].name)) continue;
+        int count = gm_variant_spans[s].count;
+        if (count < 1) return NULL;
+        int index = gm_sound_index(n,count);
+        if (index == 0) return gm_pack_font(name);
+        int at = gm_variant_spans[s].begin+index;
+        if (at < 0 || at >= (int)(sizeof(gm_variant_fonts)/sizeof(*gm_variant_fonts))) return NULL;
+        const char *font = gm_variant_fonts[at];
+        if (!gm_font_ok(font)) return NULL;
+        return font;
+    }
+    return NULL;
 }
 
 static int gm_pack_filename(const char *font, char *out, int n) {
@@ -1072,13 +1145,16 @@ static int gm_zone_materialize(GmPack *pack, const char *font, int zi,
 }
 
 int gm_synth_prepare_sample(AudioEvent *event, const cJSON *value, double midi) {
-    (void)value;
     if (!event || !isfinite(midi)) return 0;
     int program = gm_synth_program(event->token);
     if (program < 0) return 0;
-    /* First-font pack from the pinned web table; unknown names keep the
-       FluidSynth fallback. */
-    const char *font = gm_pack_font(event->token);
+    /* Same pack list and getSoundIndex rules as Strudel 1.2.6. A missing or
+       non-numeric n stays on font 0. Names outside the table, and upstream
+       stems that are not pack files, keep the FluidSynth fallback. */
+    const cJSON *nitem = value ? cJSON_GetObjectItemCaseSensitive(value,"n") : NULL;
+    double n = 0;
+    if (nitem && cJSON_IsNumber(nitem) && isfinite(nitem->valuedouble)) n = nitem->valuedouble;
+    const char *font = gm_synth_font(event->token,n);
     if (!gm_font_ok(font)) return 0;
     /* The web finds no zone outside 0..127 and throws; fall back instead. The
        fractional value goes to zone selection (first range match, high+1 slop)

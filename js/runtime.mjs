@@ -342,8 +342,33 @@ let csoundUsed = false;
 let pianoUsed = false;
 
 globalThis.performance = { now: () => Date.now() };
+/* Browser consoles treat the first string as a format and use %c for a style
+   argument that is not printed. The terminal log keeps the text only. */
+function formatConsole(values) {
+  if (!values.length) return '';
+  const first = values[0];
+  if (typeof first !== 'string' || !first.includes('%')) return values.map(String).join(' ');
+  let index = 1, text = '';
+  for (let i = 0; i < first.length; i++) {
+    if (first[i] !== '%' || i + 1 >= first.length) { text += first[i]; continue; }
+    const spec = first[++i];
+    if (spec === '%') { text += '%'; continue; }
+    if (!'csoOdif'.includes(spec)) { text += '%' + spec; continue; }
+    if (index >= values.length) { text += '%' + spec; continue; }
+    const arg = values[index++];
+    if (spec === 'c') continue;
+    if (spec === 'd' || spec === 'i') text += String(parseInt(arg, 10));
+    else if (spec === 'f') text += String(Number(arg));
+    else text += String(arg);
+  }
+  if (index < values.length) {
+    const rest = values.slice(index).map(String).join(' ');
+    text = text ? `${text} ${rest}` : rest;
+  }
+  return text;
+}
 globalThis.console = Object.fromEntries(['log', 'warn', 'error', 'info', 'debug'].map(
-  (name) => [name, (...values) => __hostLog(values.map(String).join(' '))],
+  (name) => [name, (...values) => __hostLog(formatConsole(values))],
 ));
 /**
  * Register a named pattern branch for playback. Branches are stacked together.

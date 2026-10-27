@@ -9,11 +9,17 @@ int gm_synth_program(const char *name);
 int gm_synth_available(void);
 /* Generator only. Assigns owned immutable PCM; audio never calls FluidSynth. */
 int gm_synth_prepare(AudioEvent *event);
-/* WebAudioFont pack path: resolve event->token to the same per-instrument
-   sample pack the Strudel web REPL plays, acquire the key-range zone as a
-   pitch-keyed sample, and set its sustain-loop fractions. Returns 1 with
-   ev->smp set, 0 when the caller should fall back (FluidSynth). */
+/* WebAudioFont pack path: resolve event->token and numeric n to the same
+   per-instrument sample pack the Strudel 1.2.6 web REPL plays, acquire the
+   key-range zone as a pitch-keyed sample, and set its sustain-loop fractions.
+   Returns 1 with ev->smp set, 0 when the caller should fall back (FluidSynth). */
 int gm_synth_prepare_sample(AudioEvent *event, const cJSON *value, double midi);
+/* Pack stem for name at Strudel's getSoundIndex(n). NULL when name is outside
+   the pinned table or the selected stem is not a pack file. Non-finite n
+   selects index 0. */
+const char *gm_synth_font(const char *name, double n);
+/* 1 when every pinned name's index 0 equals the historical first-font table. */
+int gm_synth_default_fonts_match(void);
 
 /* Confined webaudiofont pack helpers (no network, no filesystem). The pack
    text is the fetched pack JS; zones reference slices of it, so the text must

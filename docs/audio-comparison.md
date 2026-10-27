@@ -674,7 +674,12 @@ the actual REPL. Existing exact checks remain exact;
 new floating-point text-synth/random/glide/frequency cases allow 1e-12 absolute
 numeric error with exact event counts and structure. Raw postgain, velocity
 and delay helper checks disable the gain curve; separate audio checks retain
-the actual starter's quadratic shaping.
+the actual starter's quadratic shaping. `sine-velocity-above-one`
+compares `note(69).s('sine').gain(.4).velocity(2)` with the live player.
+Correlation is 0.9999999887063752 and the RMS ratio is 1.000149005223337 at
+zero lag, under the same gates. Velocity above 1 multiplies gain, up to the
+same ceiling of 16 as the other amplitude stages. Values inside 0..1 are
+unchanged.
 
 Three `prebake-` PCM cases fetch the pinned Switch Angel starter into an owned
 fixture config and compare glide, accent and delay against the real web player.

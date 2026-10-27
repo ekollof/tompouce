@@ -20,10 +20,18 @@ conditionals, arithmetic, alignment, scales, voicings, and signals. Integer
 fraction arithmetic on the pattern clock runs in the host. `tri`, `itri`, and
 their bipolar forms, with numeric fast, slow, early, late, and range, are
 sampled in the host too. Saw, sine, square, and noise stay in JavaScript.
+JavaScript-only reference runners leave these signal objects and pattern
+prototypes untouched when native signal hooks are absent; no native-hook mock
+is needed to import the runtime or query its live controls.
 Ordinary fraction clones, cycle bounds, span intersections/splitting and hap
 value/span transformations also have native paths. Custom objects, accessors
 and values beyond the native integer range retain the JavaScript paths.
 Fractional numbers and fraction strings still use the pinned fraction.js parser.
+Ordinary `pure()` queries also have a bounded host path that creates fresh
+cycle spans, haps and contexts. Common keys in ordinary control records are
+computed without repeatedly enumerating the right record. These build-time
+hooks require the exact pinned source; JavaScript-only hosts keep the original
+queries. Custom prototypes/builtins and unsupported spans retain the JS paths.
 Variables, closures, functions, arrays, loops, and async functions execute as JavaScript.
 Double quoted strings and backticks use Strudel mini-notation; single quoted
 strings remain ordinary strings. `$:` plays concurrent patterns. Named labels

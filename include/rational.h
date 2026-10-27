@@ -60,6 +60,8 @@ JSValue rational_dispatch(JSContext *ctx, RationalHost *host, int magic,
 JSValue rational_span_dispatch(JSContext *ctx, RationalHost *host, int magic,
                                JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue rational_create(JSContext *ctx, RationalHost *host, JSValueConst value);
+JSValue rational_pure(JSContext *ctx,RationalHost *host,int argc,JSValueConst *argv);
+JSValue rational_common_keys(JSContext *ctx,RationalHost *host,int argc,JSValueConst *argv);
 JSValue rational_triangle(JSContext *ctx, RationalHost *host, int argc, JSValueConst *argv);
 JSValue rational_hap_dispatch(JSContext *ctx, RationalHost *host, int magic,
                              JSValueConst self, int argc, JSValueConst *argv);

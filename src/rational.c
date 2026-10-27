@@ -21,6 +21,11 @@ struct RationalHost {
     JSAtom atom_begin, atom_end;
     JSValue hap_proto, hap_methods[2];
     JSAtom hap_fields[5];
+    JSAtom atom_span,atom_cycles,atom_whole_cycle;
+    JSValue native_cycles,native_whole_cycle;
+    JSValue object_proto,guard_owners[7],guard_values[7];
+    JSAtom guard_atoms[7];
+    int guard_getters[7];
 };
 
 static JSValue make_span(JSContext *ctx, RationalHost *host, Rational begin, Rational end);
@@ -480,6 +485,113 @@ JSValue rational_hap_dispatch(JSContext *ctx, RationalHost *host, int magic,
     return out;
 }
 
+JSValue rational_common_keys(JSContext *ctx,RationalHost *host,int argc,JSValueConst *argv) {
+    if (!host || argc!=2 || !pinned_object(ctx,argv[0],host->object_proto) ||
+        !pinned_object(ctx,argv[1],host->object_proto)) return JS_NULL;
+    for (int i=0;i<7;i++) {
+        JSPropertyDescriptor desc;
+        if (JS_GetOwnProperty(ctx,&desc,host->guard_owners[i],host->guard_atoms[i])!=1)
+            return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+        int getter=!!(desc.flags&JS_PROP_GETSET);
+        int same=getter==host->guard_getters[i] &&
+            JS_StrictEq(ctx,getter?desc.getter:desc.value,host->guard_values[i]);
+        JS_FreeValue(ctx,desc.value);JS_FreeValue(ctx,desc.getter);JS_FreeValue(ctx,desc.setter);
+        if (!same) return JS_NULL;
+    }
+    JSPropertyEnum *keys[2]={NULL,NULL}; uint32_t counts[2]={0,0};
+    JSValue out=JS_EXCEPTION;
+    for (int i=0;i<2;i++) if (JS_GetOwnPropertyNames(ctx,&keys[i],&counts[i],argv[i],JS_GPN_STRING_MASK|JS_GPN_ENUM_ONLY)<0) goto done;
+    if (counts[0]>4096 || counts[1]>4096 || (uint64_t)counts[0]*counts[1]>65536) { out=JS_NULL;goto done; }
+    out=JS_NewArray(ctx);
+    if (JS_IsException(out)) goto done;
+    uint32_t at=0;
+    for (uint32_t a=0;a<counts[0];a++) for (uint32_t b=0;b<counts[1];b++) if (keys[0][a].atom==keys[1][b].atom) {
+        JSValue key=JS_AtomToString(ctx,keys[0][a].atom);
+        if (JS_IsException(key) || JS_DefinePropertyValueUint32(ctx,out,at++,key,JS_PROP_C_W_E)<0) {
+            JS_FreeValue(ctx,out);out=JS_EXCEPTION;goto done;
+        }
+        break;
+    }
+done:
+    for (int i=0;i<2;i++) { for (uint32_t k=0;k<counts[i];k++) JS_FreeAtom(ctx,keys[i][k].atom);js_free(ctx,keys[i]); }
+    return out;
+}
+
+JSValue rational_pure(JSContext *ctx,RationalHost *host,int argc,JSValueConst *argv) {
+    if (!host || argc!=2 || !JS_IsObject(argv[0]) ||
+        JS_GetClassID(argv[0])!=JS_GetClassID(host->hap_proto) ||
+        !pinned_object(ctx,host->hap_proto,host->object_proto) ||
+        !pinned_object(ctx,host->span_proto,host->object_proto) ||
+        !pinned_object(ctx,host->proto,host->object_proto)) return JS_NULL;
+    JSValue span=JS_UNDEFINED,method=JS_UNDEFINED;
+    Rational begin,end;
+    if (!own_data(ctx,argv[0],host->atom_span,&span) || !clock_span(ctx,host,span,&begin,&end)) goto unsupported;
+    JSPropertyDescriptor desc;
+    int found=JS_GetOwnProperty(ctx,&desc,span,host->atom_cycles);
+    if (found==1) { JS_FreeValue(ctx,desc.value);JS_FreeValue(ctx,desc.getter);JS_FreeValue(ctx,desc.setter); }
+    if (found!=0) goto unsupported;
+    found=JS_GetOwnProperty(ctx,&desc,host->span_proto,host->atom_cycles);
+    if (found!=1) goto unsupported;
+    int standard=(desc.flags&JS_PROP_GETSET) && JS_StrictEq(ctx,desc.getter,host->native_cycles);
+    JS_FreeValue(ctx,desc.value);JS_FreeValue(ctx,desc.getter);JS_FreeValue(ctx,desc.setter);
+    if (!standard || !own_data(ctx,host->proto,host->atom_whole_cycle,&method) ||
+        !JS_StrictEq(ctx,method,host->native_whole_cycle)) goto unsupported;
+    for (int i=3;i<=5;i++) {
+        JSPropertyDescriptor guard;
+        if (JS_GetOwnProperty(ctx,&guard,host->guard_owners[i],host->guard_atoms[i])!=1) goto unsupported;
+        int getter=!!(guard.flags&JS_PROP_GETSET);
+        int same=getter==host->guard_getters[i] &&
+            JS_StrictEq(ctx,getter?guard.getter:guard.value,host->guard_values[i]);
+        JS_FreeValue(ctx,guard.value);JS_FreeValue(ctx,guard.getter);JS_FreeValue(ctx,guard.setter);
+        if (!same) goto unsupported;
+    }
+    for (int i=0;i<5;i++) if (JS_HasProperty(ctx,host->hap_proto,host->hap_fields[i])!=0) goto unsupported;
+    if (JS_HasProperty(ctx,host->span_proto,host->atom_begin)!=0 ||
+        JS_HasProperty(ctx,host->span_proto,host->atom_end)!=0) goto unsupported;
+    JSAtom fraction_fields[]={host->atom_n,host->atom_d,host->atom_s};
+    for (int i=0;i<3;i++) {
+        JSValue initial;
+        if (!own_data(ctx,host->proto,fraction_fields[i],&initial)) goto unsupported;
+        JS_FreeValue(ctx,initial);
+    }
+    Rational first,last;
+    if (rational_floor(begin,&first) || rational_floor(end,&last) ||
+        (ri128)last.s*last.n-(ri128)first.s*first.n>8190) goto unsupported;
+    JS_FreeValue(ctx,span);JS_FreeValue(ctx,method);
+    JSValue out=JS_NewArray(ctx);
+    if (JS_IsException(out)) return out;
+    unsigned count=0;
+    while (clock_order(begin,end)<=0) {
+        Rational cycle,next;
+        if (rational_floor(begin,&cycle) || rational_add(cycle,(Rational){1,1,1},&next)) {
+            JS_FreeValue(ctx,out);return JS_NULL;
+        }
+        Rational finish=clock_order(next,end)>0?end:next;
+        if (!clock_order(begin,end)) finish=end;
+        JSValue whole=make_span(ctx,host,cycle,next),part=make_span(ctx,host,begin,finish);
+        JSValue context=JS_NewObject(ctx),hap=JS_EXCEPTION;
+        if (!JS_IsException(whole) && !JS_IsException(part) && !JS_IsException(context)) {
+            hap=JS_NewObjectProto(ctx,host->hap_proto);
+            if (!JS_IsException(hap)) {
+                JSValue fields[]={whole,part,argv[1],context,JS_FALSE};
+                for (int i=0;i<5;i++) if (JS_SetProperty(ctx,hap,host->hap_fields[i],JS_DupValue(ctx,fields[i]))<0) {
+                    JS_FreeValue(ctx,hap);hap=JS_EXCEPTION;break;
+                }
+            }
+        }
+        JS_FreeValue(ctx,whole);JS_FreeValue(ctx,part);JS_FreeValue(ctx,context);
+        if (JS_IsException(hap) || JS_DefinePropertyValueUint32(ctx,out,count++,hap,JS_PROP_C_W_E)<0) {
+            JS_FreeValue(ctx,out);return JS_EXCEPTION;
+        }
+        if (!clock_order(finish,end)) return out;
+        begin=finish;
+    }
+    return out;
+unsupported:
+    JS_FreeValue(ctx,span);JS_FreeValue(ctx,method);
+    return JS_HasException(ctx)?JS_EXCEPTION:JS_NULL;
+}
+
 JSValue rational_triangle(JSContext *ctx, RationalHost *host, int argc, JSValueConst *argv) {
     Rational begin,end,rate,phase,two={1,2,1};
     int32_t a,b;
@@ -653,6 +765,9 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
     host->span_constructor=JS_UNDEFINED;
     host->hap_constructor=JS_UNDEFINED;
     host->hap_proto=JS_UNDEFINED;
+    host->native_cycles=JS_UNDEFINED;host->native_whole_cycle=JS_UNDEFINED;
+    host->object_proto=JS_UNDEFINED;
+    for (int i=0;i<7;i++) { host->guard_owners[i]=JS_UNDEFINED;host->guard_values[i]=JS_UNDEFINED; }
     for (int i=0;i<2;i++) host->hap_methods[i]=JS_UNDEFINED;
     for (int i=0;i<RATIONAL_SPAN_OPS;i++) host->span_methods[i]=JS_UNDEFINED;
     for (int i = 0; i < RATIONAL_OPS; i++) host->methods[i] = JS_UNDEFINED;
@@ -669,7 +784,10 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
     host->atom_n = JS_NewAtom(ctx, "n");
     host->atom_d = JS_NewAtom(ctx, "d");
     host->atom_begin=JS_NewAtom(ctx,"begin"); host->atom_end=JS_NewAtom(ctx,"end");
-    if (!host->atom_s || !host->atom_n || !host->atom_d || !host->atom_begin || !host->atom_end) {
+    host->atom_span=JS_NewAtom(ctx,"span");host->atom_cycles=JS_NewAtom(ctx,"spanCycles");
+    host->atom_whole_cycle=JS_NewAtom(ctx,"wholeCycle");
+    if (!host->atom_s || !host->atom_n || !host->atom_d || !host->atom_begin || !host->atom_end ||
+        !host->atom_span || !host->atom_cycles || !host->atom_whole_cycle) {
         rational_free(ctx, host); return 0;
     }
     global=JS_GetGlobalObject(ctx);
@@ -680,6 +798,26 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
     JS_FreeValue(ctx,global);
     if (!JS_IsObject(host->span_proto) || !JS_IsFunction(ctx,host->hap_constructor)) { rational_free(ctx,host); return 0; }
     host->hap_proto=JS_GetPropertyStr(ctx,host->hap_constructor,"prototype");
+    host->object_proto=JS_GetPrototype(ctx,host->hap_proto);
+    global=JS_GetGlobalObject(ctx);
+    JSValue object=JS_GetPropertyStr(ctx,global,"Object"),array=JS_GetPropertyStr(ctx,global,"Array");
+    JSValue array_proto=JS_GetPropertyStr(ctx,array,"prototype"),symbol=JS_GetPropertyStr(ctx,global,"Symbol");
+    JSValue species=JS_GetPropertyStr(ctx,symbol,"species");
+    const char *guard_names[]={"keys","filter","includes","constructor",NULL,"map","Object"};
+    for (int i=0;i<7;i++) {
+        host->guard_owners[i]=JS_DupValue(ctx,i==0?object:i==4?array:i==6?global:array_proto);
+        host->guard_atoms[i]=i==4?JS_ValueToAtom(ctx,species):JS_NewAtom(ctx,guard_names[i]);
+        JSPropertyDescriptor desc;
+        if (!host->guard_atoms[i] || JS_GetOwnProperty(ctx,&desc,host->guard_owners[i],host->guard_atoms[i])!=1) {
+            JS_FreeValue(ctx,global);JS_FreeValue(ctx,object);JS_FreeValue(ctx,array);JS_FreeValue(ctx,array_proto);
+            JS_FreeValue(ctx,symbol);JS_FreeValue(ctx,species);rational_free(ctx,host);return 0;
+        }
+        host->guard_getters[i]=!!(desc.flags&JS_PROP_GETSET);
+        host->guard_values[i]=JS_DupValue(ctx,host->guard_getters[i]?desc.getter:desc.value);
+        JS_FreeValue(ctx,desc.value);JS_FreeValue(ctx,desc.getter);JS_FreeValue(ctx,desc.setter);
+    }
+    JS_FreeValue(ctx,global);JS_FreeValue(ctx,object);JS_FreeValue(ctx,array);JS_FreeValue(ctx,array_proto);
+    JS_FreeValue(ctx,symbol);JS_FreeValue(ctx,species);
     static const char *const fields[]={"whole","part","value","context","stateful"};
     for (int i=0;i<5;i++) {
         host->hap_fields[i]=JS_NewAtom(ctx,fields[i]);
@@ -710,6 +848,7 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
             JS_FreeAtom(ctx,atom); rational_free(ctx,host); return 0;
         }
         JSValue native=JS_NewCFunctionMagic(ctx,span_method,names[i],getter?0:1,JS_CFUNC_generic_magic,i);
+        if (i==RATIONAL_SPAN_CYCLES) host->native_cycles=JS_DupValue(ctx,native);
         int ok=!JS_IsException(native);
         if (ok) ok=getter?JS_DefinePropertyGetSet(ctx,host->span_proto,atom,native,JS_UNDEFINED,JS_PROP_CONFIGURABLE)>=0:
             JS_SetProperty(ctx,host->span_proto,atom,native)>=0;
@@ -724,6 +863,7 @@ int rational_bind(JSContext *ctx, RationalHost **host_out, JSCFunctionMagic *met
         /* SetProperty consumes the function, including when installation fails. */
         JSValue native = JS_NewCFunctionMagic(ctx, method, rational_names[i], rational_lengths[i],
                                               JS_CFUNC_generic_magic, i);
+        if (i==RATIONAL_WHOLE_CYCLE) host->native_whole_cycle=JS_DupValue(ctx,native);
         if (JS_IsException(native) || JS_SetPropertyStr(ctx, proto, rational_names[i], native) < 0) {
             rational_free(ctx, host); return 0;
         }
@@ -742,6 +882,15 @@ void rational_free(JSContext *ctx, RationalHost *host) {
         JS_FreeValue(ctx,host->span_constructor);
         JS_FreeValue(ctx,host->hap_constructor);
         JS_FreeValue(ctx,host->hap_proto);
+        JS_FreeValue(ctx,host->native_cycles);JS_FreeValue(ctx,host->native_whole_cycle);
+        JS_FreeValue(ctx,host->object_proto);
+        for (int i=0;i<7;i++) {
+            JS_FreeValue(ctx,host->guard_owners[i]);JS_FreeValue(ctx,host->guard_values[i]);
+            if (host->guard_atoms[i]) JS_FreeAtom(ctx,host->guard_atoms[i]);
+        }
+        if (host->atom_span) JS_FreeAtom(ctx,host->atom_span);
+        if (host->atom_cycles) JS_FreeAtom(ctx,host->atom_cycles);
+        if (host->atom_whole_cycle) JS_FreeAtom(ctx,host->atom_whole_cycle);
         for (int i=0;i<2;i++) JS_FreeValue(ctx,host->hap_methods[i]);
         for (int i=0;i<5;i++) if (host->hap_fields[i]) JS_FreeAtom(ctx,host->hap_fields[i]);
         for (int i=0;i<RATIONAL_SPAN_OPS;i++) JS_FreeValue(ctx,host->span_methods[i]);

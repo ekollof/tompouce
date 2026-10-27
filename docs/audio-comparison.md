@@ -1,6 +1,59 @@
 # Browser/native audio comparison
 
+The [V8 suitability assessment](v8-assessment.md) uses the same event-comparison
+harness with a diagnostic V8 renderer. It matches all 41 musical Bakery cases,
+including the two native QuickJS timeouts; this does not change the production
+backend or establish audio/host-bridge parity.
+
+## Reference bootstrap and historical legato notes
+
+The Node live-control runner retains an independent JavaScript signal path:
+without `__hostSignal`, native signal installation leaves upstream prototypes
+and signal objects untouched. Regression checks include triangle/inverted and
+bipolar queries across negative and fractional arcs, followed by 135 live-control
+comparisons and 395 exact clock-fraction conversions.
+
+The deployed REPL confirms that the `Random bells` bass plays D2 in query
+cycles 0 and 1, and G2 in cycle 16. The historical pinned fixture records F2
+for those first two notes because its legato rotation also rotated values.
+The fixture remains unchanged. The example test asserts those two original F2
+values before comparing against the exact current D2 contract; it requires
+exactly two such differences, with all other event fields and ordering checked
+against the historical fixture. `scripts/controls-reference-qa.mjs` independently
+gates the three bass queries against strudel.cc without audio playback. The
+production structure-only legato adapter needed no change.
+
 ## Bakery composition corpus
+
+### Composition-query profiling
+
+`node scripts/profile-pattern-query.mjs [before-binary] [after-binary]` runs
+fresh isolated reference workers, alternating binaries for each repetition.
+`TOMPOUCE_PROFILE_RUNS` selects 1–20 repetitions (default 5). It checks the
+original Bakery source hashes and measures one `queryArc(0,1,{_cps:.5})`
+inside the existing compile budget with `Date.now()`. This is a wall-time
+probe, not a passing 200 ms query gate; it does not raise either budget.
+
+Five paired runs measured median 287→268 ms for 13587 and 282→268 ms for
+78179, all with 539 haps. Baseline ranges were 281–293 / 280–284 ms; optimized
+ranges were 267–271 / 266–271 ms. The retained fast paths fuse ordinary pure
+cycle-query construction and enumerate common control-record keys once rather
+than rebuilding the right-side key array for each left-side key. They preserve
+fresh objects, key order and callback behavior, with bounded native work and
+fallbacks for custom prototypes, accessors and changed builtins. Pinned package
+files and locks remain unchanged; bundle generation fails if either guarded
+source hook no longer matches. The fused application/intersection prototype
+showed no consistent gain and was discarded. Coarse instrumented timings put
+context merging near 11 ms, value transformations near 91 ms (including nested
+callbacks), and span transformations near 26 ms; those instrumented timings
+are investigative evidence, not exclusive CPU attribution.
+
+The fresh Bakery comparison still matches 39 musical compositions and the empty
+entry. Both heavy songs still fail at the unchanged 200 ms limit. The bounded
+optimizations therefore improve work by about 5–7% in these paired probes but
+do not resolve the budget issue or establish full-song PCM parity.
+
+### Corpus and earlier measurements
 
 `tests/fixtures/strudel-bakery.json` preserves the 42 compositions shown on the
 first Featured and Last Creations pages of <https://strudel.cc/bakery/> on

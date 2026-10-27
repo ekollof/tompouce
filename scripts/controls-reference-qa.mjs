@@ -12,6 +12,16 @@ import * as controls from '../js/node_modules/@strudel/core/controls.mjs';
 import { controlTrace, normalize } from '../tests/reference/control-trace.mjs';
 
 const expected=normalize(await controlTrace(Cyclist,{...patterns,...controls}));
+async function legatoRotation() {
+  const test=repl({getTime:()=>0,onSchedule:()=>{},setInterval:()=>1,clearInterval:()=>{}});
+  try {
+    // Explicit slowcat avoids relying on a source transpiler for mini notation.
+    await test.evaluate('note(slowcat(pure("D2"),pure("A2"),pure("G2"),pure("F2"))).euclidLegatoRot(6,8,4).slow(6)',false);
+    if (test.state.evalError) throw test.state.evalError;
+    return [0,1,16].map(begin=>({begin,events:test.scheduler.pattern.queryArc(begin,begin+1)
+      .filter(h=>h.hasOnset()).map(h=>({begin:+h.whole.begin,end:+h.whole.end,note:h.value.note}))}));
+  } finally {test.stop();}
+}
 async function controlAliases() {
   const test=repl({getTime:()=>0,onSchedule:()=>{},setInterval:()=>1,clearInterval:()=>{}});
   globalThis.__aliasCpm=60; test.scheduler.setCps(.5);
@@ -44,6 +54,12 @@ const artifacts=path.resolve(process.argv[2]??'/tmp/tompouce-web-controls-refere
 try {
   await browser.page('https://strudel.cc/');
   await browser.until(`!!window.strudelMirror?.repl?.scheduler && typeof superdough==='function' && getSound('sine')`,20000);
+  const legato=await browser.evaluate('('+legatoRotation.toString()+')()');
+  assert.deepEqual(legato,[
+    {begin:0,events:[{begin:0,end:1.5,note:'D2'}]},
+    {begin:1,events:[{begin:1.5,end:2.25,note:'D2'}]},
+    {begin:16,events:[{begin:16.5,end:17.25,note:'G2'}]},
+  ],'Random bells legato reference changed; preserve the historical fixture and inspect the adapter');
   const actual=await browser.evaluate(`(${controlTrace.toString()})(strudelMirror.repl.scheduler.constructor,{note,fastcat,pure,ref,stack}).then(${normalize.toString()})`);
   assert.deepEqual(actual,expected,'test scheduler snapshot differs from the live web REPL');
   assert.deepEqual(actual.errors,[]);
@@ -135,7 +151,7 @@ try {
   const report={url:'https://strudel.cc/',capturedAt:new Date().toISOString(),
     schedulerSha256:createHash('sha256').update(source).digest('hex'),
     snapshotSha256:createHash('sha256').update(await fs.readFile('tests/reference/web-cyclist.mjs')).digest('hex'),
-    events:actual.events.length,states:actual.states.length,zeroTempo,lifecycle,queryFailure,aliases,trace:actual};
+    events:actual.events.length,states:actual.states.length,zeroTempo,lifecycle,queryFailure,aliases,legato,trace:actual};
   await fs.mkdir(artifacts,{recursive:true});
   await fs.writeFile(path.join(artifacts,'report.json'),JSON.stringify(report,null,2)+'\n');
   process.stdout.write(`Live web REPL reference verified: ${report.events} events, ${report.states} clock states; ${artifacts}\n`);

@@ -8,6 +8,24 @@ import * as patterns from './node_modules/@strudel/core/pattern.mjs';
 import * as controls from './node_modules/@strudel/core/controls.mjs';
 import Fraction from './node_modules/fraction.js/dist/fraction.mjs';
 import {queryFraction} from './query-time.mjs';
+import * as signals from './node_modules/@strudel/core/signal.mjs';
+import {installNativeSignals} from './signal-native.mjs';
+assert.equal(typeof globalThis.__hostSignal,'undefined');
+const signalCore={...patterns,...signals};
+const originalFast=signalCore.Pattern.prototype.fast;
+const originalEarly=signalCore.Pattern.prototype.early;
+const originalRange=signalCore.Pattern.prototype.range;
+const signalArcs=[[0,1],[-.375,.625],[2.125,2.875]];
+const signalValues=()=>[signalCore.tri,signalCore.itri,signalCore.tri2,signalCore.itri2]
+  .flatMap(signal=>signalArcs.map(([begin,end])=>signal.fast(2).early(.125).range(-2,3).queryArc(begin,end)
+    .map(h=>({begin:+h.part.begin,end:+h.part.end,value:h.value}))));
+const originalSignals=signalValues();
+installNativeSignals(signalCore);
+assert.equal(signalCore.Pattern.prototype.fast,originalFast);
+assert.equal(signalCore.Pattern.prototype.early,originalEarly);
+assert.equal(signalCore.Pattern.prototype.range,originalRange);
+assert.equal(signalCore.tri.__sig,undefined);
+assert.deepEqual(signalValues(),originalSignals,'JS-only signal queries retain the pinned path');
 const core = { ...patterns, ...controls };
 const notes = (...values) => core.note(core.fastcat(...values.map(core.pure)));
 

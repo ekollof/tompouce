@@ -33,7 +33,9 @@ function finiteNumber(value) {
  * @returns {void}
  */
 export function installNativeSignals(core) {
-  if (typeof globalThis.__hostSignal !== 'function') throw new Error('native signals unavailable');
+  /* Reference runners and other JS-only hosts must retain the pinned query
+     path, including untouched prototypes and signal objects. */
+  if (typeof globalThis.__hostSignal !== 'function') return;
   const { Pattern, Hap, TimeSpan, Fraction } = core;
   const couple = (waveA, waveB) => ({ kind: 'cat', waveA, waveB, segments: 2, rate: Fraction(1), phase: Fraction(0), ops: [] });
   const warp = (sig, factor, offset) => ({

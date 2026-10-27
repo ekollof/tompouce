@@ -2,6 +2,17 @@
 
 ## Build and test
 
+The Node live-control reference runs without native signal hooks and retains
+the pinned JavaScript signal path. Historical event fixtures stay unchanged;
+the two known `Random bells` legato-note differences have exact current-REPL
+assertions and an independent live-web gate in `scripts/controls-reference-qa.mjs`.
+
+`node scripts/profile-pattern-query.mjs [before-binary] [after-binary]` provides
+paired, isolated compile-stage wall-time probes for the two heavy Bakery songs.
+The pure-query/common-control-key fast paths improve measured work by about
+5–7%, but both songs still exceed the unchanged 200 ms query limit. These probes
+are not query-budget or full-song parity gates.
+
 The project uses C11, CMake 3.20+ and Ninja. From a complete checkout:
 
 ```sh

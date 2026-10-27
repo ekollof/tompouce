@@ -69,14 +69,6 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] Resolve the `Random bells` historical event-fixture mismatch at cycle 0,
-      event 3 (bass F2 versus D2), also reproduced on unmodified 6811028.
-      Check the legato-rotation adapter against the web and preserve the fixture.
-- [ ] Restore the Node live-control reference runner's runtime bootstrap:
-      the triangle host adapter currently throws `native signals unavailable`
-      when `__hostSignal` is absent. Preserve an independent JavaScript
-      reference path rather than requiring the native implementation in Node.
-
 - [ ] The Bakery corpus's nine initial event differences now match the saved
       2026-10-27 REPL events, including coastline (78185). Triangle fastcat
       controls are sampled in C; uniform saw, sine, square, and noise signals
@@ -87,9 +79,27 @@ and measured divergences are recorded in the archive.
       do not establish a passing query-budget gate. Investigate native pattern
       application/composition next: this query still performs 20,791 value
       transformations, 11,370 span transformations and 9,490 context merges.
+      Bounded pure-query and common-control-key fast paths now reduce paired
+      five-run medians from 287/282 ms to 268/268 ms, still 539 haps and still
+      failing both 200 ms gates. The fused application prototype showed no
+      consistent gain and was discarded. Continue with larger composition/value
+      callback costs; keep context merges, stateful queries and callbacks ordered.
+      Use `scripts/profile-pattern-query.mjs` for repeatable compile-stage probes.
       The Hydra example can now evaluate musical branches through inert visual
       placeholders; actual graphics remain covered by the separate `/hydra` task. See
       [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
+
+- [ ] Optional target: migrate from QuickJS to standalone embedded V8 through a
+      confined C++ query worker, without a Node.js runtime dependency. Node-based
+      probes remain diagnostics only. Keep QuickJS available during migration;
+      replacing it is conditional on the integration and parity gates below.
+      The [suitability assessment](docs/v8-assessment.md) finds 41 Bakery event
+      matches and substantial scheduling headroom, but no production host/IPC
+      integration is implemented. Gate native bindings, all-thread confinement,
+      external-memory limits, worker OOM/death, cold/one-CPU behavior and real
+      audio continuity before enabling it. Cover reproducible V8 builds,
+      packaging, dependency notices and deployment footprint. Preserve existing
+      execution budgets and host behavior before considering QuickJS removal.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

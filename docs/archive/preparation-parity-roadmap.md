@@ -601,6 +601,25 @@ physical MIDI timing or all JavaScript/loader-exception side-effect parity.
       and gates truncated in attack/decay; retain pitch PCM gates unchanged.
       Envelope/onset combinations and operator matrices remain follow-up work.
 
+## Bounded composition fast paths
+
+- [x] Profile composition costs and retain bounded pure-query construction and
+      common control-key enumeration, with fresh object and exotic-input fallback
+      checks. Add a paired compile-stage profiling runner. Medians improve from
+      287/282 ms to 268/268 ms; 539 haps remain unchanged. The fused application
+      prototype did not improve timings and was discarded. Both actual 200 ms
+      gates remain failing; no budget, baseline or package version was changed.
+
+## Reference bootstrap and legato contracts
+
+- [x] Keep JavaScript-only reference hosts independent of native triangle hooks.
+      Check untouched prototypes/signals and restore the Node live-control gate.
+- [x] Verify `Random bells` against the deployed REPL: D2 replaces the historical
+      F2 notes in cycles 0 and 1; cycle 16 retains G2. Preserve the historical
+      fixture and assert exactly those two current-web note differences while
+      checking all other fields/order unchanged. Add an independent live-web
+      legato gate; retain the production structure-only adapter.
+
 ## FM operator routing
 
 - [x] Add thirteen selected sine-modulator matrix gates. Route numbered

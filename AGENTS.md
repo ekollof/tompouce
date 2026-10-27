@@ -121,6 +121,12 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   int64 keep the original fraction.js methods. Preserve package locks and
   historical event references. Do not regenerate baselines or loosen thresholds
   to make a regression pass.
+  JavaScript-only reference hosts must work without native signal hooks and
+  retain untouched upstream signals/prototypes rather than mocking native paths.
+  Pure-query and common-key build hooks must match the pinned source exactly.
+  Preserve fresh outputs, builtin/prototype fallbacks and bounded native work.
+  V8 assessment tools are trusted-corpus diagnostics; Node VM contexts are not
+  confinement and must not be exposed as a production untrusted-code backend.
 - `src/track.c` owns source/program changes; `src/scheduler.c` owns generation,
   transport, accepted events and history. `src/js_audio.c` prepares native events
   from haps. `current_code` is heap-owned through `current_code_set`; compiled

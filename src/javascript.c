@@ -604,6 +604,16 @@ static JSValue host_hap(JSContext *ctx, JSValueConst self, int argc, JSValueCons
     JsProgram *program=JS_GetContextOpaque(ctx);
     return rational_hap_dispatch(ctx,program?program->fractions:NULL,magic,self,argc,argv);
 }
+static JSValue host_pure(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)self;
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    return rational_pure(ctx,program?program->fractions:NULL,argc,argv);
+}
+static JSValue host_common_keys(JSContext *ctx,JSValueConst self,int argc,JSValueConst *argv) {
+    (void)self;
+    JsProgram *program=JS_GetContextOpaque(ctx);
+    return rational_common_keys(ctx,program?program->fractions:NULL,argc,argv);
+}
 
 static JSValue host_span(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {
     JsProgram *program = JS_GetContextOpaque(ctx);
@@ -647,8 +657,10 @@ static int initialize(JsProgram *p, char *error, int n) {
     int j = JS_SetPropertyStr(ctx, global, "__hostSignal", JS_NewCFunction(ctx, host_signal, "__hostSignal", 3));
     int k = JS_SetPropertyStr(ctx,global,"__hostFractionCreate",JS_NewCFunction(ctx,host_fraction_create,"__hostFractionCreate",1));
     int l = JS_SetPropertyStr(ctx,global,"__hostTriangle",JS_NewCFunction(ctx,host_triangle,"__hostTriangle",6));
+    int m = JS_SetPropertyStr(ctx,global,"__hostPure",JS_NewCFunction(ctx,host_pure,"__hostPure",2));
+    int common_keys = JS_SetPropertyStr(ctx,global,"__hostCommonKeys",JS_NewCFunction(ctx,host_common_keys,"__hostCommonKeys",2));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0 || k < 0 || l < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0 || k < 0 || l < 0 || m < 0 || common_keys < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {

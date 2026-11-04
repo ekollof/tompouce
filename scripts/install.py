@@ -30,7 +30,7 @@ PACKAGES = {
     'fedora': ['gcc', 'gcc-c++', 'make', 'cmake', 'ninja-build', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
-    'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py',
+    'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
     'web/index.html', 'web/companion.js', 'web/sounds.js', 'web/companion.css',
     'web/dist/editor.js', 'web/dist/licenses.txt', 'js/dist/licenses.txt',
     'thirdparty/STRUDEL-LICENSE', 'thirdparty/quickjs/LICENSE',
@@ -589,7 +589,7 @@ def main(argv=None):
                              HTTP_PROXY='http://127.0.0.1:9', ALL_PROXY='http://127.0.0.1:9', NO_PROXY='', no_proxy='')
             run([binary_dir / 'tests/test_install_runtime'] + (['--no-banks'] if args.skip_banks else []),cwd=build,env=check_env)
             directory(build / 'scripts')
-            for name in ('companion.py', 'sound_import.py'):
+            for name in ('companion.py', 'sound_import.py', 'query-worker.mjs'):
                 shutil.copy2(SOURCE / 'scripts' / name, build / 'scripts' / name)
             copy_runtime(build,application,binary_dir / 'tompouce')
         bin_dir = directory(prefix / 'bin')

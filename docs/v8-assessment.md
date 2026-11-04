@@ -183,6 +183,27 @@ budget and the 2 s evaluation budget, provided compilation never runs on the
 audio path. This supports the separate-process design; it does not measure a
 native C++ host, watchdog or confinement.
 
+## Opt-in Node worker prototype (2026-11-04)
+
+`src/js_worker.c` + `scripts/query-worker.mjs` implement the transport the
+migration needs, without changing the production backend: the parent sends the
+embedded bundle once, then bounded newline-delimited JSON compile/query frames
+with per-request deadlines. `tests/test_js_worker.c` checks that the worker and
+the QuickJS backend produce identical first-event values and event counts for
+three patterns, that syntax errors and oversized sources are rejected, that an
+infinite loop is interrupted by the worker's own watchdog, and that a dead or
+missing worker is reported instead of hanging or killing the caller. `SIGPIPE`
+is blocked around writes so a worker that dies mid-request cannot terminate the
+engine.
+
+Not yet done, and required before any delegation: the JS host callbacks the
+bundle expects (prebakes, Csound loads, MIDI snapshots, sliders with live
+reads), generation/source identity across evaluation, failed-evaluation
+retention, and the engine-side `JsProgram` switch behind an explicit opt-in.
+The Node process is currently a diagnostic-plus-prototype target: it adds a
+runtime Node dependency and ~113–158 MiB RSS, which is why QuickJS stays the
+default and the installer only ships the worker script.
+
 ## Build requirement
 
 No standalone V8 is installed on this machine: `nodejs` ships a static binary

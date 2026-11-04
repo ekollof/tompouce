@@ -108,14 +108,19 @@ and measured divergences are recorded in the archive.
       spawn+bootstrap+compile at 72–107 ms and a warm 50 ms window round-trip at
       7.8 ms median (8.9 ms in-process), so a separate process fits the budgets
       as long as compilation stays off the audio path. No standalone V8 exists
-      on this host (Node is static; no libnode/libv8 package), so the next
-      milestone is a pinned from-source embedder build (depot_tools, gn/ninja,
-      several GiB, ICU/snapshot/notices) and a minimal single-threaded
-      `v8::Platform` worker. Then gate native bindings, all-thread confinement,
-      external-memory limits, worker OOM/death, cold/one-CPU behavior and real
-      audio continuity before enabling it. Cover reproducible V8 builds,
-      packaging, dependency notices and deployment footprint. Preserve existing
-      execution budgets and host behavior before considering QuickJS removal.
+      on this host (Node is static; no libnode/libv8 package), so the transport
+      prototype now exists in `src/js_worker.c` + `scripts/query-worker.mjs`
+      with parity and failure gates (`tests/test_js_worker.c`). The next
+      milestone is engine delegation behind an explicit opt-in: port the JS
+      host callbacks (prebakes, Csound, MIDI snapshots, live sliders), preserve
+      generation/source identity and failed-evaluation retention, then gate
+      native bindings, all-thread confinement, external-memory limits, worker
+      OOM/death, cold/one-CPU behavior and real audio continuity. A standalone
+      from-source V8 embedder build (depot_tools, gn/ninja, several GiB,
+      ICU/snapshot/notices) remains the dependency-free alternative for later.
+      Cover reproducible builds, packaging, dependency notices and deployment
+      footprint. Preserve existing execution budgets and host behavior before
+      considering QuickJS removal.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

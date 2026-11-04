@@ -104,7 +104,14 @@ and measured divergences are recorded in the archive.
       replacing it is conditional on the integration and parity gates below.
       The [suitability assessment](docs/v8-assessment.md) finds 41 Bakery event
       matches and substantial scheduling headroom, but no production host/IPC
-      integration is implemented. Gate native bindings, all-thread confinement,
+      integration is implemented. A transport spike measured worker
+      spawn+bootstrap+compile at 72–107 ms and a warm 50 ms window round-trip at
+      7.8 ms median (8.9 ms in-process), so a separate process fits the budgets
+      as long as compilation stays off the audio path. No standalone V8 exists
+      on this host (Node is static; no libnode/libv8 package), so the next
+      milestone is a pinned from-source embedder build (depot_tools, gn/ninja,
+      several GiB, ICU/snapshot/notices) and a minimal single-threaded
+      `v8::Platform` worker. Then gate native bindings, all-thread confinement,
       external-memory limits, worker OOM/death, cold/one-CPU behavior and real
       audio continuity before enabling it. Cover reproducible V8 builds,
       packaging, dependency notices and deployment footprint. Preserve existing

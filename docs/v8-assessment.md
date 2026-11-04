@@ -171,3 +171,31 @@ Before enabling it for users:
 The evidence supports funding that prototype. It does not support replacing
 the production backend directly with the Node diagnostic or declaring GC-free,
 hard-real-time or complete REPL parity.
+
+## Worker transport spike (2026-11-04)
+
+The prerequisite that does not need a V8 build was measured with the existing
+diagnostic host: a spawned worker process (spawn, bootstrap, compile) becomes
+ready for its first query in 72–107 ms, and a warm 50 ms scheduling window
+round-trips through the pipe, query and JSON in 7.8 ms median against 8.9 ms
+in-process. Transport overhead is therefore small next to the 200 ms query
+budget and the 2 s evaluation budget, provided compilation never runs on the
+audio path. This supports the separate-process design; it does not measure a
+native C++ host, watchdog or confinement.
+
+## Build requirement
+
+No standalone V8 is installed on this machine: `nodejs` ships a static binary
+with V8 14.6, there is no `libnode.so` or `libv8`, and Arch provides no V8
+package. A production worker therefore needs a from-source embedder build
+(depot_tools, `gclient sync`, `gn`/`ninja`, roughly several GiB of checkout and
+a long build) pinned to an exact V8 revision and packaged with its notices,
+ICU data and snapshot. The host has 243 GiB free, 31 GiB RAM and 16 CPUs, so the
+build is feasible; it is the first real cost of this migration and has not been
+performed here.
+
+The worker must link V8 as a single-threaded embedder: a minimal
+`v8::Platform`, one isolate entered by one thread, `TerminateExecution` driven
+by a parent-side watchdog, a heap limit plus separate external-memory accounting,
+and OS confinement applied to every thread V8 creates (compiler and GC workers
+included). None of that is exercised by the Node diagnostic.

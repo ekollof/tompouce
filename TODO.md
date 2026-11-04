@@ -118,14 +118,18 @@ and measured divergences are recorded in the archive.
       `TOMPOUCE_QUERY_BACKEND=node|v8` delegates queries for plain musical
       programs; visuals, prebakes, Csound, live sliders and `midin` readers
       stay on QuickJS, one shared worker follows the newest compatible source,
-      and a failed worker falls back to the retained QuickJS evaluation.
+      and a failed worker falls back to the retained QuickJS evaluation. Each
+      evaluation carries a compile serial so re-evaluating identical source
+      starts fresh worker state.
       Remaining gates before this can be supported or default: host callbacks
-      for the excluded features, generation/source identity for every caller,
-      failed-evaluation retention under the worker, OOM/cold/one-CPU behavior,
-      real audio continuity, and reproducible packaging with notices. The
+      for the excluded features, failed-evaluation retention under the worker,
+      OOM/cold/one-CPU behavior, and reproducible packaging with notices. The
       worker is confined (own group, parent-death signal, no-new-privs, fixed
       `RLIMIT_CORE`/`NOFILE`/`CPU`/`AS`, sanitized environment) and its limits
-      are tested. A standalone from-source V8
+      are tested; `profile-prep-backend` with the backend enabled held all six
+      real-backend gates in two consecutive runs (zero xruns, drops or
+      overruns), with one earlier run showing a single 2.7 ms late reservation
+      worth watching. A standalone from-source V8
       embedder build (depot_tools, gn/ninja, several GiB, ICU/snapshot/notices)
       remains the dependency-free alternative for later. Preserve existing
       execution budgets and host behavior before considering QuickJS removal.

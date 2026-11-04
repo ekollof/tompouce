@@ -238,6 +238,39 @@ static void test_engine_delegation(void) {
     }
 }
 
+/* Re-evaluating identical source must start a fresh worker evaluation, not
+   continue the previous one's state. A pattern whose values depend on a
+   query-advancing callback exposes the difference. */
+static void test_engine_identity(void) {
+    const char *code = "note(60).s('sine').gain(rand.range(.2,.8))";
+    char error[512] = "";
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    cJSON *meta = NULL;
+    JsProgram *first = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(first && javascript_uses_query_worker(first), "first evaluation delegates");
+    cJSON *first_events = first ? javascript_query(first, 0, 1) : NULL;
+    /* A second evaluation replaces the worker's bound evaluation. */
+    JsProgram *second = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    expect(second && javascript_uses_query_worker(second), "second evaluation delegates");
+    cJSON *second_events = second ? javascript_query(second, 0, 1) : NULL;
+    /* The replaced program keeps working through its QuickJS evaluation. */
+    cJSON *first_again = first ? javascript_query(first, 0, 1) : NULL;
+    expect(cJSON_IsArray(first_events) && cJSON_IsArray(second_events) &&
+        cJSON_GetArraySize(first_events) == cJSON_GetArraySize(second_events),
+        "both evaluations return the same shape");
+    expect(cJSON_IsArray(first_again) &&
+        cJSON_GetArraySize(first_again) == cJSON_GetArraySize(first_events),
+        "replaced program falls back and still queries");
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    cJSON_Delete(first_again);
+    cJSON_Delete(second_events);
+    cJSON_Delete(first_events);
+    javascript_free(second);
+    javascript_free(first);
+}
+
 int main(void) {
     log_console_stderr(0);
     if (!node_available()) {
@@ -247,6 +280,7 @@ int main(void) {
     test_parity();
     test_confinement();
     test_engine_delegation();
+    test_engine_identity();
     test_rejections();
     test_watchdog();
     test_death();

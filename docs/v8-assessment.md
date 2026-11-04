@@ -206,7 +206,10 @@ input readers. Compile-time console output still comes from QuickJS, while
 query-time console lines are forwarded from the worker, so warnings appear once.
 One shared worker holds the most recently compiled compatible source; other
 programs (song mode, older tracks) keep querying QuickJS instead of
-recompiling per query. A worker timeout, death or desynchronized reply is
+recompiling per query. Each evaluation carries a unique compile serial, so
+re-evaluating identical source starts fresh worker state rather than continuing
+the previous evaluation, and a program replaced by a newer evaluation falls
+back to its retained QuickJS state. A worker timeout, death or desynchronized reply is
 reported and the affected program falls back to its QuickJS evaluation, which
 was never discarded. That fallback resumes a pattern whose internal state
 (random streams, stateful callbacks) has not advanced with the worker's, so it
@@ -223,13 +226,21 @@ via `/proc/<pid>/limits` and that a `--require` injection is ignored. The heap
 limit stays 256 MiB, and ArrayBuffer/external allocations are bounded only by
 the address-space limit.
 
+`profile-prep-backend` (real PipeWire, owned silent sink) was run with the
+backend enabled: two consecutive runs held all six workload gates with zero
+xrun gaps, zero stream drops, zero render overruns and the injected 100 ms
+positive control still counting its gap. One earlier run of the same matrix
+reported a single late voice reservation (2.7 ms past its deadline) in the
+burst workload, with no xruns, drops or overruns; treat that as marginal jitter
+to watch rather than a resolved result.
+
 Still required before this can be a supported or default backend: generation
-and source identity across evaluation for every caller, cross-checking
-failed-evaluation retention under the worker, the remaining host callbacks
-(Csound loads, MIDI snapshots, live sliders, prebakes), and audio continuity
-under GC/compile load. The Node process also adds a runtime Node
-dependency and ~113–158 MiB RSS, which is why it is opt-in and the installer
-only ships the worker script.
+and source identity across evaluation for every caller (compile serials now
+cover re-evaluation), cross-checking failed-evaluation retention under the
+worker, and the remaining host callbacks (Csound loads, MIDI snapshots, live
+sliders, prebakes). The Node process also adds a runtime Node dependency and
+~113–158 MiB RSS, which is why it is opt-in and the installer only ships the
+worker script.
 
 ## Build requirement
 

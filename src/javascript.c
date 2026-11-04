@@ -22,10 +22,12 @@
 #define JS_SPANS 2048
 
 /* Opt-in Node/V8 query delegation (TOMPOUCE_QUERY_BACKEND=node). One shared
-   worker holds the most recently compiled compatible source; other programs
-   keep using QuickJS so song mode never recompiles per query. */
+   worker holds the most recently compiled compatible evaluation; other
+   programs keep using QuickJS so song mode never recompiles per query. */
 static JsWorker *query_worker;
 static char *query_worker_source;
+static unsigned worker_bound_serial;
+static atomic_uint compile_serial_counter;
 static pthread_mutex_t query_worker_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int worker_backend_enabled(void) {
@@ -65,8 +67,11 @@ struct JsProgram {
     size_t prebake_bytes;
     RationalHost *fractions;
     /* Set when this program's queries are delegated to the opt-in Node worker
-       and the shared worker currently holds exactly this source. */
+       and the shared worker currently holds exactly this evaluation. */
     atomic_int worker_delegated;
+    /* Unique per compile_program call: two evaluations of identical source
+       must not share the worker's state. */
+    unsigned compile_serial;
 };
 /* Programs that depend on QuickJS-only host features keep using QuickJS. */
 static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
@@ -85,7 +90,10 @@ static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     return 1;
 }
 
-/* Bind the shared worker to this source; returns 1 when delegation is ready. */
+/* Bind the shared worker to this evaluation; returns 1 when delegation is
+   ready. Every compile_program call has a unique serial, so re-evaluating the
+   same source starts fresh state in the worker instead of reusing the last
+   evaluation. */
 static int worker_bind(JsProgram *p, double bpm) {
     if (!p->source) return 0;
     pthread_mutex_lock(&query_worker_lock);
@@ -98,13 +106,14 @@ static int worker_bind(JsProgram *p, double bpm) {
             return 0;
         }
     }
-    if (!query_worker_source || strcmp(query_worker_source, p->source)) {
+    if (!query_worker_source || strcmp(query_worker_source, p->source) ||
+        worker_bound_serial != p->compile_serial) {
         char error[256] = "";
         char *metadata = NULL;
         if (!js_worker_compile(query_worker, p->source, isfinite(bpm) && bpm > 0 ? bpm : 120,
                 &metadata, error, sizeof(error))) {
             /* A rejected source is a user error: keep the worker (and any
-               source already bound for another program). Only transport
+               evaluation already bound for another program). Only transport
                failures tear it down. */
             int transport = js_worker_failure(query_worker) != JS_WORKER_OK;
             log_console("query backend: worker compile failed: %s", error);
@@ -113,6 +122,7 @@ static int worker_bind(JsProgram *p, double bpm) {
                 query_worker = NULL;
                 free(query_worker_source);
                 query_worker_source = NULL;
+                worker_bound_serial = 0;
             }
             pthread_mutex_unlock(&query_worker_lock);
             return 0;
@@ -124,8 +134,10 @@ static int worker_bind(JsProgram *p, double bpm) {
             pthread_mutex_unlock(&query_worker_lock);
             return 0;
         }
+        worker_bound_serial = p->compile_serial;
     }
-    int ready = query_worker_source && !strcmp(query_worker_source, p->source);
+    int ready = query_worker_source && !strcmp(query_worker_source, p->source) &&
+        worker_bound_serial == p->compile_serial;
     pthread_mutex_unlock(&query_worker_lock);
     return ready;
 }
@@ -827,6 +839,7 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
     if (!p) return NULL;
     atomic_init(&p->refs,1);
     p->eager_csound=eager;
+    p->compile_serial = atomic_fetch_add(&compile_serial_counter,1)+1;
     if (eager) {
         pthread_mutex_lock(&stashed_csound_lock);
         p->csound=previous && previous->csound?previous->csound:stashed_csound;
@@ -925,6 +938,7 @@ static cJSON *query_events(JsProgram *p, double begin, double end, double cps, i
         int usable = 0;
         pthread_mutex_lock(&query_worker_lock);
         usable = query_worker && query_worker_source && p->source &&
+            worker_bound_serial == p->compile_serial &&
             !strcmp(query_worker_source, p->source);
         if (usable) {
             char *events_text = NULL, worker_error[256] = "";

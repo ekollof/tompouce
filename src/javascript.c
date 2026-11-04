@@ -1,4 +1,5 @@
 #include "javascript.h"
+#include "js_worker.h"
 #include "common.h"
 #include "slider.h"
 #include "midi.h"
@@ -19,6 +20,18 @@
 #define JS_MEMORY_LIMIT (128 * 1024 * 1024)
 #define JS_TEXT_LIMIT (4 * 1024 * 1024)
 #define JS_SPANS 2048
+
+/* Opt-in Node/V8 query delegation (TOMPOUCE_QUERY_BACKEND=node). One shared
+   worker holds the most recently compiled compatible source; other programs
+   keep using QuickJS so song mode never recompiles per query. */
+static JsWorker *query_worker;
+static char *query_worker_source;
+static pthread_mutex_t query_worker_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int worker_backend_enabled(void) {
+    const char *mode = getenv("TOMPOUCE_QUERY_BACKEND");
+    return mode && (!strcmp(mode, "node") || !strcmp(mode, "v8"));
+}
 
 struct JsProgram {
     SliderBank *sliders;
@@ -51,7 +64,73 @@ struct JsProgram {
     unsigned prebake_files;
     size_t prebake_bytes;
     RationalHost *fractions;
+    /* Set when this program's queries are delegated to the opt-in Node worker
+       and the shared worker currently holds exactly this source. */
+    atomic_int worker_delegated;
 };
+/* Programs that depend on QuickJS-only host features keep using QuickJS. */
+static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
+    if (!p || !metadata) return 0;
+    if (p->nvisual_sites > 0 || p->prebake_files > 0) return 0;
+    /* MIDI input readers query host state the worker does not have. */
+    if (strstr(p->source, "midin") || strstr(p->source, "midikeys")) return 0;
+    /* Live slider reads are host state the worker does not have. */
+    const cJSON *sliders = cJSON_GetObjectItemCaseSensitive(metadata, "sliders");
+    if (!cJSON_IsNumber(sliders) || sliders->valuedouble > 0) return 0;
+    if (slider_count() > 0) return 0;
+    const cJSON *csound = cJSON_GetObjectItemCaseSensitive(metadata, "csound");
+    if (csound && !cJSON_IsNull(csound)) return 0;
+    const cJSON *samples = cJSON_GetObjectItemCaseSensitive(metadata, "samples");
+    (void)samples;
+    return 1;
+}
+
+/* Bind the shared worker to this source; returns 1 when delegation is ready. */
+static int worker_bind(JsProgram *p, double bpm) {
+    if (!p->source) return 0;
+    pthread_mutex_lock(&query_worker_lock);
+    if (!query_worker) {
+        char error[256] = "";
+        query_worker = js_worker_start(NULL, NULL, error, sizeof(error));
+        if (!query_worker) {
+            pthread_mutex_unlock(&query_worker_lock);
+            log_console("query backend: worker unavailable: %s", error);
+            return 0;
+        }
+    }
+    if (!query_worker_source || strcmp(query_worker_source, p->source)) {
+        char error[256] = "";
+        char *metadata = NULL;
+        if (!js_worker_compile(query_worker, p->source, isfinite(bpm) && bpm > 0 ? bpm : 120,
+                &metadata, error, sizeof(error))) {
+            /* A rejected source is a user error: keep the worker (and any
+               source already bound for another program). Only transport
+               failures tear it down. */
+            int transport = js_worker_failure(query_worker) != JS_WORKER_OK;
+            log_console("query backend: worker compile failed: %s", error);
+            if (transport) {
+                js_worker_stop(query_worker);
+                query_worker = NULL;
+                free(query_worker_source);
+                query_worker_source = NULL;
+            }
+            pthread_mutex_unlock(&query_worker_lock);
+            return 0;
+        }
+        free(metadata);
+        free(query_worker_source);
+        query_worker_source = strdup(p->source);
+        if (!query_worker_source) {
+            pthread_mutex_unlock(&query_worker_lock);
+            return 0;
+        }
+    }
+    int ready = query_worker_source && !strcmp(query_worker_source, p->source);
+    pthread_mutex_unlock(&query_worker_lock);
+    return ready;
+}
+
+
 
 static int interrupted(JSRuntime *runtime, void *opaque) {
     (void)runtime;
@@ -391,6 +470,10 @@ void javascript_free(JsProgram *p) {
     if (p->lock_ready >= 2) pthread_mutex_destroy(&p->spans_lock);
     if (p->lock_ready >= 1) pthread_mutex_destroy(&p->lock);
     free(p);
+}
+
+int javascript_uses_query_worker(const JsProgram *p) {
+    return p ? atomic_load(&((JsProgram *)p)->worker_delegated) : 0;
 }
 
 void javascript_retain(JsProgram *p) {
@@ -811,6 +894,11 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
                 if (!p->visual_notes) { cJSON_Delete(json); javascript_free(p); return NULL; }
             }
             p->loading_allowed = 0;
+            if (worker_backend_enabled() && worker_compatible(p,json)) {
+                int delegated = worker_bind(p,isfinite(bpm) ? bpm : 120);
+                atomic_store(&p->worker_delegated,delegated);
+                if (delegated) log_console("query backend: node worker for this program");
+            }
             if (metadata) *metadata = json; else cJSON_Delete(json);
             return p;
         }
@@ -833,6 +921,37 @@ JsProgram *javascript_compile_from(const char *code, double bpm, JsProgram *prev
 
 static cJSON *query_events(JsProgram *p, double begin, double end, double cps, int probes) {
     if (!p || !isfinite(begin) || !isfinite(end) || begin < 0 || end <= begin || end - begin > 1.001) return NULL;
+    if (atomic_load(&p->worker_delegated)) {
+        int usable = 0;
+        pthread_mutex_lock(&query_worker_lock);
+        usable = query_worker && query_worker_source && p->source &&
+            !strcmp(query_worker_source, p->source);
+        if (usable) {
+            char *events_text = NULL, worker_error[256] = "";
+            int ok = js_worker_query(query_worker, begin, end, cps, probes,
+                &events_text, worker_error, sizeof(worker_error));
+            if (!ok) {
+                /* A dead or desynchronized worker must not stall playback: drop
+                   it and let the QuickJS evaluation take over. */
+                js_worker_stop(query_worker);
+                query_worker = NULL;
+                free(query_worker_source); query_worker_source = NULL;
+            }
+            pthread_mutex_unlock(&query_worker_lock);
+            if (ok && events_text) {
+                cJSON *events = cJSON_Parse(events_text);
+                free(events_text);
+                if (events) return events;
+                log_console("query backend: worker returned malformed events");
+            } else {
+                log_console("query backend: worker query failed (%s); using QuickJS",
+                    worker_error[0] ? worker_error : "unknown");
+            }
+            atomic_store(&p->worker_delegated,0);
+        } else {
+            pthread_mutex_unlock(&query_worker_lock);
+        }
+    }
     pthread_mutex_lock(&p->lock);
     JS_UpdateStackTop(p->runtime);
     double query_started=now_seconds();

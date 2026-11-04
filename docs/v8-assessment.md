@@ -196,13 +196,31 @@ missing worker is reported instead of hanging or killing the caller. `SIGPIPE`
 is blocked around writes so a worker that dies mid-request cannot terminate the
 engine.
 
-Not yet done, and required before any delegation: the JS host callbacks the
-bundle expects (prebakes, Csound loads, MIDI snapshots, sliders with live
-reads), generation/source identity across evaluation, failed-evaluation
-retention, and the engine-side `JsProgram` switch behind an explicit opt-in.
-The Node process is currently a diagnostic-plus-prototype target: it adds a
-runtime Node dependency and ~113–158 MiB RSS, which is why QuickJS stays the
-default and the installer only ships the worker script.
+`TOMPOUCE_QUERY_BACKEND=node` (or `v8`) now delegates engine queries to that
+worker. QuickJS remains the default; with the variable unset nothing changes.
+Delegation is deliberately narrow: a program is compiled by both engines, and
+only plain musical patterns are queried through the worker. Programs that need
+QuickJS-only host state stay native — visual attachments (`_scope`, `pianoroll`,
+Hydra placeholders), prebakes, Csound orchestras, live sliders and `midin`
+input readers. Compile-time console output still comes from QuickJS, while
+query-time console lines are forwarded from the worker, so warnings appear once.
+One shared worker holds the most recently compiled compatible source; other
+programs (song mode, older tracks) keep querying QuickJS instead of
+recompiling per query. A worker timeout, death or desynchronized reply is
+reported and the affected program falls back to its QuickJS evaluation, which
+was never discarded. That fallback resumes a pattern whose internal state
+(random streams, stateful callbacks) has not advanced with the worker's, so it
+is an emergency continuation rather than a seamless handoff; a later evaluation
+returns to a consistent state.
+
+Still required before this can be a supported or default backend: generation
+and source identity across evaluation for every caller, cross-checking
+failed-evaluation retention under the worker, the remaining host callbacks
+(Csound loads, MIDI snapshots, live sliders, prebakes), OS confinement for the
+worker and its threads, external-memory/process-memory policy, and audio
+continuity under GC/compile load. The Node process also adds a runtime Node
+dependency and ~113–158 MiB RSS, which is why it is opt-in and the installer
+only ships the worker script.
 
 ## Build requirement
 

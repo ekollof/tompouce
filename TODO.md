@@ -79,7 +79,11 @@ and measured divergences are recorded in the archive.
       do not establish a passing query-budget gate. Bounded pure-query and
       common-control-key fast paths now reduce paired five-run medians from
       287/282 ms to 268/268 ms, still 539 haps and still failing both 200 ms
-      gates. Use `scripts/profile-pattern-query.mjs` for repeatable probes.
+      gates on QuickJS. With the opt-in Node backend
+      (`TOMPOUCE_QUERY_BACKEND=node`) the same probe measures 145/146 ms and the
+      full Bakery comparison matches all 42 compositions, 398/398 events for
+      both songs; QuickJS remains the default and still fails these two gates.
+      Use `scripts/profile-pattern-query.mjs` for repeatable probes.
       A follow-up attribution pass (see
       [where the time goes](docs/audio-comparison.md#where-the-remaining-query-time-goes))
       shows the cost is per hap at ~0.47–0.49 ms with ~5 ms fixed, and that it
@@ -110,17 +114,19 @@ and measured divergences are recorded in the archive.
       as long as compilation stays off the audio path. No standalone V8 exists
       on this host (Node is static; no libnode/libv8 package), so the transport
       prototype now exists in `src/js_worker.c` + `scripts/query-worker.mjs`
-      with parity and failure gates (`tests/test_js_worker.c`). The next
-      milestone is engine delegation behind an explicit opt-in: port the JS
-      host callbacks (prebakes, Csound, MIDI snapshots, live sliders), preserve
-      generation/source identity and failed-evaluation retention, then gate
-      native bindings, all-thread confinement, external-memory limits, worker
-      OOM/death, cold/one-CPU behavior and real audio continuity. A standalone
-      from-source V8 embedder build (depot_tools, gn/ninja, several GiB,
-      ICU/snapshot/notices) remains the dependency-free alternative for later.
-      Cover reproducible builds, packaging, dependency notices and deployment
-      footprint. Preserve existing execution budgets and host behavior before
-      considering QuickJS removal.
+      with parity and failure gates (`tests/test_js_worker.c`).
+      `TOMPOUCE_QUERY_BACKEND=node|v8` delegates queries for plain musical
+      programs; visuals, prebakes, Csound, live sliders and `midin` readers
+      stay on QuickJS, one shared worker follows the newest compatible source,
+      and a failed worker falls back to the retained QuickJS evaluation.
+      Remaining gates before this can be supported or default: host callbacks
+      for the excluded features, generation/source identity for every caller,
+      failed-evaluation retention under the worker, worker confinement and
+      memory policy, OOM/death/cold/one-CPU behavior, real audio continuity,
+      and reproducible packaging with notices. A standalone from-source V8
+      embedder build (depot_tools, gn/ninja, several GiB, ICU/snapshot/notices)
+      remains the dependency-free alternative for later. Preserve existing
+      execution budgets and host behavior before considering QuickJS removal.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

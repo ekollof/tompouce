@@ -1701,6 +1701,11 @@ static void duck_mapping_reference(void) {
 }
 
 int main(int argc, char **argv) {
+    /* Several cases patch globalThis.__query, a QuickJS-host global that the
+       opt-in Node backend does not expose to the harness. Keep this binary on
+       the default backend so those white-box checks stay meaningful. */
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+
     if (argc>1 && !strcmp(argv[1],"--csound-worker")) {
 #ifdef TOMPOUCE_TEST_CSOUND_WORKER
         /* The production worker's address-space cap cannot host ASan's shadow

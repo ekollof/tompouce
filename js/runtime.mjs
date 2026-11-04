@@ -1060,7 +1060,7 @@ globalThis.__compile = async (code, bpm = 120, prebake = '') => {
   source = code;
   locations = result.miniLocations ?? [];
   if (pianoUsed) sampleCalls.unshift(['https://raw.githubusercontent.com/felixroos/dough-samples/main/piano.json']);
-  return JSON.stringify({ bpm: tempo, samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, collecting.size), csound: csoundUsed ? orchestraCalls : null });
+  return JSON.stringify({ bpm: tempo, samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, collecting.size), csound: csoundUsed ? orchestraCalls : null, sliders: liveSliderReaders.size });
 };
 
 /* JSON turns non-finite numbers into null. Duck numeric conversion accepts

@@ -166,7 +166,7 @@ static int read_frame(JsWorker *worker, long budget_ms, char *error, int errorle
    malformed response desynchronizes the stream, so the worker is killed rather
    than reused. */
 static cJSON *request(JsWorker *worker, unsigned long long id, const char *frame,
-    long budget_ms, char *error, int errorlen) {
+    long budget_ms, int forward_logs, char *error, int errorlen) {
     if (!worker || worker->pid <= 0) { set_error(error, errorlen, "worker not running"); return NULL; }
     if (strlen(frame) + 2 > WORKER_FRAME_MAX) {
         set_error(error, errorlen, "worker request exceeds the frame limit");
@@ -194,6 +194,14 @@ static cJSON *request(JsWorker *worker, unsigned long long id, const char *frame
         cJSON_Delete(response);
         set_error(error, errorlen, "worker response id mismatch");
         return NULL;
+    }
+    /* Surface console output the bundle produced during the request, bounded
+       by the worker (64 lines) and by the frame limit. */
+    if (forward_logs) {
+        const cJSON *logs = cJSON_GetObjectItemCaseSensitive(response, "logs");
+        const cJSON *line = NULL;
+        cJSON_ArrayForEach(line, logs)
+            if (cJSON_IsString(line) && line->valuestring) log_console("%s", line->valuestring);
     }
     const cJSON *ok = cJSON_GetObjectItemCaseSensitive(response, "ok");
     if (!cJSON_IsTrue(ok)) {
@@ -291,7 +299,7 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         set_error(error, errorlen, "bundle frame exceeds the limit");
         return NULL;
     }
-    cJSON *response = request(worker, 0, frame, WORKER_COMPILE_BUDGET_MS, error, errorlen);
+    cJSON *response = request(worker, 0, frame, WORKER_COMPILE_BUDGET_MS, 0, error, errorlen);
     free(frame);
     if (!response) { js_worker_stop(worker); return NULL; }
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(response, "v8");
@@ -329,7 +337,7 @@ int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     ok = ok && json_escape(frame, cap, &used, source, strlen(source));
     if (ok) { frame[used++] = '"'; frame[used++] = '}'; frame[used] = 0; }
     if (!ok) { free(frame); set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
-    cJSON *response = request(worker, worker->next_id, frame, WORKER_COMPILE_BUDGET_MS, error, errorlen);
+    cJSON *response = request(worker, worker->next_id, frame, WORKER_COMPILE_BUDGET_MS, 0, error, errorlen);
     free(frame);
     if (!response) return 0;
     *metadata = copy_string_field(response, "metadata");
@@ -338,17 +346,21 @@ int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     return 1;
 }
 
-int js_worker_query(JsWorker *worker, double begin, double end, double cps,
+int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,
     char **events, char *error, int errorlen) {
     if (!worker || !events) { set_error(error, errorlen, "invalid request"); return 0; }
     char frame[256];
-    int written = snprintf(frame, sizeof(frame),
-        "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"cps\":%.17g}",
-        ++worker->next_id, begin, end, cps);
+    int written = isfinite(cps)
+        ? snprintf(frame, sizeof(frame),
+            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"cps\":%.17g,\"probes\":%s}",
+            ++worker->next_id, begin, end, cps, probes ? "true" : "false")
+        : snprintf(frame, sizeof(frame),
+            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"probes\":%s}",
+            ++worker->next_id, begin, end, probes ? "true" : "false");
     if (written <= 0 || (size_t)written >= sizeof(frame)) {
         set_error(error, errorlen, "invalid query"); return 0;
     }
-    cJSON *response = request(worker, worker->next_id, frame, WORKER_QUERY_BUDGET_MS, error, errorlen);
+    cJSON *response = request(worker, worker->next_id, frame, WORKER_QUERY_BUDGET_MS, 1, error, errorlen);
     if (!response) return 0;
     *events = copy_string_field(response, "events");
     cJSON_Delete(response);

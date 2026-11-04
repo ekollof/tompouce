@@ -55,7 +55,7 @@ static void test_parity(void) {
         cJSON_Delete(worker_metadata);
 
         char *events = NULL;
-        if (!js_worker_query(worker, 0, 1, .5, &events, error, sizeof(error))) {
+        if (!js_worker_query(worker, 0, 1, .5, 0, &events, error, sizeof(error))) {
             fprintf(stderr, "query: %s\n", error);
             expect(0, "worker query");
             break;
@@ -142,9 +142,52 @@ static void test_death(void) {
     expect(dead == NULL && strlen(error) > 0, "missing worker script fails startup");
     /* The transport also refuses a null worker instead of crashing. */
     char *events = NULL;
-    expect(!js_worker_query(NULL, 0, 1, .5, &events, error, sizeof(error)),
+    expect(!js_worker_query(NULL, 0, 1, .5, 0, &events, error, sizeof(error)),
         "query on a missing worker fails");
     expect(js_worker_failure(NULL) == JS_WORKER_DEAD, "missing worker reports death");
+}
+
+/* Engine integration: with the opt-in backend enabled, a plain musical program
+   is delegated and its events match a QuickJS-compiled twin. */
+static void test_engine_delegation(void) {
+    const char *code = "note(\"c4 e4 g4\").s(\"sine\").gain(.4)";
+    char error[512] = "";
+    cJSON *meta = NULL;
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    expect(delegated != NULL, "delegated compile succeeds");
+    if (delegated) {
+        expect(javascript_uses_query_worker(delegated), "program reports worker delegation");
+        cJSON *events = javascript_query(delegated, 0, 1);
+        int count = cJSON_IsArray(events) ? cJSON_GetArraySize(events) : -1;
+        unsetenv("TOMPOUCE_QUERY_BACKEND");
+        cJSON *quick_meta = NULL;
+        JsProgram *quick = javascript_compile(code, 120, &quick_meta, error, sizeof(error));
+        cJSON_Delete(quick_meta);
+        expect(quick != NULL && !javascript_uses_query_worker(quick), "quickjs twin stays native");
+        cJSON *quick_events = quick ? javascript_query(quick, 0, 1) : NULL;
+        expect(count > 0 && count == (cJSON_IsArray(quick_events) ? cJSON_GetArraySize(quick_events) : -2),
+            "delegated and native event counts agree");
+        if (cJSON_IsArray(events) && cJSON_IsArray(quick_events) && count > 0) {
+            char *a = cJSON_PrintUnformatted(cJSON_GetArrayItem(events, 0));
+            char *b = cJSON_PrintUnformatted(cJSON_GetArrayItem(quick_events, 0));
+            expect(!strcmp(a, b), "delegated first event is identical");
+            free(a); free(b);
+        }
+        /* Slider programs must not be delegated (live values are host state). */
+        setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+        cJSON *slider_meta = NULL;
+        JsProgram *slider = javascript_compile("note(60).gain(slider(.5))", 120, &slider_meta, error, sizeof(error));
+        cJSON_Delete(slider_meta);
+        expect(slider && !javascript_uses_query_worker(slider), "slider programs keep QuickJS");
+        javascript_free(slider);
+        unsetenv("TOMPOUCE_QUERY_BACKEND");
+        cJSON_Delete(quick_events);
+        javascript_free(quick);
+        cJSON_Delete(events);
+        javascript_free(delegated);
+    }
 }
 
 int main(void) {
@@ -154,6 +197,7 @@ int main(void) {
         return 0;
     }
     test_parity();
+    test_engine_delegation();
     test_rejections();
     test_watchdog();
     test_death();

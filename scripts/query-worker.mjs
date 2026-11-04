@@ -17,8 +17,16 @@ const MAX_FRAME = 8 * 1024 * 1024;
 const MAX_SOURCE = 4 * 1024 * 1024;
 
 let context = null;
+/* Query-time console output is forwarded to the parent, bounded per request. */
+let requestLogs = [];
+const note = (value) => {
+  if (requestLogs.length >= 64) return;
+  const text = String(value);
+  requestLogs.push(text.length > 512 ? text.slice(0, 512) : text);
+};
 let compileScript = null;
 let queryScript = null;
+let probeScript = null;
 
 const write = (value) => {
   const text = JSON.stringify(value);
@@ -34,9 +42,10 @@ function boot(bundle, timeoutMs) {
     microtaskMode: 'afterEvaluate',
     codeGeneration: {strings: true, wasm: false},
   });
+  context.__workerLog = note;
   const prelude = `globalThis.performance={now:()=>Date.now()};
     globalThis.console={log(){},warn(){},error(){},info(){},debug(){}};
-    globalThis.__hostLog=()=>{};
+    globalThis.__hostLog=(value)=>__workerLog(String(value));
     globalThis.__workerSliders=[];
     globalThis.__hostSlider=v=>v;
     globalThis.__hostSliderBind=v=>(__workerSliders.push(v)-1);
@@ -47,6 +56,7 @@ function boot(bundle, timeoutMs) {
   compileScript = new vm.Script(`globalThis.__compileResult=undefined;globalThis.__compileError=undefined;
     __compile(__source,__bpm,'').then(x=>{__compileResult=x},e=>{__compileError=String(e)});`);
   queryScript = new vm.Script('__query(__begin,__end,__cps,false)');
+  probeScript = new vm.Script('__query(__begin,__end,__cps,true)');
 }
 
 function compile(source, bpm, timeoutMs) {
@@ -59,11 +69,13 @@ function compile(source, bpm, timeoutMs) {
   return context.__compileResult;
 }
 
-function query(begin, end, cps, timeoutMs) {
+function query(begin, end, cps, probes, timeoutMs) {
   context.__begin = begin;
   context.__end = end;
-  context.__cps = Number.isFinite(cps) && cps > 0 ? cps : 0.5;
-  const text = queryScript.runInContext(context, {timeout: timeoutMs});
+  /* Omitted cps lets the bundle fall back to the program tempo, as the QuickJS
+     host does when it passes NaN. */
+  context.__cps = Number.isFinite(cps) && cps > 0 ? cps : undefined;
+  const text = (probes ? probeScript : queryScript).runInContext(context, {timeout: timeoutMs});
   if (typeof text !== 'string' || Buffer.byteLength(text) > MAX_FRAME) throw new Error('event output limit');
   return text;
 }
@@ -78,7 +90,7 @@ function handle(frame, budget) {
     return {ok: true, metadata: compile(frame.source, frame.bpm, budget)};
   case 'query':
     if (!context) throw new Error('not initialized');
-    return {ok: true, events: query(frame.begin, frame.end, frame.cps, budget)};
+    return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true, budget)};
   case 'close':
     process.stdout.write(JSON.stringify({id: frame.id ?? null, ok: true}) + '\n', () => process.exit(0));
     return null;
@@ -110,8 +122,9 @@ process.stdin.on('data', (chunk) => {
     const id = Number.isInteger(frame.id) ? frame.id : null;
     const budget = frame.op === 'query' ? 2000 : 4000;
     try {
+      requestLogs = [];
       const result = handle(frame, budget);
-      if (result) write({id, ...result});
+      if (result) write({id, ...result, logs: requestLogs});
     } catch (error) {
       write({id, ok: false, error: String(error?.message ?? error).slice(0, 512)});
     }

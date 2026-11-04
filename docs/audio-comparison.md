@@ -81,8 +81,15 @@ gates.
   creations (240 ns each), 8,300 pure-query calls, 4,100 common-key scans
   (520 ns) and 456 triangle batches: roughly 10 ms in total.
 
-Reaching the unchanged 200 ms budget therefore needs about 25% less per-hap
-JavaScript work, not cheaper haps. The options are batching the hot
+With the opt-in Node backend (`TOMPOUCE_QUERY_BACKEND=node`) both heavy songs
+now finish the same compile-stage probe in 145/146 ms median, and the full
+Bakery comparison matches **all 42 compositions**, including 398/398 events for
+13587 and 78179, where QuickJS still times out. That backend is opt-in and
+documented in the [V8 assessment](v8-assessment.md#opt-in-node-worker-prototype-2026-11-04);
+the default QuickJS path keeps the budget failure described here.
+
+Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
+per-hap JavaScript work, not cheaper haps. The options are batching the hot
 `Hap`/`Pattern` operations into a native applicator that still invokes the
 JavaScript callbacks in order, reducing combinator depth only where semantics
 allow it, or the scoped V8 migration. The earlier fused application prototype

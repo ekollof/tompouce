@@ -25,8 +25,9 @@ void js_worker_stop(JsWorker *worker);
 /* Compile source and return the metadata JSON (caller frees) or NULL. */
 int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     char **metadata, char *error, int errorlen);
-/* Query [begin,end) at cps and return the events JSON (caller frees) or NULL. */
-int js_worker_query(JsWorker *worker, double begin, double end, double cps,
+/* Query [begin,end) and return the events JSON (caller frees) or NULL. A
+   non-finite cps asks the bundle to use its tempo, like the QuickJS host. */
+int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,
     char **events, char *error, int errorlen);
 
 /* Last failure class (JS_WORKER_*), for diagnostics. */

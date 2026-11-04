@@ -706,8 +706,44 @@ static int midi_controller(const cJSON *item, int *out) {
     *out=(int)item->valuedouble; return 1;
 }
 
+/* Documented REPL string form: "0x77" for a manufacturer id and
+   "0x01:0x02:0x03:0x04" for data. A token may be hex only with the 0x prefix;
+   bare tokens are decimal. ':' separates tokens because control strings are
+   mini-notation, where a space would split the value into a sequence before it
+   reaches this parser. The deployed REPL throws on these strings, so this is a
+   bounded superset that keeps the numeric forms untouched. */
+static int midi_sysex_string(const char *text, unsigned char *out, int cap, int *len) {
+    if (!text || !*text || cap < 1) return 0;
+    int n = 0;
+    const char *p = text;
+    for (;;) {
+        while (*p == ':') p++;
+        if (!*p) return 0; /* separator with no following token */
+        int hex = 0, digits = 0, value = 0;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { hex = 1; p += 2; }
+        while (*p && *p != ':') {
+            char c = *p;
+            int d;
+            if (c >= '0' && c <= '9') d = c - '0';
+            else if (hex && c >= 'a' && c <= 'f') d = c - 'a' + 10;
+            else if (hex && c >= 'A' && c <= 'F') d = c - 'A' + 10;
+            else return 0;
+            value = value * (hex ? 16 : 10) + d;
+            if (value > 255 || ++digits > (hex ? 2 : 3)) return 0;
+            p++;
+        }
+        if (!digits || n >= cap) return 0;
+        out[n++] = (unsigned char)value;
+        if (!*p) break;
+    }
+    *len = n;
+    return 1;
+}
+
 static int midi_sysex_bytes(const cJSON *item, unsigned char *out, int cap, int *len) {
     *len = 0;
+    if (cJSON_IsString(item) && item->valuestring)
+        return midi_sysex_string(item->valuestring, out, cap, len);
     if (cJSON_IsNumber(item)) {
         int byte = 0;
         if (cap < 1 || !midi_int(item, 0, 255, &byte)) return 0;
@@ -745,10 +781,10 @@ static int midi_parse_extras(JsProgram *program, const cJSON *value, AudioEvent 
     if (sysex_id && sysex_data) {
         unsigned char id[3]; int id_len = 0, data_len = 0;
         if (!midi_sysex_bytes(sysex_id, id, 3, &id_len) ||
-            !cJSON_IsArray(sysex_data) ||
             !midi_sysex_bytes(sysex_data, event->midi_sysex,
                 (int)sizeof(event->midi_sysex), &data_len)) {
-            javascript_warn_control(program, "midi sysex (requires integer id/data bytes 0..255)");
+            javascript_warn_control(program,
+                "midi sysex (requires bytes 0..255 as integers, arrays or '0x01:0x02' strings)");
             return 0;
         }
         memcpy(event->midi_sysex_id, id, (size_t)id_len);
@@ -844,7 +880,7 @@ static void midi_parse_command(JsProgram *program, const cJSON *value, AudioEven
         if (midi_sysex_bytes(cJSON_GetArrayItem(cmd,1),event->midi_post_sysex_id,3,&event->midi_post_sysex_id_len) &&
                 cJSON_IsArray(cJSON_GetArrayItem(cmd,2)) &&
                 midi_sysex_bytes(cJSON_GetArrayItem(cmd,2),event->midi_post_sysex,256,&event->midi_post_sysex_len)) event->midi_has_post_sysex=1;
-        else javascript_warn_control(program,"midi sysex (requires integer id/data bytes 0..255)");
+        else javascript_warn_control(program,"midi sysex (requires bytes 0..255 as integers, arrays or '0x01:0x02' strings)");
         return;
     }
     if (!strcmp(name, "cc")) {

@@ -976,7 +976,16 @@ and `nrpv(value)` or `nrpv([coarse,fine])` send a bounded NRPN CC transaction,
 including the reference's RPN-null deselection. Both parameter and data bytes
 must fit 0..127. Scalar extras and equivalent `midicmd` array forms both send,
 with command forms following cycle-zero start rather than replacing earlier
-messages. String sysex forms remain unsupported.
+messages. Scalar extras and equivalent `midicmd` array forms both send,
+with command forms following cycle-zero start rather than replacing earlier
+messages. Sysex byte values also accept the documented string form:
+`sysexid("0x77")` and `sysexdata("0x01:0x02:0x03:0x04")`, where a `0x` prefix
+means hex and a bare token is decimal, separated by `:`. A space is not a
+separator because control strings are mini-notation and would split into a
+sequence first. Malformed tokens, values above 255 and byte counts beyond the
+id/data bounds are rejected with the usual warning, and the note still commits.
+The deployed REPL throws on these documented strings, so this string form is a
+deliberate superset; numeric bytes, arrays and `midicmd` framing are unchanged.
 
 `defaultmidimap({lpf:74})` registers the current program's default map;
 `await midimaps({synth:{lpf:{ccn:74,min:100,max:1100,exp:2}}})` registers named

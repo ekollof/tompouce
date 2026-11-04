@@ -808,3 +808,16 @@ sounds while native drops them; native accepts uppercase extensions.
 - [x] Process BSS 321 -> 23 MiB; max-room workload peak RSS 105 -> 76 MiB.
       ctest 37/37, security and sanitizers green, exact PCM parity retained
       (test_convolution_simd exercises reservations, clones and refusals).
+
+## MIDI string-form sysex (completed 2026-11-04)
+
+- [x] `sysexid`/`sysexdata` accept the documented REPL string form
+      (`"0x77"`, `"0x01:0x02:0x03:0x04"`) in addition to integers and arrays,
+      for both scalar extras and `midicmd` array forms. `0x` means hex, bare
+      tokens are decimal, and `:` separates tokens because a space would be
+      split by mini-notation before the value reaches the parser. Malformed
+      tokens, values above 255 and byte counts beyond the 3-id/256-data bounds
+      are rejected with the existing warning while the note still commits.
+      The deployed REPL throws on its own documented strings, so the string
+      form is recorded as a deliberate superset; numeric bytes, framing and
+      send order are unchanged.

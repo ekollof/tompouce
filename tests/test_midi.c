@@ -805,13 +805,61 @@ static void test_midi_extras_commit(void) {
     schedule_loaded(1);
     assert(collect_extras(extras, 16) == 1);
     assert(extras[0].has_sysex && extras[0].id_len == 1 && extras[0].id[0] == 0x43);
+    if (!(extras[0].data_len == 2 && extras[0].data[0] == 0x79 && extras[0].data[1] == 0x09))
+        fprintf(stderr, "DBG strsysex data_len=%d d0=%d d1=%d\n",
+            extras[0].data_len, extras[0].data[0], extras[0].data[1]);
     assert(extras[0].data_len == 2 && extras[0].data[0] == 0x79 && extras[0].data[1] == 0x09);
     event_queue_clear();
-    /* String sysex forms never send on the web; the note still commits. */
-    assert(track_load_from_code("note(60).sysexid(\"0x77\").sysexdata(\"0x01\").midi()"));
+    /* Documented string form: hex tokens with a 0x prefix, ':' separated.
+       The deployed REPL throws on these, so this is a bounded superset. */
+    assert(track_load_from_code("note(60).sysexid(\"0x77\").sysexdata(\"0x01:0x02\").midi()"));
     schedule_loaded(1);
     assert(collect_extras(extras, 16) == 1);
-    assert(extras[0].note == 60 && !extras[0].has_sysex);
+    assert(extras[0].note == 60 && extras[0].has_sysex);
+    assert(extras[0].id_len == 1 && extras[0].id[0] == 0x77);
+    assert(extras[0].data_len == 2 && extras[0].data[0] == 1 && extras[0].data[1] == 2);
+    event_queue_clear();
+    assert(track_load_from_code("note(60).sysex([\"0x43\", \"0x79:0x09\"]).midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(extras[0].has_sysex && extras[0].id_len == 1 && extras[0].id[0] == 0x43);
+    assert(extras[0].data_len == 2 && extras[0].data[0] == 0x79 && extras[0].data[1] == 0x09);
+    event_queue_clear();
+    /* Malformed strings are rejected; the note still commits. */
+    const char *bad_sysex[] = {
+        "note(60).sysexid(\"0x77\").sysexdata(\"256\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"0x100\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"0x\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"0x77:\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"zz\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"-1\").midi()",
+        "note(60).sysexid(\"0x77\").sysexdata(\"\").midi()",
+        "note(60).sysexid(\"0x1:0x2:0x3:0x4\").sysexdata(\"0x01\").midi()",
+    };
+    for (unsigned bad = 0; bad < sizeof(bad_sysex)/sizeof(*bad_sysex); bad++) {
+        /* Mini-notation rejects a trailing separator or an empty string
+           before evaluation; the rest reach the sysex parser. Both paths
+           must refuse to send. */
+        if (!track_load_from_code(bad_sysex[bad])) { event_queue_clear(); continue; }
+        schedule_loaded(1);
+        assert(collect_extras(extras, 16) == 1);
+        assert(extras[0].note == 60 && !extras[0].has_sysex);
+        event_queue_clear();
+    }
+    /* The data array bound is enforced for strings too (128 bytes here, and
+       a 257-byte string is rejected outright). */
+    {
+        char long_data[2048];
+        size_t used = (size_t)snprintf(long_data, sizeof(long_data),
+            "note(60).sysexid(\"0x77\").sysexdata(\"");
+        for (int i = 0; i < 257 && used + 6 < sizeof(long_data); i++)
+            used += (size_t)snprintf(long_data + used, sizeof(long_data) - used, "%s0x01", i ? ":" : "");
+        snprintf(long_data + used, sizeof(long_data) - used, "\").midi()");
+        assert(track_load_from_code(long_data));
+        schedule_loaded(1);
+        assert(collect_extras(extras, 16) == 1);
+        assert(extras[0].note == 60 && !extras[0].has_sysex);
+    }
     event_queue_clear();
     /* Out-of-range program aborts later extras but keeps the note. */
     assert(track_load_from_code("note(60).progNum(200).ccn(74).ccv(0.5).midi()"));

@@ -147,6 +147,54 @@ static void test_death(void) {
     expect(js_worker_failure(NULL) == JS_WORKER_DEAD, "missing worker reports death");
 }
 
+/* Host-side limits must be applied and the child must not inherit injection
+   variables such as NODE_OPTIONS. */
+static void test_confinement(void) {
+    char marker[] = "/tmp/tompouce-worker-inject-XXXXXX";
+    int fd = mkstemp(marker);
+    expect(fd >= 0, "injection fixture created");
+    if (fd < 0) return;
+    close(fd);
+    unlink(marker);
+    char script[1024];
+    snprintf(script, sizeof(script),
+        "require('fs').writeFileSync('%s','injected');", marker);
+    char require_option[1200];
+    snprintf(require_option, sizeof(require_option), "--require %s", script);
+    char *previous = getenv("NODE_OPTIONS");
+    char *saved = previous ? strdup(previous) : NULL;
+    setenv("NODE_OPTIONS", require_option, 1);
+    char error[512] = "";
+    JsWorker *worker = js_worker_start(NULL, NULL, error, sizeof(error));
+    expect(worker != NULL, "worker starts with NODE_OPTIONS set");
+    expect(access(marker, F_OK) != 0, "NODE_OPTIONS is not inherited by the worker");
+    if (worker) {
+        char *metadata = NULL;
+        expect(js_worker_compile(worker, "note(60)", 120, &metadata, error, sizeof(error)),
+            "confined worker still compiles");
+        free(metadata);
+        char limits[256];
+        snprintf(limits, sizeof(limits), "/proc/%d/limits", (int)js_worker_pid(worker));
+        FILE *file = fopen(limits, "r");
+        expect(file != NULL, "worker limits are readable");
+        int core_zero = 0, address_bound = 0;
+        if (file) {
+            char line[256];
+            while (fgets(line, sizeof(line), file)) {
+                if (strstr(line, "Max core file size") && strstr(line, " 0 ")) core_zero = 1;
+                if (strstr(line, "Max address space") && strstr(line, "2147483648")) address_bound = 1;
+            }
+            fclose(file);
+        }
+        expect(core_zero, "core dumps are disabled for the worker");
+        expect(address_bound, "address space is bounded for the worker");
+        js_worker_stop(worker);
+    }
+    if (saved) { setenv("NODE_OPTIONS", saved, 1); free(saved); }
+    else unsetenv("NODE_OPTIONS");
+    unlink(marker);
+}
+
 /* Engine integration: with the opt-in backend enabled, a plain musical program
    is delegated and its events match a QuickJS-compiled twin. */
 static void test_engine_delegation(void) {
@@ -197,6 +245,7 @@ int main(void) {
         return 0;
     }
     test_parity();
+    test_confinement();
     test_engine_delegation();
     test_rejections();
     test_watchdog();

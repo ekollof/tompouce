@@ -121,9 +121,11 @@ and measured divergences are recorded in the archive.
       and a failed worker falls back to the retained QuickJS evaluation.
       Remaining gates before this can be supported or default: host callbacks
       for the excluded features, generation/source identity for every caller,
-      failed-evaluation retention under the worker, worker confinement and
-      memory policy, OOM/death/cold/one-CPU behavior, real audio continuity,
-      and reproducible packaging with notices. A standalone from-source V8
+      failed-evaluation retention under the worker, OOM/cold/one-CPU behavior,
+      real audio continuity, and reproducible packaging with notices. The
+      worker is confined (own group, parent-death signal, no-new-privs, fixed
+      `RLIMIT_CORE`/`NOFILE`/`CPU`/`AS`, sanitized environment) and its limits
+      are tested. A standalone from-source V8
       embedder build (depot_tools, gn/ninja, several GiB, ICU/snapshot/notices)
       remains the dependency-free alternative for later. Preserve existing
       execution budgets and host behavior before considering QuickJS removal.

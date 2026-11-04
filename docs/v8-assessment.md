@@ -213,12 +213,21 @@ was never discarded. That fallback resumes a pattern whose internal state
 is an emergency continuation rather than a seamless handoff; a later evaluation
 returns to a consistent state.
 
+The worker now runs with a bounded OS footprint: its own process group, a
+parent-death signal, `PR_SET_NO_NEW_PRIVS`, no core dumps, a 3,600 s CPU limit,
+a 64-descriptor limit and a 2 GiB address-space limit (Node reserves about
+1.1 GiB before running any song). It also receives a fixed minimal environment
+(`PATH`, `LANG`, `LC_ALL`, `TMPDIR`), so `NODE_OPTIONS`, `NODE_PATH` and similar
+variables cannot inject code; `tests/test_js_worker.c` checks both the limits
+via `/proc/<pid>/limits` and that a `--require` injection is ignored. The heap
+limit stays 256 MiB, and ArrayBuffer/external allocations are bounded only by
+the address-space limit.
+
 Still required before this can be a supported or default backend: generation
 and source identity across evaluation for every caller, cross-checking
 failed-evaluation retention under the worker, the remaining host callbacks
-(Csound loads, MIDI snapshots, live sliders, prebakes), OS confinement for the
-worker and its threads, external-memory/process-memory policy, and audio
-continuity under GC/compile load. The Node process also adds a runtime Node
+(Csound loads, MIDI snapshots, live sliders, prebakes), and audio continuity
+under GC/compile load. The Node process also adds a runtime Node
 dependency and ~113–158 MiB RSS, which is why it is opt-in and the installer
 only ships the worker script.
 

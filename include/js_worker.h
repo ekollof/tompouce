@@ -1,6 +1,7 @@
 #ifndef JS_WORKER_H
 #define JS_WORKER_H
 #include <stddef.h>
+#include <sys/types.h>
 
 /* Opt-in pattern-query worker running the committed bundle under Node's V8.
    QuickJS stays the default backend; this transport exists so the engine can
@@ -32,6 +33,8 @@ int js_worker_query(JsWorker *worker, double begin, double end, double cps, int 
 
 /* Last failure class (JS_WORKER_*), for diagnostics. */
 int js_worker_failure(const JsWorker *worker);
+/* Worker pid for diagnostics, or -1. */
+pid_t js_worker_pid(const JsWorker *worker);
 /* V8 version reported at init, or "" when unknown. */
 const char *js_worker_v8_version(const JsWorker *worker);
 

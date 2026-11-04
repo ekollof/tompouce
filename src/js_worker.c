@@ -6,6 +6,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -224,6 +227,32 @@ static char *copy_string_field(const cJSON *response, const char *name) {
     return copy;
 }
 
+/* Resolve the interpreter before forking so the child needs no PATH search
+   (its environment is deliberately minimal) and a missing node is reported
+   clearly instead of surfacing as an exit 127. */
+static int resolve_node(const char *node, char *out, size_t outlen) {
+    if (!node || !node[0] || !out || outlen == 0) return 0;
+    if (strchr(node, '/')) {
+        int wr = snprintf(out, outlen, "%s", node);
+        return wr > 0 && (size_t)wr < outlen && access(out, X_OK) == 0;
+    }
+    const char *path = getenv("PATH");
+    if (!path) return 0;
+    char buffer[4096];
+    snprintf(buffer, sizeof(buffer), "%s", path);
+    for (char *dir = strtok(buffer, ":"); dir; dir = strtok(NULL, ":")) {
+        char candidate[1200];
+        int wr = snprintf(candidate, sizeof(candidate), "%s/%s", dir[0] ? dir : ".", node);
+        if (wr <= 0 || (size_t)wr >= sizeof(candidate)) continue;
+        struct stat st;
+        if (access(candidate, X_OK) == 0 && stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+            snprintf(out, outlen, "%s", candidate);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static char *default_script_path(void) {
     const char *override = getenv("TOMPOUCE_QUERY_WORKER");
     if (override && override[0]) {
@@ -248,6 +277,11 @@ static char *default_script_path(void) {
 JsWorker *js_worker_start(const char *node_path, const char *script_path,
     char *error, int errorlen) {
     const char *node = node_path && node_path[0] ? node_path : "node";
+    char node_exe[1200];
+    if (!resolve_node(node, node_exe, sizeof(node_exe))) {
+        set_error(error, errorlen, "node executable not found");
+        return NULL;
+    }
     char *script = script_path && script_path[0] ? strdup(script_path) : default_script_path();
     if (!script) { set_error(error, errorlen, "query worker script not found"); return NULL; }
     int in_pipe[2], out_pipe[2];
@@ -260,14 +294,32 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         set_error(error, errorlen, "worker fork failed"); return NULL;
     }
     if (pid == 0) {
-        /* Child: own process group so the parent can kill the whole worker. */
+        /* Child: own process group so the parent can kill the whole worker,
+           die with the parent, and run with fixed limits and a sanitized
+           environment (NODE_OPTIONS and friends must not inject code). */
         setpgid(0, 0);
+        prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
+        /* The parent may already be gone between fork and prctl. */
+        if (getppid() == 1) _exit(127);
+        prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+        struct rlimit core = {0, 0}, files = {64, 64};
+        /* Node reserves about 1.1 GiB of address space before any song runs;
+           2 GiB leaves headroom for the 256 MiB heap and external buffers
+           while bounding runaway allocation. */
+        struct rlimit address = {2ull*1024*1024*1024, 2ull*1024*1024*1024};
+        struct rlimit cpu = {3600, 3600};
+        setrlimit(RLIMIT_CORE, &core);
+        setrlimit(RLIMIT_NOFILE, &files);
+        setrlimit(RLIMIT_AS, &address);
+        setrlimit(RLIMIT_CPU, &cpu);
         if (dup2(in_pipe[0], STDIN_FILENO) < 0 || dup2(out_pipe[1], STDOUT_FILENO) < 0) _exit(127);
         close(in_pipe[0]); close(in_pipe[1]); close(out_pipe[0]); close(out_pipe[1]);
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
-        char *argv[] = {(char *)node, "--max-old-space-size=256", script, NULL};
-        execvp(argv[0], argv);
+        char *argv[] = {node_exe, "--max-old-space-size=256", script, NULL};
+        char *envp[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8", "TMPDIR=/tmp", NULL};
+        execve(argv[0], argv, envp);
         _exit(127);
     }
     close(in_pipe[0]); close(out_pipe[1]);
@@ -369,4 +421,5 @@ int js_worker_query(JsWorker *worker, double begin, double end, double cps, int 
 }
 
 int js_worker_failure(const JsWorker *worker) { return worker ? worker->failure : JS_WORKER_DEAD; }
+pid_t js_worker_pid(const JsWorker *worker) { return worker ? worker->pid : -1; }
 const char *js_worker_v8_version(const JsWorker *worker) { return worker ? worker->version : ""; }

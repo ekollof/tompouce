@@ -76,17 +76,26 @@ and measured divergences are recorded in the archive.
       query budget. Native fraction clones, span operations, hap transformations
       and fused triangle queries reduced isolated one-cycle `queryArc` profiles
       from roughly 375–425 ms to 241–279 ms (539 haps); these compile-stage probes
-      do not establish a passing query-budget gate. Investigate native pattern
-      application/composition next: this query still performs 20,791 value
-      transformations, 11,370 span transformations and 9,490 context merges.
-      Bounded pure-query and common-control-key fast paths now reduce paired
-      five-run medians from 287/282 ms to 268/268 ms, still 539 haps and still
-      failing both 200 ms gates. The fused application prototype showed no
-      consistent gain and was discarded. Continue with larger composition/value
-      callback costs; keep context merges, stateful queries and callbacks ordered.
-      Use `scripts/profile-pattern-query.mjs` for repeatable compile-stage probes.
-      The Hydra example can now evaluate musical branches through inert visual
-      placeholders; actual graphics remain covered by the separate `/hydra` task. See
+      do not establish a passing query-budget gate. Bounded pure-query and
+      common-control-key fast paths now reduce paired five-run medians from
+      287/282 ms to 268/268 ms, still 539 haps and still failing both 200 ms
+      gates. Use `scripts/profile-pattern-query.mjs` for repeatable probes.
+      A follow-up attribution pass (see
+      [where the time goes](docs/audio-comparison.md#where-the-remaining-query-time-goes))
+      shows the cost is per hap at ~0.47–0.49 ms with ~5 ms fixed, and that it
+      is JavaScript call depth: in-place hap mutation leaves the time
+      unchanged, `Object.create` copies are slower, fused `withValue` chains
+      preserve values but add 7–14 ms, and native host crossings total about
+      10 ms (17k fraction clones at 240 ns, 8.3k pure queries, 4.1k common-key
+      scans at 520 ns). Each hap still crosses ~38 value transforms, 21 span
+      transforms, 58 context copies and 18 context merges through the pinned
+      combinator graph. Do not repeat allocation or single-operation
+      micro-optimizations; the remaining options are a native applicator that
+      batches the hot `Hap`/`Pattern` operations while invoking JavaScript
+      callbacks in order, reducing combinator depth only where semantics allow,
+      or the scoped V8 migration above. The Hydra example can now evaluate
+      musical branches through inert visual placeholders; actual graphics
+      remain covered by the separate `/hydra` task. See
       [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
 
 - [ ] Optional target: migrate from QuickJS to standalone embedded V8 through a
@@ -121,8 +130,13 @@ and measured divergences are recorded in the archive.
 - [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
       manifests and explicit persistence across evaluations need design and
       independent reference checks. Keep current 32-map/128-entry/32-send bounds.
-- [ ] Add web-compatible string-form MIDI sysex with bounded parsing and
+- [x] Add web-compatible string-form MIDI sysex with bounded parsing and
       rejection tests, preserving current byte-array framing and send ordering.
+      `sysexid("0x77")` and `sysexdata("0x01:0x02")` accept hex (0x) or decimal
+      tokens separated by `:`, for both scalar and `midicmd` array forms. The
+      deployed REPL throws on its own documented strings, so this is a recorded
+      superset; malformed tokens, >255 values and over-long data are rejected
+      while the note still commits.
 - [ ] Measure physical-device MIDI note-off delivery timing under load. Channel
       arrays now have independent web gates and an owned ALSA loopback check;
       this does not measure USB/DIN transport or device response. The maintained

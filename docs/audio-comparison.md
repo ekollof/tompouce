@@ -53,6 +53,42 @@ entry. Both heavy songs still fail at the unchanged 200 ms limit. The bounded
 optimizations therefore improve work by about 5–7% in these paired probes but
 do not resolve the budget issue or establish full-song PCM parity.
 
+### Where the remaining query time goes
+
+The two failing compositions were re-instrumented to decide what to optimize
+next. All numbers are compile-stage wall-clock probes on the same host, not
+gates.
+
+- **Scaling is per hap.** Querying the same pattern over growing spans gives
+  40 ms/77 haps, 87/186, 163/364, 273/539 and 593/1248: about 0.47–0.49 ms per
+  hap plus roughly 5 ms of fixed work. Any fix has to reduce per-hap cost.
+- **Hap allocation is not the cost.** Replacing the three copy operations with
+  in-place mutation (incorrect output, timing only) leaves the query at
+  264–272 ms versus 267–270 ms baseline. Rebuilding the same copies through
+  `Object.create` instead of `new Hap` is slower (289 ms). Freed copies buy
+  nothing.
+- **Fusing consecutive value transforms is not the lever.** Composing adjacent
+  `withValue` layers into one hap produced byte-identical values but ran
+  277–284 ms, slower than the 270 ms baseline, because the layers are not
+  adjacent in this graph.
+- **The dominant operations are dispatch, not arithmetic.** Per hap the query
+  performs about 38 value transformations, 21 span transformations, 58 context
+  copies and 18 context merges. Instrumented per-call totals overstate them,
+  since ~45,000 timed calls add about 88 ms of `Date.now` overhead; allocation
+  and arithmetic inside those calls are cheap, so the cost is JavaScript call
+  depth through the pinned combinator graph.
+- **Host crossings are minor.** One query makes about 17,000 native fraction
+  creations (240 ns each), 8,300 pure-query calls, 4,100 common-key scans
+  (520 ns) and 456 triangle batches: roughly 10 ms in total.
+
+Reaching the unchanged 200 ms budget therefore needs about 25% less per-hap
+JavaScript work, not cheaper haps. The options are batching the hot
+`Hap`/`Pattern` operations into a native applicator that still invokes the
+JavaScript callbacks in order, reducing combinator depth only where semantics
+allow it, or the scoped V8 migration. The earlier fused application prototype
+and this allocation work show that local micro-optimizations inside the
+existing call structure do not move the number.
+
 ### Corpus and earlier measurements
 
 `tests/fixtures/strudel-bakery.json` preserves the 42 compositions shown on the

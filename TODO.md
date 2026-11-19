@@ -204,8 +204,9 @@ and measured divergences are recorded in the archive.
 - [ ] Finish Switch Angel integration checks beyond the 81 setup/helper/API
       cases and selected audio gates: `test_oneshot_grid` now covers the pinned
       helper's grid gating with a local confined fixture (eight first-cycle
-      haps over a four-cycle query); bank-specific sounds, bmod/FX routing and
-      external devices remain open. See
+      haps over a four-cycle query); `test_switchangel_fx` also checks a
+      pinned-style FX helper attaches its stage to the query event. Bank-specific
+      sounds, bmod routing and external devices remain open. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and

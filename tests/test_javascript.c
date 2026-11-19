@@ -451,6 +451,32 @@ static void test_oneshot_grid(void) {
     puts("oneshot grid timing ok");
 }
 
+/* A pinned-style Switch Angel FX helper registers a pattern extension that
+   attaches an FX stage; the query must carry that stage on the event. */
+static void test_switchangel_fx(void) {
+    const char *fixture =
+        "register('saFX', (value, pat) => pat.FX(x => x.lpf(value)));\n";
+    char root[]="/tmp/tompouce-safx-XXXXXX", config[512], path[700];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    assert(!mkdir(config,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    write_module(path,fixture);
+    JsProgram *program=NULL;
+    cJSON *haps=query("note(60).s(\"sine\").saFX(800)",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    assert(value && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(value,"FX")));
+    cJSON_Delete(haps); javascript_free(program);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+    puts("Switch Angel FX helper event routing ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -600,6 +626,7 @@ int main(int argc, char **argv) {
     test_prebake();
     test_midi_manifest();
     test_oneshot_grid();
+    test_switchangel_fx();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

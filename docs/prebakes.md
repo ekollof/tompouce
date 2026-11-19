@@ -164,6 +164,8 @@ The oneshot event check uses a stopped zero-time clock. A focused
 `test_oneshot_grid` now feeds a confined local fixture that registers the
 pinned `oneshot` helper and checks its grid gating: over a four-cycle query only
 the eight haps of the first cycle survive a grid of four, since `getTime()` is
-the query-window begin. Bank-specific sounds, additional pitch/FM combinations,
-custom FX/bmod routing and external devices remain separate checks rather than
-claims established by this matrix.
+the query-window begin. `test_switchangel_fx` further checks that a pinned-style
+helper registering an `.FX(...)` stage carries that stage on the query event.
+Bank-specific sounds, additional pitch/FM combinations, bmod routing and
+external devices remain separate checks rather than claims established by this
+matrix.

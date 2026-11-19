@@ -279,7 +279,7 @@ separate from maintained acceptance cases and report failures honestly.
       (exit 0), while the same input against the parent commit hangs (timeout
       124). The system Notcurses and its protocol ownership are untouched, and
       the `tests/test_paste_stress.py` reproductions stay separate from
-      maintained acceptance cases. Posting the confirmation back to the GitHub
-      issue is left to the reporter's own account.
+      maintained acceptance cases. The confirmation was posted to the issue by
+      the reporter ([comment](https://github.com/dankamongmen/notcurses/issues/2947#issuecomment-7023660207)).
       The paste flood/drop issue [#2948](https://github.com/dankamongmen/notcurses/issues/2948)
       remains open and must be tracked separately.

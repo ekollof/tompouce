@@ -117,6 +117,13 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   map/options/bounded-block features, and runs it on fixed 512-frame stereo
   blocks. The engine never dlopens plugin code. `test_lv2_worker` checks the
   limits, a gain control, finite PCM and dead/missing plugin failures. Wiring
+  LV2 discovery now recognises atom MIDI ports (`atom:supports midi:MidiEvent`)
+  in addition to legacy event ports, and the worker stages bounded 1–3 byte
+  note on/off and CC messages into an atom sequence for the plugin's MIDI input
+  (`lv2_worker_send_midi`). `test_lv2_worker` exercises note on/off with the
+  `midichanfilter` plugin and rejects oversized messages. Full note/CC routing
+  from the engine scheduler into a live plugin remains open.
+
   Engine audio plumbing is in place: `s('lv2:<uri>')` is prepared off the audio
   callback through the worker (bounded to four seconds), and the render becomes
   an owned playback sample via `smp_store_owned`. `test_lv2_worker` checks that

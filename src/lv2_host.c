@@ -4,6 +4,8 @@
 #include "common.h"
 #if TOMPOUCE_HAVE_LV2
 #include <lilv/lilv.h>
+#include <lv2/atom/atom.h>
+#include <lv2/midi/midi.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -55,9 +57,13 @@ Lv2Catalog *lv2_catalog_scan(char *error, size_t error_size) {
     if (!catalog) { lilv_world_free(world); return NULL; }
     LilvNode *audio=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#AudioPort");
     LilvNode *event=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#EventPort");
+    LilvNode *atom=lilv_new_uri(world,LV2_ATOM__AtomPort);
+    LilvNode *midi=lilv_new_uri(world,LV2_MIDI__MidiEvent);
+    LilvNode *supports=lilv_new_uri(world,LV2_ATOM__supports);
     LilvNode *input=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#InputPort");
     LilvNode *output=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#OutputPort");
-    if (!audio || !event || !input || !output) {
+    if (!audio || !event || !input || !output || !atom || !midi || !supports) {
+        lilv_node_free(supports); lilv_node_free(midi); lilv_node_free(atom);
         lilv_node_free(output); lilv_node_free(input);
         lilv_node_free(event); lilv_node_free(audio);
         lilv_world_free(world); free(catalog);
@@ -83,6 +89,8 @@ Lv2Catalog *lv2_catalog_scan(char *error, size_t error_size) {
                 if (!is_input && !is_output) continue;
                 if (lilv_port_is_a(plugin,port,audio)) audio_ok=1;
                 if (lilv_port_is_a(plugin,port,event)) midi_ok=1;
+                if (lilv_port_is_a(plugin,port,atom) &&
+                    lilv_port_supports_event(plugin,port,midi)) midi_ok=1;
             }
             if (!audio_ok && !midi_ok) continue;
             const LilvNode *uri=lilv_plugin_get_uri(plugin);
@@ -101,6 +109,7 @@ Lv2Catalog *lv2_catalog_scan(char *error, size_t error_size) {
             lilv_node_free(name);
         }
     }
+    lilv_node_free(supports); lilv_node_free(midi); lilv_node_free(atom);
     lilv_node_free(output); lilv_node_free(input);
     lilv_node_free(event); lilv_node_free(audio);
     lilv_world_free(world);

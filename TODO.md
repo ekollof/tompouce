@@ -72,8 +72,10 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       checks a pinned native PCM hash (FNV over the 13,231-frame gain render at
       44.1 kHz), the deterministic reference gate for the default plugin; an
       env-selected plugin skips the hash. MIDI note/CC plumbing into a live
-      plugin remains open, and web compare gates are inapplicable because LV2
-      plugins have no strudel.cc counterpart.
+      plugin remains open; bounded note on/off and CC message plumbing through
+      the worker's atom MIDI input is implemented and tested with
+      `midichanfilter`. Web compare gates are inapplicable because LV2 plugins
+      have no strudel.cc counterpart.
 - [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
       params/presets through LV2 state mapped to existing sliders; per-plugin
       crash isolation must not take down or stall playback.

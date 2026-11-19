@@ -9,6 +9,9 @@
 #include <lv2/urid/urid.h>
 #include <lv2/options/options.h>
 #include <lv2/buf-size/buf-size.h>
+#include <lv2/atom/atom.h>
+#include <lv2/atom/util.h>
+#include <lv2/midi/midi.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -31,6 +34,8 @@
 struct Lv2Worker {
     pid_t pid;
     int in_fd, out_fd;
+    unsigned char pending_midi[24];
+    int pending_bytes;
 };
 
 typedef struct {
@@ -64,7 +69,7 @@ static int write_all(int fd, const void *data, size_t size) {
 #if TOMPOUCE_HAVE_LV2
 typedef struct {
     uint32_t index;
-    int audio, input, output;
+    int audio, atom, input, output;
     float value;
 } Lv2PortInfo;
 
@@ -128,18 +133,22 @@ static int child_main(int in_fd, int out_fd) {
     LilvNode *input=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#InputPort");
     LilvNode *output=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#OutputPort");
     LilvNode *default_node=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#default");
+    LilvNode *atom_port=lilv_new_uri(world,LV2_ATOM__AtomPort);
+    LilvNode *midi_event=lilv_new_uri(world,LV2_MIDI__MidiEvent);
     Lv2PortInfo ports[LV2_WORKER_PORT_MAX];
     unsigned nports=lilv_plugin_get_num_ports(plugin);
     if (nports>LV2_WORKER_PORT_MAX) nports=LV2_WORKER_PORT_MAX;
     for (unsigned i=0;i<nports;i++) {
         const LilvPort *port=lilv_plugin_get_port_by_index(plugin,i);
-        ports[i].index=i; ports[i].audio=ports[i].input=ports[i].output=0;
+        ports[i].index=i;
+        ports[i].audio=ports[i].atom=ports[i].input=ports[i].output=0;
         ports[i].value=0;
         if (!port) continue;
         ports[i].audio=lilv_port_is_a(plugin,port,audio);
+        ports[i].atom=lilv_port_is_a(plugin,port,atom_port);
         ports[i].input=lilv_port_is_a(plugin,port,input);
         ports[i].output=lilv_port_is_a(plugin,port,output);
-        if (ports[i].audio) continue;
+        if (ports[i].audio || ports[i].atom) continue;
         LilvNodes *defaults=lilv_port_get_value(plugin,port,default_node);
         LilvNode *first=defaults?lilv_nodes_get_first(defaults):NULL;
         if (first && lilv_node_is_float(first)) ports[i].value=lilv_node_as_float(first);
@@ -147,13 +156,24 @@ static int child_main(int in_fd, int out_fd) {
         lilv_nodes_free(defaults);
         lilv_instance_connect_port(instance,i,&ports[i].value);
     }
-    if (!audio || !input || !output || !default_node) return 1;
+    if (!audio || !input || !output || !default_node || !atom_port || !midi_event) return 1;
     lilv_instance_activate(instance);
     Lv2FrameHeader ok={0,0,1};
     if (!write_all(out_fd,&ok,sizeof(ok))) return 1;
     float *in=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
     float *out=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
     if (!in || !out) { free(in); free(out); return 1; }
+    /* One bounded atom sequence for MIDI input, shared by any atom ports. */
+    enum { MIDI_CAPACITY=4096 };
+    unsigned char *atom_storage=calloc(1,MIDI_CAPACITY);
+    LV2_Atom_Sequence *sequence=(LV2_Atom_Sequence *)atom_storage;
+    LV2_URID midi_urid=lv2_map_uri(&map_state,LV2_MIDI__MidiEvent);
+    LV2_URID sequence_urid=lv2_map_uri(&map_state,LV2_ATOM__Sequence);
+    int has_atom_input=0;
+    for (unsigned i=0;i<nports;i++) if (ports[i].atom && ports[i].input) {
+        has_atom_input=1;
+        lilv_instance_connect_port(instance,ports[i].index,sequence);
+    }
     for (;;) {
         Lv2FrameHeader header;
         if (!read_all(in_fd,&header,sizeof(header))) break;
@@ -165,11 +185,26 @@ static int child_main(int in_fd, int out_fd) {
             if (!write_all(out_fd,&header,sizeof(header))) break;
             continue;
         }
-        if (header.frames>LV2_WORKER_FRAMES ||
-            header.bytes>LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float)) break;
+        if (header.frames>LV2_WORKER_FRAMES || header.bytes>3*8) break;
         if (!read_all(in_fd,in,header.frames*LV2_WORKER_CHANNELS*sizeof(float))) break;
-        if (header.bytes && !read_all(in_fd,in,header.bytes)) break;
+        unsigned char message[24]={0};
+        if (header.bytes && !read_all(in_fd,message,header.bytes)) break;
         memset(out,0,header.frames*LV2_WORKER_CHANNELS*sizeof(float));
+        if (has_atom_input) {
+            sequence->atom.type=sequence_urid;
+            sequence->atom.size=sizeof(sequence->body);
+            sequence->body.unit=0;
+            sequence->body.pad=0;
+            if (header.bytes) {
+                LV2_Atom_Event *event=(LV2_Atom_Event *)((unsigned char *)sequence+
+                    sizeof(LV2_Atom_Sequence));
+                event->time.frames=0;
+                event->body.type=midi_urid;
+                event->body.size=header.bytes;
+                memcpy(event+1,message,header.bytes);
+                sequence->atom.size+=sizeof(LV2_Atom_Event)+header.bytes;
+            }
+        }
         for (unsigned i=0;i<nports;i++) if (ports[i].audio) {
             lilv_instance_connect_port(instance,ports[i].index,
                 ports[i].input?in:(ports[i].output?out:NULL));
@@ -179,7 +214,8 @@ static int child_main(int in_fd, int out_fd) {
         if (!write_all(out_fd,&header,sizeof(header)) ||
             !write_all(out_fd,out,header.frames*LV2_WORKER_CHANNELS*sizeof(float))) break;
     }
-    free(in); free(out);
+    free(in); free(out); free(atom_storage);
+    lilv_node_free(midi_event); lilv_node_free(atom_port);
     lilv_instance_free(instance);
     lilv_node_free(default_node); lilv_node_free(output);
     lilv_node_free(input); lilv_node_free(audio);
@@ -255,15 +291,31 @@ int lv2_worker_process(Lv2Worker *worker, const float *input, float *output,
         if (error && error_size) snprintf(error,error_size,"invalid LV2 block");
         return 0;
     }
-    Lv2FrameHeader header={.frames=frames,.bytes=0,.ok=0};
+    Lv2FrameHeader header={.frames=frames,.bytes=(uint32_t)worker->pending_bytes,.ok=0};
     size_t bytes=frames*LV2_WORKER_CHANNELS*sizeof(float);
-    if (!write_all(worker->in_fd,&header,sizeof(header)) ||
-        !write_all(worker->in_fd,input,bytes) ||
+    int written=write_all(worker->in_fd,&header,sizeof(header)) &&
+        write_all(worker->in_fd,input,bytes) &&
+        (worker->pending_bytes==0 || write_all(worker->in_fd,worker->pending_midi,
+            (size_t)worker->pending_bytes));
+    worker->pending_bytes=0;
+    if (!written ||
         !read_all(worker->out_fd,&header,sizeof(header)) ||
         !header.ok || !read_all(worker->out_fd,output,bytes)) {
         if (error && error_size) snprintf(error,error_size,"LV2 worker died");
         return 0;
     }
+    return 1;
+}
+
+int lv2_worker_send_midi(Lv2Worker *worker, const unsigned char *message, int count,
+    char *error, size_t error_size) {
+    if (error && error_size) error[0]=0;
+    if (!worker || !message || count<1 || count>3) {
+        if (error && error_size) snprintf(error,error_size,"invalid MIDI message");
+        return 0;
+    }
+    memcpy(worker->pending_midi,message,(size_t)count);
+    worker->pending_bytes=count;
     return 1;
 }
 

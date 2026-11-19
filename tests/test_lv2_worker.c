@@ -24,6 +24,27 @@ static const char *plugin_uri_for_engine(void) {
     return engine_sound;
 }
 
+/* MIDI plumbing: a plugin with an atom MIDI input accepts a bounded message
+   and still processes audio without the worker dying. */
+static void test_midi(void) {
+    char error[512]="";
+    const char *uri="http://kxstudio.sf.net/carla/plugins/midichanfilter";
+    Lv2Worker *worker=lv2_worker_start(uri,44100,error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 MIDI: %s\n",error[0]?error:"unavailable"); return; }
+    float in[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS]={0};
+    float out[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS]={0};
+    const unsigned char note_on[]={0x90,60,100}, note_off[]={0x80,60,0};
+    assert(lv2_worker_send_midi(worker,note_on,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    assert(lv2_worker_send_midi(worker,note_off,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    /* Oversized messages are rejected before reaching the plugin. */
+    const unsigned char oversized[8]={0};
+    assert(!lv2_worker_send_midi(worker,oversized,8,error,sizeof(error)));
+    lv2_worker_stop(worker);
+    puts("LV2 MIDI note on/off plumbing ok");
+}
+
 /* Engine integration: an lv2: sound is prepared off the audio callback and
    becomes a normal owned playback sample. */
 static void test_engine_resolution(void) {
@@ -62,6 +83,7 @@ static void test_engine_resolution(void) {
 }
 
 int main(void) {
+    test_midi();
     test_engine_resolution();
     char error[512]="";
     Lv2Worker *worker=lv2_worker_start(plugin_uri(),44100,error,sizeof(error));

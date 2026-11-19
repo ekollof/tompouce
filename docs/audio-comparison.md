@@ -110,6 +110,10 @@ each combinator, with no repeated top-level `queryArc` call to cache. A working
 native applicator would therefore have to restructure how combinators register
 their stages in the pinned runtime, not merely wrap their map calls.
 
+A CPU-affinity check ruled out scheduling noise: three-run medians were
+277/275 ms unpinned and 280/276 ms pinned to a single CPU with `taskset -c 0`.
+The 200 ms gap is genuine CPU work, not renderer contention.
+
 A further owned instrumented bundle counted inner pattern queries: 14,090 calls
 with 6,764 distinct (pattern id, begin, end) keys and 2,521 duplicates (up to
 20 repeats). A bounded result cache removed 1,058 calls but raised medians to

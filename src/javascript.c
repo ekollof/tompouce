@@ -47,6 +47,9 @@ struct JsProgram {
     JSContext *context;
     double deadline;
     char *source;
+    /* Confined startup prebake text, forwarded to the query worker so its
+       compile-time defaults match this QuickJS evaluation. */
+    char *prebake_source;
     struct { int offset, kind, id; unsigned mask; VisualOptions options; } visual_sites[32];
     int nvisual_sites;
     char *visual_requested, *visual_pending, *visual_source;
@@ -110,7 +113,8 @@ static int worker_bind(JsProgram *p, double bpm) {
         worker_bound_serial != p->compile_serial) {
         char error[256] = "";
         char *metadata = NULL;
-        if (!js_worker_compile(query_worker, p->source, isfinite(bpm) && bpm > 0 ? bpm : 120,
+        if (!js_worker_compile_with_prebake(query_worker, p->source,
+                isfinite(bpm) && bpm > 0 ? bpm : 120, p->prebake_source ? p->prebake_source : "",
                 &metadata, error, sizeof(error))) {
             /* A rejected source is a user error: keep the worker (and any
                evaluation already bound for another program). Only transport
@@ -475,6 +479,7 @@ void javascript_free(JsProgram *p) {
     if (p->context) JS_FreeContext(p->context);
     if (p->runtime) JS_FreeRuntime(p->runtime);
     free(p->source);
+    free(p->prebake_source);
     slider_bank_free(p->sliders);
     free(p->visual_notes);
     free(p->visual_requested); free(p->visual_pending); free(p->visual_source);
@@ -869,7 +874,8 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
     JSValue fn = global_function(ctx, "__compile");
     JSValue args[3] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120),
         JS_NewStringLen(ctx,prebake?prebake:"",prebake_length)};
-    free(prebake);
+    /* Keep the confined text for the worker; javascript_free owns it now. */
+    p->prebake_source = prebake;
     JSValue value = JS_IsException(args[0]) || JS_IsException(args[1]) || JS_IsException(args[2]) ?
         JS_EXCEPTION : JS_Call(ctx, fn, JS_UNDEFINED, 3, args);
     JS_FreeValue(ctx, args[0]); JS_FreeValue(ctx,args[1]); JS_FreeValue(ctx,args[2]); JS_FreeValue(ctx, fn);

@@ -375,11 +375,15 @@ void js_worker_stop(JsWorker *worker) {
     free(worker);
 }
 
-int js_worker_compile(JsWorker *worker, const char *source, double bpm,
-    char **metadata, char *error, int errorlen) {
+int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double bpm,
+    const char *prebake, char **metadata, char *error, int errorlen) {
     if (!worker || !source || !metadata) { set_error(error, errorlen, "invalid request"); return 0; }
     if (strlen(source) > WORKER_SOURCE_MAX) { set_error(error, errorlen, "source limit"); return 0; }
-    size_t cap = strlen(source) * 2 + 256;
+    if (!prebake) prebake = "";
+    if (strlen(prebake) > 256*1024) { set_error(error, errorlen, "prebake limit"); return 0; }
+    /* Both strings are JSON-escaped, so reserve twice their byte lengths. */
+    size_t cap = strlen(source)*2 + strlen(prebake)*2 + 320;
+    if (cap > WORKER_FRAME_MAX) { set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     char *frame = malloc(cap);
     if (!frame) { set_error(error, errorlen, "out of memory"); return 0; }
     int prefix = snprintf(frame, cap, "{\"id\":%llu,\"op\":\"compile\",\"bpm\":%.17g,\"source\":\"",
@@ -387,6 +391,11 @@ int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     size_t used = prefix > 0 ? (size_t)prefix : 0;
     int ok = prefix > 0 && used < cap;
     ok = ok && json_escape(frame, cap, &used, source, strlen(source));
+    if (ok) {
+        ok = used + 14 < cap;
+        if (ok) { memcpy(frame+used, "\",\"prebake\":\"", 13); used += 13; }
+    }
+    ok = ok && json_escape(frame, cap, &used, prebake, strlen(prebake));
     if (ok) { frame[used++] = '"'; frame[used++] = '}'; frame[used] = 0; }
     if (!ok) { free(frame); set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     cJSON *response = request(worker, worker->next_id, frame, WORKER_COMPILE_BUDGET_MS, 0, error, errorlen);
@@ -396,6 +405,11 @@ int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     cJSON_Delete(response);
     if (!*metadata) { set_error(error, errorlen, "worker returned no metadata"); return 0; }
     return 1;
+}
+
+int js_worker_compile(JsWorker *worker, const char *source, double bpm,
+    char **metadata, char *error, int errorlen) {
+    return js_worker_compile_with_prebake(worker, source, bpm, "", metadata, error, errorlen);
 }
 
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

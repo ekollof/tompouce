@@ -128,7 +128,13 @@ and measured divergences are recorded in the archive.
       evaluation carries a compile serial so re-evaluating identical source
       starts fresh worker state.
       Remaining gate before this can be supported or default: host callbacks
-      for the excluded features. OOM behavior is covered (the worker reports a
+      for the still-excluded features. The confined startup prebake is now
+      forwarded in the compile frame and tested, and the worker now rebuilds
+      its VM context per compile to match QuickJS's fresh-evaluation semantics
+      (a persistent-context `preCount` drift was found and fixed). Named
+      `loadPrebake()`, Csound loads, live sliders, MIDI snapshots and visuals
+      still stay on QuickJS.
+      OOM behavior is covered (the worker reports a
       range error for an oversized allocation and stays alive); one-CPU
       `profile-prep-backend` held 3/4 with and without the worker, with two
       2.7 ms late burst reservations and no xruns — identical in both modes, so

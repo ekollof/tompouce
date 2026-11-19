@@ -26,6 +26,10 @@ void js_worker_stop(JsWorker *worker);
 /* Compile source and return the metadata JSON (caller frees) or NULL. */
 int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     char **metadata, char *error, int errorlen);
+/* As above, with the engine's confined startup prebake text sent to the worker
+   so compile-time defaults match the QuickJS evaluation. Bounded to 256 KiB. */
+int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double bpm,
+    const char *prebake, char **metadata, char *error, int errorlen);
 /* Query [begin,end) and return the events JSON (caller frees) or NULL. A
    non-finite cps asks the bundle to use its tempo, like the QuickJS host. */
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

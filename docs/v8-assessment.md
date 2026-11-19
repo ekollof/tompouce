@@ -248,6 +248,20 @@ within the compile budget. The worker stays alive and reports the failure
 instead of hanging or returning bogus metadata, so the engine can fall back to
 its retained QuickJS evaluation.
 
+The first host state is now forwarded instead of excluded: the engine sends its
+confined startup prebake text in the compile frame, and the worker uses it as
+`__compile`'s third argument. Previously a program with a startup prebake but no
+`loadPrebake()` call silently dropped its compile-time defaults when delegated.
+`test_prebake_transport` checks the raw frame (a `setDefault('gain', 1)` prebake
+changes the worker's first event) and `test_prebake_engine` checks that such a
+program delegates and matches its QuickJS twin byte-for-byte. Forwarding the
+prebake exposed a deeper mismatch: the shared worker VM kept globals across
+compiles, so `preCount` went 1 → 2 where QuickJS creates a fresh context per
+evaluation. The worker now rebuilds its `node:vm` context on every compile;
+`tests/test_javascript.c --prebake` covers the sequence. Named `loadPrebake()`
+calls still throw in the worker and remain excluded until a host callback is
+added.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

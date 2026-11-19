@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static int fails;
@@ -304,6 +305,90 @@ static void test_engine_retention(void) {
     javascript_free(program);
 }
 
+/* The engine's confined startup prebake must reach the worker's compile stage:
+   the same source with a gain default of 1 rather than the web's .8 must
+   produce a different first event. This closes the prebake parity hole for
+   programs that do not call loadPrebake(). */
+static void test_prebake_transport(void) {
+    JsWorker *worker = js_worker_start(NULL, NULL, NULL, 0);
+    if (!worker) return;
+    char error[512] = "";
+    char *metadata = NULL, *with_text = NULL, *without_text = NULL;
+    int ok = js_worker_compile_with_prebake(worker, "note(60).s('sine')", 120,
+        "setDefault('gain', 1);", &metadata, error, sizeof(error));
+    expect(ok, "worker compiles with a startup prebake");
+    if (ok) {
+        expect(js_worker_query(worker, 0, 1, .5, 0, &with_text, error, sizeof(error)),
+            "worker queries the prebaked program");
+        free(metadata); metadata = NULL;
+    }
+    ok = js_worker_compile_with_prebake(worker, "note(60).s('sine')", 120,
+        "", &metadata, error, sizeof(error));
+    expect(ok, "worker compiles without a prebake");
+    if (ok) {
+        expect(js_worker_query(worker, 0, 1, .5, 0, &without_text, error, sizeof(error)),
+            "worker queries the plain program");
+    }
+    cJSON *with_events = with_text ? cJSON_Parse(with_text) : NULL;
+    cJSON *without_events = without_text ? cJSON_Parse(without_text) : NULL;
+    const cJSON *a = cJSON_IsArray(with_events) ? cJSON_GetArrayItem(with_events, 0) : NULL;
+    const cJSON *b = cJSON_IsArray(without_events) ? cJSON_GetArrayItem(without_events, 0) : NULL;
+    const cJSON *av = a ? cJSON_GetObjectItemCaseSensitive(a, "value") : NULL;
+    const cJSON *bv = b ? cJSON_GetObjectItemCaseSensitive(b, "value") : NULL;
+    const cJSON *ag = av ? cJSON_GetObjectItemCaseSensitive(av, "gain") : NULL;
+    const cJSON *bg = bv ? cJSON_GetObjectItemCaseSensitive(bv, "gain") : NULL;
+    expect(cJSON_IsNumber(ag) && ag->valuedouble == 1 &&
+        (!cJSON_IsNumber(bg) || bg->valuedouble != ag->valuedouble),
+        "startup prebake changes the worker's compile-time defaults");
+    char *first_with = a ? cJSON_PrintUnformatted(a) : NULL;
+    char *first_without = b ? cJSON_PrintUnformatted(b) : NULL;
+    expect(first_with && first_without && strcmp(first_with, first_without),
+        "worker events differ with and without the startup prebake");
+    free(first_with); free(first_without);
+    cJSON_Delete(with_events); cJSON_Delete(without_events);
+    free(metadata); free(with_text); free(without_text);
+    js_worker_stop(worker);
+}
+
+/* Engine integration: a program using the confined startup prebake now
+   delegates and matches its QuickJS twin, instead of silently dropping the
+   prebake defaults. */
+static void test_prebake_engine(void) {
+    char root[] = "/tmp/tompouce-worker-prebake-XXXXXX";
+    if (!mkdtemp(root)) return;
+    char config[1200], path[1300];
+    snprintf(config, sizeof(config), "%s/tompouce", root);
+    if (mkdir(config, 0700)) { rmdir(root); return; }
+    snprintf(path, sizeof(path), "%s/prebake.strudel", config);
+    FILE *file = fopen(path, "w");
+    if (file) { fputs("setDefault('gain', 1);", file); fclose(file); }
+    const char *previous = getenv("XDG_CONFIG_HOME");
+    char *saved = previous ? strdup(previous) : NULL;
+    setenv("XDG_CONFIG_HOME", root, 1);
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    char error[512] = "";
+    cJSON *meta = NULL;
+    const char *code = "note(60).s('sine')";
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(delegated && javascript_uses_query_worker(delegated),
+        "startup-prebake program delegates");
+    cJSON *worker_events = delegated ? javascript_query(delegated, 0, 1) : NULL;
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    cJSON *quick_events = quick ? javascript_query(quick, 0, 1) : NULL;
+    char *a = cJSON_IsArray(worker_events) ? cJSON_PrintUnformatted(worker_events) : NULL;
+    char *b = cJSON_IsArray(quick_events) ? cJSON_PrintUnformatted(quick_events) : NULL;
+    expect(a && b && !strcmp(a, b), "delegated prebake events match QuickJS");
+    free(a); free(b);
+    cJSON_Delete(quick_events); cJSON_Delete(worker_events);
+    javascript_free(quick); javascript_free(delegated);
+    if (saved) { setenv("XDG_CONFIG_HOME", saved, 1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+}
+
 /* The confined worker must refuse an allocation beyond its address-space
    limit within the compile budget, rather than hanging or returning metadata
    from a corrupted evaluation. */
@@ -335,6 +420,8 @@ int main(void) {
     test_engine_delegation();
     test_engine_identity();
     test_engine_retention();
+    test_prebake_transport();
+    test_prebake_engine();
     test_oom();
     test_rejections();
     test_watchdog();

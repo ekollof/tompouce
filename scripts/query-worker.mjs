@@ -17,6 +17,10 @@ const MAX_FRAME = 8 * 1024 * 1024;
 const MAX_SOURCE = 4 * 1024 * 1024;
 
 let context = null;
+/* The engine creates a fresh QuickJS context per evaluation. Keep the bundle
+   so each compile can rebuild the VM context too: reusing one context made
+   prebake globals accumulate across evaluations (e.g. preCount 1 -> 2). */
+let currentBundle = null;
 /* Query-time console output is forwarded to the parent, bounded per request. */
 let requestLogs = [];
 const note = (value) => {
@@ -38,6 +42,7 @@ function boot(bundle, timeoutMs) {
   if (typeof bundle !== 'string' || bundle.length === 0 || Buffer.byteLength(bundle) > MAX_FRAME) {
     throw new Error('invalid bundle');
   }
+  currentBundle = bundle;
   context = vm.createContext(vm.constants.DONT_CONTEXTIFY, {
     microtaskMode: 'afterEvaluate',
     codeGeneration: {strings: true, wasm: false},
@@ -54,15 +59,23 @@ function boot(bundle, timeoutMs) {
   new vm.Script(prelude).runInContext(context, {timeout: timeoutMs});
   new vm.Script(bundle, {filename: 'tompouce-runtime.js'}).runInContext(context, {timeout: timeoutMs});
   compileScript = new vm.Script(`globalThis.__compileResult=undefined;globalThis.__compileError=undefined;
-    __compile(__source,__bpm,'').then(x=>{__compileResult=x},e=>{__compileError=String(e)});`);
+    __compile(__source,__bpm,__prebake).then(x=>{__compileResult=x},e=>{__compileError=String(e)});`);
   queryScript = new vm.Script('__query(__begin,__end,__cps,false)');
   probeScript = new vm.Script('__query(__begin,__end,__cps,true)');
 }
 
-function compile(source, bpm, timeoutMs) {
+function compile(source, bpm, timeoutMs, prebake) {
   if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_SOURCE) throw new Error('source limit');
+  if (typeof prebake !== 'string' || Buffer.byteLength(prebake) > MAX_FRAME) throw new Error('prebake limit');
+  /* Match the engine's per-evaluation context so prebake and pattern globals
+     cannot leak from an earlier evaluation into this one. */
+  if (currentBundle) boot(currentBundle, timeoutMs);
   context.__source = source;
   context.__bpm = Number.isFinite(bpm) && bpm > 0 ? bpm : 120;
+  /* The engine sends its confined startup prebake so the worker sees the same
+     defaults as the QuickJS evaluation. Named loadPrebake() calls still need a
+     host callback and are excluded from delegation. */
+  context.__prebake = prebake;
   compileScript.runInContext(context, {timeout: timeoutMs});
   if (context.__compileError) throw new Error(String(context.__compileError).slice(0, 512));
   if (typeof context.__compileResult !== 'string') throw new Error('compile did not settle');
@@ -87,7 +100,7 @@ function handle(frame, budget) {
     return {ok: true, v8: process.versions.v8};
   case 'compile':
     if (!context) throw new Error('not initialized');
-    return {ok: true, metadata: compile(frame.source, frame.bpm, budget)};
+    return {ok: true, metadata: compile(frame.source, frame.bpm, budget, frame.prebake ?? '')};
   case 'query':
     if (!context) throw new Error('not initialized');
     return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true, budget)};

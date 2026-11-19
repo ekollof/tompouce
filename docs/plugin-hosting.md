@@ -108,7 +108,10 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   Engine audio plumbing is in place: `s('lv2:<uri>')` is prepared off the audio
   callback through the worker (bounded to four seconds), and the render becomes
   an owned playback sample via `smp_store_owned`. `test_lv2_worker` checks that
-  a pattern-resolved event produces finite PCM. MIDI note/CC plumbing into a
+  a pattern-resolved event produces finite PCM and pins an FNV hash of the
+  default gain plugin's 13,231-frame render at 44.1 kHz as the deterministic
+  native reference (an env-selected plugin skips the hash). Web compare gates
+  are inapplicable because strudel.cc has no LV2 host. MIDI note/CC plumbing into a
   live plugin remains open, as do pinned native reference gates: LV2 plugins
   have no strudel.cc counterpart, so the web comparison harness cannot supply a
   reference. VST3 is optional and strictly after LV2; VST2 is out.

@@ -44,10 +44,21 @@ static void test_engine_resolution(void) {
     float *pcm=NULL; int frames=0, channels=0;
     smp_get_stereo(ev.smp,&pcm,&frames,&channels);
     assert(pcm && frames>0 && channels==2);
-    double energy=0;
-    for (int i=0;i<frames*2;i++) energy+=fabs(pcm[i]);
+    double energy=0; uint64_t hash=1469598103934665603ull;
+    for (int i=0;i<frames*2;i++) {
+        energy+=fabs(pcm[i]);
+        uint32_t bits; memcpy(&bits,&pcm[i],sizeof(bits));
+        for (int b=0;b<4;b++) { hash^=(bits>>(b*8))&0xff; hash*=1099511628211ull; }
+    }
     assert(energy>0);
-    printf("LV2 engine resolution ok: %d frames, energy %.4f\n",frames,energy);
+    /* Pinned native reference render for the default gain plugin at 44.1 kHz.
+       An env override uses a different plugin, so the hash only applies to the
+       default fixture. Strudel.cc has no LV2 counterpart; this deterministic
+       PCM hash is the reference gate for the LV2 path. */
+    if (!getenv("TOMPOUCE_LV2_TEST_PLUGIN"))
+        assert(hash==4044680287945718928ull && frames==13231);
+    printf("LV2 engine resolution ok: %d frames, energy %.4f, hash %llu\n",
+        frames,energy,(unsigned long long)hash);
 }
 
 int main(void) {

@@ -63,9 +63,12 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
 - [x] LV2 audio plumbing into the engine: `s('lv2:<uri>')` is prepared off the
       audio callback through the confined worker (bounded 4 s render) and stored
       as an owned playback sample; `test_lv2_worker` covers the engine path.
-      Worker crash/missing-plugin failures are covered. MIDI note/CC plumbing
-      into a live plugin and web compare gates remain open: LV2 plugins have no
-      strudel.cc counterpart, so those need a pinned native reference render.
+      Worker crash/missing-plugin failures are covered. `test_lv2_worker` also
+      checks a pinned native PCM hash (FNV over the 13,231-frame gain render at
+      44.1 kHz), the deterministic reference gate for the default plugin; an
+      env-selected plugin skips the hash. MIDI note/CC plumbing into a live
+      plugin remains open, and web compare gates are inapplicable because LV2
+      plugins have no strudel.cc counterpart.
 - [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
       params/presets through LV2 state mapped to existing sliders; per-plugin
       crash isolation must not take down or stall playback.

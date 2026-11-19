@@ -703,8 +703,19 @@ globalThis.defaultmidimap = (map) => {
   if(!midiMaps.has('default') && midiMaps.size>=32)throw new RangeError('Too many MIDI maps');
   midiMaps.set('default',normalizeMidiMap(map));
 };
-/** Register named inline MIDI maps. Remote manifests require host support. */
+/** Register named inline MIDI maps, or load a confined manifest by name.
+ *  A string argument is read from the host's owned config store; the manifest
+ *  persists there across evaluations and is re-read on each explicit call. */
 globalThis.midimaps = async (maps) => {
+  if (typeof maps === 'string') {
+    if (!maps || maps.length>128) throw new TypeError('invalid MIDI manifest name');
+    const text = typeof __hostMidiManifest === 'function' ? __hostMidiManifest(maps) : null;
+    if (typeof text !== 'string' || text.length>65536) throw new Error('MIDI manifest unavailable');
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed!=='object' || Array.isArray(parsed))
+      throw new TypeError('MIDI manifest must be an object of maps');
+    maps = { [maps]: parsed };
+  }
   if (!maps || typeof maps!=='object' || Array.isArray(maps) || Object.keys(maps).length>32)
     throw new TypeError('midimaps requires an inline object with at most 32 maps');
   const entries=Object.entries(maps).map(([name,map])=>[name,normalizeMidiMap(map)]);

@@ -201,9 +201,12 @@ and measured divergences are recorded in the archive.
       cases and selected audio gates: live oneshot evaluation/grid timing,
       bank-specific sounds, bmod/FX routing and external devices. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
-- [ ] Extend MIDI maps beyond inline per-program definitions: confined remote
-      manifests and explicit persistence across evaluations need design and
-      independent reference checks. Keep current 32-map/128-entry/32-send bounds.
+- [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
+      loads a bounded, confined JSON manifest from the user's config store and
+      can be reloaded on later evaluations (explicit persistence). Traversal,
+      oversized files and malformed JSON are rejected; 32-map/128-entry/32-send
+      bounds are unchanged. `tests/test_javascript.c` checks mapped CCs,
+      reload and rejection. Documented in [JavaScript/native audio](docs/javascript.md).
 - [x] Add web-compatible string-form MIDI sysex with bounded parsing and
       rejection tests, preserving current byte-array framing and send ordering.
       `sysexid("0x77")` and `sysexdata("0x01:0x02")` accept hex (0x) or decimal

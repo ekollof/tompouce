@@ -235,6 +235,8 @@ static JSValue host_slider(JSContext *ctx, JSValueConst self, int argc, JSValueC
 }
 
 static int utf8_offset(const char *s, int units);
+static int prebake_name_safe(const char *name);
+static char *config_script_source(JSContext *ctx, const char *name, int optional, size_t *size);
 
 static JSValue host_slider_bind(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
@@ -282,6 +284,35 @@ static JSValue host_midi_open(JSContext *ctx, JSValueConst self, int argc, JSVal
     int open=name[0]?midi_open_input(name,-1):midi_open_input(NULL,0);
     JS_FreeCString(ctx,name);
     return JS_NewInt32(ctx,open);
+}
+
+/* Confined named MIDI manifests. A pattern may load a map from the user's
+   owned config store; names are bounded and no path or network access is
+   exposed to JavaScript. */
+static JSValue host_midi_manifest(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+    (void)self;
+    JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->loading_allowed) return JS_ThrowReferenceError(ctx,"MIDI manifests load only during evaluation");
+    if (argc!=1 || !JS_IsString(argv[0])) return JS_ThrowTypeError(ctx,"manifest requires a name");
+    size_t length; const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
+    if (!name) return JS_EXCEPTION;
+    int safe=length>0 && length<=128 && *name!='/' && !strstr(name,"..");
+    if (safe) for (size_t i=0;i<length;i++) {
+        unsigned char c=(unsigned char)name[i];
+        if (!(isalnum(c) || c=='_' || c=='-' || c=='.')) { safe=0; break; }
+    }
+    char path[256]; int n=safe?snprintf(path,sizeof(path),"midimaps/%s.json",name):-1;
+    if (!safe || n<0 || (size_t)n>=sizeof(path)) {
+        JS_FreeCString(ctx,name);
+        return JS_ThrowReferenceError(ctx,"unsafe MIDI manifest name");
+    }
+    JS_FreeCString(ctx,name);
+    size_t size=0; char *text=config_script_source(ctx,path,0,&size);
+    if (!text) return JS_EXCEPTION;
+    if (size>64*1024) { free(text); return JS_ThrowRangeError(ctx,"MIDI manifest exceeds 64 KiB"); }
+    JSValue result=JS_NewStringLen(ctx,text,size);
+    free(text);
+    return result;
 }
 
 static JSValue host_midi_read(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -844,8 +875,9 @@ static int initialize(JsProgram *p, char *error, int n) {
     int l = JS_SetPropertyStr(ctx,global,"__hostTriangle",JS_NewCFunction(ctx,host_triangle,"__hostTriangle",6));
     int m = JS_SetPropertyStr(ctx,global,"__hostPure",JS_NewCFunction(ctx,host_pure,"__hostPure",2));
     int common_keys = JS_SetPropertyStr(ctx,global,"__hostCommonKeys",JS_NewCFunction(ctx,host_common_keys,"__hostCommonKeys",2));
+    int manifest = JS_SetPropertyStr(ctx,global,"__hostMidiManifest",JS_NewCFunction(ctx,host_midi_manifest,"__hostMidiManifest",1));
     JS_FreeValue(ctx, global);
-    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0 || k < 0 || l < 0 || m < 0 || common_keys < 0) return 0;
+    if (a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0 || i < 0 || j < 0 || k < 0 || l < 0 || m < 0 || common_keys < 0 || manifest < 0) return 0;
     const char *prelude = "globalThis.performance={now:()=>Date.now()};globalThis.console={log(){},warn(){},error:__hostLog,info(){},debug(){}};";
     JSValue value = JS_Eval(ctx, prelude, strlen(prelude), "host.js", JS_EVAL_TYPE_GLOBAL);
     if (!JS_IsException(value)) {

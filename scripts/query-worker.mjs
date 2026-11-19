@@ -62,6 +62,7 @@ function boot(bundle, timeoutMs) {
     globalThis.__hostMidiOpen=()=>1;
     globalThis.__hostMidiRead=(cc,chan)=>__midiCC.get(String(cc)+':'+String(chan ?? 0)) ?? 0;
     globalThis.__hostMidiKeys=()=>{throw new Error('midikeys are unavailable in the query worker')};
+    globalThis.__hostMidiManifest=()=>{throw new Error('MIDI manifests require the QuickJS host')};
     /* Orchestra loads are applied by the engine's confined Csound renderer
        after evaluation. Here they only need to be bounded and accepted so the
        same source compiles; query events do not depend on the engine state. */

@@ -373,6 +373,52 @@ static void test_control_aliases(void) {
     cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program);
 }
 
+static void test_midi_manifest(void) {
+    char root[]="/tmp/tompouce-midimap-XXXXXX", config[512], directory[700], path[900];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    snprintf(directory,sizeof(directory),"%s/midimaps",config);
+    assert(!mkdir(config,0700) && !mkdir(directory,0700));
+    snprintf(path,sizeof(path),"%s/demo.json",directory);
+    write_module(path,"{\"gain\":10,\"cutoff\":20}");
+    JsProgram *program=NULL;
+    char error[1024]; cJSON *meta=NULL;
+    cJSON *haps=query("await midimaps('demo'); note(60).midi({midimap:'demo'}).gain(.5).lpf(800)",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    const cJSON *mapped=cJSON_GetObjectItemCaseSensitive(value,"_midiMapped");
+    assert(cJSON_IsArray(mapped) && cJSON_GetArraySize(mapped)==2);
+    const cJSON *entry=cJSON_GetArrayItem(mapped,0);
+    assert(cJSON_IsObject(entry) && cJSON_GetObjectItemCaseSensitive(entry,"ccn")->valueint==10);
+    cJSON_Delete(haps); javascript_free(program);
+    /* The manifest persists in the owned store across evaluations. */
+    haps=query("await midimaps('demo'); note(60).midi({midimap:'demo'}).gain(.5)",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    const char *rejected[]={"await midimaps('../demo'); note(60)",
+        "await midimaps('/etc/passwd'); note(60)",
+        "await midimaps('missing'); note(60)"};
+    for (size_t i=0;i<sizeof(rejected)/sizeof(*rejected);i++) {
+        program=javascript_compile(rejected[i],120,&meta,error,sizeof(error));
+        cJSON_Delete(meta); meta=NULL;
+        assert(!program);
+    }
+    snprintf(path,sizeof(path),"%s/bad.json",directory);
+    write_module(path,"{ not json");
+    program=javascript_compile("await midimaps('bad'); note(60)",120,&meta,error,sizeof(error));
+    cJSON_Delete(meta); meta=NULL;
+    assert(!program);
+    unlink(path);
+    snprintf(path,sizeof(path),"%s/demo.json",directory);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(directory); rmdir(config); rmdir(root);
+    puts("confined MIDI manifests, persistence and rejection ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -520,6 +566,7 @@ int main(int argc, char **argv) {
     test_visual_highlight_mapping();
     test_local_modules();
     test_prebake();
+    test_midi_manifest();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

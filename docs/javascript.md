@@ -1007,8 +1007,13 @@ deliberate superset; numeric bytes, arrays and `midicmd` framing are unchanged.
 maps selected with `.midimap('synth')` or MIDI options. Mapped CCs send before
 notes, in hap control order, with clamping and exponential scaling. Maps are
 bounded to 32 names including the default, 128 control entries per map and
-32 mapped sends per hap. Remote map manifests and map persistence across
-evaluations remain unsupported; inline definitions must be in the source.
+32 mapped sends per hap. `await midimaps('synth')` now loads a named manifest
+from the user's confined `tompouce/midimaps/<name>.json` config file instead of
+an inline object. Names are bounded to 128 safe characters, files to 64 KiB,
+traversal and non-JSON content are rejected, and the same manifest can be
+reloaded on later evaluations, so persistence is explicit rather than implicit.
+Query workers do not read these files; a program using a manifest falls back to
+the QuickJS evaluation. Inline definitions remain supported.
 
 MIDI note gates use the hap duration in **cycles**, including `.duration()`
 and `.clip()`, converted at scheduling tempo. The default note-off offset is

@@ -142,6 +142,8 @@ try {
     ...[
       ['source-pan',`.pan(.7)`],
       ['source-stretch',`.speed(.5)`],
+      ['kernel-roomsize',`.roomsize(".3 .8 .3")`],
+      ['kernel-size',`.size(".2 .6 .2")`],
     ].map(([name,controls])=>({name:`shared-room-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
       code:`s('stretch_fixture').fast(3).gain(.3).clip(.05)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
     ...[

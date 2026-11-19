@@ -798,7 +798,10 @@ correlate above 0.999996 at lag zero with the unchanged thresholds.
 
 Two more `shared-room-source-` cases cover a panned source (`.pan(.7)`) and a
 downward-stretched source (`.speed(.5)`) feeding the mono IR. Both pass at lag
-zero: correlation 0.99999998 and 0.999705, RMS ratios 0.9931 and 1.0111. A
+zero: correlation 0.99999998 and 0.999705, RMS ratios 0.9931 and 1.0111.
+Two `shared-room-kernel-` gates extend this to kernel-change automation via
+`.roomsize(".3 .8 .3")` and `.size(".2 .6 .2")`: correlations 0.99999999 and
+0.99999999, RMS ratios 0.9930 for both, with the same unchanged thresholds. A
 fractional **IR** rate is a separate, unresolved divergence. Adding
 `.irspeed(.5)` or `.irspeed(.75)` together with the matching source speed gave
 correlations -0.78 and -0.92 with the same windows and thresholds; an initial

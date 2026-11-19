@@ -44,6 +44,10 @@ class HydraTest(unittest.TestCase):
         cls.url = re.search(r"http://127\.0\.0\.1:\d+", line).group()
         html = urllib.request.urlopen(cls.url).read().decode()
         assert "music_audio_scope" in html and "COMPANION_TOKEN" not in html
+        assert 'src="/hydra.js"' in html
+        script = urllib.request.urlopen(cls.url + "/hydra.js").read().decode()
+        for name in ("osc", "shape", "solid", "noise", "src", "rotate", "scale", "repeatX", "out"):
+            assert name in script
         cls.token = re.search(r"const token = '([^']+)'", html).group(1)
 
     @classmethod

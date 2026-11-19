@@ -8,6 +8,7 @@
 </style></head><body>
 <canvas id="stage" width="960" height="540"></canvas>
 <div id="hud">waiting for engine analysis…</div>
+<script nonce="EDITOR_STYLE_NONCE" src="/hydra.js"></script>
 <script nonce="EDITOR_STYLE_NONCE">
 const token = 'COMPANION_TOKEN';
 const stage = document.getElementById('stage');
@@ -27,6 +28,12 @@ async function poll() {
   } catch (error) { /* keep the last frame on a dropped poll */ }
   const width = stage.width, height = stage.height;
   ctx.fillStyle = '#090b12'; ctx.fillRect(0,0,width,height);
+  if (globalThis.__hydraOutput && typeof __hydraOutput._paint === 'function') {
+    __hydraOutput._paint(ctx, width, height, last);
+    hud.textContent = 'hydra: custom graph · ' + (last && last.bpm ? last.bpm.toFixed(1) + ' bpm' : 'waiting');
+    setTimeout(poll, 125);
+    return;
+  }
   const samples = last && last.scope ? last.scope : [];
   let energy = 0;
   for (const value of samples) energy += Math.abs(value);

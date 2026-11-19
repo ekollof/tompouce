@@ -82,7 +82,8 @@ def main():
             files["/editor.js"] = ("dist/editor.js", "text/javascript")
             files["/sounds.js"] = ("sounds.js", "text/javascript")
             if args.hydra:
-                files = {"/": ("hydra.html", "text/html; charset=utf-8")}
+                files = {"/": ("hydra.html", "text/html; charset=utf-8"),
+                         "/hydra.js": ("hydra.js", "text/javascript")}
             if self.path not in files:
                 self.send(404, b'{}')
                 return

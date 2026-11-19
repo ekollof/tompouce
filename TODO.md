@@ -15,9 +15,11 @@ verification, installation and upstream terminal constraints.
       the companion helper with a private token, Host/Origin checks, one
       read-only `music_audio_scope` MCP tool (bounded 16–192 samples, polled at
       8 Hz) and a parent-pid session guard. `tests/test_companion.py` covers the
-      tool allowlist and auth. Still open: full Strudel/Hydra function
-      compatibility (`osc`, `shape`, `src`, …) and source-generation guards on
-      the visual stream; the current page is a bounded audio-scope renderer.
+      tool allowlist and auth. A bounded Hydra-style function layer
+      (`web/hydra.js`: `osc`/`shape`/`solid`/`noise`/`src` with `rotate`,
+      `scale`, `repeatX/Y`, `color`, `out`) is served and checked. Still open:
+      full WebGL Hydra compatibility and source-generation guards on the visual
+      stream.
 
 ## Plugin hosting
 

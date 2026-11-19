@@ -826,7 +826,22 @@ Each scope now shows only the native voices from its attached pattern, after
 voice effects, envelope, gain and pan. The tap precedes shared orbit reverb/delay,
 ducking and master effects; these shared tails are not attributed to a pattern.
 Csound's combined orchestra output has no isolated tap yet. Spectrum uses the
-same isolated tap. Up to 32 visualization call sites are supported per program,
+same isolated tap.
+
+**Assessment of the remaining browser options.** The styling/layout features
+that have no terminal equivalent are deliberate ceilings, not pending work:
+page-background placement, custom canvas contexts, font families, spiral cap
+styles and pitchwheel degree/int-label options. Unknown options are reported
+once and ignored; native typography and low-resolution braille are documented
+adaptations rather than browser-pixel replicas. Coordinate checks against the
+deployed renderer (`node scripts/scope-reference-qa.mjs`) and native raster
+checks (`test_terminal_graphics`) cover the geometry that does have a
+counterpart. Shared delay, reverb and duck tails stay on their orbits and are
+intentionally not attributed to an individual pattern: the web shares those
+effects too, so per-pattern tap attribution would require duplicating shared
+state and would misrepresent what is sounding. Csound output is a single
+combined orchestra stream with no isolated per-pattern tap for the same
+reason. No browser-pixel parity is claimed for any of these cases. Up to 32 visualization call sites are supported per program,
 with one visible widget of each kind per source line and eight simultaneous
 Kitty placements (additional widgets use braille). Drawing queries run on the
 generator at up to 8 Hz, with a 50 ms budget and 4,096 total cached events;

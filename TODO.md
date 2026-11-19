@@ -180,10 +180,12 @@ and measured divergences are recorded in the archive.
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
       Very long modulation uses a bounded conservative connection deadline;
       distinguish these limits from established PCM parity.
-- [ ] Assess remaining visualization options and shared-effect tail attribution:
-      browser styling/layout options, per-pattern shared delay/reverb/duck tails
-      and isolated Csound taps. Document intentional terminal adaptations rather
-      than claiming browser-pixel parity.
+- [x] Assess remaining visualization options and shared-effect tail attribution:
+      documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)
+      — browser-only styling is a deliberate ceiling, shared orbit tails and
+      the combined Csound stream are intentionally not attributed per pattern,
+      and terminal geometry/raster is checked against the web renderer without
+      claiming browser-pixel parity.
 - [ ] Finish Switch Angel integration checks beyond the 81 setup/helper/API
       cases and selected audio gates: live oneshot evaluation/grid timing,
       bank-specific sounds, bmod/FX routing and external devices. See

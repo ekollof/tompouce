@@ -813,9 +813,16 @@ from 1.13 to 0.994, but correlation stayed at -0.73; even with interpolation
 added the best cross-correlation over ±1 s of lag was only 0.71 at lag -115
 samples, with -0.63 at lag zero. The difference is therefore structural in the
 web's IR-rate resampling, not just a buffer length or interpolation detail. Both
-experiments were reverted rather than accepted without parity. Keep integer IR
-rates in gates and do not treat these measurements as parity; this is distinct
-from the established PCM and room-send gates.
+experiments were reverted rather than accepted without parity. A third probe
+ruled out simpler explanations: the web capture with `.irspeed(.5)` is
+byte-different from both no `irspeed` and `.irspeed(1)` (SHA 3c336c4e… vs
+40647527…), so the browser does not ignore the setting; cross-correlating that
+capture against native renders at IR rates 0.25, 0.5, 1, 2 and −0.5, a
+compounded source speed of 0.25 and a doubled room size gave best |correlation|
+0.63 (native 0.5, negative sign). No simple inverse-rate or compound-speed
+mapping reproduces it. Keep integer IR rates in gates and do not treat these
+measurements as parity; this is distinct from the established PCM and room-send
+gates.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

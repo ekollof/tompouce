@@ -304,6 +304,26 @@ static void test_engine_retention(void) {
     javascript_free(program);
 }
 
+/* The confined worker must refuse an allocation beyond its address-space
+   limit within the compile budget, rather than hanging or returning metadata
+   from a corrupted evaluation. */
+static void test_oom(void) {
+    JsWorker *worker = js_worker_start(NULL, NULL, NULL, 0);
+    if (!worker) return;
+    char error[512] = "";
+    char *metadata = NULL;
+    expect(js_worker_compile(worker, "note(60)", 120, &metadata, error, sizeof(error)),
+        "worker is healthy before the OOM request");
+    free(metadata); metadata = NULL;
+    error[0] = 0;
+    int ok = js_worker_compile(worker,
+        "new ArrayBuffer(1500000000); note(60)", 120, &metadata, error, sizeof(error));
+    expect(!ok, "allocation beyond the worker limit is refused");
+    expect(error[0] != '\0', "worker OOM or death is reported");
+    free(metadata);
+    js_worker_stop(worker);
+}
+
 int main(void) {
     log_console_stderr(0);
     if (!node_available()) {
@@ -315,6 +335,7 @@ int main(void) {
     test_engine_delegation();
     test_engine_identity();
     test_engine_retention();
+    test_oom();
     test_rejections();
     test_watchdog();
     test_death();

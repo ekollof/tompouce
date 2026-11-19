@@ -126,10 +126,14 @@ and measured divergences are recorded in the archive.
       and a failed worker falls back to the retained QuickJS evaluation. Each
       evaluation carries a compile serial so re-evaluating identical source
       starts fresh worker state.
-      Remaining gates before this can be supported or default: host callbacks
-      for the excluded features and OOM/cold/one-CPU behavior. Failed-evaluation
-      retention is cross-checked: a rejected live evaluation keeps the last
-      playable program delegating with identical events. Packaging is documented
+      Remaining gate before this can be supported or default: host callbacks
+      for the excluded features. OOM behavior is covered (the worker reports a
+      range error for an oversized allocation and stays alive); one-CPU
+      `profile-prep-backend` held 3/4 with and without the worker, with two
+      2.7 ms late burst reservations and no xruns — identical in both modes, so
+      the worker is not the cause. Failed-evaluation retention is cross-checked:
+      a rejected live evaluation keeps the last playable program delegating
+      with identical events. Packaging is documented
       (the installer ships only the worker script, the engine sends its bundle
       over IPC, and Node's optional runtime notices are in NOTICE/README). The
       worker is confined (own group, parent-death signal, no-new-privs, fixed

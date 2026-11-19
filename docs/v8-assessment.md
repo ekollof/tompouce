@@ -234,6 +234,20 @@ reported a single late voice reservation (2.7 ms past its deadline) in the
 burst workload, with no xruns, drops or overruns; treat that as marginal jitter
 to watch rather than a resolved result.
 
+`profile-prep-backend` was also run with the whole engine pinned to one CPU
+(`taskset -c 0`), both with and without the worker backend. Both runs held 3/4
+of the reduced one-CPU workload matrix; the `burst` case had two late voice
+reservations (2.676 ms) with no xrun gaps, stream drops or render overruns. The
+worker is not the cause: the default backend produced the identical result.
+Keep this as an honest one-CPU limitation, not a parity claim.
+
+OOM behavior is covered by `test_oom` in `tests/test_js_worker.c`: a compile
+request that tries to allocate a 1.5 GiB `ArrayBuffer` beyond the worker's
+2 GiB address-space limit returns `RangeError: Array buffer allocation failed`
+within the compile budget. The worker stays alive and reports the failure
+instead of hanging or returning bogus metadata, so the engine can fall back to
+its retained QuickJS evaluation.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

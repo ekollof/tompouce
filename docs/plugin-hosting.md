@@ -48,6 +48,35 @@ tools), keep the graph quantum low and stable, enable realtime scheduling
 intermediate PulseAudio hop. Record those numbers before claiming
 live-coding suitability; do not infer them from the native engine benchmarks.
 
+## Supported classes and the UI ceiling
+
+Today the supported plugin classes are exactly those the separate Carla process
+supports: LADSPA, DSSI, LV2, VST2, VST3, SF2 and SFZ, plus whatever Wine bridges
+the user has configured. Tompouce itself has no native plugin loader, no `lilv`
+dependency and no VST3 SDK; it neither scans nor instantiates plugins, and it
+never loads plugin code into the engine process. Do not claim native LV2/VST3
+support from the Carla path.
+
+There is no embedded plugin UI. The terminal UI cannot host `suil`/X11 editors,
+and this project does not add a browser-based plugin window. In the zero-code
+path, control happens in Carla's own window (or its project file), not in
+Tompouce's F1–F6 panes or the companion. The planned native LV2 host would expose
+generic parameter sliders only, mapped to the existing slider system; it would
+still have no editor embedding. That is the ceiling by design, not a temporary
+gap to be filled with X11 or browser UI code.
+
+## Per-user setup
+
+Plugins, their licenses, their installation and their host-side configuration
+remain the user's responsibility. Tompouce does not install or redistribute
+plugin binaries, Wine prefixes or VST SDKs, and its installer never touches them.
+For Wine VSTs, configure yabridge in a per-user prefix and keep its routing and
+realtime setup outside the engine. Realtime scheduling is likewise user-side:
+use the distro's rtkit setup for native plugins and rtkit/wine-rt for Wine
+bridges. These steps cannot be regression-tested on the development box, so the
+documented path stops at "configure and measure on your own machine" rather than
+promising latency numbers here.
+
 ## Planned, not implemented
 
 - An `out` control for named PipeWire targets so `s('saw').out('carla')` can

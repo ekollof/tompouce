@@ -56,8 +56,9 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
 - [ ] One instrument and one effect behind compare gates (rendered output vs
       a pinned reference render), plus failure tests (missing/broken plugin,
       dead worker, preset rejection) and sanitizer coverage of the host glue.
-- [ ] Document supported classes, the no-UI ceiling, per-user plugin setup
-      (licenses/installs stay with the user) and the rtkit/Wine notes below.
+- [x] Document supported classes, the no-UI ceiling, per-user plugin setup
+      (licenses/installs stay with the user) and the rtkit/Wine notes.
+      See [external plugin hosting](docs/plugin-hosting.md#supported-classes-and-the-ui-ceiling).
 
 VST3 is optional and strictly after LV2: it needs the GPLv3 SDK vendored
 under `thirdparty/` with notices intact plus a C++ bridge for the COM-style

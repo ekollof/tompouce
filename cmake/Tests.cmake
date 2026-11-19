@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound js_worker rational signal_wave
-        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2)
+        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})

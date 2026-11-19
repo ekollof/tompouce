@@ -51,8 +51,13 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       LV2_PATH including the user dir, allowlist audio/MIDI port classes and
       refuse non-`file://` binaries, traversal and remote/executable metadata.
       `test_lv2` covers the bounded catalog (210 audio plugins on this box).
-- [ ] LV2 instantiation and worker plumbing: instantiate discovered plugins in
-      a confined worker, never in the engine process, with bounded buffers.
+- [x] LV2 instantiation in a confined worker (`src/lv2_worker.c`): plugin code
+      runs in a forked child with fixed limits and a minimal feature set; the
+      engine only sends bounded stereo PCM blocks and control values. Tests
+      cover confinement, gain control, PCM and dead/missing plugin failures.
+- [ ] LV2 audio/MIDI plumbing into the engine's scheduler and one instrument /
+      effect behind compare gates (worker crash isolation and preset rejection
+      tests included).
 - [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
       params/presets through LV2 state mapped to existing sliders; per-plugin
       crash isolation must not take down or stall playback.

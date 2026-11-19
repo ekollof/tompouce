@@ -99,10 +99,14 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   it reads only metadata from LV2_PATH (including the user bundle dir), keeps a
   bounded catalog of plugins with audio or event ports, and refuses binaries
   that are not plain `file://` `.so` paths without traversal or remote/download
-  metadata. No plugin is loaded or executed. Instantiation in a confined worker
-  on the `csound_host` pattern remains open; plugins must never run in the
-  engine process, and preparation stays outside the audio callback. VST3 is
-  optional and strictly after LV2; VST2 is out.
+  metadata. Instantiation now happens in a confined worker (`src/lv2_worker.c`):
+  a forked child with a parent-death signal, no-new-privs, no core dumps, a 64-fd
+  limit and a 2 GiB address-space limit loads the plugin, supplies bounded URID
+  map/options/bounded-block features, and runs it on fixed 512-frame stereo
+  blocks. The engine never dlopens plugin code. `test_lv2_worker` checks the
+  limits, a gain control, finite PCM and dead/missing plugin failures. Wiring
+  these blocks into the scheduler's audio/MIDI paths and the compare gates
+  remains open. VST3 is optional and strictly after LV2; VST2 is out.
 
 See [TODO.md](../TODO.md) for the current state of those items and
 [audio backends](../README.md#run) for Tompouce's output selection rules.

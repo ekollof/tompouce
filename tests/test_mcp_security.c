@@ -70,6 +70,26 @@ int main(void) {
     transmit(fd,"{\"method\":\"ping\"}\n"); /* auth is required on every frame */
     assert(mcp_input_fd<0); close(fd);
 
+    /* The hydra analysis tool is read-only and bounded even for a huge limit. */
+    fd=client();
+    snprintf(request,sizeof(request),"{\"auth\":\"%s\",\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"music_audio_scope\",\"arguments\":{\"limit\":9999}}}\n",
+        mcp_tcp_token());
+    transmit(fd,request);
+    char analysis[8192]; ssize_t analysed=recv(fd,analysis,sizeof(analysis)-1,0);
+    assert(analysed>0); analysis[analysed]=0;
+    assert(strstr(analysis,"scope") && strstr(analysis,"bpm"));
+    cJSON *envelope=cJSON_Parse(analysis);
+    assert(envelope);
+    const cJSON *content=cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetObjectItemCaseSensitive(envelope,"result"),"content");
+    const cJSON *text=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(content,0),"text");
+    cJSON *metrics=text&&cJSON_IsString(text)?cJSON_Parse(text->valuestring):NULL;
+    assert(metrics);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(metrics,"scope"))<=256);
+    cJSON_Delete(metrics); cJSON_Delete(envelope);
+    close(fd); mcp_poll();
+
     fd=client();
     snprintf(request,sizeof(request),"{\"auth\":\"%s\",\"method\":\"ping\"} garbage\n",mcp_tcp_token());
     transmit(fd,request); assert(mcp_input_fd<0); close(fd);

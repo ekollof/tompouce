@@ -998,6 +998,14 @@ FM combination or full-song parity.
 
 ## Kabelsalat effect tails and input routing
 
+Nested `FX(...)` chains remain outside the gated matrix. A probe with
+`.FX(x=>x.lpf(800))`, `.FX(x=>x.room(.3))` and `.FX(x=>x.delay(.2))` over a
+clipped sine gave correlation 0.99999997 in all three cases but a constant
+RMS ratio of 1.2504, outside the unchanged 0.85–1.15 band. The waveform shape
+matches while the level does not, so this is a gain-staging divergence rather
+than a timing or synthesis mismatch; no threshold was changed and no case was
+accepted.
+
 Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
 zero/short/extended cleanup times, feedback, clipped and naturally ending
 stereo samples, and explicit output channels. Run them with

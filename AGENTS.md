@@ -199,10 +199,10 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   [#2948](https://github.com/dankamongmen/notcurses/issues/2948) (related to
   [#2548](https://github.com/dankamongmen/notcurses/issues/2548)) is still open;
   [#2947](https://github.com/dankamongmen/notcurses/issues/2947) has an upstream
-  fix (PR #2954, commit `2cb71b8`, milestone 3.1.0) awaiting our confirmation.
-  Do not attempt local fixes or replace system Notcurses before that fix is
-  confirmed in a release. Preserve the reproductions and report failures
-  honestly.
+  fix (PR #2954, commit `2cb71b8`, milestone 3.1.0) verified in an owned build
+  (the split-UTF-8 pipe finishes; the parent commit hangs). Do not attempt local
+  fixes or replace system Notcurses before that fix is confirmed in a release.
+  Preserve the reproductions and report failures honestly.
   Missing Tree-sitter children are normal while typing; check for null nodes
   before calling byte/point accessors.
 - `src/visual.c`, `src/visual_render.c` and `src/terminal_graphics.c` own bounded

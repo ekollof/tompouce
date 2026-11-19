@@ -95,10 +95,14 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
 
 - A managed Carla instance driven from patterns, with project files for plugin
   graphs and note/CC through the existing MIDI output.
-- Native LV2 discovery/instantiation through `lilv`, with audio and note/CC
-  plumbing in a confined worker process on the `csound_host` pattern. Plugins
-  must never run in the engine process, and preparation stays outside the audio
-  callback. VST3 is optional and strictly after LV2; VST2 is out.
+- LV2 discovery through `lilv` is implemented (`src/lv2_host.c`, `test_lv2`):
+  it reads only metadata from LV2_PATH (including the user bundle dir), keeps a
+  bounded catalog of plugins with audio or event ports, and refuses binaries
+  that are not plain `file://` `.so` paths without traversal or remote/download
+  metadata. No plugin is loaded or executed. Instantiation in a confined worker
+  on the `csound_host` pattern remains open; plugins must never run in the
+  engine process, and preparation stays outside the audio callback. VST3 is
+  optional and strictly after LV2; VST2 is out.
 
 See [TODO.md](../TODO.md) for the current state of those items and
 [audio backends](../README.md#run) for Tompouce's output selection rules.

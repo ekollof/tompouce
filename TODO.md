@@ -47,9 +47,12 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
 - [ ] Drive a managed Carla instance from patterns: project files for plugin
       graphs, notes/CC through existing MIDI output for params, instance
       lifecycle owned by the engine without stalling playback on failure.
-- [ ] LV2 discovery/instantiation via `lilv` (installer dependency): scan
-      standard paths plus a user dir, allowlist audio/MIDI plugin classes,
-      refuse shell-y plugin metadata (executable paths, FDI downloads).
+- [x] LV2 discovery via `lilv` (optional build dependency, auto-detected): scan
+      LV2_PATH including the user dir, allowlist audio/MIDI port classes and
+      refuse non-`file://` binaries, traversal and remote/executable metadata.
+      `test_lv2` covers the bounded catalog (210 audio plugins on this box).
+- [ ] LV2 instantiation and worker plumbing: instantiate discovered plugins in
+      a confined worker, never in the engine process, with bounded buffers.
 - [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
       params/presets through LV2 state mapped to existing sliders; per-plugin
       crash isolation must not take down or stall playback.

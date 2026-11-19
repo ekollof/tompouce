@@ -185,7 +185,8 @@ temporary builds. Disable it with `-DWITH_CCACHE=OFF`; an explicit
 Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`,
 `libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus
 pkg-config and `xxd`. Optional packages detected at configuration time are
-`libpipewire-0.3` (0.3.7+), `libpulse`, `samplerate` and `fluidsynth` (2.2+).
+`libpipewire-0.3` (0.3.7+), `libpulse`, `samplerate`, `fluidsynth` (2.2+) and
+`lilv-0` (metadata-only LV2 discovery; no plugin is loaded).
 FluidSynth is only the offline fallback for `gm_` instruments; their primary
 playback needs no soundfont. The installer includes these packages and FluidR3 GM.
 

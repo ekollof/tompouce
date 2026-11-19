@@ -806,10 +806,16 @@ fractional **IR** rate is a separate, unresolved divergence. Adding
 `.irspeed(.5)` or `.irspeed(.75)` together with the matching source speed gave
 correlations -0.78 and -0.92 with the same windows and thresholds; an initial
 attempt at linear interpolation in the IR kernel changed the result only
-marginally and was reverted rather than tuned to the capture. The web resampler
-and the native nearest-index IR preparation are not equivalent at fractional
-rates here. Keep integer IR rates in gates and do not treat these measurements
-as parity; this is distinct from the established PCM and room-send gates.
+marginally and was reverted rather than tuned to the capture. A second attempt
+stretched the kernel length for sub-unity IR rates (so the same impulse covers
+proportionally more output samples). That brought the `.irspeed(.5)` RMS ratio
+from 1.13 to 0.994, but correlation stayed at -0.73; even with interpolation
+added the best cross-correlation over ±1 s of lag was only 0.71 at lag -115
+samples, with -0.63 at lag zero. The difference is therefore structural in the
+web's IR-rate resampling, not just a buffer length or interpolation detail. Both
+experiments were reverted rather than accepted without parity. Keep integer IR
+rates in gates and do not treat these measurements as parity; this is distinct
+from the established PCM and room-send gates.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

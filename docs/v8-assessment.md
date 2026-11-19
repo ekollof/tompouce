@@ -281,6 +281,12 @@ worker; `__hostMidiOpen` succeeds there and `test_midi_delegation` checks that a
 live CC change reaches the worker and matches a QuickJS twin. `midikeys`
 consumes a host event queue and still stays on QuickJS.
 
+Csound programs now delegate too: the worker's `__hostCsound` is a bounded
+no-op (16 loads, the same kind/text size checks as the host), while the engine
+still applies the real orchestra after evaluation through its confined renderer.
+`test_csound_delegation` covers both `.csound()` and `loadCsound()` against a
+QuickJS twin; query events do not depend on engine Csound state.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

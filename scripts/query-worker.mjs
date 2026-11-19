@@ -62,6 +62,16 @@ function boot(bundle, timeoutMs) {
     globalThis.__hostMidiOpen=()=>1;
     globalThis.__hostMidiRead=(cc,chan)=>__midiCC.get(String(cc)+':'+String(chan ?? 0)) ?? 0;
     globalThis.__hostMidiKeys=()=>{throw new Error('midikeys are unavailable in the query worker')};
+    /* Orchestra loads are applied by the engine's confined Csound renderer
+       after evaluation. Here they only need to be bounded and accepted so the
+       same source compiles; query events do not depend on the engine state. */
+    globalThis.__csoundLoads=0;
+    globalThis.__hostCsound=(kind,text)=>{
+      if(++__csoundLoads>16)throw new Error('too many Csound loads');
+      if(typeof kind!=='string'||typeof text!=='string'||
+         (kind==='code'&&text.length>65536)||(kind==='url'&&text.length>480))
+        throw new Error('invalid Csound load');
+    };
     globalThis.__prebakeLoadingAllowed=true;
     globalThis.__hostPrebake=name=>{
       if(!__prebakeLoadingAllowed)throw new Error('prebake loads are closed after evaluation');

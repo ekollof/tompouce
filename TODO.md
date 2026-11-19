@@ -139,7 +139,9 @@ and measured divergences are recorded in the archive.
       with a mid-session slider_set; slider programs now delegate. `midin` CC
       snapshots are forwarded per query (all nonzero CCs, bounded) and tested;
       `midikeys` still stays on QuickJS because it consumes a host event queue.
-      Csound loads and visuals still stay on QuickJS.
+      Csound loads are now accepted by a bounded worker callback while the
+      engine applies the real orchestra, and are tested for event parity.
+      Visuals still stay on QuickJS.
       OOM behavior is covered (the worker reports a
       range error for an oversized allocation and stays alive); one-CPU
       `profile-prep-backend` held 3/4 with and without the worker, with two

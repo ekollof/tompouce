@@ -309,6 +309,35 @@ static void test_midi_delegation(void) {
     javascript_free(quick); javascript_free(delegated);
 }
 
+/* Csound programs were excluded because loads need the engine's renderer. The
+   load callback is bounded and accepted in the worker; the engine still applies
+   the real orchestra, and query events must match QuickJS. */
+static void test_csound_delegation(void) {
+    const char *sources[] = {
+        "note(60).s('sine').csound('triangle')",
+        "await loadCsound('instr 1\\nendin'); note(60).s('sine')",
+    };
+    char error[512] = "";
+    for (size_t i=0;i<sizeof(sources)/sizeof(*sources);i++) {
+        setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+        cJSON *meta = NULL;
+        JsProgram *delegated = javascript_compile(sources[i], 120, &meta, error, sizeof(error));
+        cJSON_Delete(meta); meta = NULL;
+        expect(delegated && javascript_uses_query_worker(delegated), "Csound program delegates");
+        cJSON *w = delegated ? javascript_query(delegated, 0, 1) : NULL;
+        unsetenv("TOMPOUCE_QUERY_BACKEND");
+        JsProgram *quick = javascript_compile(sources[i], 120, &meta, error, sizeof(error));
+        cJSON_Delete(meta);
+        cJSON *q = quick ? javascript_query(quick, 0, 1) : NULL;
+        char *a = cJSON_IsArray(w) ? cJSON_PrintUnformatted(w) : NULL;
+        char *b = cJSON_IsArray(q) ? cJSON_PrintUnformatted(q) : NULL;
+        expect(a && b && !strcmp(a, b), "Csound events match QuickJS");
+        free(a); free(b);
+        cJSON_Delete(q); cJSON_Delete(w);
+        javascript_free(quick); javascript_free(delegated);
+    }
+}
+
 /* Re-evaluating identical source must start a fresh worker evaluation, not
    continue the previous one's state. A pattern whose values depend on a
    query-advancing callback exposes the difference. */
@@ -535,6 +564,7 @@ int main(void) {
     test_engine_delegation();
     test_slider_delegation();
     test_midi_delegation();
+    test_csound_delegation();
     test_engine_identity();
     test_engine_retention();
     test_prebake_transport();

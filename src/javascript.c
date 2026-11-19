@@ -94,8 +94,8 @@ static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     if (strstr(p->source, "midikeys")) return 0;
     /* Slider values are forwarded at compile and on every query, so live
        controls no longer force the QuickJS backend. */
-    const cJSON *csound = cJSON_GetObjectItemCaseSensitive(metadata, "csound");
-    if (csound && !cJSON_IsNull(csound)) return 0;
+    /* Orchestra loads are applied by the engine's confined Csound renderer
+       after evaluation; the worker only needs to accept them during compile. */
     const cJSON *samples = cJSON_GetObjectItemCaseSensitive(metadata, "samples");
     (void)samples;
     return 1;

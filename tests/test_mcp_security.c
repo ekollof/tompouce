@@ -78,7 +78,7 @@ int main(void) {
     transmit(fd,request);
     char analysis[8192]; ssize_t analysed=recv(fd,analysis,sizeof(analysis)-1,0);
     assert(analysed>0); analysis[analysed]=0;
-    assert(strstr(analysis,"scope") && strstr(analysis,"bpm"));
+    assert(strstr(analysis,"scope") && strstr(analysis,"bpm") && strstr(analysis,"generation"));
     cJSON *envelope=cJSON_Parse(analysis);
     assert(envelope);
     const cJSON *content=cJSON_GetObjectItemCaseSensitive(

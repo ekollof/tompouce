@@ -14,7 +14,7 @@ const token = 'COMPANION_TOKEN';
 const stage = document.getElementById('stage');
 const ctx = stage.getContext('2d');
 const hud = document.getElementById('hud');
-let phase = 0, last = null;
+let phase = 0, last = null, sourceGeneration = null;
 async function poll() {
   try {
     const reply = await fetch('/api/tool', {method:'POST',
@@ -23,7 +23,16 @@ async function poll() {
     if (reply.ok) {
       const payload = await reply.json();
       const text = payload.result && payload.result.content && payload.result.content[0] && payload.result.content[0].text;
-      if (text) { const data = JSON.parse(text); last = data; }
+      if (text) {
+        const data = JSON.parse(text);
+        if (typeof data.generation === 'number') {
+          if (sourceGeneration !== null && data.generation !== sourceGeneration) {
+            last = null; phase = 0; // new source: drop the stale waveform frame
+          }
+          sourceGeneration = data.generation;
+        }
+        last = data;
+      }
     }
   } catch (error) { /* keep the last frame on a dropped poll */ }
   const width = stage.width, height = stage.height;

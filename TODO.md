@@ -18,8 +18,9 @@ verification, installation and upstream terminal constraints.
       tool allowlist and auth. A bounded Hydra-style function layer
       (`web/hydra.js`: `osc`/`shape`/`solid`/`noise`/`src` with `rotate`,
       `scale`, `repeatX/Y`, `color`, `out`) is served and checked. Still open:
-      full WebGL Hydra compatibility and source-generation guards on the visual
-      stream.
+      full WebGL Hydra compatibility. The scope tool now includes the accepted
+      source's `generation`, and the page drops stale frames when it changes.
+      Full WebGL compatibility remains open.
 
 ## Plugin hosting
 

@@ -605,6 +605,10 @@ void handle_request(cJSON *req) {
                 cJSON_AddItemToObject(root,"scope",scope);
                 cJSON_AddNumberToObject(root,"playing",audio_is_playing()?1:0);
                 cJSON_AddNumberToObject(root,"bpm",audio_get_bpm());
+                /* The accepted source's generation lets a visualizer discard an
+                   analysis frame collected before the current program loaded. */
+                cJSON_AddNumberToObject(root,"generation",
+                    track_count==1?tracks[0].compile_generation:0);
                 for (int i=0;i<count;i++)
                     cJSON_AddItemToArray(scope,cJSON_CreateNumber((int)(samples[i]*10000)/10000.0));
                 char *text=cJSON_PrintUnformatted(root);

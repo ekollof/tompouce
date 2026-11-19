@@ -96,6 +96,11 @@ allow it, or the scoped V8 migration. The earlier fused application prototype
 and this allocation work show that local micro-optimizations inside the
 existing call structure do not move the number.
 
+`cmake --build build --target profile-bakery-query` runs this compile-stage
+probe reproducibly against the built `test_javascript` (set
+`TOMPOUCE_PROFILE_RUNS` for the run count). It prints median wall milliseconds
+and hap counts for both heavy IDs and is explicitly not a 200 ms gate.
+
 A build-time prototype replaced the pinned `withValue` map loop with a native
 host function that walks the array and invokes the same JavaScript callback per
 hap in order. Median probes went from 267/267 ms to 271/270 ms, so the hook was

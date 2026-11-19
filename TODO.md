@@ -103,7 +103,8 @@ and measured divergences are recorded in the archive.
       (`TOMPOUCE_QUERY_BACKEND=node`) the same probe measures 145/146 ms and the
       full Bakery comparison matches all 42 compositions, 398/398 events for
       both songs; QuickJS remains the default and still fails these two gates.
-      Use `scripts/profile-pattern-query.mjs` for repeatable probes.
+      Use `scripts/profile-pattern-query.mjs` or the non-gating
+      `cmake --build build --target profile-bakery-query` for repeatable probes.
       A follow-up attribution pass (see
       [where the time goes](docs/audio-comparison.md#where-the-remaining-query-time-goes))
       shows the cost is per hap at ~0.47–0.49 ms with ~5 ms fixed, and that it

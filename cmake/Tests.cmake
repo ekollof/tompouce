@@ -110,6 +110,12 @@ add_custom_target(test-duck-reference-web
     DEPENDS test_live_sliders test_duck_onset WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL VERBATIM)
 
+# Diagnostic only: compile-stage Bakery query medians. Not a 200 ms gate.
+add_custom_target(profile-bakery-query
+    COMMAND node scripts/profile-pattern-query.mjs "$<TARGET_FILE:test_javascript>"
+    DEPENDS test_javascript WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL VERBATIM)
+
 add_custom_target(profile-prep-deadlines
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_PREP_DEADLINE_BINARY=$<TARGET_FILE:test_prep_deadlines>"
         node scripts/prep-deadline-qa.mjs

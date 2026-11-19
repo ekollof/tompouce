@@ -511,6 +511,36 @@ static void test_switchangel_humanize(void) {
     puts("Switch Angel humanize bounds ok");
 }
 
+/* Switch Angel bmod routing: a pinned-style helper attaches a bus modulation
+   entry to the pattern's query event. */
+static void test_switchangel_bmod(void) {
+    const char *fixture =
+        "register('saBend', pat => pat.bmod({c:'s', b:'busA', dr:1}));\n";
+    char root[]="/tmp/tompouce-sabmod-XXXXXX", config[512], path[700];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    assert(!mkdir(config,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    write_module(path,fixture);
+    JsProgram *program=NULL;
+    cJSON *haps=query("note(60).s(\"sine\").saBend()",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    const cJSON *mod=cJSON_GetObjectItemCaseSensitive(value,"bmod");
+    assert(cJSON_IsObject(mod) && cJSON_GetObjectItemCaseSensitive(mod,"0"));
+    const cJSON *entry=cJSON_GetObjectItemCaseSensitive(mod,"0");
+    const cJSON *bus=cJSON_GetObjectItemCaseSensitive(entry,"bus");
+    assert(cJSON_IsString(bus) && !strcmp(bus->valuestring,"busA"));
+    cJSON_Delete(haps); javascript_free(program);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+    puts("Switch Angel bmod routing ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -662,6 +692,7 @@ int main(int argc, char **argv) {
     test_oneshot_grid();
     test_switchangel_fx();
     test_switchangel_humanize();
+    test_switchangel_bmod();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

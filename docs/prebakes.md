@@ -167,6 +167,7 @@ the eight haps of the first cycle survive a grid of four, since `getTime()` is
 the query-window begin. `test_switchangel_fx` further checks that a pinned-style
 helper registering an `.FX(...)` stage carries that stage on the query event,
 and `test_switchangel_humanize` checks the pinned humanize helper's onset and
-velocity bounds with a deterministic random source. Bank-specific sounds,
-additional pitch/FM combinations, bmod routing and external devices remain
-separate checks rather than claims established by this matrix.
+velocity bounds with a deterministic random source. `test_switchangel_bmod`
+checks a pinned-style helper attaches a bus modulation entry to the query event.
+Bank-specific sounds, additional pitch/FM combinations and external devices
+remain separate checks rather than claims established by this matrix.

@@ -55,7 +55,12 @@ function boot(bundle, timeoutMs) {
     globalThis.__hostSlider=v=>v;
     globalThis.__hostSliderBind=v=>(__workerSliders.push(v)-1);
     globalThis.__hostSliderRead=i=>__workerSliders[i];
-    globalThis.__hostPrebake=()=>{throw new Error('prebakes are unavailable in the query worker')};`;
+    globalThis.__prebakeLoadingAllowed=true;
+    globalThis.__hostPrebake=name=>{
+      if(!__prebakeLoadingAllowed)throw new Error('prebake loads are closed after evaluation');
+      if(!Object.hasOwn(__prebakes,name))throw new Error('prebake unavailable in the query worker');
+      return __prebakes[name];
+    };`;
   new vm.Script(prelude).runInContext(context, {timeout: timeoutMs});
   new vm.Script(bundle, {filename: 'tompouce-runtime.js'}).runInContext(context, {timeout: timeoutMs});
   compileScript = new vm.Script(`globalThis.__compileResult=undefined;globalThis.__compileError=undefined;
@@ -64,9 +69,10 @@ function boot(bundle, timeoutMs) {
   probeScript = new vm.Script('__query(__begin,__end,__cps,true)');
 }
 
-function compile(source, bpm, timeoutMs, prebake) {
+function compile(source, bpm, timeoutMs, prebake, prebakes) {
   if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_SOURCE) throw new Error('source limit');
   if (typeof prebake !== 'string' || Buffer.byteLength(prebake) > MAX_FRAME) throw new Error('prebake limit');
+  if (!prebakes || typeof prebakes !== 'object' || Array.isArray(prebakes)) throw new Error('invalid prebake table');
   /* Match the engine's per-evaluation context so prebake and pattern globals
      cannot leak from an earlier evaluation into this one. */
   if (currentBundle) boot(currentBundle, timeoutMs);
@@ -76,7 +82,9 @@ function compile(source, bpm, timeoutMs, prebake) {
      defaults as the QuickJS evaluation. Named loadPrebake() calls still need a
      host callback and are excluded from delegation. */
   context.__prebake = prebake;
+  context.__prebakes = prebakes;
   compileScript.runInContext(context, {timeout: timeoutMs});
+  context.__prebakeLoadingAllowed = false;
   if (context.__compileError) throw new Error(String(context.__compileError).slice(0, 512));
   if (typeof context.__compileResult !== 'string') throw new Error('compile did not settle');
   return context.__compileResult;
@@ -100,7 +108,8 @@ function handle(frame, budget) {
     return {ok: true, v8: process.versions.v8};
   case 'compile':
     if (!context) throw new Error('not initialized');
-    return {ok: true, metadata: compile(frame.source, frame.bpm, budget, frame.prebake ?? '')};
+    return {ok: true, metadata: compile(frame.source, frame.bpm, budget,
+      frame.prebake ?? '', frame.prebakes ?? {})};
   case 'query':
     if (!context) throw new Error('not initialized');
     return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true, budget)};

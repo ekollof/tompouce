@@ -50,6 +50,12 @@ struct JsProgram {
     /* Confined startup prebake text, forwarded to the query worker so its
        compile-time defaults match this QuickJS evaluation. */
     char *prebake_source;
+    /* Named prebakes the QuickJS evaluation actually loaded, with their
+       confined text. Reused to build the worker's __hostPrebake table without
+       re-reading files after the confined load window closes. */
+    char named_prebake_names[16][256];
+    char *named_prebake_texts[16];
+    int nnamed_prebakes;
     struct { int offset, kind, id; unsigned mask; VisualOptions options; } visual_sites[32];
     int nvisual_sites;
     char *visual_requested, *visual_pending, *visual_source;
@@ -79,7 +85,7 @@ struct JsProgram {
 /* Programs that depend on QuickJS-only host features keep using QuickJS. */
 static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     if (!p || !metadata) return 0;
-    if (p->nvisual_sites > 0 || p->prebake_files > 0) return 0;
+    if (p->nvisual_sites > 0) return 0;
     /* MIDI input readers query host state the worker does not have. */
     if (strstr(p->source, "midin") || strstr(p->source, "midikeys")) return 0;
     /* Live slider reads are host state the worker does not have. */
@@ -113,9 +119,15 @@ static int worker_bind(JsProgram *p, double bpm) {
         worker_bound_serial != p->compile_serial) {
         char error[256] = "";
         char *metadata = NULL;
-        if (!js_worker_compile_with_prebake(query_worker, p->source,
+        cJSON *prebakes = cJSON_CreateObject();
+        for (int i=0;i<p->nnamed_prebakes && prebakes;i++)
+            cJSON_AddStringToObject(prebakes,p->named_prebake_names[i],p->named_prebake_texts[i]);
+        char *prebakes_json = prebakes ? cJSON_PrintUnformatted(prebakes) : NULL;
+        int compiled = js_worker_compile_with_host(query_worker, p->source,
                 isfinite(bpm) && bpm > 0 ? bpm : 120, p->prebake_source ? p->prebake_source : "",
-                &metadata, error, sizeof(error))) {
+                prebakes_json ? prebakes_json : "{}", &metadata, error, sizeof(error));
+        free(prebakes_json); cJSON_Delete(prebakes);
+        if (!compiled) {
             /* A rejected source is a user error: keep the worker (and any
                evaluation already bound for another program). Only transport
                failures tear it down. */
@@ -358,6 +370,13 @@ static int prebake_name_safe(const char *name) {
     return local_name_safe(name) || (n>8 && !strcmp(name+n-8,".strudel"));
 }
 
+static char *dup_bytes(const char *text, size_t size) {
+    char *copy = malloc(size+1);
+    if (!copy) return NULL;
+    memcpy(copy,text,size); copy[size] = 0;
+    return copy;
+}
+
 static JSValue host_prebake(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
     JsProgram *p=JS_GetContextOpaque(ctx);
@@ -366,17 +385,30 @@ static JSValue host_prebake(JSContext *ctx, JSValueConst self, int argc, JSValue
     if (argc!=1 || !JS_IsString(argv[0]))return JS_ThrowTypeError(ctx,"prebake requires a file name");
     size_t length; const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
     if (!name)return JS_EXCEPTION;
-    int safe=strlen(name)==length && prebake_name_safe(name);
-    char path[256]; int n=snprintf(path,sizeof(path),"prebakes/%s",name);
-    JS_FreeCString(ctx,name);
-    if (!safe || n<0 || (size_t)n>=sizeof(path))return JS_ThrowReferenceError(ctx,"unsafe prebake name");
+    int safe=length>0 && length<sizeof(p->named_prebake_names[0]) && strlen(name)==length && prebake_name_safe(name);
+    char path[256]; int n=safe?snprintf(path,sizeof(path),"prebakes/%s",name):-1;
+    if (!safe || n<0 || (size_t)n>=sizeof(path)) {
+        JS_FreeCString(ctx,name);
+        return JS_ThrowReferenceError(ctx,"unsafe prebake name");
+    }
     p->prebake_files++;
     size_t size=0; char *text=config_script_source(ctx,path,0,&size);
-    if (!text)return JS_EXCEPTION;
+    if (!text) { JS_FreeCString(ctx,name); return JS_EXCEPTION; }
     if (size>1024*1024-p->prebake_bytes) {
-        free(text);return JS_ThrowRangeError(ctx,"prebakes exceed 1 MiB total");
+        free(text); JS_FreeCString(ctx,name); return JS_ThrowRangeError(ctx,"prebakes exceed 1 MiB total");
     }
     p->prebake_bytes+=size;
+    if (p->nnamed_prebakes<16 && p->named_prebake_texts[p->nnamed_prebakes]==NULL) {
+        char *copy=dup_bytes(name,length);
+        if (copy) {
+            snprintf(p->named_prebake_names[p->nnamed_prebakes],
+                sizeof(p->named_prebake_names[p->nnamed_prebakes]),"%s",name);
+            free(copy);
+            p->named_prebake_texts[p->nnamed_prebakes]=dup_bytes(text,size);
+            p->nnamed_prebakes++;
+        }
+    }
+    JS_FreeCString(ctx,name);
     JSValue result=JS_NewStringLen(ctx,text,size); free(text); return result;
 }
 
@@ -480,6 +512,7 @@ void javascript_free(JsProgram *p) {
     if (p->runtime) JS_FreeRuntime(p->runtime);
     free(p->source);
     free(p->prebake_source);
+    for (int i=0;i<p->nnamed_prebakes;i++) free(p->named_prebake_texts[i]);
     slider_bank_free(p->sliders);
     free(p->visual_notes);
     free(p->visual_requested); free(p->visual_pending); free(p->visual_source);

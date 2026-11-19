@@ -132,8 +132,10 @@ and measured divergences are recorded in the archive.
       forwarded in the compile frame and tested, and the worker now rebuilds
       its VM context per compile to match QuickJS's fresh-evaluation semantics
       (a persistent-context `preCount` drift was found and fixed). Named
-      `loadPrebake()`, Csound loads, live sliders, MIDI snapshots and visuals
-      still stay on QuickJS.
+      `loadPrebake()` calls are now forwarded as a confined name→text table in
+      the compile frame and are tested; the worker's prebake load window closes
+      after evaluation like the host's. Csound loads, live sliders, MIDI
+      snapshots and visuals still stay on QuickJS.
       OOM behavior is covered (the worker reports a
       range error for an oversized allocation and stays alive); one-CPU
       `profile-prep-backend` held 3/4 with and without the worker, with two

@@ -259,8 +259,12 @@ prebake exposed a deeper mismatch: the shared worker VM kept globals across
 compiles, so `preCount` went 1 → 2 where QuickJS creates a fresh context per
 evaluation. The worker now rebuilds its `node:vm` context on every compile;
 `tests/test_javascript.c --prebake` covers the sequence. Named `loadPrebake()`
-calls still throw in the worker and remain excluded until a host callback is
-added.
+calls are now forwarded too: the engine records each confined prebake name and
+text it loaded during evaluation and sends a JSON table in the compile frame.
+The worker's `__hostPrebake` reads only from that table, closes it after
+evaluation like the QuickJS host, and never touches the filesystem; a missing
+name is still an error. `test_named_prebake_engine` checks delegation and
+event parity for a note driven by a prebake global.
 
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and

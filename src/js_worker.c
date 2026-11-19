@@ -375,14 +375,17 @@ void js_worker_stop(JsWorker *worker) {
     free(worker);
 }
 
-int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double bpm,
-    const char *prebake, char **metadata, char *error, int errorlen) {
+int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm,
+    const char *prebake, const char *prebakes_json,
+    char **metadata, char *error, int errorlen) {
     if (!worker || !source || !metadata) { set_error(error, errorlen, "invalid request"); return 0; }
     if (strlen(source) > WORKER_SOURCE_MAX) { set_error(error, errorlen, "source limit"); return 0; }
     if (!prebake) prebake = "";
     if (strlen(prebake) > 256*1024) { set_error(error, errorlen, "prebake limit"); return 0; }
-    /* Both strings are JSON-escaped, so reserve twice their byte lengths. */
-    size_t cap = strlen(source)*2 + strlen(prebake)*2 + 320;
+    if (!prebakes_json) prebakes_json = "{}";
+    /* Strings are JSON-escaped (twice their bytes at worst); prebakes_json is
+       already serialized by the caller. */
+    size_t cap = strlen(source)*2 + strlen(prebake)*2 + strlen(prebakes_json) + 352;
     if (cap > WORKER_FRAME_MAX) { set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     char *frame = malloc(cap);
     if (!frame) { set_error(error, errorlen, "out of memory"); return 0; }
@@ -396,7 +399,15 @@ int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double 
         if (ok) { memcpy(frame+used, "\",\"prebake\":\"", 13); used += 13; }
     }
     ok = ok && json_escape(frame, cap, &used, prebake, strlen(prebake));
-    if (ok) { frame[used++] = '"'; frame[used++] = '}'; frame[used] = 0; }
+    if (ok) {
+        frame[used++] = '"';
+        ok = used + strlen(prebakes_json) + 13 < cap;
+        if (ok) {
+            memcpy(frame+used, ",\"prebakes\":", 12); used += 12;
+            memcpy(frame+used, prebakes_json, strlen(prebakes_json)); used += strlen(prebakes_json);
+        }
+    }
+    if (ok) { frame[used++] = '}'; frame[used] = 0; }
     if (!ok) { free(frame); set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     cJSON *response = request(worker, worker->next_id, frame, WORKER_COMPILE_BUDGET_MS, 0, error, errorlen);
     free(frame);
@@ -407,9 +418,16 @@ int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double 
     return 1;
 }
 
+int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double bpm,
+    const char *prebake, char **metadata, char *error, int errorlen) {
+    return js_worker_compile_with_host(worker, source, bpm, prebake, "{}",
+        metadata, error, errorlen);
+}
+
 int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     char **metadata, char *error, int errorlen) {
-    return js_worker_compile_with_prebake(worker, source, bpm, "", metadata, error, errorlen);
+    return js_worker_compile_with_host(worker, source, bpm, "", "{}",
+        metadata, error, errorlen);
 }
 
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

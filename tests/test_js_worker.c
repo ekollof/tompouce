@@ -389,6 +389,51 @@ static void test_prebake_engine(void) {
     unlink(path); rmdir(config); rmdir(root);
 }
 
+/* Named prebakes loaded during the QuickJS evaluation are forwarded to the
+   worker, so a program whose notes depend on prebake globals still delegates
+   and matches its QuickJS twin. */
+static void test_named_prebake_engine(void) {
+    char root[] = "/tmp/tompouce-worker-named-prebake-XXXXXX";
+    if (!mkdtemp(root)) return;
+    char config[1200], directory[1300], path[1400];
+    snprintf(config, sizeof(config), "%s/tompouce", root);
+    snprintf(directory, sizeof(directory), "%s/prebakes", config);
+    if (mkdir(config, 0700) || mkdir(directory, 0700)) { rmdir(directory); rmdir(config); rmdir(root); return; }
+    snprintf(path, sizeof(path), "%s/fixture.strudel", directory);
+    FILE *file = fopen(path, "w");
+    if (file) { fputs("window.fixturePitch = 71;", file); fclose(file); }
+    const char *previous = getenv("XDG_CONFIG_HOME");
+    char *saved = previous ? strdup(previous) : NULL;
+    setenv("XDG_CONFIG_HOME", root, 1);
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    char error[512] = "";
+    cJSON *meta = NULL;
+    const char *code = "await loadPrebake('fixture.strudel'); note(fixturePitch).s('sine')";
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(delegated && javascript_uses_query_worker(delegated),
+        "named-prebake program delegates");
+    cJSON *worker_events = delegated ? javascript_query(delegated, 0, 1) : NULL;
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    cJSON *quick_events = quick ? javascript_query(quick, 0, 1) : NULL;
+    char *a = cJSON_IsArray(worker_events) ? cJSON_PrintUnformatted(worker_events) : NULL;
+    char *b = cJSON_IsArray(quick_events) ? cJSON_PrintUnformatted(quick_events) : NULL;
+    expect(a && b && !strcmp(a, b), "named-prebake events match QuickJS");
+    const cJSON *first = cJSON_IsArray(worker_events) ? cJSON_GetArrayItem(worker_events, 0) : NULL;
+    const cJSON *value = first ? cJSON_GetObjectItemCaseSensitive(first, "value") : NULL;
+    const cJSON *note = value ? cJSON_GetObjectItemCaseSensitive(value, "note") : NULL;
+    expect(cJSON_IsNumber(note) && note->valueint == 71,
+        "prebake global reaches the worker's evaluation");
+    free(a); free(b);
+    cJSON_Delete(quick_events); cJSON_Delete(worker_events);
+    javascript_free(quick); javascript_free(delegated);
+    if (saved) { setenv("XDG_CONFIG_HOME", saved, 1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(directory); rmdir(config); rmdir(root);
+}
+
 /* The confined worker must refuse an allocation beyond its address-space
    limit within the compile budget, rather than hanging or returning metadata
    from a corrupted evaluation. */
@@ -422,6 +467,7 @@ int main(void) {
     test_engine_retention();
     test_prebake_transport();
     test_prebake_engine();
+    test_named_prebake_engine();
     test_oom();
     test_rejections();
     test_watchdog();

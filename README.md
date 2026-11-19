@@ -239,6 +239,10 @@ accept 44.1 kHz is skipped. F4 and MCP `music_health` show the selected backend;
 the console records startup failures. With no usable output, editing and MCP
 remain available with `stream=down backend=none`. Selection occurs at startup.
 
+External plugin hosts such as Carla can sit downstream of the normal PipeWire
+output with no Tompouce changes; see [external plugin hosting](docs/plugin-hosting.md)
+for the zero-code patchbay path and its verification limits.
+
 Convolution automatically selects a spectrum kernel in the order AVX2, AVX,
 SSE2, then portable C, according to CPU/OS support. The rest of the engine retains
 its normal build settings. `TOMPOUCE_SIMD=c` forces the portable path;

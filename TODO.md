@@ -28,9 +28,14 @@ In-between, use Carla instead of building format support: it already hosts
 LADSPA/DSSI/LV2/VST2/VST3/SF2/SFZ plus Wine bridges (GPL-2.0-or-later, so no
 license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
 
-- [ ] Document the zero-code path: Tompouce JACK out into a Carla patchbay
-      hosting anything (including Wine VSTs), manual patching, no pattern
-      params. Verify on a configured box and record latency notes.
+- [x] Document the zero-code path: Tompouce's default PipeWire out into a Carla
+      patchbay (via `pw-jack` or native JACK) hosting anything, including Wine
+      VSTs, manual patching with `pw-link`, no pattern params.
+      See [external plugin hosting](docs/plugin-hosting.md).
+- [ ] Verify the zero-code path on a configured box and record latency notes:
+      round-trip MIDI-to-audio latency under load with rtkit/wine-rt, and a
+      real plugin chain. This box has Carla 2.5.10, `pw-jack`, `pw-link` and
+      PipeWire, but the maintained checks only cover Tompouce to an owned sink.
 - [ ] `out` control for named PipeWire targets (exact node-name match):
       `s('saw').out('carla')` routes those voices to a dedicated stream
       targeting that node; unknown names fall back to the default stream with

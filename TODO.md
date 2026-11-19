@@ -40,8 +40,12 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       See [external plugin hosting](docs/plugin-hosting.md).
 - [ ] Verify the zero-code path on a configured box and record latency notes:
       round-trip MIDI-to-audio latency under load with rtkit/wine-rt, and a
-      real plugin chain. This box has Carla 2.5.10, `pw-jack`, `pw-link` and
-      PipeWire, but the maintained checks only cover Tompouce to an owned sink.
+      real plugin chain. Verified here: generating a real Carla project with
+      the bundled LV2 gain plugin via Carla's Python API and starting it
+      headless (`pw-jack carla -n`), which exposes a `Carla` PipeWire node.
+      Blocked here: the JACK bridge exposed only one AUX playback port, so the
+      signal-path and latency measurement needs the user's configured box with
+      a real plugin chain and realtime setup; it is not claimed as verified.
 - [x] `out` control for named PipeWire targets (exact node-name match):
       `s('saw').out('carla')` routes voices to a per-name stream (up to four,
       from the `TOMPOUCE_OUTPUT_NAMES` allowlist) with one shared render pass;

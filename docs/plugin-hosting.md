@@ -48,6 +48,18 @@ tools), keep the graph quantum low and stable, enable realtime scheduling
 intermediate PulseAudio hop. Record those numbers before claiming
 live-coding suitability; do not infer them from the native engine benchmarks.
 
+The reproducible part was checked on the development box. A real Carla project
+with the bundled LV2 `audiogain_s` plugin can be generated through Carla's own
+Python API (`/usr/share/carla/carla_backend.py`: `CarlaHostDLL` on
+`libcarla_standalone2.so`, `set_engine_option(ENGINE_OPTION_PROCESS_MODE,
+ENGINE_PROCESS_MODE_PATCHBAY)` then `add_plugin(BINARY_NATIVE, PLUGIN_LV2,
+/usr/lib/lv2/carla.lv2/carla.so, "gain", "<uri>", 0, None, 0)` and
+`save_project(...)`). `pw-jack carla -n <project>` then exposes a PipeWire node
+named `Carla` (and `Carla.<pid>/gain` for the plugin). On this box the JACK
+bridge exposed only a single AUX playback port, so a full signal-path and
+latency measurement could not be completed here; that step needs the configured
+box and is not claimed as verified.
+
 ## Supported classes and the UI ceiling
 
 Today the supported plugin classes are exactly those the separate Carla process

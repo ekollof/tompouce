@@ -5,6 +5,8 @@
 #include "../src/scheduler.c"
 #include "midi.h"
 #include <assert.h>
+#include <math.h>
+#include <pthread.h>
 #include <alsa/asoundlib.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -324,6 +326,66 @@ static void test_short_gate_and_bounds(void) {
 
 /* Receive only this process's own output: no discovery-by-name connection
    to another running engine and no external hardware or audio device. */
+static volatile double load_sink;
+static void *busy_load(void *arg) {
+    (void)arg;
+    double value=1;
+    for (int i=0;i<20000000;i++) value=sqrt(value+1.0000001);
+    load_sink=value;
+    return NULL;
+}
+
+/* Same owned ALSA receiver, but with CPU contention from two owned threads.
+   Note-offs must still be delivered before the 30 ms audio-time deadline. */
+static void test_note_off_under_load(void) {
+    midi_shutdown(); midi_init();
+    if (!midi_ready()) { puts("SKIP note-off under load: no ALSA sequencer"); return; }
+    snd_seq_t *receiver=NULL;
+    assert(snd_seq_open(&receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
+    snd_seq_set_client_name(receiver,"tompouce-noteoff-load-qa");
+    int port=snd_seq_create_simple_port(receiver,"owned receiver",
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+    assert(port>=0);
+    snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client,-1);
+    int sender=-1,sender_port=-1;
+    while (snd_seq_query_next_client(receiver,client)>=0) {
+        if (snd_seq_client_info_get_pid(client)!=(int)getpid() || strcmp(snd_seq_client_info_get_name(client),"tompouce")) continue;
+        snd_seq_port_info_t *info; snd_seq_port_info_alloca(&info);
+        snd_seq_port_info_set_client(info,snd_seq_client_info_get_client(client));
+        snd_seq_port_info_set_port(info,-1);
+        while (snd_seq_query_next_port(receiver,info)>=0) if (!strcmp(snd_seq_port_info_get_name(info),"out")) {
+            assert(sender<0);
+            sender=snd_seq_client_info_get_client(client); sender_port=snd_seq_port_info_get_port(info);
+        }
+    }
+    assert(sender>=0 && snd_seq_connect_from(receiver,port,sender,sender_port)>=0);
+    pthread_t threads[2];
+    for (int i=0;i<2;i++) assert(!pthread_create(&threads[i],NULL,busy_load,NULL));
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    const unsigned char channels[]={1,3,5,7};
+    midi_capture_enable(1);
+    midi_notes_for(channels,4,64,110,.02);
+    int ons=0,offs=0; double first=monotonic();
+    while (offs<4 && monotonic()-first<3) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(receiver,&event)>=0 && event) {
+            if (event->type==SND_SEQ_EVENT_NOTEON) ons++;
+            else if (event->type==SND_SEQ_EVENT_NOTEOFF) {
+                assert(ons==4 && offs<4);
+                assert(audio_time_now()>=.02 && audio_time_now()<.03);
+                offs++;
+            }
+        }
+        if (offs<4) pump_realtime(128);
+    }
+    for (int i=0;i<2;i++) pthread_join(threads[i],NULL);
+    assert(ons==4 && offs==4);
+    midi_capture_enable(0); snd_seq_close(receiver); midi_shutdown();
+    audio_toggle_play(0); event_queue_clear();
+    puts("note-off delivery holds under CPU load");
+}
+
 static void test_channel_note_off_loopback(void) {
     midi_shutdown(); midi_init();
     if (!midi_ready()) { puts("SKIP channel note-off loopback: no ALSA sequencer"); return; }
@@ -1272,6 +1334,7 @@ int main(int argc, char **argv) {
     test_midi_extras_delivery();
     test_short_gate_and_bounds();
     test_channel_note_off_loopback();
+    test_note_off_under_load();
     event_queue_clear();
     midi_shutdown();
     puts("dominant MIDI routing holds without local voices; combined outputs stay independent");

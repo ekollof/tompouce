@@ -220,8 +220,10 @@ and measured divergences are recorded in the archive.
       superset; malformed tokens, >255 values and over-long data are rejected
       while the note still commits.
 - [ ] Measure physical-device MIDI note-off delivery timing under load. Channel
-      arrays now have independent web gates and an owned ALSA loopback check;
-      this does not measure USB/DIN transport or device response. The maintained
+      arrays have independent web gates; `test_note_off_under_load` now adds two
+      busy CPU threads to the owned ALSA loopback check and still requires every
+      20 ms note-off before 30 ms of audio time. USB/DIN transport and device
+      response remain unmeasured. The maintained
       gate covers named CCs, inline maps, NRPN,
       controller/options defaults, duplicate scalar/command sends and exact
       note-on/off timestamp differences. Pinned numeric-string coercion drift

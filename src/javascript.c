@@ -89,8 +89,9 @@ struct JsProgram {
 static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     if (!p || !metadata) return 0;
     if (p->nvisual_sites > 0) return 0;
-    /* MIDI input readers query host state the worker does not have. */
-    if (strstr(p->source, "midin") || strstr(p->source, "midikeys")) return 0;
+    /* midin CC values are forwarded per query; midikeys consumes a host event
+       queue that the worker cannot consume, so it stays on QuickJS. */
+    if (strstr(p->source, "midikeys")) return 0;
     /* Slider values are forwarded at compile and on every query, so live
        controls no longer force the QuickJS backend. */
     const cJSON *csound = cJSON_GetObjectItemCaseSensitive(metadata, "csound");
@@ -124,6 +125,27 @@ static char *worker_sliders_json(JsProgram *p, int with_binds) {
     for (int i=0;i<p->nslider_binds;i++) cJSON_AddItemToArray(binds,cJSON_CreateNumber(p->slider_binds[i]));
     cJSON_AddItemToObject(root,"binds",binds);
     cJSON_AddItemToObject(root,"values",values);
+    char *text=cJSON_PrintUnformatted(root); cJSON_Delete(root); return text;
+}
+
+/* MIDI CC reads are lazy: a pattern can read any CC at query time, so the
+   compile stage cannot know which ones to forward. Send every nonzero CC value
+   with each query (bounded by 128 * 16 entries); the worker keeps a bounded
+   map of the same size. */
+static char *worker_midi_json(JsProgram *p) {
+    (void)p;
+    cJSON *root = cJSON_CreateArray();
+    if (!root) return NULL;
+    for (int cc=0;cc<128;cc++) for (int chan=0;chan<16;chan++) {
+        double value=midi_cc_value(cc,chan);
+        if (value==0) continue;
+        cJSON *entry=cJSON_CreateArray();
+        if (!entry) { cJSON_Delete(root); return NULL; }
+        cJSON_AddItemToArray(entry,cJSON_CreateNumber(cc));
+        cJSON_AddItemToArray(entry,cJSON_CreateNumber(chan));
+        cJSON_AddItemToArray(entry,cJSON_CreateNumber(value));
+        cJSON_AddItemToArray(root,entry);
+    }
     char *text=cJSON_PrintUnformatted(root); cJSON_Delete(root); return text;
 }
 
@@ -1010,9 +1032,11 @@ static cJSON *query_events(JsProgram *p, double begin, double end, double cps, i
         if (usable) {
             char *events_text = NULL, worker_error[256] = "";
             char *slider_values = worker_sliders_json(p,0);
-            int ok = js_worker_query_with_sliders(query_worker, begin, end, cps, probes,
-                slider_values ? slider_values : "[]", &events_text, worker_error, sizeof(worker_error));
-            free(slider_values);
+            char *midi_values = worker_midi_json(p);
+            int ok = js_worker_query_full(query_worker, begin, end, cps, probes,
+                slider_values ? slider_values : "[]", midi_values ? midi_values : "[]",
+                &events_text, worker_error, sizeof(worker_error));
+            free(midi_values); free(slider_values);
             if (!ok) {
                 /* A dead or desynchronized worker must not stall playback: drop
                    it and let the QuickJS evaluation take over. */

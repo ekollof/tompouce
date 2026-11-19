@@ -274,6 +274,13 @@ programs now delegate, and `test_slider_delegation` checks that a
 `slider_set(0, .9)` between queries reaches the worker and matches a QuickJS
 twin.
 
+`midin` CC reads are lazy (a pattern can read any CC at query time), so the
+compile stage cannot know which ones to forward. Each query frame now carries
+all nonzero CC values (bounded at 128 × 16 entries) as a bounded map in the
+worker; `__hostMidiOpen` succeeds there and `test_midi_delegation` checks that a
+live CC change reaches the worker and matches a QuickJS twin. `midikeys`
+consumes a host event queue and still stays on QuickJS.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

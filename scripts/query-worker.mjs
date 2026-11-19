@@ -58,6 +58,10 @@ function boot(bundle, timeoutMs) {
        a slot keep the same identity here as in the QuickJS evaluation. */
     globalThis.__hostSliderBind=()=>__workerBinds.length?__workerBinds.shift():-1;
     globalThis.__hostSliderRead=i=>__workerSliders[i];
+    globalThis.__midiCC=new Map();
+    globalThis.__hostMidiOpen=()=>1;
+    globalThis.__hostMidiRead=(cc,chan)=>__midiCC.get(String(cc)+':'+String(chan ?? 0)) ?? 0;
+    globalThis.__hostMidiKeys=()=>{throw new Error('midikeys are unavailable in the query worker')};
     globalThis.__prebakeLoadingAllowed=true;
     globalThis.__hostPrebake=name=>{
       if(!__prebakeLoadingAllowed)throw new Error('prebake loads are closed after evaluation');
@@ -90,6 +94,7 @@ function compile(source, bpm, timeoutMs, prebake, prebakes, sliders) {
   context.__prebakes = prebakes;
   context.__workerBinds = sliders.binds.slice();
   context.__workerSliders = sliders.values.slice();
+  context.__midiCC = new Map();
   compileScript.runInContext(context, {timeout: timeoutMs});
   context.__prebakeLoadingAllowed = false;
   if (context.__compileError) throw new Error(String(context.__compileError).slice(0, 512));
@@ -97,7 +102,12 @@ function compile(source, bpm, timeoutMs, prebake, prebakes, sliders) {
   return context.__compileResult;
 }
 
-function query(begin, end, cps, probes, timeoutMs, sliders) {
+function query(begin, end, cps, probes, timeoutMs, sliders, midi) {
+  if (midi !== undefined) {
+    if (!Array.isArray(midi) || midi.length > 2048) throw new Error('invalid midi snapshot');
+    context.__midiCC = new Map(midi.map(entry =>
+      [`${Number(entry[0])}:${Number(entry[1])}`, Number(entry[2])]));
+  }
   if (sliders !== undefined) {
     if (!Array.isArray(sliders) || sliders.length > 64) throw new Error('invalid slider values');
     context.__workerSliders = sliders.slice();
@@ -124,7 +134,7 @@ function handle(frame, budget) {
   case 'query':
     if (!context) throw new Error('not initialized');
     return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true,
-      budget, frame.sliders)};
+      budget, frame.sliders, frame.midi)};
   case 'close':
     process.stdout.write(JSON.stringify({id: frame.id ?? null, ok: true}) + '\n', () => process.exit(0));
     return null;

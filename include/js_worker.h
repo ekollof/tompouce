@@ -40,6 +40,10 @@ int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm
    slider index), so live control changes reach delegated queries. */
 int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, double cps, int probes,
     const char *slider_values_json, char **events, char *error, int errorlen);
+/* As above, plus MIDI CC snapshots as [[cc, channel, value], ...]. */
+int js_worker_query_full(JsWorker *worker, double begin, double end, double cps, int probes,
+    const char *slider_values_json, const char *midi_json,
+    char **events, char *error, int errorlen);
 /* Query [begin,end) and return the events JSON (caller frees) or NULL. A
    non-finite cps asks the bundle to use its tempo, like the QuickJS host. */
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

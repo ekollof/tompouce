@@ -439,11 +439,13 @@ int js_worker_compile(JsWorker *worker, const char *source, double bpm,
         metadata, error, errorlen);
 }
 
-int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, double cps, int probes,
-    const char *slider_values_json, char **events, char *error, int errorlen) {
+int js_worker_query_full(JsWorker *worker, double begin, double end, double cps, int probes,
+    const char *slider_values_json, const char *midi_json,
+    char **events, char *error, int errorlen) {
     if (!worker || !events) { set_error(error, errorlen, "invalid request"); return 0; }
     if (!slider_values_json) slider_values_json = "[]";
-    size_t cap = 256 + strlen(slider_values_json) + 32;
+    if (!midi_json) midi_json = "[]";
+    size_t cap = 256 + strlen(slider_values_json) + strlen(midi_json) + 48;
     if (cap > WORKER_FRAME_MAX) { set_error(error, errorlen, "query exceeds the frame limit"); return 0; }
     char *frame = malloc(cap);
     if (!frame) { set_error(error, errorlen, "out of memory"); return 0; }
@@ -460,8 +462,14 @@ int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, dou
         ok = used + n + 2 <= cap;
         if (ok) {
             memcpy(frame+used, slider_values_json, n); used += n;
-            frame[used++] = '}'; frame[used] = 0;
+            ok = used + strlen(midi_json) + 10 <= cap;
+            if (ok) {
+                memcpy(frame+used, ",\"midi\":", 8); used += 8;
+                size_t m = strlen(midi_json);
+                memcpy(frame+used, midi_json, m); used += m;
+            }
         }
+        if (ok) { frame[used++] = '}'; frame[used] = 0; }
     }
     if (!ok) { free(frame); set_error(error, errorlen, "invalid query"); return 0; }
     cJSON *response = request(worker, worker->next_id, frame, WORKER_QUERY_BUDGET_MS, 1, error, errorlen);
@@ -471,6 +479,12 @@ int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, dou
     cJSON_Delete(response);
     if (!*events) { set_error(error, errorlen, "worker returned no events"); return 0; }
     return 1;
+}
+
+int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, double cps, int probes,
+    const char *slider_values_json, char **events, char *error, int errorlen) {
+    return js_worker_query_full(worker, begin, end, cps, probes, slider_values_json, NULL,
+        events, error, errorlen);
 }
 
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

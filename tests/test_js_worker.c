@@ -3,9 +3,11 @@
 #include "js_worker.h"
 #include "javascript.h"
 #include "slider.h"
+#include "midi.h"
 #include "common.h"
 #include <cjson/cJSON.h>
 #include <assert.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -266,6 +268,47 @@ static void test_slider_delegation(void) {
     javascript_free(quick); javascript_free(delegated);
 }
 
+/* midin CC reads are host state forwarded with each query. A delegated
+   program must see a live CC change and match a QuickJS twin. */
+static void test_midi_delegation(void) {
+    const char *code = "const cc = await midin('no-such-device-xyz'); note(60).s('sine').gain(cc(120))";
+    char error[512] = "";
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    midi_test_inject(1, 0, 120, 64);
+    cJSON *meta = NULL;
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(delegated && javascript_uses_query_worker(delegated), "midin program delegates");
+    cJSON *w1 = delegated ? javascript_query(delegated, 0, 1) : NULL;
+    midi_test_inject(1, 0, 120, 127);
+    cJSON *w2 = delegated ? javascript_query(delegated, 0, 1) : NULL;
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    midi_test_inject(1, 0, 120, 64);
+    JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    cJSON *q1 = quick ? javascript_query(quick, 0, 1) : NULL;
+    midi_test_inject(1, 0, 120, 127);
+    cJSON *q2 = quick ? javascript_query(quick, 0, 1) : NULL;
+    char *a = cJSON_IsArray(w1) ? cJSON_PrintUnformatted(w1) : NULL;
+    char *b = cJSON_IsArray(q1) ? cJSON_PrintUnformatted(q1) : NULL;
+    char *c = cJSON_IsArray(w2) ? cJSON_PrintUnformatted(w2) : NULL;
+    char *d = cJSON_IsArray(q2) ? cJSON_PrintUnformatted(q2) : NULL;
+    expect(a && b && !strcmp(a, b), "initial CC value matches QuickJS");
+    expect(c && d && !strcmp(c, d), "updated CC value matches QuickJS");
+    const cJSON *first = cJSON_IsArray(w1) ? cJSON_GetArrayItem(w1, 0) : NULL;
+    const cJSON *value = first ? cJSON_GetObjectItemCaseSensitive(first, "value") : NULL;
+    const cJSON *gain = value ? cJSON_GetObjectItemCaseSensitive(value, "gain") : NULL;
+    expect(cJSON_IsNumber(gain) && fabs(gain->valuedouble - 64.0/127.0) < 1e-9,
+        "worker uses the initial CC value");
+    first = cJSON_IsArray(w2) ? cJSON_GetArrayItem(w2, 0) : NULL;
+    value = first ? cJSON_GetObjectItemCaseSensitive(first, "value") : NULL;
+    gain = value ? cJSON_GetObjectItemCaseSensitive(value, "gain") : NULL;
+    expect(cJSON_IsNumber(gain) && gain->valuedouble == 1, "worker uses the updated CC value");
+    free(a); free(b); free(c); free(d);
+    cJSON_Delete(q2); cJSON_Delete(q1); cJSON_Delete(w2); cJSON_Delete(w1);
+    javascript_free(quick); javascript_free(delegated);
+}
+
 /* Re-evaluating identical source must start a fresh worker evaluation, not
    continue the previous one's state. A pattern whose values depend on a
    query-advancing callback exposes the difference. */
@@ -491,6 +534,7 @@ int main(void) {
     test_confinement();
     test_engine_delegation();
     test_slider_delegation();
+    test_midi_delegation();
     test_engine_identity();
     test_engine_retention();
     test_prebake_transport();

@@ -3526,6 +3526,8 @@ static const DocLine cheat[] = {
     {3, "/tutor            Open Strudeltutor lessons"},
     {3, "/companion        Open browser companion"},
     {3, "/companion stop   Close companion"},
+    {3, "/hydra            Open bounded audio visualizer"},
+    {3, "/hydra stop       Close audio visualizer"},
     {0, ""},
     {1, "Mouse and pane focus"},
     {3, "Left-click        Place cursor / focus pane"},
@@ -4117,6 +4119,17 @@ static void do_command_or_ai(const char *text) {
             } else {
                 int port = mcp_companion_port();
                 snprintf(status_msg,256,port && companion_start(port) ? "companion starting (URL in console)" : "companion unavailable (see console)");
+            }
+        } else if (cmd && strcmp(cmd,"hydra")==0) {
+            char *arg = strtok_r(NULL," \t",&save);
+            char *extra = strtok_r(NULL," \t",&save);
+            if (extra || (arg && strcmp(arg,"stop") && strcmp(arg,"start"))) {
+                log_console("usage: /hydra [start|stop]");
+            } else if (arg && !strcmp(arg,"stop")) {
+                hydra_stop(); snprintf(status_msg,256,"hydra stopping");
+            } else {
+                int port = mcp_companion_port();
+                snprintf(status_msg,256,port && hydra_start(port) ? "hydra starting (URL in console)" : "hydra unavailable (see console)");
             }
         } else if (cmd && strcmp(cmd,"clear")==0) {
             replace_code_with("");

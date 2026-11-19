@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--mcp-port", type=int, default=18789)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--open", action="store_true", help="open a Chromium tab")
+    parser.add_argument("--hydra", action="store_true", help="serve the bounded audio visualizer only")
     parser.add_argument("--parent-pid", type=int, help="exit if the launching engine exits")
     parser.add_argument("--mcp-token-stdin", action="store_true", help="read the engine capability from a private stdin pipe")
     args = parser.parse_args()
@@ -37,6 +38,9 @@ def main():
              "music_health", "music_play", "music_stop", "music_evaluate",
              "music_set_bpm", "music_set_code"}
     tools.update({"music_sounds", "music_reload_sounds"})
+    if args.hydra:
+        # The visualizer gets a single bounded read-only analysis tool.
+        tools = {"music_audio_scope"}
 
     def call_mcp(name, arguments):
         message = {"jsonrpc": "2.0", "id": 1, "auth": mcp_token, "method": "tools/call",
@@ -77,12 +81,14 @@ def main():
                      "/companion.css": ("companion.css", "text/css")}
             files["/editor.js"] = ("dist/editor.js", "text/javascript")
             files["/sounds.js"] = ("sounds.js", "text/javascript")
+            if args.hydra:
+                files = {"/": ("hydra.html", "text/html; charset=utf-8")}
             if self.path not in files:
                 self.send(404, b'{}')
                 return
             name, kind = files[self.path]
             content = (assets / name).read_bytes()
-            if name == "index.html":
+            if name in ("index.html", "hydra.html"):
                 content = content.replace(b"COMPANION_TOKEN", token.encode())
                 content = content.replace(b"EDITOR_STYLE_NONCE", style_nonce.encode())
             self.send(200, content, kind)
@@ -90,6 +96,7 @@ def main():
         def do_POST(self):
             origin = f"http://127.0.0.1:{self.server.server_port}"
             if (not self.host_ok() or self.path not in {"/api/tool", "/api/import"} or
+                    (args.hydra and self.path != "/api/tool") or
                     self.headers.get("Origin") != origin or
                     not hmac.compare_digest(self.headers.get("X-Companion-Token", ""), token)):
                 self.send(403, b'{"error":"request refused"}')
@@ -134,7 +141,8 @@ def main():
     server = Server(("127.0.0.1", args.port), Handler)
     server.daemon_threads = True
     url = f"http://127.0.0.1:{server.server_port}/"
-    print(f"Tompouce companion: {url} (MCP 127.0.0.1:{args.mcp_port})", flush=True)
+    label = "Tompouce hydra" if args.hydra else "Tompouce companion"
+    print(f"{label}: {url} (MCP 127.0.0.1:{args.mcp_port})", flush=True)
     if args.open:
         try:
             browser = next((path for name in ('chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable') if (path := shutil.which(name))), 'chromium')

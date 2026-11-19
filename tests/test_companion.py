@@ -12,6 +12,70 @@ import urllib.error
 import urllib.request
 
 
+class HydraTest(unittest.TestCase):
+    """The /hydra bridge exposes one bounded analysis tool and nothing else."""
+    @classmethod
+    def setUpClass(cls):
+        cls.calls = []
+
+        class MCP(socketserver.StreamRequestHandler):
+            def handle(self):
+                message = json.loads(self.rfile.readline())
+                assert message.get("auth") == "a" * 64
+                cls.calls.append(message["params"]["name"])
+                reply = {"jsonrpc": "2.0", "id": message["id"], "result": {
+                    "content": [{"type": "text", "text": '{"scope":[0,0.1],"bpm":120,"playing":1}'}]}}
+                self.wfile.write((json.dumps(reply) + "\n").encode())
+
+        cls.mcp = socketserver.ThreadingTCPServer(("127.0.0.1", 0), MCP)
+        cls.worker = threading.Thread(target=cls.mcp.serve_forever, daemon=True)
+        cls.worker.start()
+        cls.storage = tempfile.TemporaryDirectory()
+        cls.process = subprocess.Popen(["python3", "scripts/companion.py", "--hydra", "--mcp-port",
+                                        str(cls.mcp.server_address[1])], stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True,
+                                       env=dict(os.environ, XDG_CONFIG_HOME=cls.storage.name,
+                                                TOMPOUCE_MCP_TOKEN="a" * 64))
+        if not select.select([cls.process.stdout], [], [], 5)[0]:
+            cls.process.kill()
+            raise AssertionError("hydra startup timed out")
+        line = cls.process.stdout.readline()
+        assert "Tompouce hydra" in line
+        cls.url = re.search(r"http://127\.0\.0\.1:\d+", line).group()
+        html = urllib.request.urlopen(cls.url).read().decode()
+        assert "music_audio_scope" in html and "COMPANION_TOKEN" not in html
+        cls.token = re.search(r"const token = '([^']+)'", html).group(1)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.process.terminate()
+        cls.process.communicate(timeout=5)
+        cls.mcp.shutdown()
+        cls.mcp.server_close()
+        cls.worker.join(timeout=5)
+        cls.storage.cleanup()
+
+    def post(self, path, name, token=None, origin=None):
+        return urllib.request.urlopen(urllib.request.Request(self.url + path,
+            json.dumps({"name": name, "arguments": {"limit": 32}}).encode(), headers={
+                "Origin": origin or self.url, "X-Companion-Token": token or self.token,
+                "Content-Type": "application/json"}), timeout=5)
+
+    def test_only_analysis_tool(self):
+        reply = json.loads(self.post("/api/tool", "music_audio_scope").read())
+        assert "scope" in reply["result"]["content"][0]["text"]
+        assert self.calls == ["music_audio_scope"]
+        for name in ("music_get_code", "music_evaluate"):
+            with self.assertRaises(urllib.error.HTTPError):
+                self.post("/api/tool", name)
+        with self.assertRaises(urllib.error.HTTPError):
+            self.post("/api/import", "music_audio_scope")
+        with self.assertRaises(urllib.error.HTTPError):
+            self.post("/api/tool", "music_audio_scope", token="wrong")
+        with self.assertRaises(urllib.error.HTTPError):
+            self.post("/api/tool", "music_audio_scope", origin="http://evil.example")
+
+
 class CompanionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

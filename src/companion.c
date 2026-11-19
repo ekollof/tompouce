@@ -12,7 +12,9 @@
 
 extern char **environ;
 typedef struct { pid_t child; int output_fd, stopping; char pending[1024]; size_t pending_size; } Helper;
-static Helper bridge = {.output_fd = -1}, importer = {.output_fd = -1};
+static Helper bridge = {.output_fd = -1}, importer = {.output_fd = -1}, hydra = {.output_fd = -1};
+static int helper_script(const char *name, char *script, size_t size);
+static int helper_spawn(Helper *helper, char *const *argv, const char *secret);
 
 static int helper_poll(Helper *helper, const char *label) {
     if (helper->output_fd >= 0) {
@@ -51,6 +53,7 @@ static int helper_poll(Helper *helper, const char *label) {
 
 void companion_poll(void) {
     (void)helper_poll(&bridge,"companion");
+    (void)helper_poll(&hydra,"hydra");
     if (helper_poll(&importer,"sound import")) (void)user_sounds_reload();
 }
 
@@ -62,7 +65,24 @@ static void helper_stop(Helper *helper) {
 }
 
 void companion_stop(void) { companion_poll(); helper_stop(&bridge); }
-void companion_shutdown(void) { companion_poll(); helper_stop(&bridge); helper_stop(&importer); }
+void hydra_stop(void) { helper_poll(&hydra,"hydra"); helper_stop(&hydra); }
+void companion_shutdown(void) {
+    companion_poll(); helper_stop(&bridge); helper_stop(&hydra); helper_stop(&importer);
+}
+
+int hydra_start(int mcp_port) {
+    companion_poll();
+    if (hydra.child>0) return 1;
+    if (mcp_port<1 || mcp_port>65535) return 0;
+    char script[PATH_MAX], port[16], parent[32];
+    if (!helper_script("companion.py",script,sizeof(script))) return 0;
+    snprintf(port,sizeof(port),"%d",mcp_port);
+    snprintf(parent,sizeof(parent),"%ld",(long)getpid());
+    const char *secret=mcp_tcp_token();
+    char *argv[]={"python3",script,"--hydra","--mcp-port",port,"--parent-pid",parent,
+        "--mcp-token-stdin","--open",NULL};
+    return helper_spawn(&hydra,argv,secret);
+}
 
 static int helper_script(const char *name, char *script, size_t size) {
     ssize_t length = readlink("/proc/self/exe",script,size-1);

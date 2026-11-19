@@ -10,11 +10,14 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
-- [ ] Add a separate `/hydra` command that opens a browser window or tab running
-      a Strudel-compatible Hydra visualizer, connected to Tompouce's audio
-      outputs so Hydra can react to the music. Keep it independent of F12,
-      with authenticated output access, bounded audio/analysis streaming and
-      explicit browser/session lifecycle and source-generation guards.
+- [ ] `/hydra` command: a separate loopback visualizer is now implemented and
+      independent of F12 — `/hydra` / `/hydra stop` spawn a browser tab through
+      the companion helper with a private token, Host/Origin checks, one
+      read-only `music_audio_scope` MCP tool (bounded 16–192 samples, polled at
+      8 Hz) and a parent-pid session guard. `tests/test_companion.py` covers the
+      tool allowlist and auth. Still open: full Strudel/Hydra function
+      compatibility (`osc`, `shape`, `src`, …) and source-generation guards on
+      the visual stream; the current page is a bounded audio-scope renderer.
 
 ## Plugin hosting
 

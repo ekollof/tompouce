@@ -410,6 +410,8 @@ void handle_request(cJSON *req) {
             "{\"type\":\"object\",\"properties\":{}}");
         ADDTOOL("music_debug", "Read-only engine snapshot: voices, filter Hz, sample window, recent triggers, queued events.",
             "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"number\"}}}");
+        ADDTOOL("music_audio_scope", "Bounded read-only audio waveform and voice metrics for visualizers.",
+            "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}");
         ADDTOOL("music_sounds", "Search playable samples, drum-machines, synths, wavetables and user sounds. Returns JSON catalog text.",
             "{\"type\":\"object\",\"properties\":{\"category\":{\"type\":\"string\"},\"query\":{\"type\":\"string\"},\"offset\":{\"type\":\"integer\"},\"limit\":{\"type\":\"integer\"}}}");
         ADDTOOL("music_reload_sounds", "Reload imported sounds from confined application storage; source/playback unchanged.",
@@ -589,6 +591,27 @@ void handle_request(cJSON *req) {
                     iserr = 1;
                 }
             }
+        } else if (strcmp(tname, "music_audio_scope") == 0) {
+            int count=256;
+            const cJSON *lim=args?cJSON_GetObjectItemCaseSensitive(args,"limit"):NULL;
+            if (cJSON_IsNumber(lim) && isfinite(lim->valuedouble)) count=(int)lim->valuedouble;
+            if (count<16) count=16;
+            if (count>256) count=256;
+            float samples[256];
+            count=audio_scope_copy(samples,count);
+            cJSON *root=cJSON_CreateObject();
+            cJSON *scope=cJSON_CreateArray();
+            if (root && scope) {
+                cJSON_AddItemToObject(root,"scope",scope);
+                cJSON_AddNumberToObject(root,"playing",audio_is_playing()?1:0);
+                cJSON_AddNumberToObject(root,"bpm",audio_get_bpm());
+                for (int i=0;i<count;i++)
+                    cJSON_AddItemToArray(scope,cJSON_CreateNumber((int)(samples[i]*10000)/10000.0));
+                char *text=cJSON_PrintUnformatted(root);
+                snprintf(out,outcap,"%s",text?text:"{}");
+                free(text);
+            } else snprintf(out,outcap,"{}");
+            cJSON_Delete(root);
         } else if (strcmp(tname, "music_get_status") == 0) {
             int si = scheduler_song_pos();
             int n = scheduler_song_count();

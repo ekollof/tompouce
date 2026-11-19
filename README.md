@@ -272,6 +272,13 @@ with `/companion stop`; it also exits with the engine. The companion is
 loopback-only; audio stays native. Standalone launching via
 `python3 scripts/companion.py --open` remains available.
 
+`/hydra` opens a separate loopback visualizer tab (`/hydra stop` closes it),
+independent of F12. It uses the same authenticated loopback helper with a
+single read-only `music_audio_scope` tool (bounded waveform plus BPM/playing
+state, polled at 8 Hz); it has no control access to the engine and exits with
+its parent. It is a bounded audio-scope renderer, not a full Strudel/Hydra
+function host.
+
 Native ZzFX (`s('z_sine')` and related sounds), bytebeat (`s('bytebeat').bbexpr('t')`)
 and Kabelsalat graphs (`note(60).K(sine(sFreq).mul(.1).out())`) run without a browser.
 Append `.osc()` to route a pattern to SuperDirt or another OSC receiver over UDP,

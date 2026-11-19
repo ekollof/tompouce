@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tompouce Hydra</title>
+<style nonce="EDITOR_STYLE_NONCE">
+ html,body{margin:0;height:100%;background:#090b12;color:#d7dbe8;font:13px system-ui,sans-serif;overflow:hidden}
+ canvas{display:block;width:100vw;height:100vh}
+ #hud{position:fixed;top:8px;left:10px;padding:4px 8px;background:#101525aa;border:1px solid #2a3350;border-radius:6px}
+</style></head><body>
+<canvas id="stage" width="960" height="540"></canvas>
+<div id="hud">waiting for engine analysis…</div>
+<script nonce="EDITOR_STYLE_NONCE">
+const token = 'COMPANION_TOKEN';
+const stage = document.getElementById('stage');
+const ctx = stage.getContext('2d');
+const hud = document.getElementById('hud');
+let phase = 0, last = null;
+async function poll() {
+  try {
+    const reply = await fetch('/api/tool', {method:'POST',
+      headers:{'Content-Type':'application/json','X-Companion-Token':token},
+      body:JSON.stringify({name:'music_audio_scope',arguments:{limit:192}})});
+    if (reply.ok) {
+      const payload = await reply.json();
+      const text = payload.result && payload.result.content && payload.result.content[0] && payload.result.content[0].text;
+      if (text) { const data = JSON.parse(text); last = data; }
+    }
+  } catch (error) { /* keep the last frame on a dropped poll */ }
+  const width = stage.width, height = stage.height;
+  ctx.fillStyle = '#090b12'; ctx.fillRect(0,0,width,height);
+  const samples = last && last.scope ? last.scope : [];
+  let energy = 0;
+  for (const value of samples) energy += Math.abs(value);
+  energy = samples.length ? energy / samples.length : 0;
+  phase += 0.01 + Math.min(0.06, energy * 0.4);
+  ctx.strokeStyle = `hsl(${(phase*40)%360} 80% 65%)`; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i=0;i<samples.length;i++) {
+    const x = i/(samples.length-1)*width;
+    const y = height/2 - samples[i]*height*0.85;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = '#2a3350'; ctx.beginPath();
+  ctx.moveTo(0,height/2); ctx.lineTo(width,height/2); ctx.stroke();
+  hud.textContent = last
+    ? `hydra: ${last.playing ? 'playing' : 'stopped'} · ${last.bpm.toFixed(1)} bpm · rms ${energy.toFixed(3)} · ${samples.length} samples`
+    : 'waiting for engine analysis…';
+  setTimeout(poll, 125); // bounded to 8 Hz
+}
+poll();
+</script></body></html>

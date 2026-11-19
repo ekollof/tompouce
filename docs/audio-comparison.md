@@ -110,6 +110,13 @@ each combinator, with no repeated top-level `queryArc` call to cache. A working
 native applicator would therefore have to restructure how combinators register
 their stages in the pinned runtime, not merely wrap their map calls.
 
+A further owned instrumented bundle counted inner pattern queries: 14,090 calls
+with 6,764 distinct (pattern id, begin, end) keys and 2,521 duplicates (up to
+20 repeats). A bounded result cache removed 1,058 calls but raised medians to
+300–337 ms, because string-key and map bookkeeping costs more than the saved
+calls. Both prototypes were reverted; the bundle is byte-identical to the
+committed one.
+
 ### Corpus and earlier measurements
 
 `tests/fixtures/strudel-bakery.json` preserves the 42 compositions shown on the

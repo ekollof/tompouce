@@ -160,6 +160,10 @@ Eight shared-PCM sample pitch checks cover quantum-rate automation, fractional
 starts, release, vibrato, stereo and reverse playback.
 Twelve worklet checks add pulse/supersaw envelopes, vibrato, release and startup,
 plus a Kabelsalat source with pitch controls on the replaced oscillator.
-The oneshot event check uses a stopped zero-time clock; live evaluation/grid
-timing, additional pitch/FM combinations, custom FX/bmod routing and external devices
-remain separate checks rather than claims established by this matrix.
+The oneshot event check uses a stopped zero-time clock. A focused
+`test_oneshot_grid` now feeds a confined local fixture that registers the
+pinned `oneshot` helper and checks its grid gating: over a four-cycle query only
+the eight haps of the first cycle survive a grid of four, since `getTime()` is
+the query-window begin. Bank-specific sounds, additional pitch/FM combinations,
+custom FX/bmod routing and external devices remain separate checks rather than
+claims established by this matrix.

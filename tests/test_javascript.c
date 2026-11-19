@@ -419,6 +419,38 @@ static void test_midi_manifest(void) {
     puts("confined MIDI manifests, persistence and rejection ok");
 }
 
+/* Switch Angel's pinned oneshot helper locks an event to the next grid
+   boundary. getTime() is the query-window begin, so the grid is deterministic
+   and can be checked without a live clock or the downloaded starter. */
+static void test_oneshot_grid(void) {
+    const char *fixture =
+        "register('oneshot', (grid, pat) => { const t = getTime();\n"
+        "  const qt = Math.ceil(t / grid) * grid;\n"
+        "  return pat.filterWhen((x) => x >= qt && x < qt + 1); });\n";
+    char root[]="/tmp/tompouce-oneshot-XXXXXX", config[512], directory[700], path[900];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    snprintf(directory,sizeof(directory),"%s/prebakes",config);
+    assert(!mkdir(config,0700) && !mkdir(directory,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    write_module(path,fixture);
+    JsProgram *program=NULL;
+    cJSON *haps=query("note(\"[c4 e4 g4 c5]*2\").s(\"sine\").oneshot(4)",&program);
+    assert(haps && cJSON_GetArraySize(haps)==8);
+    for (int i=0;i<cJSON_GetArraySize(haps);i++) {
+        const cJSON *begin=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,i),"begin");
+        assert(cJSON_IsNumber(begin) && begin->valuedouble>=0 && begin->valuedouble<1);
+    }
+    cJSON_Delete(haps); javascript_free(program);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(directory); rmdir(config); rmdir(root);
+    puts("oneshot grid timing ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -567,6 +599,7 @@ int main(int argc, char **argv) {
     test_local_modules();
     test_prebake();
     test_midi_manifest();
+    test_oneshot_grid();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

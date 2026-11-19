@@ -96,6 +96,15 @@ allow it, or the scoped V8 migration. The earlier fused application prototype
 and this allocation work show that local micro-optimizations inside the
 existing call structure do not move the number.
 
+A build-time prototype replaced the pinned `withValue` map loop with a native
+host function that walks the array and invokes the same JavaScript callback per
+hap in order. Median probes went from 267/267 ms to 271/270 ms, so the hook was
+reverted; QuickJS's built-in `Array.map` is already the faster loop. A second
+instrumentation found that `Pattern.query` is an own-property closure created by
+each combinator, with no repeated top-level `queryArc` call to cache. A working
+native applicator would therefore have to restructure how combinators register
+their stages in the pinned runtime, not merely wrap their map calls.
+
 ### Corpus and earlier measurements
 
 `tests/fixtures/strudel-bakery.json` preserves the 42 compositions shown on the

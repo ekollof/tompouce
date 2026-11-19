@@ -2,6 +2,7 @@
    failure behavior. Skips when Node is unavailable; never an audio device. */
 #include "js_worker.h"
 #include "javascript.h"
+#include "slider.h"
 #include "common.h"
 #include <cjson/cJSON.h>
 #include <assert.h>
@@ -224,19 +225,45 @@ static void test_engine_delegation(void) {
             expect(!strcmp(a, b), "delegated first event is identical");
             free(a); free(b);
         }
-        /* Slider programs must not be delegated (live values are host state). */
-        setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
-        cJSON *slider_meta = NULL;
-        JsProgram *slider = javascript_compile("note(60).gain(slider(.5))", 120, &slider_meta, error, sizeof(error));
-        cJSON_Delete(slider_meta);
-        expect(slider && !javascript_uses_query_worker(slider), "slider programs keep QuickJS");
-        javascript_free(slider);
-        unsetenv("TOMPOUCE_QUERY_BACKEND");
         cJSON_Delete(quick_events);
         javascript_free(quick);
         cJSON_Delete(events);
         javascript_free(delegated);
     }
+}
+
+/* Live slider values are host state forwarded with every worker query. A
+   slider program now delegates and must see a mid-session slider_set(). */
+static void test_slider_delegation(void) {
+    const char *code = "note(60).s('sine').gain(slider(.5))";
+    char error[512] = "";
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    cJSON *meta = NULL;
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(delegated && javascript_uses_query_worker(delegated), "slider program delegates");
+    if (!delegated) { unsetenv("TOMPOUCE_QUERY_BACKEND"); return; }
+    javascript_activate_sliders(delegated);
+    cJSON *before = javascript_query(delegated, 0, 1);
+    expect(slider_set(0, .9), "live slider update applies");
+    cJSON *after = javascript_query(delegated, 0, 1);
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    javascript_activate_sliders(quick);
+    expect(slider_set(0, .9), "live slider update applies to the twin");
+    cJSON *twin = quick ? javascript_query(quick, 0, 1) : NULL;
+    char *a = cJSON_IsArray(after) ? cJSON_PrintUnformatted(after) : NULL;
+    char *b = cJSON_IsArray(twin) ? cJSON_PrintUnformatted(twin) : NULL;
+    expect(a && b && !strcmp(a, b), "updated slider reaches the worker");
+    const cJSON *first = cJSON_IsArray(after) ? cJSON_GetArrayItem(after, 0) : NULL;
+    const cJSON *value = first ? cJSON_GetObjectItemCaseSensitive(first, "value") : NULL;
+    const cJSON *gain = value ? cJSON_GetObjectItemCaseSensitive(value, "gain") : NULL;
+    expect(cJSON_IsNumber(gain) && gain->valuedouble == .9, "worker uses the new slider value");
+    free(a); free(b);
+    slider_set(0, .5);
+    cJSON_Delete(twin); cJSON_Delete(before); cJSON_Delete(after);
+    javascript_free(quick); javascript_free(delegated);
 }
 
 /* Re-evaluating identical source must start a fresh worker evaluation, not
@@ -463,6 +490,7 @@ int main(void) {
     test_parity();
     test_confinement();
     test_engine_delegation();
+    test_slider_delegation();
     test_engine_identity();
     test_engine_retention();
     test_prebake_transport();

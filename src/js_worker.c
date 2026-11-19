@@ -376,16 +376,18 @@ void js_worker_stop(JsWorker *worker) {
 }
 
 int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm,
-    const char *prebake, const char *prebakes_json,
+    const char *prebake, const char *prebakes_json, const char *sliders_json,
     char **metadata, char *error, int errorlen) {
     if (!worker || !source || !metadata) { set_error(error, errorlen, "invalid request"); return 0; }
     if (strlen(source) > WORKER_SOURCE_MAX) { set_error(error, errorlen, "source limit"); return 0; }
     if (!prebake) prebake = "";
     if (strlen(prebake) > 256*1024) { set_error(error, errorlen, "prebake limit"); return 0; }
     if (!prebakes_json) prebakes_json = "{}";
-    /* Strings are JSON-escaped (twice their bytes at worst); prebakes_json is
-       already serialized by the caller. */
-    size_t cap = strlen(source)*2 + strlen(prebake)*2 + strlen(prebakes_json) + 352;
+    if (!sliders_json) sliders_json = "{\"binds\":[],\"values\":[]}";
+    /* Strings are JSON-escaped (twice their bytes at worst); the JSON fields
+       are already serialized by the caller. */
+    size_t cap = strlen(source)*2 + strlen(prebake)*2 + strlen(prebakes_json) +
+        strlen(sliders_json) + 392;
     if (cap > WORKER_FRAME_MAX) { set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     char *frame = malloc(cap);
     if (!frame) { set_error(error, errorlen, "out of memory"); return 0; }
@@ -407,6 +409,13 @@ int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm
             memcpy(frame+used, prebakes_json, strlen(prebakes_json)); used += strlen(prebakes_json);
         }
     }
+    if (ok) {
+        ok = used + strlen(sliders_json) + 12 < cap;
+        if (ok) {
+            memcpy(frame+used, ",\"sliders\":", 11); used += 11;
+            memcpy(frame+used, sliders_json, strlen(sliders_json)); used += strlen(sliders_json);
+        }
+    }
     if (ok) { frame[used++] = '}'; frame[used] = 0; }
     if (!ok) { free(frame); set_error(error, errorlen, "request exceeds the frame limit"); return 0; }
     cJSON *response = request(worker, worker->next_id, frame, WORKER_COMPILE_BUDGET_MS, 0, error, errorlen);
@@ -420,36 +429,54 @@ int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm
 
 int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double bpm,
     const char *prebake, char **metadata, char *error, int errorlen) {
-    return js_worker_compile_with_host(worker, source, bpm, prebake, "{}",
+    return js_worker_compile_with_host(worker, source, bpm, prebake, "{}", NULL,
         metadata, error, errorlen);
 }
 
 int js_worker_compile(JsWorker *worker, const char *source, double bpm,
     char **metadata, char *error, int errorlen) {
-    return js_worker_compile_with_host(worker, source, bpm, "", "{}",
+    return js_worker_compile_with_host(worker, source, bpm, "", "{}", NULL,
         metadata, error, errorlen);
 }
 
-int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,
-    char **events, char *error, int errorlen) {
+int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, double cps, int probes,
+    const char *slider_values_json, char **events, char *error, int errorlen) {
     if (!worker || !events) { set_error(error, errorlen, "invalid request"); return 0; }
-    char frame[256];
+    if (!slider_values_json) slider_values_json = "[]";
+    size_t cap = 256 + strlen(slider_values_json) + 32;
+    if (cap > WORKER_FRAME_MAX) { set_error(error, errorlen, "query exceeds the frame limit"); return 0; }
+    char *frame = malloc(cap);
+    if (!frame) { set_error(error, errorlen, "out of memory"); return 0; }
     int written = isfinite(cps)
-        ? snprintf(frame, sizeof(frame),
-            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"cps\":%.17g,\"probes\":%s}",
+        ? snprintf(frame, cap,
+            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"cps\":%.17g,\"probes\":%s,\"sliders\":",
             ++worker->next_id, begin, end, cps, probes ? "true" : "false")
-        : snprintf(frame, sizeof(frame),
-            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"probes\":%s}",
+        : snprintf(frame, cap,
+            "{\"id\":%llu,\"op\":\"query\",\"begin\":%.17g,\"end\":%.17g,\"probes\":%s,\"sliders\":",
             ++worker->next_id, begin, end, probes ? "true" : "false");
-    if (written <= 0 || (size_t)written >= sizeof(frame)) {
-        set_error(error, errorlen, "invalid query"); return 0;
+    int ok = written > 0 && (size_t)written < cap;
+    if (ok) {
+        size_t used = (size_t)written, n = strlen(slider_values_json);
+        ok = used + n + 2 <= cap;
+        if (ok) {
+            memcpy(frame+used, slider_values_json, n); used += n;
+            frame[used++] = '}'; frame[used] = 0;
+        }
     }
+    if (!ok) { free(frame); set_error(error, errorlen, "invalid query"); return 0; }
     cJSON *response = request(worker, worker->next_id, frame, WORKER_QUERY_BUDGET_MS, 1, error, errorlen);
+    free(frame);
     if (!response) return 0;
     *events = copy_string_field(response, "events");
     cJSON_Delete(response);
     if (!*events) { set_error(error, errorlen, "worker returned no events"); return 0; }
     return 1;
+}
+
+int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,
+    char **events, char *error, int errorlen) {
+    return js_worker_query_with_sliders(worker, begin, end, cps, probes, NULL,
+        events, error, errorlen);
 }
 
 int js_worker_failure(const JsWorker *worker) { return worker ? worker->failure : JS_WORKER_DEAD; }

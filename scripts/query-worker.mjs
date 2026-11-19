@@ -52,8 +52,11 @@ function boot(bundle, timeoutMs) {
     globalThis.console={log(){},warn(){},error(){},info(){},debug(){}};
     globalThis.__hostLog=(value)=>__workerLog(String(value));
     globalThis.__workerSliders=[];
+    globalThis.__workerBinds=[];
     globalThis.__hostSlider=v=>v;
-    globalThis.__hostSliderBind=v=>(__workerSliders.push(v)-1);
+    /* The host sends its own bind indices, so source-position binds that reuse
+       a slot keep the same identity here as in the QuickJS evaluation. */
+    globalThis.__hostSliderBind=()=>__workerBinds.length?__workerBinds.shift():-1;
     globalThis.__hostSliderRead=i=>__workerSliders[i];
     globalThis.__prebakeLoadingAllowed=true;
     globalThis.__hostPrebake=name=>{
@@ -69,10 +72,12 @@ function boot(bundle, timeoutMs) {
   probeScript = new vm.Script('__query(__begin,__end,__cps,true)');
 }
 
-function compile(source, bpm, timeoutMs, prebake, prebakes) {
+function compile(source, bpm, timeoutMs, prebake, prebakes, sliders) {
   if (typeof source !== 'string' || Buffer.byteLength(source) > MAX_SOURCE) throw new Error('source limit');
   if (typeof prebake !== 'string' || Buffer.byteLength(prebake) > MAX_FRAME) throw new Error('prebake limit');
   if (!prebakes || typeof prebakes !== 'object' || Array.isArray(prebakes)) throw new Error('invalid prebake table');
+  if (!sliders || typeof sliders !== 'object' || !Array.isArray(sliders.binds) ||
+      !Array.isArray(sliders.values) || sliders.binds.length > 64) throw new Error('invalid slider table');
   /* Match the engine's per-evaluation context so prebake and pattern globals
      cannot leak from an earlier evaluation into this one. */
   if (currentBundle) boot(currentBundle, timeoutMs);
@@ -83,6 +88,8 @@ function compile(source, bpm, timeoutMs, prebake, prebakes) {
      host callback and are excluded from delegation. */
   context.__prebake = prebake;
   context.__prebakes = prebakes;
+  context.__workerBinds = sliders.binds.slice();
+  context.__workerSliders = sliders.values.slice();
   compileScript.runInContext(context, {timeout: timeoutMs});
   context.__prebakeLoadingAllowed = false;
   if (context.__compileError) throw new Error(String(context.__compileError).slice(0, 512));
@@ -90,7 +97,11 @@ function compile(source, bpm, timeoutMs, prebake, prebakes) {
   return context.__compileResult;
 }
 
-function query(begin, end, cps, probes, timeoutMs) {
+function query(begin, end, cps, probes, timeoutMs, sliders) {
+  if (sliders !== undefined) {
+    if (!Array.isArray(sliders) || sliders.length > 64) throw new Error('invalid slider values');
+    context.__workerSliders = sliders.slice();
+  }
   context.__begin = begin;
   context.__end = end;
   /* Omitted cps lets the bundle fall back to the program tempo, as the QuickJS
@@ -109,10 +120,11 @@ function handle(frame, budget) {
   case 'compile':
     if (!context) throw new Error('not initialized');
     return {ok: true, metadata: compile(frame.source, frame.bpm, budget,
-      frame.prebake ?? '', frame.prebakes ?? {})};
+      frame.prebake ?? '', frame.prebakes ?? {}, frame.sliders ?? {binds: [], values: []})};
   case 'query':
     if (!context) throw new Error('not initialized');
-    return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true, budget)};
+    return {ok: true, events: query(frame.begin, frame.end, frame.cps, frame.probes === true,
+      budget, frame.sliders)};
   case 'close':
     process.stdout.write(JSON.stringify({id: frame.id ?? null, ok: true}) + '\n', () => process.exit(0));
     return null;

@@ -56,6 +56,9 @@ struct JsProgram {
     char named_prebake_names[16][256];
     char *named_prebake_texts[16];
     int nnamed_prebakes;
+    /* Slider bind indices in evaluation order, for the query worker. */
+    int slider_binds[64];
+    int nslider_binds;
     struct { int offset, kind, id; unsigned mask; VisualOptions options; } visual_sites[32];
     int nvisual_sites;
     char *visual_requested, *visual_pending, *visual_source;
@@ -88,10 +91,8 @@ static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     if (p->nvisual_sites > 0) return 0;
     /* MIDI input readers query host state the worker does not have. */
     if (strstr(p->source, "midin") || strstr(p->source, "midikeys")) return 0;
-    /* Live slider reads are host state the worker does not have. */
-    const cJSON *sliders = cJSON_GetObjectItemCaseSensitive(metadata, "sliders");
-    if (!cJSON_IsNumber(sliders) || sliders->valuedouble > 0) return 0;
-    if (slider_count() > 0) return 0;
+    /* Slider values are forwarded at compile and on every query, so live
+       controls no longer force the QuickJS backend. */
     const cJSON *csound = cJSON_GetObjectItemCaseSensitive(metadata, "csound");
     if (csound && !cJSON_IsNull(csound)) return 0;
     const cJSON *samples = cJSON_GetObjectItemCaseSensitive(metadata, "samples");
@@ -103,6 +104,29 @@ static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
    ready. Every compile_program call has a unique serial, so re-evaluating the
    same source starts fresh state in the worker instead of reusing the last
    evaluation. */
+/* Current slider state for the worker: bind indices in evaluation order plus
+   values by host index. Query frames send only the values array. */
+static char *worker_sliders_json(JsProgram *p, int with_binds) {
+    int max = -1;
+    for (int i=0;i<p->nslider_binds;i++) if (p->slider_binds[i]>max) max=p->slider_binds[i];
+    cJSON *values = cJSON_CreateArray();
+    if (!values) return NULL;
+    for (int i=0;i<=max;i++) {
+        double value = 0;
+        if (p->nslider_binds==0 || !slider_bank_read(p->sliders,i,&value)) value = 0;
+        if (!cJSON_AddItemToArray(values,cJSON_CreateNumber(value))) { cJSON_Delete(values); return NULL; }
+    }
+    if (!with_binds) { char *text=cJSON_PrintUnformatted(values); cJSON_Delete(values); return text; }
+    cJSON *root = cJSON_CreateObject();
+    if (!root) { cJSON_Delete(values); return NULL; }
+    cJSON *binds = cJSON_CreateArray();
+    if (!binds) { cJSON_Delete(values); cJSON_Delete(root); return NULL; }
+    for (int i=0;i<p->nslider_binds;i++) cJSON_AddItemToArray(binds,cJSON_CreateNumber(p->slider_binds[i]));
+    cJSON_AddItemToObject(root,"binds",binds);
+    cJSON_AddItemToObject(root,"values",values);
+    char *text=cJSON_PrintUnformatted(root); cJSON_Delete(root); return text;
+}
+
 static int worker_bind(JsProgram *p, double bpm) {
     if (!p->source) return 0;
     pthread_mutex_lock(&query_worker_lock);
@@ -123,10 +147,12 @@ static int worker_bind(JsProgram *p, double bpm) {
         for (int i=0;i<p->nnamed_prebakes && prebakes;i++)
             cJSON_AddStringToObject(prebakes,p->named_prebake_names[i],p->named_prebake_texts[i]);
         char *prebakes_json = prebakes ? cJSON_PrintUnformatted(prebakes) : NULL;
+        char *sliders_json = worker_sliders_json(p,1);
         int compiled = js_worker_compile_with_host(query_worker, p->source,
                 isfinite(bpm) && bpm > 0 ? bpm : 120, p->prebake_source ? p->prebake_source : "",
-                prebakes_json ? prebakes_json : "{}", &metadata, error, sizeof(error));
-        free(prebakes_json); cJSON_Delete(prebakes);
+                prebakes_json ? prebakes_json : "{}", sliders_json ? sliders_json : "{\"binds\":[],\"values\":[]}",
+                &metadata, error, sizeof(error));
+        free(sliders_json); free(prebakes_json); cJSON_Delete(prebakes);
         if (!compiled) {
             /* A rejected source is a user error: keep the worker (and any
                evaluation already bound for another program). Only transport
@@ -204,6 +230,8 @@ static JSValue host_slider_bind(JSContext *ctx, JSValueConst self, int argc, JSV
     }
     int index=slider_bank_bind_site(program->sliders,offset,v[0],v[1],v[2],v[3]);
     if (index<0) return JS_ThrowRangeError(ctx,"too many sliders");
+    if (program->nslider_binds < (int)(sizeof(program->slider_binds)/sizeof(program->slider_binds[0])))
+        program->slider_binds[program->nslider_binds++] = index;
     return JS_NewInt32(ctx,index);
 }
 
@@ -981,8 +1009,10 @@ static cJSON *query_events(JsProgram *p, double begin, double end, double cps, i
             !strcmp(query_worker_source, p->source);
         if (usable) {
             char *events_text = NULL, worker_error[256] = "";
-            int ok = js_worker_query(query_worker, begin, end, cps, probes,
-                &events_text, worker_error, sizeof(worker_error));
+            char *slider_values = worker_sliders_json(p,0);
+            int ok = js_worker_query_with_sliders(query_worker, begin, end, cps, probes,
+                slider_values ? slider_values : "[]", &events_text, worker_error, sizeof(worker_error));
+            free(slider_values);
             if (!ok) {
                 /* A dead or desynchronized worker must not stall playback: drop
                    it and let the QuickJS evaluation take over. */

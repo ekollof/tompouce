@@ -134,8 +134,10 @@ and measured divergences are recorded in the archive.
       (a persistent-context `preCount` drift was found and fixed). Named
       `loadPrebake()` calls are now forwarded as a confined name→text table in
       the compile frame and are tested; the worker's prebake load window closes
-      after evaluation like the host's. Csound loads, live sliders, MIDI
-      snapshots and visuals still stay on QuickJS.
+      after evaluation like the host's. Live sliders are also forwarded (bind
+      indices plus current values at compile, values on each query) and tested
+      with a mid-session slider_set; slider programs now delegate. Csound
+      loads, MIDI snapshots and visuals still stay on QuickJS.
       OOM behavior is covered (the worker reports a
       range error for an oversized allocation and stays alive); one-CPU
       `profile-prep-backend` held 3/4 with and without the worker, with two

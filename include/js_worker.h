@@ -34,8 +34,12 @@ int js_worker_compile_with_prebake(JsWorker *worker, const char *source, double 
    name loadPrebake() uses. The engine builds it from the texts its confined
    host already loaded, so the worker never reads files itself. */
 int js_worker_compile_with_host(JsWorker *worker, const char *source, double bpm,
-    const char *prebake, const char *prebakes_json,
+    const char *prebake, const char *prebakes_json, const char *sliders_json,
     char **metadata, char *error, int errorlen);
+/* Query with the engine's current slider values (a JSON array indexed by host
+   slider index), so live control changes reach delegated queries. */
+int js_worker_query_with_sliders(JsWorker *worker, double begin, double end, double cps, int probes,
+    const char *slider_values_json, char **events, char *error, int errorlen);
 /* Query [begin,end) and return the events JSON (caller frees) or NULL. A
    non-finite cps asks the bundle to use its tempo, like the QuickJS host. */
 int js_worker_query(JsWorker *worker, double begin, double end, double cps, int probes,

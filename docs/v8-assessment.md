@@ -266,6 +266,14 @@ evaluation like the QuickJS host, and never touches the filesystem; a missing
 name is still an error. `test_named_prebake_engine` checks delegation and
 event parity for a note driven by a prebake global.
 
+Live slider values are forwarded too. The engine records the host's bind
+indices during evaluation and sends them with current values at compile; each
+query frame carries the latest values, and the worker's `__hostSliderBind`
+returns the same host index so source-position binds keep their identity. Slider
+programs now delegate, and `test_slider_delegation` checks that a
+`slider_set(0, .9)` between queries reaches the worker and matches a QuickJS
+twin.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

@@ -271,6 +271,39 @@ static void test_engine_identity(void) {
     javascript_free(first);
 }
 
+/* A rejected live evaluation must not disturb the worker binding for the
+   currently playing program: the last playable pattern keeps delegating and
+   returns identical events. */
+static void test_engine_retention(void) {
+    const char *good = "note(\"c4 e4 g4\").s(\"sine\").gain(.4)";
+    char error[512] = "";
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    cJSON *meta = NULL;
+    JsProgram *program = javascript_compile(good, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    expect(program && javascript_uses_query_worker(program), "retained evaluation delegates");
+    if (!program) { unsetenv("TOMPOUCE_QUERY_BACKEND"); return; }
+    cJSON *before = javascript_query(program, 0, 1);
+    cJSON *bad_meta = NULL;
+    JsProgram *bad = javascript_compile_from("const x = ;", 120, program,
+        &bad_meta, error, sizeof(error));
+    cJSON_Delete(bad_meta);
+    expect(bad == NULL, "failed evaluation is rejected");
+    expect(error[0] != '\0', "failed evaluation reports an error");
+    expect(javascript_uses_query_worker(program), "worker binding survives failed evaluation");
+    cJSON *after = javascript_query(program, 0, 1);
+    char *before_text = cJSON_IsArray(before) ? cJSON_PrintUnformatted(before) : NULL;
+    char *after_text = cJSON_IsArray(after) ? cJSON_PrintUnformatted(after) : NULL;
+    expect(before_text && after_text && !strcmp(before_text, after_text),
+        "retained evaluation returns identical events after a failed evaluation");
+    free(before_text); free(after_text);
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    cJSON_Delete(after);
+    cJSON_Delete(before);
+    javascript_free(bad);
+    javascript_free(program);
+}
+
 int main(void) {
     log_console_stderr(0);
     if (!node_available()) {
@@ -281,6 +314,7 @@ int main(void) {
     test_confinement();
     test_engine_delegation();
     test_engine_identity();
+    test_engine_retention();
     test_rejections();
     test_watchdog();
     test_death();

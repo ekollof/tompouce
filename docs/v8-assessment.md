@@ -234,11 +234,15 @@ reported a single late voice reservation (2.7 ms past its deadline) in the
 burst workload, with no xruns, drops or overruns; treat that as marginal jitter
 to watch rather than a resolved result.
 
-Still required before this can be a supported or default backend: generation
-and source identity across evaluation for every caller (compile serials now
-cover re-evaluation), cross-checking failed-evaluation retention under the
-worker, and the remaining host callbacks (Csound loads, MIDI snapshots, live
-sliders, prebakes). The Node process also adds a runtime Node dependency and
+Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
+the shared worker bound to the last playable program, which keeps delegating and
+returns byte-identical events (`test_engine_retention` in
+`tests/test_js_worker.c`).
+
+Still required before this can be a supported or default backend: host callbacks
+for the excluded features (Csound loads, MIDI snapshots, live sliders, prebakes),
+plus OOM/cold/one-CPU behavior and reproducible packaging with notices. The Node
+process also adds a runtime Node dependency and
 ~113–158 MiB RSS, which is why it is opt-in and the installer only ships the
 worker script.
 

@@ -195,12 +195,14 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   Notcurses owns keyboard and mouse protocols. Keep input decoding, wrapped-row
   geometry, cursor placement, selection and undo consistent. Palette replies
   must be consumed before editor input; do not add raw mouse-mode escapes.
-  Known paste flood/drop and split-UTF-8 hangs await upstream fixes:
+  Known paste flood/drop and split-UTF-8 hangs:
   [#2948](https://github.com/dankamongmen/notcurses/issues/2948) (related to
-  [#2548](https://github.com/dankamongmen/notcurses/issues/2548)) and
-  [#2947](https://github.com/dankamongmen/notcurses/issues/2947). Do not attempt
-  local fixes for these failures or replace system Notcurses while upstream
-  fixes are pending. Preserve the reproductions and report failures honestly.
+  [#2548](https://github.com/dankamongmen/notcurses/issues/2548)) is still open;
+  [#2947](https://github.com/dankamongmen/notcurses/issues/2947) has an upstream
+  fix (PR #2954, commit `2cb71b8`, milestone 3.1.0) awaiting our confirmation.
+  Do not attempt local fixes or replace system Notcurses before that fix is
+  confirmed in a release. Preserve the reproductions and report failures
+  honestly.
   Missing Tree-sitter children are normal while typing; check for null nodes
   before calling byte/point accessors.
 - `src/visual.c`, `src/visual_render.c` and `src/terminal_graphics.c` own bounded

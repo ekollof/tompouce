@@ -122,8 +122,10 @@ and measured divergences are recorded in the archive.
       evaluation carries a compile serial so re-evaluating identical source
       starts fresh worker state.
       Remaining gates before this can be supported or default: host callbacks
-      for the excluded features, failed-evaluation retention under the worker,
-      OOM/cold/one-CPU behavior, and reproducible packaging with notices. The
+      for the excluded features, OOM/cold/one-CPU behavior, and reproducible
+      packaging with notices. Failed-evaluation retention is cross-checked: a
+      rejected live evaluation keeps the last playable program delegating with
+      identical events. The
       worker is confined (own group, parent-death signal, no-new-privs, fixed
       `RLIMIT_CORE`/`NOFILE`/`CPU`/`AS`, sanitized environment) and its limits
       are tested; `profile-prep-backend` with the backend enabled held all six
@@ -194,3 +196,14 @@ Large paste flood/drop and split-UTF-8 hangs await Notcurses
 Retain system Notcurses and its protocol ownership; do not add local fixes while
 upstream fixes are pending. Keep `tests/test_paste_stress.py` reproductions
 separate from maintained acceptance cases and report failures honestly.
+
+- [ ] Low priority: the submitted split-UTF-8 hang
+      [#2947](https://github.com/dankamongmen/notcurses/issues/2947) has an
+      upstream fix (PR #2954, commit `2cb71b8`, milestone 3.1.0) and the
+      maintainer is waiting on our confirmation. Build that commit (or a
+      release containing it) in an owned prefix and re-run the split-UTF-8
+      reproducer from `tests/test_paste_stress.py`; report back on the issue.
+      The paste flood/drop issue [#2948](https://github.com/dankamongmen/notcurses/issues/2948)
+      remains open and must be tracked separately. Do not replace the system
+      Notcurses or add local workarounds before the fix is confirmed; keep the
+      reproductions separate from maintained acceptance cases.

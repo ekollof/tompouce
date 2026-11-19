@@ -31,5 +31,11 @@ project license does not replace their notices. See:
   felixroos/webaudiofontdata mirror). The installer prefetches pinned packs
   and preserves their MIT notice for offline use. Missing packs are fetched
   lazily at runtime; unavailable packs fall back to the local SoundFont.
+- The optional `TOMPOUCE_QUERY_BACKEND=node|v8` query backend needs Node.js at
+  runtime; QuickJS remains the default and needs no Node installation. Tompouce
+  ships only `scripts/query-worker.mjs` and sends its own committed JavaScript
+  bundle to the worker over IPC. Node.js is MIT-licensed and includes V8
+  (BSD-3-Clause); their notices come with your Node.js installation, which is
+  not bundled or installed by Tompouce. See docs/v8-assessment.md.
 
 Project source: https://github.com/ekollof/tompouce

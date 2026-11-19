@@ -218,8 +218,10 @@ terminal rendering in four owned PTY geometries under ASan/UBSan.
 See [fixture provenance](tests/fixtures/README.md).
 
 Normal builds use the committed JavaScript bundles and vendored QuickJS.
-Node.js/npm are needed only for explicit `js-bundle`, `companion-bundle` or
-`compare-audio` targets, e.g. `cmake --build build --target js-bundle`.
+Node.js/npm are needed for explicit `js-bundle`, `companion-bundle` or
+`compare-audio` targets, e.g. `cmake --build build --target js-bundle`, and at
+runtime only if you opt into `TOMPOUCE_QUERY_BACKEND=node|v8`
+(see [V8 assessment](docs/v8-assessment.md)); that backend is never the default.
 After rebuilding a bundle, run the normal build again to embed it.
 
 ## Run

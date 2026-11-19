@@ -239,12 +239,22 @@ the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in
 `tests/test_js_worker.c`).
 
+## Packaging and notices
+
+`install.sh` copies `scripts/query-worker.mjs` alongside the installed binary
+(`RUNTIME_FILES` in `scripts/install.py`), and `tests/test_install.py` covers that
+out-of-tree copy. No JavaScript bundle or Node runtime is installed for the
+worker: the engine sends its own committed, embedded bundle in the init frame,
+and the worker evaluates it through `node:vm`. `NOTICE` and the README document
+that Node.js is an optional runtime dependency (MIT-licensed, with V8 under
+BSD-3-Clause) whose notices come with the user's Node installation. The worker
+resolves its script relative to the installed executable, so the symlinked
+launcher in `~/.local/bin` finds the script under `~/.local/lib/tompouce`.
+
 Still required before this can be a supported or default backend: host callbacks
-for the excluded features (Csound loads, MIDI snapshots, live sliders, prebakes),
-plus OOM/cold/one-CPU behavior and reproducible packaging with notices. The Node
-process also adds a runtime Node dependency and
-~113–158 MiB RSS, which is why it is opt-in and the installer only ships the
-worker script.
+for the excluded features (Csound loads, MIDI snapshots, live sliders, prebakes)
+and OOM/cold/one-CPU behavior. The Node process also adds a runtime Node
+dependency and ~113–158 MiB RSS, which is why it is opt-in.
 
 ## Build requirement
 

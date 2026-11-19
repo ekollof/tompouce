@@ -122,10 +122,11 @@ and measured divergences are recorded in the archive.
       evaluation carries a compile serial so re-evaluating identical source
       starts fresh worker state.
       Remaining gates before this can be supported or default: host callbacks
-      for the excluded features, OOM/cold/one-CPU behavior, and reproducible
-      packaging with notices. Failed-evaluation retention is cross-checked: a
-      rejected live evaluation keeps the last playable program delegating with
-      identical events. The
+      for the excluded features and OOM/cold/one-CPU behavior. Failed-evaluation
+      retention is cross-checked: a rejected live evaluation keeps the last
+      playable program delegating with identical events. Packaging is documented
+      (the installer ships only the worker script, the engine sends its bundle
+      over IPC, and Node's optional runtime notices are in NOTICE/README). The
       worker is confined (own group, parent-death signal, no-new-privs, fixed
       `RLIMIT_CORE`/`NOFILE`/`CPU`/`AS`, sanitized environment) and its limits
       are tested; `profile-prep-backend` with the backend enabled held all six

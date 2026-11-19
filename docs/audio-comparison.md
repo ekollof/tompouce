@@ -1025,7 +1025,12 @@ clipped sine gave correlation 0.99999997 in all three cases but a constant
 RMS ratio of 1.2504, outside the unchanged 0.85–1.15 band. The waveform shape
 matches while the level does not, so this is a gain-staging divergence rather
 than a timing or synthesis mismatch; no threshold was changed and no case was
-accepted.
+accepted. A control sine with the same gain and no `FX` passed at ratio 1.000,
+and an FX case with gain 0.5 kept the same 1.2503 ratio, so the factor is
+independent of the explicit gain and consistent with the web applying its 0.8
+default gain to the FX chain. Native has no `FX` gain handling; adding a 0.8
+factor would be tuning to this capture rather than deriving the web's full FX
+gain staging, so it was not accepted.
 
 Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
 zero/short/extended cleanup times, feedback, clipped and naturally ending

@@ -338,6 +338,33 @@ static void test_csound_delegation(void) {
     }
 }
 
+/* Visual sites are configured in QuickJS, but their scopeMask reaches musical
+   events from the delegated query. Check that a visual program delegates and
+   produces the same masked events as a QuickJS twin. */
+static void test_visual_delegation(void) {
+    const char *code = "note(60).s('sine')._scope()";
+    char error[512] = "";
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
+    cJSON *meta = NULL;
+    JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta); meta = NULL;
+    expect(delegated && javascript_uses_query_worker(delegated), "visual program delegates");
+    cJSON *w = delegated ? javascript_query(delegated, 0, 1) : NULL;
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
+    cJSON_Delete(meta);
+    cJSON *q = quick ? javascript_query(quick, 0, 1) : NULL;
+    char *a = cJSON_IsArray(w) ? cJSON_PrintUnformatted(w) : NULL;
+    char *b = cJSON_IsArray(q) ? cJSON_PrintUnformatted(q) : NULL;
+    expect(a && b && !strcmp(a, b), "visual events match QuickJS");
+    const cJSON *first = cJSON_IsArray(w) ? cJSON_GetArrayItem(w, 0) : NULL;
+    const cJSON *mask = first ? cJSON_GetObjectItemCaseSensitive(first, "scopeMask") : NULL;
+    expect(cJSON_IsNumber(mask) && mask->valuedouble != 0, "visual scopeMask reaches the worker");
+    free(a); free(b);
+    cJSON_Delete(q); cJSON_Delete(w);
+    javascript_free(quick); javascript_free(delegated);
+}
+
 /* Re-evaluating identical source must start a fresh worker evaluation, not
    continue the previous one's state. A pattern whose values depend on a
    query-advancing callback exposes the difference. */
@@ -565,6 +592,7 @@ int main(void) {
     test_slider_delegation();
     test_midi_delegation();
     test_csound_delegation();
+    test_visual_delegation();
     test_engine_identity();
     test_engine_retention();
     test_prebake_transport();

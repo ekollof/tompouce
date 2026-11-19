@@ -127,9 +127,8 @@ and measured divergences are recorded in the archive.
       and a failed worker falls back to the retained QuickJS evaluation. Each
       evaluation carries a compile serial so re-evaluating identical source
       starts fresh worker state.
-      Remaining gate before this can be supported or default: host callbacks
-      for the still-excluded features. The confined startup prebake is now
-      forwarded in the compile frame and tested, and the worker now rebuilds
+      The confined startup prebake is now forwarded in the compile frame and
+      tested, and the worker now rebuilds
       its VM context per compile to match QuickJS's fresh-evaluation semantics
       (a persistent-context `preCount` drift was found and fixed). Named
       `loadPrebake()` calls are now forwarded as a confined name→text table in
@@ -141,7 +140,9 @@ and measured divergences are recorded in the archive.
       `midikeys` still stays on QuickJS because it consumes a host event queue.
       Csound loads are now accepted by a bounded worker callback while the
       engine applies the real orchestra, and are tested for event parity.
-      Visuals still stay on QuickJS.
+      Visual programs now delegate too (scopeMask from the shared bundle,
+      visual sites still configured in QuickJS) and are tested. All formerly
+      excluded callback categories now have worker paths except `midikeys`.
       OOM behavior is covered (the worker reports a
       range error for an oversized allocation and stays alive); one-CPU
       `profile-prep-backend` held 3/4 with and without the worker, with two

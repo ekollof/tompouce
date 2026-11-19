@@ -287,6 +287,16 @@ still applies the real orchestra after evaluation through its confined renderer.
 `test_csound_delegation` covers both `.csound()` and `loadCsound()` against a
 QuickJS twin; query events do not depend on engine Csound state.
 
+Visual programs delegate as well. Visual sites are still configured by
+`configure_visuals()` in QuickJS, but `scopeMask` values arrive on musical
+events from the worker's shared bundle; `test_visual_delegation` checks that a
+`._scope()` program delegates with masked events identical to QuickJS.
+
+With that, all formerly excluded callback categories have worker paths;
+`midikeys` is the one remaining QuickJS-only reader because it consumes a host
+event queue. The remaining work is the dependency-free standalone V8 embedder
+build and the decision to make any backend other than QuickJS the default.
+
 Failed-evaluation retention is cross-checked: a rejected live evaluation leaves
 the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in

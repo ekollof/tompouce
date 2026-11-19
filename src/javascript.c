@@ -88,7 +88,9 @@ struct JsProgram {
 /* Programs that depend on QuickJS-only host features keep using QuickJS. */
 static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
     if (!p || !metadata) return 0;
-    if (p->nvisual_sites > 0) return 0;
+    /* Visual sites are configured in QuickJS by configure_visuals(); musical
+       queries only carry scopeMask values, which the worker's bundle produces
+       from the same source. */
     /* midin CC values are forwarded per query; midikeys consumes a host event
        queue that the worker cannot consume, so it stays on QuickJS. */
     if (strstr(p->source, "midikeys")) return 0;

@@ -2,6 +2,7 @@
 #include "gm_synth.h"
 #include "audio.h"
 #include "audio_output.h"
+#include "lv2_worker.h"
 #include "scheduler.h"
 #include "sampler.h"
 #include "websamp.h"
@@ -223,6 +224,39 @@ static double midi_value(const cJSON *v) {
     return (octave + 1) * 12 + semitone;
 }
 
+/* Prepare a bounded offline render through a confined LV2 plugin. The plugin
+   runs in a worker, never in the audio callback; the result becomes an owned
+   playback sample. Only the test/demo lv2: namespace is accepted here. */
+static int lv2_prepare_sample(AudioEvent *ev, const char *sound, double duration, double gain) {
+    if (strncmp(sound,"lv2:",4) || strlen(sound)<=4 || strlen(sound)>260) return 0;
+    if (!isfinite(duration) || duration<=0) return 0;
+    char error[256]="";
+    Lv2Worker *worker=lv2_worker_start(sound+4,SR,error,sizeof(error));
+    if (!worker) return 0;
+    int frames=(int)fmin(4.0*SR,fmax(SR/10.0,ceil((duration+.1)*SR)));
+    float *pcm=calloc((size_t)frames*2,sizeof(float));
+    if (!pcm) { lv2_worker_stop(worker); return 0; }
+    double frequency=fmax(20,fmin(12000,ev->freq>0?ev->freq:440));
+    double phase=0, step=2*M_PI*frequency/SR;
+    for (int i=0;i<frames;i++) {
+        double fade=fmin(1,i/(.005*SR))*exp(-i/(.5*SR));
+        pcm[i*2]=(float)(.25*sin(phase)*fade);
+        pcm[i*2+1]=pcm[i*2];
+        phase+=step;
+    }
+    lv2_worker_set_control(worker,0,(float)fmax(0,fmin(2,gain)),error,sizeof(error));
+    int ok=1;
+    for (int at=0;at<frames && ok;at+=LV2_WORKER_FRAMES) {
+        int count=frames-at<LV2_WORKER_FRAMES?frames-at:LV2_WORKER_FRAMES;
+        ok=lv2_worker_process(worker,pcm+at*2,pcm+at*2,(unsigned)count,error,sizeof(error));
+    }
+    lv2_worker_stop(worker);
+    if (!ok) { free(pcm); return 0; }
+    ev->smp=smp_store_owned(pcm,frames);
+    free(pcm);
+    return ev->smp>=0;
+}
+
 static int audio_event_values(const cJSON *hap, double origin, double seconds, AudioEvent *ev, int include_ducks) {
     const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap,"begin");
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(hap,"end");
@@ -405,6 +439,10 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
             if (nbytes > 0 && (size_t)nbytes < sizeof(local))
                 ev->smp = midi >= 0 ? smp_acquire_note(dir,midi) : smp_acquire(dir,local);
         }
+    }
+    if (ev->smp < 0 && !*bank && !strncmp(sound,"lv2:",4)) {
+        double lv2_gain=control(value,"gain",1,0,2);
+        lv2_prepare_sample(ev,sound,ev->duration,lv2_gain);
     }
     if (ev->smp < 0 && !*bank) {
         if (strchr(sound,'/') || strchr(sound,'.')) ev->smp=smp_acquire_path(sound);

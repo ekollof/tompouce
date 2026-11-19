@@ -800,6 +800,27 @@ void smp_get(int id, float **buf, int *len) {
     sample_unlock();
 }
 
+int smp_store_owned(const float *stereo, int frames) {
+    if (!stereo || frames<1 || frames>SMP_MAX_LEN) return -1;
+    size_t bytes=(size_t)frames*2*sizeof(float);
+    float *copy=malloc(bytes);
+    if (!copy) return -1;
+    memcpy(copy,stereo,bytes);
+    sample_lock();
+    if (n_samples>=SMP_MAX_SAMPLES || bytes>SMP_CACHE_BYTES-sample_bytes) {
+        sample_unlock(); free(copy);
+        log_console("sampler: decoded sample cache is full (256 samples / 256 MiB)");
+        return -1;
+    }
+    int id=n_samples++;
+    samples[id].buf=NULL; samples[id].stereo=copy;
+    samples[id].channels=2; samples[id].len=frames;
+    samples[id].base_midi=60; samples[id].path[0]=0;
+    sample_bytes+=bytes;
+    sample_unlock();
+    return id;
+}
+
 void smp_get_stereo(int id, float **buf, int *len, int *channels) {
     sample_lock();
     if (buf) *buf = id >= 0 && id < n_samples ? samples[id].stereo : NULL;

@@ -105,8 +105,13 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   map/options/bounded-block features, and runs it on fixed 512-frame stereo
   blocks. The engine never dlopens plugin code. `test_lv2_worker` checks the
   limits, a gain control, finite PCM and dead/missing plugin failures. Wiring
-  these blocks into the scheduler's audio/MIDI paths and the compare gates
-  remains open. VST3 is optional and strictly after LV2; VST2 is out.
+  Engine audio plumbing is in place: `s('lv2:<uri>')` is prepared off the audio
+  callback through the worker (bounded to four seconds), and the render becomes
+  an owned playback sample via `smp_store_owned`. `test_lv2_worker` checks that
+  a pattern-resolved event produces finite PCM. MIDI note/CC plumbing into a
+  live plugin remains open, as do pinned native reference gates: LV2 plugins
+  have no strudel.cc counterpart, so the web comparison harness cannot supply a
+  reference. VST3 is optional and strictly after LV2; VST2 is out.
 
 See [TODO.md](../TODO.md) for the current state of those items and
 [audio backends](../README.md#run) for Tompouce's output selection rules.

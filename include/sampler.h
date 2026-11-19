@@ -29,6 +29,10 @@ int smp_acquire_file(const char *fullpath, int base_midi);
    (a regular file, not a symlink). Refuses ".." components. */
 int smp_acquire_abs(const char *fullpath, int base_midi);
 
+/* Store a bounded, already-prepared stereo buffer as a playback sample. The
+   sampler takes ownership; used for offline-prepared plugin renders. */
+int smp_store_owned(const float *stereo, int frames);
+
 /* Drop cached dir listings so added/removed files are picked up
    (decoded samples stay valid in memory). */
 void smp_invalidate(void);

@@ -1,5 +1,8 @@
 /* Confined LV2 worker: plugin code runs in a child, PCM is bounded. */
 #include "lv2_worker.h"
+#include "js_audio.h"
+#include "sampler.h"
+#include <cjson/cJSON.h>
 #include <assert.h>
 #include <math.h>
 #include <signal.h>
@@ -15,7 +18,40 @@ static const char *plugin_uri(void) {
         "http://kxstudio.sf.net/carla/plugins/audiogain_s";
 }
 
+static char engine_sound[512];
+static const char *plugin_uri_for_engine(void) {
+    snprintf(engine_sound,sizeof(engine_sound),"lv2:%s",plugin_uri());
+    return engine_sound;
+}
+
+/* Engine integration: an lv2: sound is prepared off the audio callback and
+   becomes a normal owned playback sample. */
+static void test_engine_resolution(void) {
+    cJSON *value=cJSON_CreateObject();
+    cJSON_AddStringToObject(value,"s",plugin_uri_for_engine());
+    cJSON_AddNumberToObject(value,"gain",.5);
+    AudioEvent ev;
+    memset(&ev,0,sizeof(ev));
+    dsp_params_init(&ev.dsp); ev.dsp.enabled=1;
+    ev.freq=220; ev.duration=.2; ev.smp=-1; ev.wt=-1; ev.smp_speed=1;
+    int ok=js_audio_resolve_sample(&ev,value);
+    cJSON_Delete(value);
+    if (!ok) {
+        printf("LV2 engine resolution unavailable\n");
+        return;
+    }
+    assert(ev.smp>=0);
+    float *pcm=NULL; int frames=0, channels=0;
+    smp_get_stereo(ev.smp,&pcm,&frames,&channels);
+    assert(pcm && frames>0 && channels==2);
+    double energy=0;
+    for (int i=0;i<frames*2;i++) energy+=fabs(pcm[i]);
+    assert(energy>0);
+    printf("LV2 engine resolution ok: %d frames, energy %.4f\n",frames,energy);
+}
+
 int main(void) {
+    test_engine_resolution();
     char error[512]="";
     Lv2Worker *worker=lv2_worker_start(plugin_uri(),44100,error,sizeof(error));
     if (!worker) {

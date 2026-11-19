@@ -796,6 +796,18 @@ original hap, leaving the wrong right-channel tail after the source disconnected
 The valid initial captures failed at correlations -0.217..0.901. All nine now
 correlate above 0.999996 at lag zero with the unchanged thresholds.
 
+Two more `shared-room-source-` cases cover a panned source (`.pan(.7)`) and a
+downward-stretched source (`.speed(.5)`) feeding the mono IR. Both pass at lag
+zero: correlation 0.99999998 and 0.999705, RMS ratios 0.9931 and 1.0111. A
+fractional **IR** rate is a separate, unresolved divergence. Adding
+`.irspeed(.5)` or `.irspeed(.75)` together with the matching source speed gave
+correlations -0.78 and -0.92 with the same windows and thresholds; an initial
+attempt at linear interpolation in the IR kernel changed the result only
+marginally and was reverted rather than tuned to the capture. The web resampler
+and the native nearest-index IR preparation are not equivalent at fractional
+rates here. Keep integer IR rates in gates and do not treat these measurements
+as parity; this is distinct from the established PCM and room-send gates.
+
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same
 quantum-rate envelope schedule as rendering, with at most 32,768 quanta of

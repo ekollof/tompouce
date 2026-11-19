@@ -151,10 +151,17 @@ and measured divergences are recorded in the archive.
       startup now have independent web comparisons. Nested `FX(...)` chains
       remain outside that coverage.
 - [ ] Extend shared-effect checks beyond the 22 send/orbit/fixed-IR/lifetime
-      cases: panned/stretched/graph source connections, source eviction, live
-      reconnections, kernel-change automation, nested/control-output routing and
-      live edits remain open. Very long modulation uses a bounded conservative
-      connection deadline; distinguish these limits from established PCM parity.
+      cases: two new `shared-room-source-` gates cover a panned source
+      (`.pan(.7)`, correlation 0.99999998) and a downward-stretched source
+      (`.speed(.5)`, 0.999705) feeding the mono IR. Graph source connections,
+      source eviction, live reconnections, kernel-change automation,
+      nested/control-output routing and live edits remain open. Fractional IR
+      rates are a measured divergence: `.irspeed(.5|.75)` with matching source
+      speed gave correlations -0.78/-0.92; an interpolation attempt was
+      reverted rather than tuned to the capture. See
+      [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
+      Very long modulation uses a bounded conservative connection deadline;
+      distinguish these limits from established PCM parity.
 - [ ] Assess remaining visualization options and shared-effect tail attribution:
       browser styling/layout options, per-pattern shared delay/reverb/duck tails
       and isolated Csound taps. Document intentional terminal adaptations rather

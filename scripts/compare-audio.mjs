@@ -140,6 +140,11 @@ try {
     ].map(([name,controls])=>({name:`shared-room-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
       code:`s('stretch_fixture').fast(3).gain(.3).clip(.05).ir('mono_fixture')${controls}.dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
     ...[
+      ['source-pan',`.pan(.7)`],
+      ['source-stretch',`.speed(.5)`],
+    ].map(([name,controls])=>({name:`shared-room-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
+      code:`s('stretch_fixture').fast(3).gain(.3).clip(.05)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
+    ...[
       ['send-toggle',`note("c4*3").delay("1 0 1").delaytime(.075).delayfeedback(.7)`],
       ['feedback-zero',`note("c4*3").delay(1).delaytime(.075).delayfeedback(".7 0 .4")`],
       ['time-negative',`note("c4*2").delay(1).delaytime(".075 -1").delayfeedback(.7)`],

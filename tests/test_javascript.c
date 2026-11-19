@@ -477,6 +477,40 @@ static void test_switchangel_fx(void) {
     puts("Switch Angel FX helper event routing ok");
 }
 
+/* Switch Angel's humanize helper shifts onset and velocity within documented
+   bounds; a deterministic random source makes the bounds checkable. */
+static void test_switchangel_humanize(void) {
+    const char *fixture =
+        "Math.random = () => 0.75;\n"
+        "const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));\n"
+        "register('humanize', (amt, pat) => { const a=clamp(amt,0,1);\n"
+        "  return pat.withHaps(haps=>haps.map(hap=>hap.withSpan(span=>span.withTime(\n"
+        "    t=>t+0.1*a*(2*Math.random()-1))))).withValue(v=>({...v,\n"
+        "    velocity:(v.velocity??1)+0.5*a*(2*Math.random()-1)})); });\n";
+    char root[]="/tmp/tompouce-sahum-XXXXXX", config[512], path[700];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    assert(!mkdir(config,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    write_module(path,fixture);
+    JsProgram *program=NULL;
+    cJSON *haps=query("s(\"bd\").s(\"sine\").humanize(1)",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+    const cJSON *velocity=cJSON_GetObjectItemCaseSensitive(value,"velocity");
+    assert(cJSON_IsNumber(velocity) && velocity->valuedouble>=0.5 && velocity->valuedouble<=1.5);
+    const cJSON *begin=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"begin");
+    assert(cJSON_IsNumber(begin) && begin->valuedouble>=0 && begin->valuedouble<.2);
+    cJSON_Delete(haps); javascript_free(program);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+    puts("Switch Angel humanize bounds ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -627,6 +661,7 @@ int main(int argc, char **argv) {
     test_midi_manifest();
     test_oneshot_grid();
     test_switchangel_fx();
+    test_switchangel_humanize();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

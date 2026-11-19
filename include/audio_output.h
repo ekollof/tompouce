@@ -3,6 +3,15 @@
 
 typedef void (*AudioOutputRender)(float *output, unsigned long frames);
 /* Foreground startup/shutdown; rendering stays on the chosen output thread. */
+/* Named output targets (exact PipeWire node names). Index 0 is the default
+   stream; 1..AUDIO_OUTPUT_NAMED_MAX are lazily created named streams. */
+#define AUDIO_OUTPUT_NAMED_MAX 4
+/* Resolve a pattern .out(name) to a target index; unknown names return 0 and
+   emit one console warning. Candidate names come from TOMPOUCE_OUTPUT_NAMES. */
+int audio_output_target(const char *name);
+const char *audio_output_target_name(int index);
+int audio_output_named_count(void);
+
 int audio_output_start(AudioOutputRender render, unsigned long frames);
 void audio_output_stop(void);
 int audio_output_active(void);

@@ -598,6 +598,18 @@ globalThis.each = (fn) => { eachTransform = fn; return core.silence; };
  */
 core.Pattern.prototype.osc = function () { return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_osc:true})); };
 globalThis.osc = pattern=>pattern.osc();
+/**
+ * Route this pattern's voices to a named output stream (an exact PipeWire node
+ * name). Unknown names fall back to the default stream with a warning.
+ * @name out
+ * @param {string} name destination node name
+ * @example
+ * s('saw').out('carla')
+ */
+core.Pattern.prototype.out = function (name) {
+  const target = typeof name === 'string' ? name.slice(0,128) : '';
+  return this.fmap(value=>({...((value && typeof value==='object')?value:{note:value}),_out:target}));
+};
 /* MIDI controller input, mirroring the upstream input package: midin opens
    a sender and returns a per-CC live reader (values normalized 0..1, default
    0); midikeys returns live keyboard notes with fixed durations. Native

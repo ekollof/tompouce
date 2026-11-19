@@ -1,8 +1,10 @@
 #define _POSIX_C_SOURCE 200809L
 #include "audio_output.h"
+#include "audio.h"
 #include "common.h"
 #include <portaudio.h>
 #include <stdatomic.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <errno.h>
 #ifdef HAVE_PIPEWIRE
@@ -20,6 +22,57 @@
 #define OUTPUT_STRIDE (OUTPUT_CHANNELS*sizeof(float))
 #define OUTPUT_FRAMES 4096
 #define CONNECT_SECONDS 2
+
+/* Exact-match named targets. The list is fixed at construction from a bounded
+   allowlist so an arbitrary pattern string can never open a new stream or
+   connect to an unbounded node name. */
+static char named_targets[AUDIO_OUTPUT_NAMED_MAX][64];
+static int named_count=-1;
+static char warned_targets[AUDIO_OUTPUT_NAMED_MAX+1];
+
+static void init_named_targets(void) {
+    if (named_count>=0) return;
+    named_count=0;
+    const char *list=getenv("TOMPOUCE_OUTPUT_NAMES");
+    if (!list || !*list) return;
+    const char *cursor=list;
+    while (*cursor && named_count<AUDIO_OUTPUT_NAMED_MAX) {
+        const char *end=strchr(cursor,',');
+        size_t length=end?(size_t)(end-cursor):strlen(cursor);
+        if (length && length<sizeof(named_targets[0])) {
+            memcpy(named_targets[named_count],cursor,length);
+            named_targets[named_count][length]=0;
+            named_count++;
+        }
+        if (!end) break;
+        cursor=end+1;
+    }
+    char names[512]=""; size_t used=0;
+    for (int i=0;i<named_count;i++) {
+        int n=snprintf(names+used,sizeof(names)-used,"%s%s",i?",":"",named_targets[i]);
+        if (n<=0 || (size_t)n>=sizeof(names)-used) break;
+        used+=(size_t)n;
+    }
+    log_console("audio: named output candidates: %s",used?names:"(none)");
+}
+
+int audio_output_target(const char *name) {
+    init_named_targets();
+    if (!name || !*name) return 0;
+    for (int i=0;i<named_count;i++) if (!strcmp(name,named_targets[i])) return i+1;
+    if (!warned_targets[AUDIO_OUTPUT_NAMED_MAX]) {
+        warned_targets[AUDIO_OUTPUT_NAMED_MAX]=1;
+        log_console("audio: unknown output target %.64s; using the default stream",name);
+    }
+    return 0;
+}
+
+const char *audio_output_target_name(int index) {
+    init_named_targets();
+    return index>=1 && index<=named_count ? named_targets[index-1] : NULL;
+}
+
+int audio_output_named_count(void) { init_named_targets(); return named_count; }
 
 /* Missed device cycles observed on the output thread. A gap between process
    callbacks beyond 1.5x the delivered quantum means the server cycled
@@ -90,9 +143,17 @@ static unsigned long block_frames;
 static char output_error[192];
 
 #ifdef HAVE_PIPEWIRE
+/* Named-target streams share the main loop. The default stream's render fills
+   shadow buffers; named streams copy a snapshot so neither re-renders DSP. */
+#define TARGET_FRAMES OUTPUT_FRAMES
+static float target_shadow[AUDIO_OUTPUT_NAMED_MAX+1][TARGET_FRAMES*2];
+static float target_ready[AUDIO_OUTPUT_NAMED_MAX+1][TARGET_FRAMES*2];
+static pthread_mutex_t target_lock=PTHREAD_MUTEX_INITIALIZER;
+
 static struct {
     struct pw_thread_loop *loop;
     struct pw_stream *stream;
+    struct pw_stream *named[AUDIO_OUTPUT_NAMED_MAX+1];
     int initialized, started, failed;
     atomic_int active;
 } native_pw;
@@ -128,11 +189,19 @@ static void pw_process(void *data) {
         if (buffer->requested && buffer->requested<frames) frames=(uint32_t)buffer->requested;
 #endif
         xrun_observe(frames);
+        int named=audio_output_named_count();
+        for (int t=1;t<=named;t++) out_target_buffers[t]=target_shadow[t];
         /* Cap individual DSP calls, including unusually large server buffers. */
         for (uint32_t at=0;at<frames;) {
             unsigned long count=frames-at;
             if (count>block_frames) count=block_frames;
             render_audio((float *)out->data+at*OUTPUT_CHANNELS,count); at+=(uint32_t)count;
+        }
+        if (named>0) {
+            pthread_mutex_lock(&target_lock);
+            for (int t=1;t<=named;t++)
+                memcpy(target_ready[t],target_shadow[t],sizeof(target_ready[t]));
+            pthread_mutex_unlock(&target_lock);
         }
         out->chunk->offset=0; out->chunk->stride=OUTPUT_STRIDE; out->chunk->size=frames*OUTPUT_STRIDE;
         buffer->size=frames;
@@ -142,6 +211,33 @@ static void pw_process(void *data) {
 
 static const struct pw_stream_events pw_events={
     .version=PW_VERSION_STREAM_EVENTS, .state_changed=pw_state_changed, .process=pw_process
+};
+
+/* Named streams never render: they replay the last snapshot produced by the
+   default stream's single render pass. */
+static void pw_named_process(void *data) {
+    int target=(int)(intptr_t)data;
+    struct pw_stream *stream=target>=0 && target<=AUDIO_OUTPUT_NAMED_MAX ? native_pw.named[target] : NULL;
+    if (!stream) return;
+    struct pw_buffer *buffer=pw_stream_dequeue_buffer(stream);
+    if (!buffer) return;
+    struct spa_buffer *spa=buffer->buffer;
+    if (spa && spa->n_datas && spa->datas[0].data && spa->datas[0].chunk) {
+        struct spa_data *data_out=&spa->datas[0];
+        uint32_t frames=data_out->maxsize/OUTPUT_STRIDE;
+        if (buffer->requested && buffer->requested<frames) frames=buffer->requested;
+        if (frames>TARGET_FRAMES) frames=TARGET_FRAMES;
+        pthread_mutex_lock(&target_lock);
+        memcpy(data_out->data,target_ready[target],(size_t)frames*OUTPUT_STRIDE);
+        pthread_mutex_unlock(&target_lock);
+        data_out->chunk->offset=0; data_out->chunk->stride=OUTPUT_STRIDE;
+        data_out->chunk->size=frames*OUTPUT_STRIDE; buffer->size=frames;
+    }
+    pw_stream_queue_buffer(stream,buffer);
+}
+
+static const struct pw_stream_events pw_named_events={
+    .version=PW_VERSION_STREAM_EVENTS, .process=pw_named_process
 };
 
 static int pipewire_open(void) {
@@ -174,6 +270,24 @@ static int pipewire_open(void) {
     pw_thread_loop_lock(native_pw.loop);
     int result=pw_stream_connect(native_pw.stream,PW_DIRECTION_OUTPUT,PW_ID_ANY,
         PW_STREAM_FLAG_AUTOCONNECT|PW_STREAM_FLAG_MAP_BUFFERS|PW_STREAM_FLAG_RT_PROCESS,&format,1);
+    /* One extra stream per allowlisted name, with exact target-object matching.
+       A stream that cannot connect is destroyed; its voices stay on default. */
+    for (int t=1;t<=audio_output_named_count();t++) {
+        const char *name=audio_output_target_name(t);
+        struct pw_properties *named_props=pw_properties_new(PW_KEY_MEDIA_TYPE,"Audio",
+            PW_KEY_MEDIA_CATEGORY,"Playback",PW_KEY_MEDIA_ROLE,"Music",PW_KEY_APP_NAME,"Tompouce",
+            PW_KEY_NODE_NAME,"tompouce-named",PW_KEY_TARGET_OBJECT,name,PW_KEY_NODE_LATENCY,latency,NULL);
+        if (!named_props) continue;
+        native_pw.named[t]=pw_stream_new_simple(pw_thread_loop_get_loop(native_pw.loop),
+            "Tompouce",named_props,&pw_named_events,(void *)(intptr_t)t);
+        if (!native_pw.named[t]) continue;
+        if (pw_stream_connect(native_pw.named[t],PW_DIRECTION_OUTPUT,PW_ID_ANY,
+                PW_STREAM_FLAG_AUTOCONNECT|PW_STREAM_FLAG_MAP_BUFFERS|PW_STREAM_FLAG_RT_PROCESS,
+                &format,1)<0) {
+            pw_stream_destroy(native_pw.named[t]); native_pw.named[t]=NULL;
+            log_console("audio: named target %s unavailable; voices use the default stream",name);
+        }
+    }
     if (result>=0) {
         result=pw_thread_loop_start(native_pw.loop);
         if (result>=0) {
@@ -193,6 +307,11 @@ static int pipewire_open(void) {
 static void pipewire_close(void) {
     if (native_pw.started) pw_thread_loop_stop(native_pw.loop);
     if (native_pw.loop) pw_thread_loop_lock(native_pw.loop);
+    for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) {
+        if (native_pw.named[t]) pw_stream_destroy(native_pw.named[t]);
+        native_pw.named[t]=NULL;
+        out_target_buffers[t]=NULL;
+    }
     if (native_pw.stream) pw_stream_destroy(native_pw.stream);
     if (native_pw.loop) pw_thread_loop_unlock(native_pw.loop);
     if (native_pw.loop) pw_thread_loop_destroy(native_pw.loop);

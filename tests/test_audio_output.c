@@ -13,6 +13,21 @@
 #define Pa_GetErrorText fake_pa_error
 #include "../src/audio_output.c"
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void test_named_targets(void) {
+    setenv("TOMPOUCE_OUTPUT_NAMES","carla,other",1);
+    assert(audio_output_named_count()==2);
+    assert(audio_output_target("carla")==1);
+    assert(audio_output_target("other")==2);
+    assert(audio_output_target("missing")==0);
+    assert(audio_output_target(NULL)==0);
+    assert(!strcmp(audio_output_target_name(1),"carla"));
+    assert(!strcmp(audio_output_target_name(2),"other"));
+    assert(!audio_output_target_name(0));
+    unsetenv("TOMPOUCE_OUTPUT_NAMES");
+}
 
 static int init_error, open_error, start_error, format_error, initialized_count, terminated_count, closed_count;
 static int has_device=1, channels=2, last_host;
@@ -70,6 +85,7 @@ static void sine_render(float *out, unsigned long frames) {
 }
 
 int main(void) {
+    test_named_targets();
     size_t n=sizeof(output_drivers)/sizeof(*output_drivers);
     assert(!strcmp(output_drivers[n-2].name,"JACK") && !strcmp(output_drivers[n-1].name,"ALSA"));
 #ifdef HAVE_PIPEWIRE

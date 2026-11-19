@@ -527,6 +527,11 @@ int main(int argc, char **argv) {
     assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(midi_value,"_csoundMidi")));
     assert(cJSON_GetObjectItemCaseSensitive(midi_value,"note")->valuedouble == 60.5);
     cJSON_Delete(midi_haps); javascript_free(program);
+    cJSON *out_haps = query("s('saw').out('carla')",&program);
+    const cJSON *out_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(out_haps,0),"value");
+    const cJSON *out_name = cJSON_GetObjectItemCaseSensitive(out_value,"_out");
+    assert(cJSON_IsString(out_name) && !strcmp(out_name->valuestring,"carla"));
+    cJSON_Delete(out_haps); javascript_free(program);
     cJSON *piano_haps = query("note(60).clip(.5).piano()",&program);
     const cJSON *piano_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(piano_haps,0),"value");
     assert(!strcmp(cJSON_GetObjectItemCaseSensitive(piano_value,"s")->valuestring,"piano"));

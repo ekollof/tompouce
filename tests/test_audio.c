@@ -468,7 +468,29 @@ static void test_output_volume(void) {
     playing=0;audio_set_reference_mode(0);audio_time=0;
 }
 
+/* Voices tagged with a named target feed only that target's buffer; the
+   default bus stays silent so its established PCM is untouched. */
+static void test_named_output_routing(void) {
+    memset(voices,0,sizeof(voices));
+    AudioEvent event={.inst=INST_SINE,.smp=-1,.freq=220,.gain=.02,
+        .duration=2,.att=0,.rel=.01,.sus=1,.out_target=1};
+    playing=1;
+    audio_trigger_event(&event);
+    float target[512*2]={0}, default_out[512*2]={0};
+    out_target_buffers[1]=target;
+    pa_callback(NULL,default_out,512,NULL,0,NULL);
+    out_target_buffers[1]=NULL;
+    double target_energy=0, default_energy=0;
+    for (int i=0;i<512*2;i++) {
+        target_energy+=fabs(target[i]); default_energy+=fabs(default_out[i]);
+    }
+    assert(target_energy>0);
+    assert(default_energy==0);
+    memset(voices,0,sizeof(voices));
+}
+
 int main(void) {
+    test_named_output_routing();
     /* Never-used orbits must stay bit-exactly silent: the reverb and delay
        gates skip work only when their state is provably zero. Runs first so
        no later test has dirtied a delay line or reverb network. */

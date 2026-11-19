@@ -36,13 +36,13 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       round-trip MIDI-to-audio latency under load with rtkit/wine-rt, and a
       real plugin chain. This box has Carla 2.5.10, `pw-jack`, `pw-link` and
       PipeWire, but the maintained checks only cover Tompouce to an owned sink.
-- [ ] `out` control for named PipeWire targets (exact node-name match):
-      `s('saw').out('carla')` routes those voices to a dedicated stream
-      targeting that node; unknown names fall back to the default stream with
-      a console warning (never silence). Lazily create streams per distinct
-      name under a small cap; reuse the `TOMPOUCE_OUTPUT_TARGET` mechanism
-      per stream. List candidate targets at startup/construction for
-      discoverability; keep the default stream behavior byte-identical.
+- [x] `out` control for named PipeWire targets (exact node-name match):
+      `s('saw').out('carla')` routes voices to a per-name stream (up to four,
+      from the `TOMPOUCE_OUTPUT_NAMES` allowlist) with one shared render pass;
+      unknown names warn once and use the default stream. Candidates are
+      logged at startup and the default bus stays byte-identical. Named streams
+      carry dry voices only, bypassing shared effects. See
+      [named output targets](docs/plugin-hosting.md#named-output-targets-out).
       Sources (capture) stay out of scope until an input path exists.
 - [ ] Drive a managed Carla instance from patterns: project files for plugin
       graphs, notes/CC through existing MIDI output for params, instance

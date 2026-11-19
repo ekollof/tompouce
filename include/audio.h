@@ -1,6 +1,7 @@
 #ifndef AUDIO_H
 #define AUDIO_H
 #include "csound_host.h"
+extern float *out_target_buffers[]; /* set by the output backend per render */
 void audio_set_csound(CsoundProgram *program);
 void audio_set_reference_mode(int on);
 #include "common.h"
@@ -13,6 +14,7 @@ typedef struct Voice {
     DspState dsp;
     DspState dsp_right;
     int active;
+    int out_target; /* 0 default, 1..4 named output streams */
     unsigned scope_mask, scope_generation;
     int inst;
     double freq;

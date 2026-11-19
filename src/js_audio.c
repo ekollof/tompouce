@@ -1,6 +1,7 @@
 #include "js_audio.h"
 #include "gm_synth.h"
 #include "audio.h"
+#include "audio_output.h"
 #include "scheduler.h"
 #include "sampler.h"
 #include "websamp.h"
@@ -231,6 +232,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         end->valuedouble <= begin->valuedouble || !isfinite(origin) || seconds <= 0 || !isfinite(seconds)) return 0;
     memset(ev,0,sizeof(*ev));
     ev->scope_mask = (unsigned)control(hap,"scopeMask",0,0,4294967295.0);
+    ev->out_target = audio_output_target(text_control(v,"_out"));
     ev->time = origin + begin->valuedouble * seconds;
     ev->duration = fmin(60,(end->valuedouble - begin->valuedouble) * seconds);
     double clip = control(v,"clip",1,0,64);

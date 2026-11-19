@@ -77,12 +77,22 @@ bridges. These steps cannot be regression-tested on the development box, so the
 documented path stops at "configure and measure on your own machine" rather than
 promising latency numbers here.
 
+## Named output targets (`out`)
+
+`s('saw').out('carla')` attaches an exact output name to a pattern's voices.
+The engine only opens streams for names in the bounded `TOMPOUCE_OUTPUT_NAMES`
+allowlist (comma-separated, at most four, 64 characters each); candidates are
+logged at startup. An unknown name emits one console warning and uses the
+default stream, so a mistyped target never silences a pattern. Each allowlisted
+name gets its own PipeWire stream with `PW_KEY_TARGET_OBJECT` set to that exact
+node name. The default stream performs the only render pass; named streams
+replay a snapshot of the dry voices assigned to them, bypassing shared orbit
+reverb/delay/duck and master effects. The default bus keeps its original
+operation order and stays byte-identical: a named-target voice contributes
+nothing to it. Sources/capture remain out of scope until an input path exists.
+
 ## Planned, not implemented
 
-- An `out` control for named PipeWire targets so `s('saw').out('carla')` can
-  route individual voices to a dedicated stream (exact node-name match, small
-  cap, default-stream fallback with a warning). Sources/capture stay out of
-  scope until an input path exists.
 - A managed Carla instance driven from patterns, with project files for plugin
   graphs and note/CC through the existing MIDI output.
 - Native LV2 discovery/instantiation through `lilv`, with audio and note/CC

@@ -912,6 +912,7 @@ static void dispatch_voice_onsets(void) {
 static void trigger_voice(Voice *v, AudioEvent *ev) {
     memset(v, 0, sizeof(Voice));
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
+    v->out_target = ev->out_target;
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
     else v->dsp.control.enabled=v->dsp_right.control.enabled=0;
@@ -1468,6 +1469,17 @@ typedef struct {
     double left, right, delay_l, delay_r, room_l, room_r, room_size;
 } VoiceMix;
 
+/* Named-target dry taps. The default bus keeps its exact operation order;
+   these accumulators are written in parallel and consumed by extra streams. */
+static double target_dry_l[AUDIO_OUTPUT_NAMED_MAX+1], target_dry_r[AUDIO_OUTPUT_NAMED_MAX+1];
+float *out_target_buffers[AUDIO_OUTPUT_NAMED_MAX+1];
+
+static void target_add(int target, double l, double r) {
+    if (target>0 && target<=AUDIO_OUTPUT_NAMED_MAX) {
+        target_dry_l[target]+=l; target_dry_r[target]+=r;
+    }
+}
+
 static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
     /* Source transport may shorten note_off_time. The outer release node
        keeps the original hap and raw-release anchors instead. */
@@ -1496,6 +1508,10 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
     unsigned scope_mask = v->scope_mask;
     for (int i = 0; scope_mask; i++, scope_mask >>= 1) if ((scope_mask&1u) && v->scope_generation == pattern_scope_generation[i])
         pattern_scope_frame[i] += (l*left+r*right)*dry*.5;
+    target_add(v->out_target,l*left*dry,r*right*dry);
+    /* Named targets bypass the shared orbit/effect bus entirely; their dry
+       source is carried by the target buffer, never by the default stream. */
+    if (v->out_target>0) return;
     mix->left += l*left*dry; mix->right += r*right*dry;
     mix->delay_l += l*left*v->delay_send;
     mix->delay_r += r*right*v->delay_send;
@@ -1716,6 +1732,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             mixes[o].room_size = -1;
         }
         double L = 0, R = 0;
+        for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) target_dry_l[t]=target_dry_r[t]=0;
         double cs_l = 0, cs_r = 0;
         double duck_g[N_ORBITS];
         orbits_ensure();
@@ -2224,6 +2241,13 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         else if (output_gain!=1) { L*=output_gain; R*=output_gain; }
         out[i*2] = (float)L;
         out[i*2+1] = (float)R;
+        for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) {
+            float *buffer=out_target_buffers[t];
+            if (!buffer) continue;
+            double gain=output_gain;
+            buffer[i*2]=(float)(target_dry_l[t]*gain);
+            buffer[i*2+1]=(float)(target_dry_r[t]*gain);
+        }
         /* scope tap: lock-free ring for the viz pane (single writer) */
         scope_buf[scope_pos & (SCOPE_N - 1)] = (float)((L + R) * 0.5);
         scope_pos++;

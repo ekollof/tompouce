@@ -81,15 +81,27 @@ gates.
   creations (240 ns each), 8,300 pure-query calls, 4,100 common-key scans
   (520 ns) and 456 triangle batches: roughly 10 ms in total.
 
-With the opt-in Node backend (`TOMPOUCE_QUERY_BACKEND=node`) both heavy songs
-now finish the same compile-stage probe in 145/146 ms median, and the full
-Bakery comparison matches **all 42 compositions**, including 398/398 events for
-13587 and 78179, where QuickJS still times out. That backend is opt-in and
-documented in the [V8 assessment](v8-assessment.md#opt-in-node-worker-prototype-2026-11-04);
-the default QuickJS path keeps the budget failure described here. The
-[opt-in native V8 worker](v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20)
-does the same: 139/140 ms medians on the two heavy songs and 42/42 compositions
-in the full comparison. Neither backend changes the QuickJS default or any gate.
+With a worker backend both heavy songs finish the compile-stage probe well
+under the budget, and the full Bakery comparison matches **all 42
+compositions**, including 398/398 events for 13587 and 78179, where QuickJS
+times out. The Node diagnostic backend measured 128/129 ms medians and the
+native V8 worker 139/140 ms; with no backend env the native worker is preferred
+when installed. See the [V8 assessment](v8-assessment.md) for details. No
+threshold or baseline was changed, and `TOMPOUCE_QUERY_BACKEND=quickjs` keeps
+the original behavior.
+
+These event gates do not measure playback continuity. "Computer says no" is a
+runtime stress case: an isolated daemon playing IDs 13587 and 78179 reaches
+**124–128/128 active voices** on QuickJS, Node and native V8 alike, with the
+same near-cap peaks on every backend. `music_health` now reports PipeWire xrun
+gaps; over 48 s runs the gap counts varied from 59 to 330 and max gaps were
+about 7–10 ms, with no consistent backend difference and only one late-preparation
+skip. Changing `--block` from 128 to 256 frames did not reliably reduce gaps
+(81/330 versus 118/218 in repeated Node runs), so this is not a simple
+buffer-size problem: the track fills the fixed 128-voice pool and the single
+real-time render callback, whereas the browser's WebAudio graph has look-ahead
+scheduling and different voice/buffer architecture. Voice-pool policy and
+per-block render cost for this composition remain open diagnostics.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

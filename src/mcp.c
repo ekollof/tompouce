@@ -3,6 +3,7 @@
 #include "track.h"
 #include "scheduler.h"
 #include "audio.h"
+#include "audio_output.h"
 #include "ai.h"
 #include "tui.h"
 #include "midi.h"
@@ -287,15 +288,17 @@ static void handle_session(cJSON *args, char *out, size_t outlen, int *iserr) {
 
 static void handle_health(char *out, size_t outlen) {
     int av = audio_active_voices();
+    unsigned long long calls=0, gaps=0, max_gap=0, empty=0;
+    audio_output_xrun_stats(&calls,&gaps,&max_gap,&empty);
     snprintf(out, outlen,
-        "playing=%s stream=%s backend=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s",
+        "playing=%s stream=%s backend=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s xrun=%llu gaps=%llu empty=%llu max=%llums",
         audio_is_playing() ? "yes" : "no",
         audio_is_stream_active() ? "up" : "down",
         audio_backend_name(),
         audio_get_bpm(), audio_time_now(), av, event_queue_depth(), track_count,
         scheduler_song_pos() + 1, scheduler_song_count(),
         banks_ready() ? "ready" : "indexing", banks_count(),
-        midi_ready() ? "up" : "down");
+        midi_ready() ? "up" : "down", calls, gaps, empty, max_gap/1000000ull);
 }
 
 static cJSON *text_result(const char *text, int is_error) {

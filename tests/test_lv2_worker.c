@@ -45,6 +45,44 @@ static void test_midi(void) {
     puts("LV2 MIDI note on/off plumbing ok");
 }
 
+/* A deterministic instrument reference render: the LSP oscillator becomes an
+   owned PCM buffer through the same worker protocol. Strudel.cc has no LV2
+   counterpart, so this pinned hash is the reference gate for the instrument
+   side, alongside the gain effect render below. */
+static void test_instrument_reference(void) {
+    const char *uri = "http://lsp-plug.in/plugins/lv2/oscillator_mono";
+    char error[512] = "";
+    Lv2Worker *worker = lv2_worker_start(uri,44100,error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 instrument: %s\n",error[0]?error:"unavailable"); return; }
+    const int frames = 13231;
+    float *pcm = calloc((size_t)frames*2,sizeof(float));
+    assert(pcm);
+    double phase=0, step=2*M_PI*220.0/44100.0;
+    for (int i=0;i<frames;i++) {
+        double fade=fmin(1,i/(.005*44100.0))*exp(-i/(.5*44100.0));
+        pcm[i*2]=(float)(.25*sin(phase)*fade);
+        pcm[i*2+1]=pcm[i*2]; phase+=step;
+    }
+    assert(lv2_worker_set_control(worker,0,.5f,error,sizeof(error)));
+    int ok=1;
+    for (int at=0;at<frames && ok;at+=LV2_WORKER_FRAMES) {
+        int count=frames-at<LV2_WORKER_FRAMES?frames-at:LV2_WORKER_FRAMES;
+        ok=lv2_worker_process(worker,pcm+at*2,pcm+at*2,(unsigned)count,error,sizeof(error));
+    }
+    lv2_worker_stop(worker);
+    assert(ok);
+    double energy=0; uint64_t hash=1469598103934665603ull;
+    for (int i=0;i<frames*2;i++) {
+        energy+=fabs(pcm[i]);
+        uint32_t bits; memcpy(&bits,&pcm[i],sizeof(bits));
+        for (int b=0;b<4;b++) { hash^=(bits>>(b*8))&0xff; hash*=1099511628211ull; }
+    }
+    free(pcm);
+    assert(energy>0);
+    assert(hash==13122609104998660811ull && frames==13231);
+    puts("LV2 instrument reference render ok");
+}
+
 /* Engine integration: an lv2: sound is prepared off the audio callback and
    becomes a normal owned playback sample. */
 static void test_engine_resolution(void) {
@@ -85,6 +123,7 @@ static void test_engine_resolution(void) {
 int main(void) {
     test_midi();
     test_engine_resolution();
+    test_instrument_reference();
     char error[512]="";
     Lv2Worker *worker=lv2_worker_start(plugin_uri(),44100,error,sizeof(error));
     if (!worker) {
@@ -108,7 +147,10 @@ int main(void) {
     float output[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
     for (unsigned i=0;i<LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS;i++)
         input[i]=(float)(.1*sin(i*0.01));
-    /* Port 0 of audiogain_s is its gain control, default 0. */
+    /* Port 0 of audiogain_s is its gain control, default 0. Out-of-range
+       indices and non-finite values are rejected before reaching the child. */
+    assert(!lv2_worker_set_control(worker,9999,1.0f,error,sizeof(error)));
+    assert(!lv2_worker_set_control(worker,0,NAN,error,sizeof(error)));
     assert(lv2_worker_set_control(worker,0,1.0f,error,sizeof(error)));
     assert(lv2_worker_process(worker,input,output,LV2_WORKER_FRAMES,error,sizeof(error)));
     double energy=0;

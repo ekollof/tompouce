@@ -94,6 +94,12 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
 - [ ] One instrument and one effect behind compare gates (rendered output vs
       a pinned reference render), plus failure tests (missing/broken plugin,
       dead worker, preset rejection) and sanitizer coverage of the host glue.
+      The instrument side now has a pinned offline PCM hash for the LSP
+      oscillator (13231 frames, deterministic across runs), the gain effect has
+      its existing engine-path hash, and control-port rejection (invalid index,
+      non-finite value) is tested alongside the missing-plugin and dead-worker
+      cases. The engine-path gain hash currently skips here because resolution
+      is unavailable in this environment, and sanitizer coverage remains open.
 - [x] Document supported classes, the no-UI ceiling, per-user plugin setup
       (licenses/installs stay with the user) and the rtkit/Wine notes.
       See [external plugin hosting](docs/plugin-hosting.md#supported-classes-and-the-ui-ceiling).

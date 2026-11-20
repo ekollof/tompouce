@@ -274,23 +274,54 @@ static char *default_script_path(void) {
     return NULL;
 }
 
+/* Default-backend discovery: an explicit TOMPOUCE_V8_WORKER, then a worker
+   beside the executable (installers put both under lib/tompouce), then one in
+   the current directory. Missing worker means QuickJS remains in use. */
+static char *default_v8_worker_path(void) {
+    const char *override = getenv("TOMPOUCE_V8_WORKER");
+    if (override && override[0]) {
+        if (access(override, X_OK) == 0) return strdup(override);
+        return NULL;
+    }
+    if (access("./tompouce-v8-worker", X_OK) == 0)
+        return strdup("./tompouce-v8-worker");
+    char exe[4096];
+    ssize_t got = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (got <= 0) return NULL;
+    exe[got] = 0;
+    char *slash = strrchr(exe, '/');
+    if (!slash) return NULL;
+    *slash = 0;
+    char candidate[4200];
+    if (snprintf(candidate, sizeof(candidate), "%s/tompouce-v8-worker", exe) <
+            (int)sizeof(candidate) && access(candidate, X_OK) == 0)
+        return strdup(candidate);
+    /* Build trees put test binaries in tests/ and the worker one level up. */
+    if (snprintf(candidate, sizeof(candidate), "%s/../tompouce-v8-worker", exe) <
+            (int)sizeof(candidate) && access(candidate, X_OK) == 0)
+        return strdup(candidate);
+    return NULL;
+}
+
 JsWorker *js_worker_start(const char *node_path, const char *script_path,
     char *error, int errorlen) {
-    /* Opt-in native V8 worker: a separately built C++ binary that speaks the
-       same frames. QuickJS stays the default; the Node worker remains valid. */
+    /* Native V8 is preferred when the binary is present; QuickJS is the
+       fallback. Explicit env values keep the old Node path and a hard opt-out. */
     const char *backend = getenv("TOMPOUCE_QUERY_BACKEND");
-    int native = backend && !strcmp(backend, "native");
+    if (backend && !strcmp(backend, "quickjs")) return NULL;
+    int explicit_node = (backend &&
+        (!strcmp(backend, "node") || !strcmp(backend, "v8"))) ||
+        (node_path && node_path[0]) || (script_path && script_path[0]);
+    int explicit_native = backend && !strcmp(backend, "native") && !explicit_node;
+    char *native_exe = (explicit_native || !explicit_node)
+        ? default_v8_worker_path() : NULL;
+    if (explicit_native && !native_exe) {
+        set_error(error, errorlen, "native V8 worker not found (TOMPOUCE_V8_WORKER)");
+        return NULL;
+    }
+    int native = native_exe != NULL;
     char node_exe[1200];
-    char worker_exe[1200];
-    if (native) {
-        const char *configured = getenv("TOMPOUCE_V8_WORKER");
-        if (!configured || !configured[0] ||
-            snprintf(worker_exe, sizeof(worker_exe), "%s", configured) >=
-                (int)sizeof(worker_exe) || access(worker_exe, X_OK)) {
-            set_error(error, errorlen, "native V8 worker not found (TOMPOUCE_V8_WORKER)");
-            return NULL;
-        }
-    } else {
+    if (!native) {
         const char *node = node_path && node_path[0] ? node_path : "node";
         if (!resolve_node(node, node_exe, sizeof(node_exe))) {
             set_error(error, errorlen, "node executable not found");
@@ -304,11 +335,11 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
     }
     int in_pipe[2], out_pipe[2];
     if (pipe2(in_pipe, O_CLOEXEC) || pipe2(out_pipe, O_CLOEXEC)) {
-        free(script); set_error(error, errorlen, "worker pipe creation failed"); return NULL;
+        free(script); free(native_exe); set_error(error, errorlen, "worker pipe creation failed"); return NULL;
     }
     pid_t pid = fork();
     if (pid < 0) {
-        free(script); close(in_pipe[0]); close(in_pipe[1]); close(out_pipe[0]); close(out_pipe[1]);
+        free(script); free(native_exe); close(in_pipe[0]); close(in_pipe[1]); close(out_pipe[0]); close(out_pipe[1]);
         set_error(error, errorlen, "worker fork failed"); return NULL;
     }
     if (pid == 0) {
@@ -337,7 +368,7 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
         char *node_argv[] = {node_exe, "--max-old-space-size=256", script, NULL};
-        char *native_argv[] = {worker_exe, NULL};
+        char *native_argv[] = {native_exe, NULL};
         char **argv = native ? native_argv : node_argv;
         char *envp[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
             "LC_ALL=C.UTF-8", "TMPDIR=/tmp", NULL};
@@ -345,7 +376,7 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         _exit(127);
     }
     close(in_pipe[0]); close(out_pipe[1]);
-    free(script);
+    free(script); free(native_exe);
     JsWorker *worker = calloc(1, sizeof(*worker));
     if (!worker) {
         kill(pid, SIGKILL); close(in_pipe[1]); close(out_pipe[0]);

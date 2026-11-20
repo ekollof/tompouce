@@ -3,9 +3,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 
-/* Opt-in pattern-query worker running the committed bundle under Node's V8.
-   QuickJS stays the default backend; this transport exists so the engine can
-   delegate compile/query work to a separate process without linking V8.
+/* Pattern-query worker running the committed bundle in a separate process,
+   either the native C++ V8 worker or the Node diagnostic worker. The native
+   worker is preferred when present; QuickJS is the fallback when no worker is
+   available or TOMPOUCE_QUERY_BACKEND=quickjs is set.
 
    The worker is untrusted from the engine's point of view: every frame is
    bounded, every request has a deadline, and a timeout or dead process is

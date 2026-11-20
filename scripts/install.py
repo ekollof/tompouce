@@ -475,6 +475,18 @@ def copy_runtime(build, application, binary=None):
     for name in ('arpoon.json', 'belldub.json', 'bassfugue.json', 'flatrave.json', 'juxundtollerei.json', 'strudeltutor.json'):
         if (SOURCE / name).is_file():
             atomic_bytes(application / 'examples' / name, (SOURCE / name).read_bytes())
+    # Native V8 worker and its ICU data must sit beside the executable so the
+    # engine discovers them as the default query backend.
+    for name, mode in (('tompouce-v8-worker', 0o755), ('icudtl.dat', 0o644)):
+        artifact = build / name
+        if artifact.is_file():
+            atomic_bytes(application / name, artifact.read_bytes(), mode)
+    v8_licenses = Path('/usr/share/licenses/libv8')
+    if v8_licenses.is_dir():
+        for license_file in sorted(v8_licenses.iterdir()):
+            if license_file.is_file():
+                atomic_bytes(application / 'licenses' / 'libv8' / license_file.name,
+                             license_file.read_bytes(), 0o644)
 
 
 def main(argv=None):
@@ -573,9 +585,22 @@ def main(argv=None):
                        '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', f'-DCSOUND_PREFIX={csound}']
             if needs_tree:
                 command.append(f'-DTREE_SITTER_PREFIX={tree}')
+            # When a pinned libv8 is discoverable, build the native query worker
+            # so it becomes the default backend for this installation.
+            have_v8 = False
+            try:
+                have_v8 = subprocess.run(['pkg-config', '--exists', 'v8'],
+                    capture_output=True, env=environment).returncode == 0
+            except FileNotFoundError:
+                pass
+            if have_v8:
+                command.append('-DWITH_V8=ON')
             run(command, cwd=build, env=environment)
+            targets = ['tompouce', 'test_install_runtime']
+            if have_v8:
+                targets.append('tompouce-v8-worker')
             run(['cmake', '--build', binary_dir, '--parallel', str(args.jobs),
-                 '--target', 'tompouce', 'test_install_runtime'], cwd=build, env=environment)
+                 '--target', *targets], cwd=build, env=environment)
             if not args.skip_banks:
                 available = shutil.disk_usage(application).free
                 minimum = (128 * 1024 ** 2 if (application / 'assets/banks/.install-receipt.json').exists()
@@ -589,9 +614,20 @@ def main(argv=None):
                              TOMPOUCE_BANKS=str(application / 'assets/banks'), https_proxy='http://127.0.0.1:9',
                              HTTP_PROXY='http://127.0.0.1:9', ALL_PROXY='http://127.0.0.1:9', NO_PROXY='', no_proxy='')
             run([binary_dir / 'tests/test_install_runtime'] + (['--no-banks'] if args.skip_banks else []),cwd=build,env=check_env)
-            directory(build / 'scripts')
-            for name in ('companion.py', 'sound_import.py', 'query-worker.mjs'):
-                shutil.copy2(SOURCE / 'scripts' / name, build / 'scripts' / name)
+            # copy_runtime reads every allowlisted runtime file from the build
+            # tree; stage all of them, not just the scripts.
+            for relative in RUNTIME_FILES:
+                if relative == 'tompouce':
+                    continue
+                source = SOURCE / relative
+                if source.is_file():
+                    destination = build / relative
+                    directory(destination.parent)
+                    shutil.copy2(source, destination)
+            for artifact_name in ('tompouce-v8-worker', 'icudtl.dat'):
+                artifact = binary_dir / artifact_name
+                if artifact.is_file():
+                    shutil.copy2(artifact, build / artifact_name)
             copy_runtime(build,application,binary_dir / 'tompouce')
         bin_dir = directory(prefix / 'bin')
         launcher = bin_dir / 'tompouce'

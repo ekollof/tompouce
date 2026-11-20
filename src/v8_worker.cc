@@ -37,6 +37,25 @@ constexpr size_t kMaxFrame = 8 * 1024 * 1024;
 constexpr size_t kMaxSource = 4 * 1024 * 1024;
 constexpr int kMaxLogs = 64;
 constexpr size_t kMaxLogChars = 512;
+/* V8 16 has no recoverable OOM callback: a fatal OOM aborts the process. Bound
+   ArrayBuffer allocations so oversized requests become catchable RangeErrors,
+   matching the Node worker's failure behavior. */
+class LimitedAllocator : public v8::ArrayBuffer::Allocator {
+ public:
+  explicit LimitedAllocator(v8::ArrayBuffer::Allocator *base) : base_(base) {}
+  void *Allocate(size_t length) override {
+    return length > kMaxArrayBuffer ? nullptr : base_->Allocate(length);
+  }
+  void *AllocateUninitialized(size_t length) override {
+    return length > kMaxArrayBuffer ? nullptr : base_->AllocateUninitialized(length);
+  }
+  void Free(void *data, size_t length) override { base_->Free(data, length); }
+
+ private:
+  static constexpr size_t kMaxArrayBuffer = 512u * 1024u * 1024u;
+  v8::ArrayBuffer::Allocator *base_;
+};
+
 v8::Isolate *g_isolate = nullptr;
 v8::Global<v8::Context> g_json_context;
 v8::Global<v8::Context> g_context;
@@ -325,7 +344,9 @@ int main(int argc, char **argv) {
   v8::V8::Initialize();
 
   v8::Isolate::CreateParams params;
-  params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
+  params.array_buffer_allocator = new LimitedAllocator(
+      v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+  params.constraints.set_max_old_generation_size_in_bytes(256u * 1024u * 1024u);
   v8::Isolate *isolate = v8::Isolate::New(params);
   g_isolate = isolate;
   g_watchdog.start();

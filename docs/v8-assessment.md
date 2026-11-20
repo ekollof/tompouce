@@ -322,13 +322,24 @@ baseline was changed. `test_js_worker` passes in native and Node modes, and a
 focused ctest run (`js_worker|javascript|daemon|mcp_security|companion|audio_output`)
 passed 6/6.
 
-This is still an opt-in prototype, not a default-backend decision. The
-acceptance gates above remain open: confinement across all V8 threads, JIT
-mapping audit, OOM/malformed-frame/watchdog behavior at the embedder level,
-cold-swap and low-CPU measurements, and audio continuity under GC/JIT/compile
-load. The packaged V8 build also has its in-process sandbox disabled, and the
-shim currently rebuilds the runtime bundle per evaluation, which is worth
-measuring before any default switch.
+The native worker is now the **default when its binary is present**: with no
+`TOMPOUCE_QUERY_BACKEND`, the engine discovers `tompouce-v8-worker` beside the
+executable (or one directory up in build trees) and delegates to it. When no
+worker is installed, QuickJS is used as before; `TOMPOUCE_QUERY_BACKEND=quickjs`
+is the explicit opt-out, and `node`/`v8` still select the Node diagnostic
+worker. An isolated `install.sh` run with a `v8` pkg-config package confirmed
+the worker and `icudtl.dat` are built and installed beside the engine. With
+that default and no backend env, the full Bakery comparison again matched
+42/42 compositions, including 398/398 on both heavy songs; the compile-stage
+probe was 142/142 ms versus 266/265 ms under the `quickjs` opt-out. The worker
+bounds ArrayBuffer allocations so oversized requests become catchable
+`RangeError`s instead of aborting V8.
+
+Hardening gates remain open: an audit of confinement across all V8 threads and
+JIT executable mappings, cold-swap and low-CPU measurements, and audio
+continuity under GC/JIT/compile load. The packaged V8 build has its in-process
+sandbox disabled, and the shim rebuilds the runtime bundle per evaluation;
+both deserve follow-up before claiming full production parity.
 
 ## Packaging and notices
 
@@ -342,10 +353,10 @@ BSD-3-Clause) whose notices come with the user's Node installation. The worker
 resolves its script relative to the installed executable, so the symlinked
 launcher in `~/.local/bin` finds the script under `~/.local/lib/tompouce`.
 
-Still required before this can be a supported or default backend: host callbacks
-for the excluded features (Csound loads, MIDI snapshots, live sliders, prebakes)
-and OOM/cold/one-CPU behavior. The Node process also adds a runtime Node
-dependency and ~113–158 MiB RSS, which is why it is opt-in.
+All host callbacks now have worker paths except `midikeys`. The remaining
+questions are the hardening gates above and packaging; the Node process adds a
+runtime Node dependency and ~113–158 MiB RSS, so it stays a diagnostic option
+while the native worker is preferred when available.
 
 ## Build requirement
 

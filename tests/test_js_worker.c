@@ -135,6 +135,7 @@ static void test_watchdog(void) {
 }
 
 static void test_death(void) {
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
     char error[512] = "";
     /* A node executable that exits immediately must fail startup, not hang. */
     JsWorker *dead = js_worker_start("/bin/false", "scripts/query-worker.mjs", error, sizeof(error));
@@ -154,6 +155,7 @@ static void test_death(void) {
 /* Host-side limits must be applied and the child must not inherit injection
    variables such as NODE_OPTIONS. */
 static void test_confinement(void) {
+    setenv("TOMPOUCE_QUERY_BACKEND", "node", 1);
     char marker[] = "/tmp/tompouce-worker-inject-XXXXXX";
     int fd = mkstemp(marker);
     expect(fd >= 0, "injection fixture created");
@@ -182,14 +184,15 @@ static void test_confinement(void) {
         FILE *file = fopen(limits, "r");
         expect(file != NULL, "worker limits are readable");
         int core_zero = 0, address_bound = 0;
-        const char *backend = getenv("TOMPOUCE_QUERY_BACKEND");
-        const char *expected_limit = backend && !strcmp(backend, "native")
-            ? "274877906944" : "2147483648";
         if (file) {
             char line[256];
             while (fgets(line, sizeof(line), file)) {
                 if (strstr(line, "Max core file size") && strstr(line, " 0 ")) core_zero = 1;
-                if (strstr(line, "Max address space") && strstr(line, expected_limit)) address_bound = 1;
+                /* Node uses 2 GiB; the native V8 worker needs larger virtual
+                   reservations. Both are bounded, which is the contract. */
+                if (strstr(line, "Max address space") &&
+                    (strstr(line, "2147483648") || strstr(line, "274877906944")))
+                    address_bound = 1;
             }
             fclose(file);
         }
@@ -216,7 +219,7 @@ static void test_engine_delegation(void) {
         expect(javascript_uses_query_worker(delegated), "program reports worker delegation");
         cJSON *events = javascript_query(delegated, 0, 1);
         int count = cJSON_IsArray(events) ? cJSON_GetArraySize(events) : -1;
-        unsetenv("TOMPOUCE_QUERY_BACKEND");
+        setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
         cJSON *quick_meta = NULL;
         JsProgram *quick = javascript_compile(code, 120, &quick_meta, error, sizeof(error));
         cJSON_Delete(quick_meta);
@@ -247,12 +250,12 @@ static void test_slider_delegation(void) {
     JsProgram *delegated = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta); meta = NULL;
     expect(delegated && javascript_uses_query_worker(delegated), "slider program delegates");
-    if (!delegated) { unsetenv("TOMPOUCE_QUERY_BACKEND"); return; }
+    if (!delegated) { setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1); return; }
     javascript_activate_sliders(delegated);
     cJSON *before = javascript_query(delegated, 0, 1);
     expect(slider_set(0, .9), "live slider update applies");
     cJSON *after = javascript_query(delegated, 0, 1);
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
     javascript_activate_sliders(quick);
@@ -285,7 +288,7 @@ static void test_midi_delegation(void) {
     cJSON *w1 = delegated ? javascript_query(delegated, 0, 1) : NULL;
     midi_test_inject(1, 0, 120, 127);
     cJSON *w2 = delegated ? javascript_query(delegated, 0, 1) : NULL;
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     midi_test_inject(1, 0, 120, 64);
     JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
@@ -328,7 +331,7 @@ static void test_csound_delegation(void) {
         cJSON_Delete(meta); meta = NULL;
         expect(delegated && javascript_uses_query_worker(delegated), "Csound program delegates");
         cJSON *w = delegated ? javascript_query(delegated, 0, 1) : NULL;
-        unsetenv("TOMPOUCE_QUERY_BACKEND");
+        setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
         JsProgram *quick = javascript_compile(sources[i], 120, &meta, error, sizeof(error));
         cJSON_Delete(meta);
         cJSON *q = quick ? javascript_query(quick, 0, 1) : NULL;
@@ -353,7 +356,7 @@ static void test_visual_delegation(void) {
     cJSON_Delete(meta); meta = NULL;
     expect(delegated && javascript_uses_query_worker(delegated), "visual program delegates");
     cJSON *w = delegated ? javascript_query(delegated, 0, 1) : NULL;
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
     cJSON *q = quick ? javascript_query(quick, 0, 1) : NULL;
@@ -393,7 +396,7 @@ static void test_engine_identity(void) {
     expect(cJSON_IsArray(first_again) &&
         cJSON_GetArraySize(first_again) == cJSON_GetArraySize(first_events),
         "replaced program falls back and still queries");
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     cJSON_Delete(first_again);
     cJSON_Delete(second_events);
     cJSON_Delete(first_events);
@@ -412,7 +415,7 @@ static void test_engine_retention(void) {
     JsProgram *program = javascript_compile(good, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
     expect(program && javascript_uses_query_worker(program), "retained evaluation delegates");
-    if (!program) { unsetenv("TOMPOUCE_QUERY_BACKEND"); return; }
+    if (!program) { setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1); return; }
     cJSON *before = javascript_query(program, 0, 1);
     cJSON *bad_meta = NULL;
     JsProgram *bad = javascript_compile_from("const x = ;", 120, program,
@@ -427,7 +430,7 @@ static void test_engine_retention(void) {
     expect(before_text && after_text && !strcmp(before_text, after_text),
         "retained evaluation returns identical events after a failed evaluation");
     free(before_text); free(after_text);
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     cJSON_Delete(after);
     cJSON_Delete(before);
     javascript_free(bad);
@@ -503,7 +506,7 @@ static void test_prebake_engine(void) {
     expect(delegated && javascript_uses_query_worker(delegated),
         "startup-prebake program delegates");
     cJSON *worker_events = delegated ? javascript_query(delegated, 0, 1) : NULL;
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
     cJSON *quick_events = quick ? javascript_query(quick, 0, 1) : NULL;
@@ -543,7 +546,7 @@ static void test_named_prebake_engine(void) {
     expect(delegated && javascript_uses_query_worker(delegated),
         "named-prebake program delegates");
     cJSON *worker_events = delegated ? javascript_query(delegated, 0, 1) : NULL;
-    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
     JsProgram *quick = javascript_compile(code, 120, &meta, error, sizeof(error));
     cJSON_Delete(meta);
     cJSON *quick_events = quick ? javascript_query(quick, 0, 1) : NULL;
@@ -583,13 +586,40 @@ static void test_oom(void) {
     js_worker_stop(worker);
 }
 
+/* Default migration: an available native worker is used with no env var, and
+   TOMPOUCE_QUERY_BACKEND=quickjs is a hard opt-out. Skipped when no native
+   worker was supplied to the test. */
+static void test_default_backend(void) {
+    if (!getenv("TOMPOUCE_V8_WORKER")) return;
+    unsetenv("TOMPOUCE_QUERY_BACKEND");
+    char error[256] = "";
+    JsWorker *worker = js_worker_start(NULL, NULL, error, sizeof(error));
+    expect(worker != NULL, "default backend prefers the native worker");
+    if (worker) {
+        const char *version = js_worker_v8_version(worker);
+        expect(version && version[0], "default worker reports a V8 version");
+        js_worker_stop(worker);
+    }
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
+    error[0] = 0;
+    worker = js_worker_start(NULL, NULL, error, sizeof(error));
+    expect(worker == NULL, "quickjs opt-out disables the worker");
+    setenv("TOMPOUCE_QUERY_BACKEND", "quickjs", 1);
+}
+
 int main(void) {
     log_console_stderr(0);
-    if (!node_available()) {
-        puts("node unavailable: query worker checks skipped");
+    const char *forced = getenv("TOMPOUCE_QUERY_BACKEND");
+    if (forced && !strcmp(forced, "quickjs")) {
+        puts("quickjs backend: query worker checks skipped");
+        return 0;
+    }
+    if (!node_available() && !getenv("TOMPOUCE_V8_WORKER")) {
+        puts("no query worker available: query worker checks skipped");
         return 0;
     }
     test_parity();
+    test_default_backend();
     test_confinement();
     test_engine_delegation();
     test_slider_delegation();

@@ -31,9 +31,11 @@ static atomic_uint compile_serial_counter;
 static pthread_mutex_t query_worker_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int worker_backend_enabled(void) {
+    /* Native V8 is the preferred default when its worker binary is present;
+       js_worker_start() falls back to QuickJS when it is not. Explicit
+       TOMPOUCE_QUERY_BACKEND=quickjs is the hard opt-out. */
     const char *mode = getenv("TOMPOUCE_QUERY_BACKEND");
-    return mode && (!strcmp(mode, "node") || !strcmp(mode, "v8") ||
-                    !strcmp(mode, "native"));
+    return !(mode && !strcmp(mode, "quickjs"));
 }
 
 struct JsProgram {
@@ -159,8 +161,10 @@ static int worker_bind(JsProgram *p, double bpm) {
         char error[256] = "";
         query_worker = js_worker_start(NULL, NULL, error, sizeof(error));
         if (!query_worker) {
+            int silent = !error[0];
             pthread_mutex_unlock(&query_worker_lock);
-            log_console("query backend: worker unavailable: %s", error);
+            if (!silent)
+                log_console("query backend: worker unavailable: %s", error);
             return 0;
         }
     }
@@ -1034,7 +1038,7 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
             if (worker_backend_enabled() && worker_compatible(p,json)) {
                 int delegated = worker_bind(p,isfinite(bpm) ? bpm : 120);
                 atomic_store(&p->worker_delegated,delegated);
-                if (delegated) log_console("query backend: node worker for this program");
+                if (delegated) log_console("query backend: worker for this program");
             }
             if (metadata) *metadata = json; else cJSON_Delete(json);
             return p;

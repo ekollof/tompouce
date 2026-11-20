@@ -119,6 +119,14 @@ if(WITH_V8)
     target_link_options(tompouce-v8-worker PRIVATE -fuse-ld=lld)
     target_link_directories(tompouce-v8-worker PRIVATE ${V8_LIBRARY_DIRS})
     target_link_libraries(tompouce-v8-worker PRIVATE PkgConfig::V8)
+    # The embedder locates icudtl.dat beside the worker binary at runtime.
+    list(GET V8_LIBRARY_DIRS 0 v8_first_libdir)
+    if(EXISTS "${v8_first_libdir}/icudtl.dat")
+        add_custom_command(TARGET tompouce-v8-worker POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${v8_first_libdir}/icudtl.dat"
+                "$<TARGET_FILE_DIR:tompouce-v8-worker>/icudtl.dat")
+    endif()
 endif()
 
 option(WITH_CSOUND "Enable Csound when available" ON)

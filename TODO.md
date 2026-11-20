@@ -131,7 +131,7 @@ and measured divergences are recorded in the archive.
       [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus)
       and the [native V8 prototype](docs/v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20).
 
-- [ ] Optional target: migrate from QuickJS to standalone embedded V8 through a
+- [x] Optional target: migrate from QuickJS to standalone embedded V8 through a
       confined C++ query worker, without a Node.js runtime dependency. Node-based
       probes remain diagnostics only. Keep QuickJS available during migration;
       replacing it is conditional on the integration and parity gates below.
@@ -187,8 +187,12 @@ and measured divergences are recorded in the archive.
       including 398/398 events on both heavy songs, at 139/140 ms compile-stage
       medians (Node: 128/129 ms). QuickJS stays the default and the acceptance
       gates in [the assessment](docs/v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20)
-      remain open. Preserve existing execution budgets and host behavior before
-      considering QuickJS removal.
+      remain open. The default migration is now implemented: with no backend
+      env the native worker is discovered beside the executable and used, with
+      QuickJS as fallback and `TOMPOUCE_QUERY_BACKEND=quickjs` as explicit
+      opt-out; `install.sh` builds and installs the worker when a `v8`
+      pkg-config package is present. Hardening gates stay documented in the
+      assessment. Preserve existing execution budgets and host behavior.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

@@ -29,6 +29,9 @@ PACKAGES = {
     'debian': ['build-essential', 'cmake', 'ninja-build', 'pkg-config', 'xxd', 'libnotcurses-dev', 'portaudio19-dev', 'libpipewire-0.3-dev', 'libpulse-dev', 'libsamplerate0-dev', 'libfluidsynth-dev', 'fluid-soundfont-gm', 'libopenal-dev', 'libcurl4-openssl-dev', 'libcjson-dev', 'libleveldb-dev', 'libasound2-dev', 'libtree-sitter-dev', 'liblilv-dev', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
     'fedora': ['gcc', 'gcc-c++', 'make', 'cmake', 'ninja-build', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'openal-soft-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'lilv-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
+# Top-level files CMake reads while configuring the temporary build tree.
+# Keep this in sync with configure_file() sources in CMakeLists.txt.
+STAGED_FILES = ('CMakeLists.txt', 'README.md', 'LICENSE', 'NOTICE', 'strudeltutor.json', 'alsoft.conf')
 RUNTIME_FILES = [
     'tompouce', 'alsoft.conf', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
     'scripts/tompoucectl.py', 'scripts/install-daemon.py', 'systemd/tompouce-daemon.service.in',
@@ -573,7 +576,7 @@ def main(argv=None):
             # Each installation has a new source root. Normalize compiler paths
             # within it so unchanged sources can reuse the user's ccache.
             environment.setdefault('CCACHE_BASEDIR', str(build))
-            for name in ('CMakeLists.txt', 'README.md', 'LICENSE', 'NOTICE', 'strudeltutor.json'):
+            for name in STAGED_FILES:
                 shutil.copy2(SOURCE / name, build / name)
             ignore = shutil.ignore_patterns('*.o', '*.d', '*.inc', 'node_modules', '__pycache__', '.git')
             for relative in ('cmake', 'src', 'include', 'thirdparty', 'js/dist', 'web'):

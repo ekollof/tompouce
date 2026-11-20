@@ -26,6 +26,14 @@ def wav():
 
 
 class InstallerTest(unittest.TestCase):
+    def test_configure_inputs_are_staged(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in installer.STAGED_FILES:
+            self.assertTrue((root / name).is_file(), name)
+        cmake = (root / 'CMakeLists.txt').read_text()
+        for name in re.findall(r'configure_file\(\s*([A-Za-z0-9_.-]+)\s+', cmake):
+            self.assertIn(name, installer.STAGED_FILES)
+
     def test_out_of_tree_runtime_copy(self):
         with tempfile.TemporaryDirectory() as root:
             source, application = Path(root) / 'source', Path(root) / 'installed'

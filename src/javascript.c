@@ -614,6 +614,15 @@ int javascript_uses_query_worker(const JsProgram *p) {
     return p ? atomic_load(&((JsProgram *)p)->worker_delegated) : 0;
 }
 
+const char *javascript_engine_name(void) {
+    pthread_mutex_lock(&query_worker_lock);
+    JsWorker *worker = query_worker;
+    int native = worker ? js_worker_is_native(worker) : 0;
+    pthread_mutex_unlock(&query_worker_lock);
+    if (!worker) return "QuickJS";
+    return native ? "V8 native" : "Node V8";
+}
+
 void javascript_retain(JsProgram *p) {
     if (p) atomic_fetch_add_explicit(&p->refs,1,memory_order_relaxed);
 }

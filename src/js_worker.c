@@ -33,6 +33,7 @@ struct JsWorker {
     int in_fd, out_fd;
     unsigned long long next_id;
     int failure;
+    int native;
     char version[32];
     char *line;
     size_t line_cap;
@@ -383,6 +384,7 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         set_error(error, errorlen, "out of memory"); return NULL;
     }
     worker->pid = pid;
+    worker->native = native;
     worker->in_fd = in_pipe[1];
     worker->out_fd = out_pipe[0];
     worker->failure = JS_WORKER_OK;
@@ -547,5 +549,6 @@ int js_worker_query(JsWorker *worker, double begin, double end, double cps, int 
 }
 
 int js_worker_failure(const JsWorker *worker) { return worker ? worker->failure : JS_WORKER_DEAD; }
+int js_worker_is_native(const JsWorker *worker) { return worker ? worker->native : 0; }
 pid_t js_worker_pid(const JsWorker *worker) { return worker ? worker->pid : -1; }
 const char *js_worker_v8_version(const JsWorker *worker) { return worker ? worker->version : ""; }

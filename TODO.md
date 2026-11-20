@@ -86,7 +86,11 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       have no strudel.cc counterpart.
 - [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
       params/presets through LV2 state mapped to existing sliders; per-plugin
-      crash isolation must not take down or stall playback.
+      crash isolation must not take down or stall playback. Discovery now reads
+      bounded control-port metadata (port index, name, declared min/max/default)
+      for all safe plugins — 3155 ports across 219 plugins on this box — so
+      slider mapping has a stable reference; the live plugin path itself is
+      still not wired into the scheduler.
 - [ ] One instrument and one effect behind compare gates (rendered output vs
       a pinned reference render), plus failure tests (missing/broken plugin,
       dead worker, preset rejection) and sanitizer coverage of the host glue.

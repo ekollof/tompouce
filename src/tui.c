@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "slider.h"
 #include "audio.h"
+#include "javascript.h"
 #include "convolution_mix.h"
 #include "common.h"
 #include "ai.h"
@@ -3728,7 +3729,7 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         int evaluated=text && !strcmp(text,cstr(evaluated_source));
         pthread_mutex_unlock(&tracks_lock);
         state_line(&row,maxrow,c0+1,w-2,"engine=%s js=%d native=%d gen=%u queue-gen=%u",
-            "QuickJS/Strudel",js,compiled-js,generation,event_queue_generation());
+            javascript_engine_name(),js,compiled-js,generation,event_queue_generation());
         state_line(&row,maxrow,c0+1,w-2,"source=%s file=%s bytes=%zu lines=%d",
             !text?"unknown":(evaluated?"evaluated":"pending F5"),
             !text?"unknown":(editor_written && !strcmp(text,editor_written)?"saved":"unsaved"),

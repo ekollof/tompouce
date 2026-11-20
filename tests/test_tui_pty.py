@@ -604,6 +604,18 @@ check("hide console in vi mode", 'note(60).gain(0)', b'\x0c',
       expected='note(60).gain(0)', observed=b'console hidden', vi=True)
 check("F4 state diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", vi=True, observed=b'mode=VI:N')
+_engine_mode = os.environ.get('TOMPOUCE_QUERY_BACKEND', '')
+if _engine_mode == 'quickjs':
+    _engine_label = b'engine=QuickJS'
+elif _engine_mode in ('node', 'v8'):
+    _engine_label = b'engine=Node V8'
+elif _engine_mode == 'native' or (Path(BINARY).parent / 'tompouce-v8-worker').is_file() \
+        or (Path(BINARY).parent.parent / 'tompouce-v8-worker').is_file():
+    _engine_label = b'engine=V8 native'
+else:
+    _engine_label = b'engine=QuickJS'
+check("F4 JavaScript engine label", "note('c4').gain(0)", b'\x1bOS',
+      expected="note('c4').gain(0)", observed=_engine_label)
 check("F4 SIMD diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=c cpu=', simd='c')
 check("output volume mouse and keys", "note('c4').gain(0)", output_volume=True,

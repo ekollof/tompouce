@@ -54,6 +54,8 @@ int js_worker_query(JsWorker *worker, double begin, double end, double cps, int 
 int js_worker_failure(const JsWorker *worker);
 /* Worker pid for diagnostics, or -1. */
 pid_t js_worker_pid(const JsWorker *worker);
+/* Non-zero when this worker is the native V8 embedder (not Node). */
+int js_worker_is_native(const JsWorker *worker);
 /* V8 version reported at init, or "" when unknown. */
 const char *js_worker_v8_version(const JsWorker *worker);
 

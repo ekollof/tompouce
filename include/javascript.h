@@ -18,8 +18,10 @@ JsProgram *javascript_compile_from(const char *code, double bpm, JsProgram *prev
                                  cJSON **metadata, char *error, int errorlen);
 void javascript_free(JsProgram *program);
 void javascript_retain(JsProgram *program);
-/* Diagnostics: 1 when this program's queries run in the opt-in Node worker. */
+/* Diagnostics: 1 when this program's queries run in a separate worker. */
 int javascript_uses_query_worker(const JsProgram *program);
+/* Name of the active JavaScript engine ("QuickJS", "V8 native" or "Node V8"). */
+const char *javascript_engine_name(void);
 /* Publish controls only after a successful program load. Failed compiles keep
    the currently playing program's live values and UI bindings intact. */
 void javascript_activate_sliders(JsProgram *program);

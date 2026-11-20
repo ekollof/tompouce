@@ -207,8 +207,11 @@ scripts/build-appimage.sh tompouce-x86_64.AppImage
 ```
 
 It bundles the engine, its scripts/web assets and the shared-library closure,
-and runs against the host glibc. Sound banks are not included (they are several
-GiB): set `TOMPOUCE_BANKS` to a bank directory or install them separately. Use
+and runs against the host glibc. Sound banks are too large to bundle: on first
+run the AppImage downloads the same full pinned catalog as
+`install.sh --all-banks` into `$XDG_DATA_HOME/tompouce/assets/banks`, reusing
+the checksummed, resumable installer. An existing `~/.local/lib/tompouce/assets/banks`
+is detected, and an explicit `TOMPOUCE_BANKS` skips the fetch. Use
 `TOMPOUCE_APPIMAGE_BINARY` to package another build, for example one made with
 `-DWITH_CSOUND=OFF` so no private Csound library is bundled.
 

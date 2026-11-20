@@ -57,7 +57,8 @@ install -m 755 "$BINARY" "$APPDIR/usr/bin/tompouce"
 files=(
   README.md LICENSE NOTICE
   scripts/companion.py scripts/sound_import.py scripts/query-worker.mjs
-  scripts/tompoucectl.py scripts/install-daemon.py
+  scripts/tompoucectl.py scripts/install-daemon.py scripts/fetch-banks.py
+  scripts/install.py scripts/banks.lock.json scripts/gm-webaudiofont.lock.json
   systemd/tompouce-daemon.service.in
   web/index.html web/companion.js web/sounds.js web/companion.css
   web/dist/editor.js web/dist/licenses.txt js/dist/licenses.txt
@@ -111,6 +112,25 @@ cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE=$(dirname "$(readlink -f "$0")")
 export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Sound banks are not bundled (several GiB). Use an existing install if the
+# user has one, honour an explicit TOMPOUCE_BANKS, otherwise fetch the full
+# pinned catalog once into the user's data directory using the project's own
+# checksummed installer. Re-running after an interruption resumes safely.
+if [ -z "${TOMPOUCE_BANKS:-}" ]; then
+  if [ -d "$HOME/.local/lib/tompouce/assets/banks" ]; then
+    TOMPOUCE_BANKS="$HOME/.local/lib/tompouce/assets/banks"
+  else
+    BANKS="${XDG_DATA_HOME:-$HOME/.local/share}/tompouce/assets/banks"
+    if [ ! -f "$BANKS/.install-receipt.json" ]; then
+      echo "Tompouce: first run: downloading sound banks into $BANKS" >&2
+      mkdir -p "$(dirname "$BANKS")" || exit 1
+      "$HERE/usr/bin/scripts/fetch-banks.py" "$BANKS" || exit 1
+    fi
+    TOMPOUCE_BANKS="$BANKS"
+  fi
+  export TOMPOUCE_BANKS
+fi
 exec "$HERE/usr/bin/tompouce" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
@@ -132,10 +152,12 @@ cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/tompouce.png" "$APPDIR/tompouce
 cat > "$APPDIR/usr/share/doc/tompouce/README.txt" <<'EOF'
 Tompouce AppImage
 
-Run with a terminal. Sound banks are not bundled because they are several GiB;
-point TOMPOUCE_BANKS at a bank directory or use the upstream installer to
-download them. All other runtime files (scripts, web assets, licenses) are
-inside the AppImage next to the executable.
+Run with a terminal. Sound banks are too large to bundle: the first run fetches
+the full pinned catalog (as install.sh --all-banks) into
+$XDG_DATA_HOME/tompouce/assets/banks using the checksummed, resumable installer.
+Set TOMPOUCE_BANKS to use a different bank directory and skip the fetch, or use
+an existing ~/.local/lib/tompouce/assets/banks install. All other runtime files
+(scripts, web assets, licenses) are inside the AppImage next to the executable.
 EOF
 
 rm -f "$OUT"

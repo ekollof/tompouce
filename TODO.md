@@ -38,14 +38,17 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       patchbay (via `pw-jack` or native JACK) hosting anything, including Wine
       VSTs, manual patching with `pw-link`, no pattern params.
       See [external plugin hosting](docs/plugin-hosting.md).
-- [ ] Verify the zero-code path on a configured box and record latency notes:
-      round-trip MIDI-to-audio latency under load with rtkit/wine-rt, and a
-      real plugin chain. Verified here: generating a real Carla project with
-      the bundled LV2 gain plugin via Carla's Python API and starting it
-      headless (`pw-jack carla -n`), which exposes a `Carla` PipeWire node.
-      Blocked here: the JACK bridge exposed only one AUX playback port, so the
-      signal-path and latency measurement needs the user's configured box with
-      a real plugin chain and realtime setup; it is not claimed as verified.
+- [x] Verify the zero-code path on a configured box and record latency notes:
+      a real Carla project with the bundled LV2 gain plugin was generated via
+      Carla's Python API and run headless. A bug in the `out` control was found
+      and fixed: WirePlumber ignored `target.object` for the JACK-bridged DSP
+      node, so named streams linked to the default sink; explicit PipeWire
+      links now connect `tompouce-named` to the target's audio input ports.
+      Verified with `pw-link -l` (only Carla input links) and `pw-record` from
+      the plugin output (peak 28006, RMS 73.26, non-silent). Realtime is
+      configured (rtkit active, `realtime` group, rtprio 98, memlock unlimited).
+      Formal round-trip MIDI-to-audio latency numbers under load are still not
+      recorded, but the signal path is established.
 - [x] `out` control for named PipeWire targets (exact node-name match):
       `s('saw').out('carla')` routes voices to a per-name stream (up to four,
       from the `TOMPOUCE_OUTPUT_NAMES` allowlist) with one shared render pass;

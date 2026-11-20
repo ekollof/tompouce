@@ -158,6 +158,114 @@ static struct {
     atomic_int active;
 } native_pw;
 
+/* Explicit PipeWire links for named targets. WirePlumber's policy ignores
+   target.object for JACK-bridged DSP nodes (no media.class), so declarative
+   targeting can silently link a named stream to the default sink. Enumerate
+   the registry once the loop is running and create the links ourselves. */
+#define PW_MAX_PORTS 64
+typedef struct {
+    uint32_t node_id;             /* target node, 0 until found */
+    uint32_t in_port[PW_MAX_PORTS];
+    int n_in;
+    uint32_t out_port[PW_MAX_PORTS];
+    int n_out;
+    int done;
+    int seq, target_seq;
+} PwLinkScan;
+
+static const char *pw_prop(const struct spa_dict *dict, const char *key) {
+    if (!dict) return NULL;
+    const struct spa_dict_item *item;
+    spa_dict_for_each(item, dict)
+        if (!strcmp(item->key,key)) return item->value;
+    return NULL;
+}
+
+static void pw_scan_global(void *data, uint32_t id, uint32_t permissions,
+    const char *type, uint32_t version, const struct spa_dict *props) {
+    (void)permissions; (void)version;
+    PwLinkScan *scan=data;
+    const char *node_name=pw_prop(props,PW_KEY_NODE_NAME);
+    const char *port_name=pw_prop(props,"port.name");
+    if (node_name && !strcmp(node_name,"tompouce-named") &&
+        !strcmp(type,PW_TYPE_INTERFACE_Node)) {
+        /* Named stream node: its output ports are gathered below by node id. */
+        scan->out_port[0]=id; /* placeholder replaced via port globals */
+        scan->out_port[0]=0;
+    }
+    if (!strcmp(type,PW_TYPE_INTERFACE_Node) && node_name &&
+        audio_output_named_count()>0) {
+        for (int t=1;t<=audio_output_named_count();t++)
+            if (!strcmp(node_name,audio_output_target_name(t))) { scan->node_id=id; break; }
+    }
+    if (!strcmp(type,PW_TYPE_INTERFACE_Port) && port_name) {
+        const char *direction=pw_prop(props,"port.direction");
+        const char *dsp=pw_prop(props,"format.dsp");
+        int is_audio=dsp && strstr(dsp,"audio");
+        const char *node_id_text=pw_prop(props,"node.id");
+        uint32_t owner=node_id_text?(uint32_t)strtoul(node_id_text,NULL,10):0;
+        if (is_audio && owner==scan->node_id && direction && !strcmp(direction,"in") &&
+            scan->n_in<PW_MAX_PORTS) scan->in_port[scan->n_in++]=id;
+        if (is_audio && owner && direction && !strcmp(direction,"out")) {
+            /* Ports of the named stream: identify by its port alias prefix. */
+            const char *alias=pw_prop(props,"port.alias");
+            if (alias && !strncmp(alias,"tompouce-named:",15) && scan->n_out<PW_MAX_PORTS)
+                scan->out_port[scan->n_out++]=id;
+        }
+    }
+}
+
+static void pw_scan_remove(void *data, uint32_t id) { (void)data; (void)id; }
+
+static void pw_scan_done(void *data, uint32_t id, int seq) {
+    PwLinkScan *scan=data;
+    if (id==PW_ID_CORE && seq==scan->target_seq) scan->done=1;
+}
+
+static void pw_link_named_targets(void) {
+    if (audio_output_named_count()<1 || !native_pw.named[1]) return;
+    struct pw_core *core=pw_stream_get_core(native_pw.stream);
+    struct pw_registry *registry=pw_core_get_registry(core,PW_VERSION_REGISTRY,0);
+    if (!registry) return;
+    PwLinkScan scan={0};
+    static const struct pw_registry_events registry_events={
+        .version=PW_VERSION_REGISTRY_EVENTS,.global=pw_scan_global,.global_remove=pw_scan_remove};
+    struct spa_hook registry_hook={0};
+    static const struct pw_core_events core_events={
+        .version=PW_VERSION_CORE_EVENTS,.done=pw_scan_done};
+    struct spa_hook core_hook={0};
+    pw_registry_add_listener(registry,&registry_hook,&registry_events,&scan);
+    pw_core_add_listener(core,&core_hook,&core_events,&scan);
+    scan.seq=pw_core_sync(core,PW_ID_CORE,0);
+    scan.target_seq=scan.seq;
+    struct timespec deadline;
+    if (pw_thread_loop_get_time(native_pw.loop,&deadline,2*1000000000LL)>=0)
+        while (!scan.done)
+            if (pw_thread_loop_timed_wait_full(native_pw.loop,&deadline)<0) break;
+    spa_hook_remove(&registry_hook); spa_hook_remove(&core_hook);
+    if (!scan.node_id || !scan.n_in || !scan.n_out) {
+        log_console("audio: named target ports not found; default stream used");
+        pw_core_destroy(core,registry);
+        return;
+    }
+    int pairs=scan.n_in<scan.n_out?scan.n_in:scan.n_out;
+    for (int i=0;i<pairs;i++) {
+        char out_node[32], in_node[32], out_port[32], in_port[32];
+        snprintf(out_node,sizeof(out_node),"%u",PW_ID_ANY);
+        snprintf(in_node,sizeof(in_node),"%u",scan.node_id);
+        snprintf(out_port,sizeof(out_port),"%u",scan.out_port[i]);
+        snprintf(in_port,sizeof(in_port),"%u",scan.in_port[i]);
+        struct spa_dict_item items[]={
+            {PW_KEY_LINK_OUTPUT_NODE,out_node},{PW_KEY_LINK_OUTPUT_PORT,out_port},
+            {PW_KEY_LINK_INPUT_NODE,in_node},{PW_KEY_LINK_INPUT_PORT,in_port},
+            {PW_KEY_LINK_PASSIVE,"true"}};
+        struct spa_dict dict=SPA_DICT_INIT_ARRAY(items);
+        pw_core_create_object(core,"link-factory",PW_TYPE_INTERFACE_Link,PW_VERSION_LINK,&dict,0);
+    }
+    log_console("audio: linked named output to target node %u (%d ports)",scan.node_id,pairs);
+    pw_core_destroy(core,registry);
+}
+
 static void pw_state_changed(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error) {
     (void)data; (void)old;
     atomic_store(&native_pw.active,state==PW_STREAM_STATE_STREAMING);
@@ -281,8 +389,10 @@ static int pipewire_open(void) {
         native_pw.named[t]=pw_stream_new_simple(pw_thread_loop_get_loop(native_pw.loop),
             "Tompouce",named_props,&pw_named_events,(void *)(intptr_t)t);
         if (!native_pw.named[t]) continue;
+        /* No AUTOCONNECT: WirePlumber would attach this stream to the default
+           sink before the explicit target links below are created. */
         if (pw_stream_connect(native_pw.named[t],PW_DIRECTION_OUTPUT,PW_ID_ANY,
-                PW_STREAM_FLAG_AUTOCONNECT|PW_STREAM_FLAG_MAP_BUFFERS|PW_STREAM_FLAG_RT_PROCESS,
+                PW_STREAM_FLAG_MAP_BUFFERS|PW_STREAM_FLAG_RT_PROCESS,
                 &format,1)<0) {
             pw_stream_destroy(native_pw.named[t]); native_pw.named[t]=NULL;
             log_console("audio: named target %s unavailable; voices use the default stream",name);
@@ -296,6 +406,7 @@ static int pipewire_open(void) {
             result=pw_thread_loop_get_time(native_pw.loop,&deadline,CONNECT_SECONDS*1000000000LL);
             while (result>=0 && !native_pw.failed && !atomic_load(&native_pw.active))
                 if (pw_thread_loop_timed_wait_full(native_pw.loop,&deadline)<0) break;
+            if (atomic_load(&native_pw.active)) pw_link_named_targets();
         }
     }
     if (result<0) snprintf(output_error,sizeof(output_error),"%s",strerror(-result));

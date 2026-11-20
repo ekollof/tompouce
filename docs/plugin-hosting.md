@@ -55,10 +55,18 @@ Python API (`/usr/share/carla/carla_backend.py`: `CarlaHostDLL` on
 ENGINE_PROCESS_MODE_PATCHBAY)` then `add_plugin(BINARY_NATIVE, PLUGIN_LV2,
 /usr/lib/lv2/carla.lv2/carla.so, "gain", "<uri>", 0, None, 0)` and
 `save_project(...)`). `pw-jack carla -n <project>` then exposes a PipeWire node
-named `Carla` (and `Carla.<pid>/gain` for the plugin). On this box the JACK
-bridge exposed only a single AUX playback port, so a full signal-path and
-latency measurement could not be completed here; that step needs the configured
-box and is not claimed as verified.
+named `Carla` (and a `gain` node with `Audio Input 1/2`, `Audio Output 1/2` and
+`events-in` ports). Testing the `out` control against it exposed a real bug:
+WirePlumber ignores the declarative `target.object` property for a JACK-bridged
+DSP node (no `media.class`), linking the named stream to the default sink
+instead. Named streams now skip `PW_STREAM_FLAG_AUTOCONNECT` and create explicit
+PipeWire links after enumerating the target's ports by node name, so
+`.out('gain')` connects only to `gain:Audio Input 1/2`. The path was verified
+with `pw-link -l` and by recording the plugin output with `pw-record` (peak
+28006, RMS 73.26, non-silent). Realtime is configured (rtkit active, `realtime`
+group, rtprio 98, memlock unlimited). Formal round-trip MIDI-to-audio latency
+figures under load are still not recorded; the established path is not itself a
+latency measurement.
 
 ## Supported classes and the UI ceiling
 

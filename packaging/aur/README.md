@@ -11,8 +11,9 @@ Two package recipes live here:
 
 ## Before submitting
 
-1. Replace the `# Maintainer:` placeholder in each `PKGBUILD` with your AUR
-   account name and email.
+1. The `# Maintainer:` field in each `PKGBUILD` is set to Emiel Kollof
+   <emiel@kollof.nl>. Keep it if submitting under that AUR account, or change
+   it to the account used for submission.
 2. Update `_commit`, `_date` and `pkgver` in `tompouce/PKGBUILD` when packaging
    a newer upstream revision. `libv8/PKGBUILD` pins exact depot_tools and V8
    commits.

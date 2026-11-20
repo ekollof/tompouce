@@ -1,4 +1,4 @@
-# Maintainer: REPLACE_ME <replace@example.com>
+# Maintainer: Emiel Kollof <emiel@kollof.nl>
 pkgname=libv8
 pkgver=16.0.94
 pkgrel=1

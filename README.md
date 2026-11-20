@@ -212,8 +212,10 @@ run the AppImage downloads the same full pinned catalog as
 `install.sh --all-banks` into `$XDG_DATA_HOME/tompouce/assets/banks`, reusing
 the checksummed, resumable installer. An existing `~/.local/lib/tompouce/assets/banks`
 is detected, and an explicit `TOMPOUCE_BANKS` skips the fetch. Use
-`TOMPOUCE_APPIMAGE_BINARY` to package another build, for example one made with
-`-DWITH_CSOUND=OFF` so no private Csound library is bundled.
+`TOMPOUCE_APPIMAGE_BINARY` to package another build. If that binary links
+`libcsound64`, the script bundles its plugins and license from `CSOUND_PREFIX`
+(or the usual private install locations) and points Csound at the bundled
+plugins at runtime; use a `-DWITH_CSOUND=OFF` binary to omit Csound entirely.
 
 Optional libraries default to enabled when found. Explicit `-DWITH_...=ON`
 requires the corresponding package; `OFF` disables it. Csound is enabled when
@@ -221,12 +223,13 @@ found unless `-DWITH_CSOUND=OFF` is set. Use `-DCSOUND_PREFIX=/path` or
 `-DTREE_SITTER_PREFIX=/path` for private installations; their library paths
 remain available to the executable after the installer copies it.
 
-The opt-in native V8 query worker needs a `v8` pkg-config package (see
-[`packaging/aur/libv8`](packaging/aur/libv8)) and `-DWITH_V8=ON`; run it with
-`TOMPOUCE_QUERY_BACKEND=native TOMPOUCE_V8_WORKER=/path/to/tompouce-v8-worker`.
-QuickJS remains the default. See the
-[V8 assessment](docs/v8-assessment.md) for the prototype results and remaining
-acceptance gates.
+With a `v8` pkg-config package (see [`packaging/aur/libv8`](packaging/aur/libv8)),
+`-DWITH_V8=ON` builds the native V8 worker, which the engine uses by default
+when the binary is installed beside it. Without a worker, QuickJS is still the
+fallback, and `TOMPOUCE_QUERY_BACKEND=quickjs` forces it explicitly;
+`node`/`v8` select the Node diagnostic worker. The installer builds and ships
+the worker automatically when the package is available. See the
+[V8 assessment](docs/v8-assessment.md) for results and remaining hardening gates.
 
 For `.csound()`, `loadCsound()` and `loadOrc()`, install Csound headers/library.
 The current upstream livecode orchestra requires Csound 7. On Linux x86_64,

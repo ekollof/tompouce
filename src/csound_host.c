@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -245,7 +246,11 @@ int csound_worker_main(void) {
     if (setrlimit(RLIMIT_AS,&memory)) return 1;
     if (csoundInitialize(CSOUNDINIT_NO_SIGNAL_HANDLER|CSOUNDINIT_NO_ATEXIT) < 0) return 1;
 #ifdef HAVE_CSOUND7
-    CSOUND *engine = csoundCreate(&reply,CSOUND7_OPCODEDIR);
+    /* Portable builds (AppImage) install plugins at a runtime-dependent path;
+       allow that to override the compile-time prefix. */
+    const char *opcode_dir = getenv("TOMPOUCE_CSOUND_PLUGINS");
+    if (!opcode_dir || !opcode_dir[0]) opcode_dir = CSOUND7_OPCODEDIR;
+    CSOUND *engine = csoundCreate(&reply,opcode_dir);
 #else
     CSOUND *engine = csoundCreate(&reply);
 #endif

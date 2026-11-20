@@ -116,6 +116,12 @@ globalThis.__workerLog = value => {
   __workerLogs.push(text.length > 512 ? text.slice(0, 512) : text);
 };
 globalThis.__hostLog = value => __workerLog(String(value));
+globalThis.__queryWorkerSilent = true;
+/* Native accelerators live in the QuickJS host; null selects the bundled JS
+   fallback instead of throwing a ReferenceError in the worker. */
+globalThis.__hostPure = () => null;
+globalThis.__hostSignal = () => null;
+globalThis.__hostTriangle = () => null;
 delete globalThis.window;
 globalThis.performance = { now: () => Date.now() };
 globalThis.console = { log(){}, warn(){}, error(){}, info(){}, debug(){} };
@@ -168,7 +174,7 @@ globalThis.__compileRunner = () => {
   globalThis.__compileError = undefined;
   __compile(__source, __bpm, __prebake).then(
     value => { globalThis.__compileResult = value; },
-    error => { globalThis.__compileError = String(error); });
+    error => { globalThis.__compileError = String((error && error.stack) || error); });
   return '';
 };
 globalThis.__queryRunner = () => __query(__begin, __end, __cps, false);
@@ -282,6 +288,13 @@ bool CallGlobal(v8::Local<v8::Context> context, const char *name,
            .ToLocal(&value)) {
     *error = try_catch.HasTerminated() ? std::string("script timeout")
                                        : ToStd(isolate, try_catch.Exception());
+    if (!try_catch.HasTerminated()) {
+      v8::Local<v8::Value> stack;
+      if (try_catch.StackTrace(context).ToLocal(&stack)) {
+        std::string trace = ToStd(isolate, stack);
+        if (!trace.empty()) *error += " | " + trace.substr(0, 600);
+      }
+    }
     if (error->empty()) *error = "call failed";
     return false;
   }
@@ -431,7 +444,7 @@ int main(int argc, char **argv) {
             v8::Local<v8::Value> failure = GetGlobal(context, "__compileError");
             if (!failure->IsUndefined() && failure->IsString()) {
               std::string text = ToStd(isolate, failure);
-              error = text.substr(0, 512);
+              error = text.substr(0, 2000);
             } else {
               v8::Local<v8::Value> result = GetGlobal(context, "__compileResult");
               if (!result->IsString()) {

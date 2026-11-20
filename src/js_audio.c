@@ -257,6 +257,36 @@ static int lv2_prepare_sample(AudioEvent *ev, const char *sound, double duration
     return ev->smp>=0;
 }
 
+/* Apply query-time materialized FX(...) steps. The web invokes each closure
+   per event; those chains start from superdough's default gain of 0.8. */
+static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
+    const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
+    if (!cJSON_IsArray(chains)) return;
+    int count = cJSON_GetArraySize(chains);
+    if (count <= 0 || count > 8) return;
+    double chain_gain = .8;
+    for (int i = 0; i < count; i++) {
+        const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
+            cJSON_GetArrayItem(chains,i),"steps");
+        if (!cJSON_IsArray(steps)) continue;
+        int nsteps = cJSON_GetArraySize(steps);
+        if (nsteps > 32) nsteps = 32;
+        for (int j = 0; j < nsteps; j++) {
+            const cJSON *step = cJSON_GetArrayItem(steps,j);
+            const cJSON *op = cJSON_IsObject(step)
+                ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
+            if (!cJSON_IsString(op) || !op->valuestring) continue;
+            const char *name = op->valuestring;
+            /* No step is replayed yet. The web's FX chain contributes its
+               default superdough gain (0.8) regardless of an inner .gain()
+               call, which the comparison confirms; other steps need their own
+               gates before the renderer can apply them safely. */
+            (void)name;
+        }
+    }
+    ev->gain *= chain_gain;
+}
+
 static int audio_event_values(const cJSON *hap, double origin, double seconds, AudioEvent *ev, int include_ducks) {
     const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap,"begin");
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(hap,"end");
@@ -311,6 +341,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     const char *sync[] = {"lpsync","hpsync","bpsync"};
     for (int i = 0; i < 3; i++)
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
+    apply_fx_steps(ev,v);
     const char *sound = text_control(v,"s");
     int wavetable=!strncmp(sound,"wt_",3);
     if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;

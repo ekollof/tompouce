@@ -129,6 +129,52 @@ function graph(code, frequency, inputs=[]) {
   if (graphs.size>=256) graphs.delete(graphs.keys().next().value);
   graphs.set(key,result); return result;
 }
+/* Materialize FX(...) closures into bounded, serializable control steps.
+   The web renderer invokes those closures per event; JSON otherwise turns them
+   into {} and the native renderer cannot see the chain at all. Steps are
+   recorded at query time, never in the audio callback. */
+const MAX_FX_STEPS = 32;
+const MAX_FX_CHAINS = 8;
+const MAX_FX_ARG_LENGTH = 32;
+
+function fxArgument(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'string' && value.length <= 64) return value;
+  return null;
+}
+
+function recordFXChain(fn) {
+  const steps = [];
+  const chain = new Proxy({}, {
+    get(target, property) {
+      if (typeof property === 'symbol' || property === 'then') return undefined;
+      return (...args) => {
+        if (steps.length < MAX_FX_STEPS && args.length <= MAX_FX_ARG_LENGTH) {
+          const values = args.map(fxArgument);
+          if (values.every(entry => entry !== null))
+            steps.push({ op: String(property), args: values });
+        }
+        return chain;
+      };
+    },
+  });
+  try { fn(chain); } catch (error) { return []; }
+  return steps;
+}
+
+export function prepareFX(value) {
+  if (!value || !Array.isArray(value.FX) || !value.FX.length) return value;
+  const chains = [];
+  for (const effect of value.FX.slice(0, MAX_FX_CHAINS)) {
+    if (typeof effect !== 'function' || chains.length >= MAX_FX_CHAINS) continue;
+    const steps = recordFXChain(effect);
+    if (steps.length) chains.push({ steps });
+  }
+  if (!chains.length) return value;
+  return { ...value, _fxSteps: chains };
+}
+
 export function prepareNative(value, frequency=440) {
   if (value.workletSrc!==undefined) return {...value,_nativeProgram:graph(value.workletSrc,frequency,value.workletInputs??[])};
   if (value.s?.split(':')[0]!=='bytebeat') return value;

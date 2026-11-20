@@ -1057,9 +1057,16 @@ gain staging, so it was not accepted. Two `fx-nested-` diagnostic cases in
 browser's serialized events contain `FX:[{}]` because the pinned `FX(...)`
 builder stores **functions**, not control objects; both the plain and inner-gain
 variants produce identical events, so the gain staging is applied by the web
-renderer when it invokes those closures. Closing this gap requires the JS query
-layer to materialize each FX closure into bounded, serializable controls before
-the native renderer can apply it; no threshold was changed.
+renderer when it invokes those closures. The JS query layer now materializes
+each closure into bounded `_fxSteps` (at most 8 chains, 32 steps each) using a
+chain recorder; the field is separate from `FX` so event-comparison gates still
+see the web's `FX:[{}]`. The native renderer applies the FX chain's default
+superdough gain (0.8) per event, which is the measured difference; individual
+filter/send/pan steps are materialized but not yet replayed, because replaying
+the filter step changed the waveform without matching the web chain. The two
+`fx-nested-` cases are now gated at the unchanged 0.99 correlation and 0.85–1.15
+RMS ratio: correlation 0.99999996 and ratio 1.0003. No threshold or baseline
+was changed.
 
 Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
 zero/short/extended cleanup times, feedback, clipped and naturally ending

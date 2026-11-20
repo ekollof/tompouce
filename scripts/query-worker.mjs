@@ -51,6 +51,12 @@ function boot(bundle, timeoutMs) {
   const prelude = `globalThis.performance={now:()=>Date.now()};
     globalThis.console={log(){},warn(){},error(){},info(){},debug(){}};
     globalThis.__hostLog=(value)=>__workerLog(String(value));
+    globalThis.__queryWorkerSilent=true;
+    /* Native accelerators live only in the QuickJS host. Null selects the
+       bundled JavaScript fallback rather than throwing a ReferenceError. */
+    globalThis.__hostPure=()=>null;
+    globalThis.__hostSignal=()=>null;
+    globalThis.__hostTriangle=()=>null;
     globalThis.__workerSliders=[];
     globalThis.__workerBinds=[];
     globalThis.__hostSlider=v=>v;

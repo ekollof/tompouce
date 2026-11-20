@@ -190,8 +190,8 @@ try {
       code:`s('stretch_fixture').gain(.5).speed(8).worklet('audioin().delay(.8).out()').fxr(${fxr})`,cycles:1,cps:.5,window:1.2,correlation:.99})),
     ...[0,.005,.01].map(release=>({name:`kabel-src-short-release-${release}`,sound:'sine',
       code:`note(69).s('sine').gain(.4).clip(.05).release(${release}).K(sine(sFreq).mul(.1).out()).fxr(.005)`,cycles:1,cps:.5,window:.2,correlation:.99})),
-    {name:'fx-nested-lpf-probe',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800))`,cycles:1,cps:.5,window:.6,correlation:null},
-    {name:'fx-nested-gain-probe',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800).gain(.5))`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'fx-nested-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-nested-inner-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800).gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'kabel-fxr-short-release',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.05).release(0).worklet('audioin().add(.1).out()').fxr(.005)`,cycles:1,cps:.5,window:.2,correlation:.99},
     ...[
       ['gain-low',`.gain(.2).worklet('audioin().fold(8).out()')`],

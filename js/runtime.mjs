@@ -5,7 +5,7 @@ import * as tonal from '@strudel/tonal';
 import * as transpileModule from '@strudel/transpiler';
 import { parse } from 'acorn';
 import { semitones as intervalSemitones } from '@tonaljs/interval';
-import { installNative, prepareNative } from './native-synth.mjs';
+import { installNative, prepareNative, prepareFX } from './native-synth.mjs';
 import { installNativeSignals } from './signal-native.mjs';
 import { queryFraction } from './query-time.mjs';
 import {installPrebakes,resetPrebakes,runPrebake,prepareAudioDefaults,isPrebaking} from './prebake.mjs';
@@ -490,7 +490,7 @@ hydraPlaceholder = new Proxy(Object.create(null), {
  * $: note("c3 e3 g3").s('sine')
  */
 globalThis.initHydra = async (_options) => {
-  if (!hydraWarned) {
+  if (!hydraWarned && !globalThis.__queryWorkerSilent) {
     hydraWarned = true;
     __hostLog('Hydra visuals are unavailable: visual calls are ignored; musical patterns still play.');
   }
@@ -1147,7 +1147,7 @@ globalThis.__query = (begin, end, cps, probes = false) => {
       const mask=(hap.context?.scopeMask ?? 0) | (probes ? hap.context?.probeMask ?? 0 : 0);
       const frequency=item.workletSrc===undefined?440:Number.isFinite(item.freq)?item.freq:
         440*Math.pow(2,(core.valueToMidi({note:36,...item})-69)/12);
-      events.push({ begin: at, end: finish, value: prepareNative(prepareDuckNumbers(prepareAudioDefaults(prepareMidiValue(item))),frequency), locations: locs, scopeMask:mask >>> 0 });
+      events.push({ begin: at, end: finish, value: prepareFX(prepareNative(prepareDuckNumbers(prepareAudioDefaults(prepareMidiValue(item))),frequency)), locations: locs, scopeMask:mask >>> 0 });
     }
   }
   return JSON.stringify(events);

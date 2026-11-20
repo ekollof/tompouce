@@ -206,8 +206,12 @@ and measured divergences are recorded in the archive.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
-      startup now have independent web comparisons. Nested `FX(...)` chains
-      remain outside that coverage.
+      startup now have independent web comparisons. Nested `FX(...)` chains now
+      have two gated cases (`fx-nested-`, correlation 0.99999996, RMS ratio
+      1.0003): query-time materialization exposes bounded step descriptors and
+      the native renderer applies the web chain's default 0.8 gain. Individual
+      filter/send/pan steps are materialized but not replayed yet. See
+      [Kabelsalat effect tails](docs/audio-comparison.md#kabelsalat-effect-tails-and-input-routing).
 - [ ] Extend shared-effect checks beyond the 22 send/orbit/fixed-IR/lifetime
       cases: two new `shared-room-source-` gates cover a panned source
       (`.pan(.7)`, correlation 0.99999998) and a downward-stretched source

@@ -118,16 +118,17 @@ optimization. A follow-up change froze pan/send constants into preallocated
 repeated 48-second runs still average ~1.63–1.69 ms render with hundreds of
 over-budget callbacks, so this refactor did not materially change xrun gaps.
 Further gains need a different hot-path strategy, not just hoisting constants.
-An optional OpenAL backend (`TOMPOUCE_AUDIO_BACKEND=OpenAL`) ran the same
-Node-backed stress pattern with **zero buffer underruns**. The default queue is
-now 2×256 frames (about 11.6 ms), chosen after listening tests reported no
-artifacts there; smaller queues (64×2 at 2.9 ms and 128×2 at 5.8 ms) also
-counted zero queue-empty events but were not accepted as the default from the
-counter alone. `TOMPOUCE_OPENAL_FRAMES` (64–1024) and
-`TOMPOUCE_OPENAL_BUFFERS` (2–8) expose the tradeoff. The default PipeWire path
-is unchanged and still showed tens of gaps in the same runs. This confirms that
-a queued output engine absorbs render bursts at a latency cost, without changing
-the synth/mix path.
+The OpenAL backend ran the same Node-backed stress pattern with **zero buffer
+underruns**, and it is now the first-choice backend when built (PipeWire is the
+fallback). Its queue is 2×256 frames (about 11.6 ms), chosen after listening
+tests reported no artifacts there; smaller queues (64×2 at 2.9 ms and 128×2 at
+5.8 ms) also counted zero queue-empty events but were not accepted as the
+default from the counter alone. `TOMPOUCE_OPENAL_FRAMES` (64–1024) and
+`TOMPOUCE_OPENAL_BUFFERS` (2–8) expose the tradeoff, and
+`TOMPOUCE_AUDIO_BACKEND=PipeWire` restores the direct path. The PipeWire
+fallback still showed tens of gaps in the same runs. This confirms that a queued
+output engine absorbs render bursts at a latency cost, without changing the
+synth/mix path.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

@@ -1,8 +1,8 @@
 *.o
 /build*/
 /CMakeUserPresets.json
-tompouce
-strudelterm
+/tompouce
+/strudelterm
 tests/test_pattern
 tests/test_harmony
 tests/test_strudel

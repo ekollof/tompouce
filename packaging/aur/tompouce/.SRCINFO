@@ -1,0 +1,32 @@
+pkgbase = tompouce
+	pkgdesc = Terminal live-coding environment for music with an embedded Strudel runtime
+	pkgver = 0.1.0.r20261120.64c7ac0
+	pkgrel = 2
+	url = https://github.com/ekollof/tompouce
+	arch = x86_64
+	license = AGPL-3.0-or-later
+	makedepends = cmake
+	makedepends = ninja
+	makedepends = pkgconf
+	makedepends = xxd
+	makedepends = git
+	depends = glibc
+	depends = gcc-libs
+	depends = notcurses>=3.0.9
+	depends = portaudio
+	depends = openal
+	depends = curl
+	depends = cjson
+	depends = leveldb
+	depends = alsa-lib
+	depends = tree-sitter>=0.25
+	optdepends = pipewire: PipeWire audio backend
+	optdepends = libpulse: PulseAudio backend
+	optdepends = libsamplerate: sample-rate conversion
+	optdepends = fluidsynth: offline GM synth fallback
+	optdepends = fluid-soundfont: GM soundfont for the FluidSynth fallback
+	optdepends = lilv: metadata-only LV2 plugin discovery
+	source = git+https://github.com/ekollof/tompouce.git#commit=64c7ac03b9b2f79f340887ec0c606260aa274019
+	sha256sums = SKIP
+
+pkgname = tompouce

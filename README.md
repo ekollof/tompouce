@@ -185,8 +185,9 @@ temporary builds. Disable it with `-DWITH_CCACHE=OFF`; an explicit
 Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`,
 `libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus
 pkg-config and `xxd`. Optional packages detected at configuration time are
-`libpipewire-0.3` (0.3.7+), `libpulse`, `samplerate`, `fluidsynth` (2.2+) and
-`lilv-0` (metadata-only LV2 discovery; no plugin is loaded).
+`openal` (now the first-choice output when present), `libpipewire-0.3` (0.3.7+),
+`libpulse`, `samplerate`, `fluidsynth` (2.2+) and `lilv-0` (metadata-only LV2
+discovery; no plugin is loaded).
 FluidSynth is only the offline fallback for `gm_` instruments; their primary
 playback needs no soundfont. The installer includes these packages and FluidR3 GM.
 
@@ -258,13 +259,14 @@ After rebuilding a bundle, run the normal build again to embed it.
 ./build/tompouce
 ```
 
-Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, then optional
-**OpenAL** when built, skipping unavailable backends and cleaning up failed
+Audio startup tries **OpenAL → PipeWire → PulseAudio → JACK → ALSA** when
+OpenAL is built, skipping unavailable backends and cleaning up failed
 connections before trying the next. Set `TOMPOUCE_AUDIO_BACKEND` to one of
-`PipeWire`, `PulseAudio`, `JACK`, `ALSA` or `OpenAL` to force a backend. PipeWire
-and PulseAudio use their native clients; JACK and ALSA use explicitly selected
-PortAudio host APIs; OpenAL uses a queued 2×256-frame stream by default
-(about 11.6 ms) and is useful when the direct callback misses its deadline.
+`OpenAL`, `PipeWire`, `PulseAudio`, `JACK` or `ALSA` to force a backend. OpenAL
+uses a queued 2×256-frame stream by default (about 11.6 ms) and absorbs render
+bursts that would otherwise miss the direct callback deadline. PipeWire and
+PulseAudio use their native clients; JACK and ALSA use explicitly selected
+PortAudio host APIs.
 `TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune
 that queue; the console logs the resulting depth. The engine remains stereo at 44.1 kHz;
 libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a

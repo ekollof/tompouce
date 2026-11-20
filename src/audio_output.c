@@ -774,6 +774,9 @@ static unsigned long long openal_underrun_count(void) { return atomic_load(&open
 #endif
 
 static const OutputDriver output_drivers[]={
+#ifdef HAVE_OPENAL
+    {"OpenAL",openal_open,openal_close,openal_active},
+#endif
 #ifdef HAVE_PIPEWIRE
     {"PipeWire",pipewire_open,pipewire_close,pipewire_active},
 #endif
@@ -781,10 +784,7 @@ static const OutputDriver output_drivers[]={
     {"PulseAudio",pulse_open,pulse_close,pulse_active},
 #endif
     {"JACK",jack_open,portaudio_close,portaudio_active},
-    {"ALSA",alsa_open,portaudio_close,portaudio_active},
-#ifdef HAVE_OPENAL
-    {"OpenAL",openal_open,openal_close,openal_active}
-#endif
+    {"ALSA",alsa_open,portaudio_close,portaudio_active}
 };
 
 static int select_output(const OutputDriver *drivers, size_t count) {

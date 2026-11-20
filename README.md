@@ -221,6 +221,13 @@ found unless `-DWITH_CSOUND=OFF` is set. Use `-DCSOUND_PREFIX=/path` or
 `-DTREE_SITTER_PREFIX=/path` for private installations; their library paths
 remain available to the executable after the installer copies it.
 
+The opt-in native V8 query worker needs a `v8` pkg-config package (see
+[`packaging/aur/libv8`](packaging/aur/libv8)) and `-DWITH_V8=ON`; run it with
+`TOMPOUCE_QUERY_BACKEND=native TOMPOUCE_V8_WORKER=/path/to/tompouce-v8-worker`.
+QuickJS remains the default. See the
+[V8 assessment](docs/v8-assessment.md) for the prototype results and remaining
+acceptance gates.
+
 For `.csound()`, `loadCsound()` and `loadOrc()`, install Csound headers/library.
 The current upstream livecode orchestra requires Csound 7. On Linux x86_64,
 `bash scripts/install-csound7.sh` installs a pinned engine under `~/.local/opt`

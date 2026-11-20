@@ -193,9 +193,14 @@ and measured divergences are recorded in the archive.
       real-backend gates in two consecutive runs (zero xruns, drops or
       overruns), with one earlier run showing a single 2.7 ms late reservation
       worth watching. A standalone from-source V8
-      embedder build (depot_tools, gn/ninja, several GiB, ICU/snapshot/notices)
-      remains the dependency-free alternative for later. Preserve existing
-      execution budgets and host behavior before considering QuickJS removal.
+      embedder build is now demonstrated with pinned V8 16.0.94 and an AUR
+      `libv8` recipe: the opt-in native C++ worker (`-DWITH_V8=ON`,
+      `TOMPOUCE_QUERY_BACKEND=native`) matched 42/42 Bakery compositions,
+      including 398/398 events on both heavy songs, at 139/140 ms compile-stage
+      medians (Node: 128/129 ms). QuickJS stays the default and the acceptance
+      gates in [the assessment](docs/v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20)
+      remain open. Preserve existing execution budgets and host behavior before
+      considering QuickJS removal.
 
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate

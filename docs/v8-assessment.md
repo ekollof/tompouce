@@ -302,6 +302,34 @@ the shared worker bound to the last playable program, which keeps delegating and
 returns byte-identical events (`test_engine_retention` in
 `tests/test_js_worker.c`).
 
+### Native embedded V8 worker prototype (2026-11-20)
+
+`src/v8_worker.cc` implements the same framed protocol in C++ against the
+pinned V8 16.0.94 static library built by the AUR recipe in
+`packaging/aur/libv8/`. CMake `-DWITH_V8=ON` builds `tompouce-v8-worker` from a
+`v8` pkg-config package (default `OFF`); select it with
+`TOMPOUCE_QUERY_BACKEND=native` and `TOMPOUCE_V8_WORKER=/path/to/binary`.
+QuickJS remains the default and the Node worker remains valid. The native
+worker needs `icudtl.dat` beside the binary and a 256 GiB `RLIMIT_AS` for V8's
+virtual reservations (RSS is far smaller).
+
+With the makepkg-built package used as an isolated prefix and no competing
+build load, the compile-stage medians were 139/140 ms for IDs 13587/78179
+(539 haps each) versus 128/129 ms for the Node worker. The full Bakery
+comparison with the native worker matched **42/42** compositions, including
+398/398 events on both heavy songs and 112/112 on ID 112818; no threshold or
+baseline was changed. `test_js_worker` passes in native and Node modes, and a
+focused ctest run (`js_worker|javascript|daemon|mcp_security|companion|audio_output`)
+passed 6/6.
+
+This is still an opt-in prototype, not a default-backend decision. The
+acceptance gates above remain open: confinement across all V8 threads, JIT
+mapping audit, OOM/malformed-frame/watchdog behavior at the embedder level,
+cold-swap and low-CPU measurements, and audio continuity under GC/JIT/compile
+load. The packaged V8 build also has its in-process sandbox disabled, and the
+shim currently rebuilds the runtime bundle per evaluation, which is worth
+measuring before any default switch.
+
 ## Packaging and notices
 
 `install.sh` copies `scripts/query-worker.mjs` alongside the installed binary

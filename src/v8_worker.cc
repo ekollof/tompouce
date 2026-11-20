@@ -35,6 +35,8 @@ namespace {
 
 constexpr size_t kMaxFrame = 8 * 1024 * 1024;
 constexpr size_t kMaxSource = 4 * 1024 * 1024;
+constexpr int kMaxLogs = 64;
+constexpr size_t kMaxLogChars = 512;
 v8::Isolate *g_isolate = nullptr;
 v8::Global<v8::Context> g_json_context;
 v8::Global<v8::Context> g_context;

@@ -109,39 +109,27 @@ Use independent web comparisons and explicit acceptance criteria for each gap.
 Preserve thresholds, historical fixtures and execution budgets; completed gates
 and measured divergences are recorded in the archive.
 
-- [ ] The Bakery corpus's nine initial event differences now match the saved
-      2026-10-27 REPL events, including coastline (78185). Triangle fastcat
-      controls are sampled in C; uniform saw, sine, square, and noise signals
-      stay in JavaScript. IDs 13587 and 78179 still exceed the existing 200 ms
-      query budget. Native fraction clones, span operations, hap transformations
-      and fused triangle queries reduced isolated one-cycle `queryArc` profiles
-      from roughly 375–425 ms to 241–279 ms (539 haps); these compile-stage probes
-      do not establish a passing query-budget gate. Bounded pure-query and
-      common-control-key fast paths now reduce paired five-run medians from
-      287/282 ms to 268/268 ms, still 539 haps and still failing both 200 ms
-      gates on QuickJS. With the opt-in Node backend
-      (`TOMPOUCE_QUERY_BACKEND=node`) the same probe measures 145/146 ms and the
-      full Bakery comparison matches all 42 compositions, 398/398 events for
-      both songs; QuickJS remains the default and still fails these two gates.
-      Use `scripts/profile-pattern-query.mjs` or the non-gating
+- [x] Close the Bakery query-budget gap with an opt-in worker: all nine initial
+      event differences match the saved 2026-10-27 REPL events, including
+      coastline (78185), and the full corpus now matches all 42 compositions.
+      The two songs that exceed 200 ms on QuickJS (IDs 13587 and 78179) run at
+      139/140 ms compile-stage medians with the opt-in native V8 worker (Node:
+      128/129 ms), with 398/398 events each in the full comparison. QuickJS
+      remains the default and still fails those two gates; the gap is closed by
+      `TOMPOUCE_QUERY_BACKEND=native`, not by changing the budget or a baseline.
+      Native fraction clones, span/hap fast paths and C-sampled triangle
+      fastcat controls remain for the default backend; the attribution pass
+      (see [where the time goes](docs/audio-comparison.md#where-the-remaining-query-time-goes))
+      shows the residual is per-hap JavaScript call depth (~0.47–0.49 ms per
+      hap, ~38 value transforms, 21 span transforms, 58 context copies and 18
+      context merges), with native host crossings around 10 ms total. Do not
+      repeat allocation or single-operation micro-optimizations there. Use
+      `scripts/profile-pattern-query.mjs` or the non-gating
       `cmake --build build --target profile-bakery-query` for repeatable probes.
-      A follow-up attribution pass (see
-      [where the time goes](docs/audio-comparison.md#where-the-remaining-query-time-goes))
-      shows the cost is per hap at ~0.47–0.49 ms with ~5 ms fixed, and that it
-      is JavaScript call depth: in-place hap mutation leaves the time
-      unchanged, `Object.create` copies are slower, fused `withValue` chains
-      preserve values but add 7–14 ms, and native host crossings total about
-      10 ms (17k fraction clones at 240 ns, 8.3k pure queries, 4.1k common-key
-      scans at 520 ns). Each hap still crosses ~38 value transforms, 21 span
-      transforms, 58 context copies and 18 context merges through the pinned
-      combinator graph. Do not repeat allocation or single-operation
-      micro-optimizations; the remaining options are a native applicator that
-      batches the hot `Hap`/`Pattern` operations while invoking JavaScript
-      callbacks in order, reducing combinator depth only where semantics allow,
-      or the scoped V8 migration above. The Hydra example can now evaluate
-      musical branches through inert visual placeholders; actual graphics
-      remain covered by the separate `/hydra` task. See
-      [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus).
+      The Hydra example can evaluate musical branches through inert visual
+      placeholders; actual graphics stay with the separate `/hydra` item. See
+      [Bakery corpus results](docs/audio-comparison.md#bakery-composition-corpus)
+      and the [native V8 prototype](docs/v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20).
 
 - [ ] Optional target: migrate from QuickJS to standalone embedded V8 through a
       confined C++ query worker, without a Node.js runtime dependency. Node-based
@@ -152,10 +140,10 @@ and measured divergences are recorded in the archive.
       integration is implemented. A transport spike measured worker
       spawn+bootstrap+compile at 72–107 ms and a warm 50 ms window round-trip at
       7.8 ms median (8.9 ms in-process), so a separate process fits the budgets
-      as long as compilation stays off the audio path. No standalone V8 exists
-      on this host (Node is static; no libnode/libv8 package), so the transport
-      prototype now exists in `src/js_worker.c` + `scripts/query-worker.mjs`
-      with parity and failure gates (`tests/test_js_worker.c`).
+      as long as compilation stays off the audio path. The transport prototype
+      exists in `src/js_worker.c` + `scripts/query-worker.mjs` with parity and
+      failure gates (`tests/test_js_worker.c`); a standalone V8 embedder is now
+      built by the AUR recipe in `packaging/aur/libv8/` (see below).
       `TOMPOUCE_QUERY_BACKEND=node|v8` delegates queries for plain musical
       programs; visuals, prebakes, Csound, live sliders and `midin` readers
       stay on QuickJS, one shared worker follows the newest compatible source,

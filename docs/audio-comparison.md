@@ -86,7 +86,10 @@ now finish the same compile-stage probe in 145/146 ms median, and the full
 Bakery comparison matches **all 42 compositions**, including 398/398 events for
 13587 and 78179, where QuickJS still times out. That backend is opt-in and
 documented in the [V8 assessment](v8-assessment.md#opt-in-node-worker-prototype-2026-11-04);
-the default QuickJS path keeps the budget failure described here.
+the default QuickJS path keeps the budget failure described here. The
+[opt-in native V8 worker](v8-assessment.md#native-embedded-v8-worker-prototype-2026-11-20)
+does the same: 139/140 ms medians on the two heavy songs and 42/42 compositions
+in the full comparison. Neither backend changes the QuickJS default or any gate.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

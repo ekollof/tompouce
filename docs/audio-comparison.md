@@ -97,11 +97,14 @@ same near-cap peaks on every backend. `music_health` now reports PipeWire xrun
 gaps; over 48 s runs the gap counts varied from 59 to 330 and max gaps were
 about 7–10 ms, with no consistent backend difference and only one late-preparation
 skip. Changing `--block` from 128 to 256 frames did not reliably reduce gaps
-(81/330 versus 118/218 in repeated Node runs), so this is not a simple
-buffer-size problem: the track fills the fixed 128-voice pool and the single
-real-time render callback, whereas the browser's WebAudio graph has look-ahead
-scheduling and different voice/buffer architecture. Voice-pool policy and
-per-block render cost for this composition remain open diagnostics.
+(81/330 versus 118/218 in repeated Node runs). An isolated experiment doubling
+`MAX_VOICES` from 128 to 256 also did not help — 48-second Node runs gave 263,
+497 and 832 gaps versus roughly 81–330 at the default limit, with voices still
+peaking around 156. So this is not a simple buffer-size or voice-count problem:
+the single real-time callback and its per-block render cost are the bottleneck,
+whereas the browser's WebAudio graph has look-ahead scheduling and a different
+voice/buffer architecture. Voice-pool policy and per-block render profiling for
+this composition remain open diagnostics.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

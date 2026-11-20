@@ -6,6 +6,7 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <errno.h>
 #ifdef TOMPOUCE_RENDER_PROFILE
 #include <time.h>
@@ -650,15 +651,19 @@ static void portaudio_close(void) {
 static int portaudio_active(void) { return pa_output && Pa_IsStreamActive(pa_output)==1; }
 
 #ifdef HAVE_OPENAL
-#define OPENAL_FRAMES 512
-#define OPENAL_BUFFERS 4
+#define OPENAL_DEFAULT_FRAMES 256
+#define OPENAL_DEFAULT_BUFFERS 2
+#define OPENAL_MAX_FRAMES 1024
+#define OPENAL_MAX_BUFFERS 8
 static ALCdevice *openal_device;
 static ALCcontext *openal_context;
-static ALuint openal_source, openal_buffers[OPENAL_BUFFERS];
+static ALuint openal_source, openal_buffers[OPENAL_MAX_BUFFERS];
 static pthread_t openal_thread_handle;
 static atomic_int openal_stop;
 static _Atomic unsigned long long openal_underruns;
-static float openal_pcm[OPENAL_FRAMES*2];
+static unsigned openal_frames=OPENAL_DEFAULT_FRAMES;
+static unsigned openal_buffer_count=OPENAL_DEFAULT_BUFFERS;
+static float openal_pcm[OPENAL_MAX_FRAMES*2];
 
 static void *openal_render_thread(void *unused) {
     (void)unused;
@@ -674,7 +679,7 @@ static void *openal_render_thread(void *unused) {
 #ifdef TOMPOUCE_RENDER_PROFILE
             long long render_started=render_now_ns();
 #endif
-            render_audio(openal_pcm,OPENAL_FRAMES);
+            render_audio(openal_pcm,openal_frames);
 #ifdef TOMPOUCE_RENDER_PROFILE
             {
                 unsigned long long elapsed=(unsigned long long)(render_now_ns()-render_started);
@@ -688,7 +693,7 @@ static void *openal_render_thread(void *unused) {
             }
 #endif
             alBufferData(buffer,AL_FORMAT_STEREO_FLOAT32,openal_pcm,
-                         (ALsizei)sizeof(openal_pcm),(ALsizei)SR);
+                         (ALsizei)(openal_frames*2*sizeof(float)),(ALsizei)SR);
             alSourceQueueBuffers(openal_source,1,&buffer);
         }
         ALint state=0;
@@ -701,6 +706,16 @@ static void *openal_render_thread(void *unused) {
 }
 
 static int openal_open(void) {
+    const char *frames_env=getenv("TOMPOUCE_OPENAL_FRAMES");
+    const char *buffers_env=getenv("TOMPOUCE_OPENAL_BUFFERS");
+    if (frames_env && frames_env[0]) {
+        long value=strtol(frames_env,NULL,10);
+        if (value>=64 && value<=OPENAL_MAX_FRAMES) openal_frames=(unsigned)value;
+    }
+    if (buffers_env && buffers_env[0]) {
+        long value=strtol(buffers_env,NULL,10);
+        if (value>=2 && value<=OPENAL_MAX_BUFFERS) openal_buffer_count=(unsigned)value;
+    }
     openal_device=alcOpenDevice(NULL);
     if (!openal_device) { snprintf(output_error,sizeof(output_error),"no OpenAL device"); return 0; }
     openal_context=alcCreateContext(openal_device,NULL);
@@ -711,17 +726,18 @@ static int openal_open(void) {
         openal_context=NULL; openal_device=NULL; return 0;
     }
     alGenSources(1,&openal_source);
-    alGenBuffers(OPENAL_BUFFERS,openal_buffers);
+    alGenBuffers((ALsizei)openal_buffer_count,openal_buffers);
     if (alGetError()!=AL_NO_ERROR) {
         snprintf(output_error,sizeof(output_error),"cannot create OpenAL source");
-        alDeleteSources(1,&openal_source); alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+        alDeleteSources(1,&openal_source);
+        alDeleteBuffers((ALsizei)openal_buffer_count,openal_buffers);
         alcMakeContextCurrent(NULL); alcDestroyContext(openal_context); alcCloseDevice(openal_device);
         openal_context=NULL; openal_device=NULL; return 0;
     }
     memset(openal_pcm,0,sizeof(openal_pcm));
-    for (int i=0;i<OPENAL_BUFFERS;i++) {
+    for (int i=0;i<(int)openal_buffer_count;i++) {
         alBufferData(openal_buffers[i],AL_FORMAT_STEREO_FLOAT32,openal_pcm,
-                     (ALsizei)sizeof(openal_pcm),(ALsizei)SR);
+                     (ALsizei)(openal_frames*2*sizeof(float)),(ALsizei)SR);
         alSourceQueueBuffers(openal_source,1,&openal_buffers[i]);
     }
     alSourcePlay(openal_source);
@@ -729,10 +745,14 @@ static int openal_open(void) {
     atomic_store(&openal_underruns,0);
     if (pthread_create(&openal_thread_handle,NULL,openal_render_thread,NULL)) {
         snprintf(output_error,sizeof(output_error),"cannot start OpenAL thread");
-        alDeleteSources(1,&openal_source); alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+        alDeleteSources(1,&openal_source);
+        alDeleteBuffers((ALsizei)openal_buffer_count,openal_buffers);
         alcMakeContextCurrent(NULL); alcDestroyContext(openal_context); alcCloseDevice(openal_device);
         openal_context=NULL; openal_device=NULL; return 0;
     }
+    log_console("audio: OpenAL queue %u x %u frames (%.1f ms)",
+        openal_buffer_count,openal_frames,
+        1000.0*openal_buffer_count*openal_frames/SR);
     return 1;
 }
 
@@ -742,7 +762,7 @@ static void openal_close(void) {
     pthread_join(openal_thread_handle,NULL);
     alSourceStop(openal_source);
     alDeleteSources(1,&openal_source);
-    alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+    alDeleteBuffers((ALsizei)openal_buffer_count,openal_buffers);
     alcMakeContextCurrent(NULL);
     alcDestroyContext(openal_context);
     alcCloseDevice(openal_device);

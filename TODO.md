@@ -289,8 +289,9 @@ Kabelsalat device-input/mouse nodes and custom JavaScript UGens also require
 explicit scope and confinement design before implementation. The separate
 Hydra task above covers visualizer integration, not general browser input APIs.
 The optional OpenAL queued backend measured zero buffer underruns on the
-"Computer says no" stress pattern (about 46 ms of added buffering); other
-non-PipeWire backend underruns remain unmeasured.
+"Computer says no" stress pattern; its default is now 2×256 frames (about
+11.6 ms), with `TOMPOUCE_OPENAL_FRAMES`/`TOMPOUCE_OPENAL_BUFFERS` for tuning.
+Other non-PipeWire backend underruns remain unmeasured.
 
 ## Terminal blockers awaiting upstream
 

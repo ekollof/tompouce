@@ -263,8 +263,10 @@ Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, then optional
 connections before trying the next. Set `TOMPOUCE_AUDIO_BACKEND` to one of
 `PipeWire`, `PulseAudio`, `JACK`, `ALSA` or `OpenAL` to force a backend. PipeWire
 and PulseAudio use their native clients; JACK and ALSA use explicitly selected
-PortAudio host APIs; OpenAL uses a queued 4×512-frame stream and is useful when
-the direct callback misses its deadline. The engine remains stereo at 44.1 kHz;
+PortAudio host APIs; OpenAL uses a queued 2×256-frame stream by default
+(about 11.6 ms) and is useful when the direct callback misses its deadline.
+`TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune
+that queue; the console logs the resulting depth. The engine remains stereo at 44.1 kHz;
 libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a
 backend that cannot accept 44.1 kHz is skipped. F4 and MCP `music_health` show
 the selected backend and backend-specific underruns; the console records startup

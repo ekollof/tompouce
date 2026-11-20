@@ -1052,7 +1052,14 @@ and an FX case with gain 0.5 kept the same 1.2503 ratio, so the factor is
 independent of the explicit gain and consistent with the web applying its 0.8
 default gain to the FX chain. Native has no `FX` gain handling; adding a 0.8
 factor would be tuning to this capture rather than deriving the web's full FX
-gain staging, so it was not accepted.
+gain staging, so it was not accepted. Two `fx-nested-` diagnostic cases in
+`scripts/compare-audio.mjs` reproduce the 1.2504 ratio without a gate. The
+browser's serialized events contain `FX:[{}]` because the pinned `FX(...)`
+builder stores **functions**, not control objects; both the plain and inner-gain
+variants produce identical events, so the gain staging is applied by the web
+renderer when it invokes those closures. Closing this gap requires the JS query
+layer to materialize each FX closure into bounded, serializable controls before
+the native renderer can apply it; no threshold was changed.
 
 Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
 zero/short/extended cleanup times, feedback, clipped and naturally ending

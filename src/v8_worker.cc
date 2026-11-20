@@ -115,6 +115,7 @@ globalThis.__workerLog = value => {
   const text = String(value);
   __workerLogs.push(text.length > 512 ? text.slice(0, 512) : text);
 };
+globalThis.__hostLog = value => __workerLog(String(value));
 delete globalThis.window;
 globalThis.performance = { now: () => Date.now() };
 globalThis.console = { log(){}, warn(){}, error(){}, info(){}, debug(){} };

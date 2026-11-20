@@ -248,6 +248,12 @@ and measured divergences are recorded in the archive.
       controller/options defaults, duplicate scalar/command sends and exact
       note-on/off timestamp differences. Pinned numeric-string coercion drift
       remains explicit; do not replace the runtime or historical fixtures.
+      An isolated resident daemon is available for testing through
+      `--mcp-socket <path>` (0600 named Unix socket, no TCP port) with
+      `scripts/tompoucectl.py` and an optional disabled-by-default systemd user
+      unit from `scripts/install-daemon.py`; `test_daemon` covers auth, isolation
+      and SIGTERM socket cleanup. A precise MIDI-to-audio latency number still
+      needs external MIDI injection permissions or an in-engine capture hook.
 
 Input beyond CC/note-on has been evaluated against the deployed stack:
 note-off, bend, touch and program messages do not become native CC entries.

@@ -54,7 +54,7 @@ add_custom_target(test-simd-sanitize
     USES_TERMINAL VERBATIM)
 
 set(test_environment "TOMPOUCE_TEST_BINARY=$<TARGET_FILE:tompouce>")
-foreach(name terminal_render_pty install sound_import sounds companion osc tui_pty)
+foreach(name terminal_render_pty install sound_import sounds companion daemon osc tui_pty)
     add_test(NAME ${name} COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${name}.py")
     set_tests_properties(${name} PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "${test_environment};TOMPOUCE_RENDER_TEST_BINARY=$<TARGET_FILE:test_terminal_render>" TIMEOUT 300)

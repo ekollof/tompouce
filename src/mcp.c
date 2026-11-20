@@ -21,11 +21,16 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
 #include <sys/random.h>
+#include <signal.h>
+
+static volatile sig_atomic_t mcp_stop_requested;
+static void mcp_handle_signal(int signum) { (void)signum; mcp_stop_requested=1; }
 
 FILE *mcp_out_stream = NULL;
 int mcp_input_fd = -1;
@@ -992,19 +997,75 @@ void mcp_run(int ui_mode, int tcp_port) {
     ai_shutdown();
 }
 
-int mcp_run_tcp(int port) {
-    if (!mcp_auth_init(0)) {
-        log_console("mcp: --mcp-port requires TOMPOUCE_MCP_TOKEN (64 lowercase hex characters)");
-        return 1;
+/* Serve one authenticated client at a time on an already-bound listener. */
+static void mcp_serve_listener(int ls) {
+    struct sigaction stop_action;
+    memset(&stop_action,0,sizeof(stop_action));
+    stop_action.sa_handler=mcp_handle_signal;
+    sigemptyset(&stop_action.sa_mask);
+    sigaction(SIGTERM,&stop_action,NULL);
+    sigaction(SIGINT,&stop_action,NULL);
+    mcp_stop_requested=0;
+    for (;;) {
+        int cs = accept(ls, NULL, NULL);
+        if (cs < 0) {
+            if (errno == EINTR) { if (mcp_stop_requested) break; continue; }
+            break;
+        }
+        int flags = fcntl(cs, F_GETFL, 0);
+        if (flags<0 || fcntl(cs,F_SETFL,flags|O_NONBLOCK)<0 || fcntl(cs,F_SETFD,FD_CLOEXEC)<0) { close(cs); continue; }
+        mcp_output_socket=cs; mcp_send_failed=0; mcp_reset_pending();
+        mcp_client_deadline=now_seconds()+2;
+        int alive = 1;
+        while (alive) {
+            if (now_seconds()>mcp_client_deadline) break;
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(cs, &rfds);
+            struct timeval tv = { 0, 100000 };
+            int sel = select(cs + 1, &rfds, NULL, NULL, &tv);
+            if (sel > 0) {
+                for (;;) {
+                    char *frame = NULL;
+                    int rr = mcp_read_frame(cs, &frame);
+                    if (rr < 0) { alive = 0; break; }
+                    if (rr == 0) break;
+                    int accepted=mcp_dispatch_tcp(frame);
+                    free(frame);
+                    if (!accepted) { alive=0; break; }
+                }
+            } else if (sel < 0) {
+                if (errno == EINTR) continue;
+                alive = 0;
+            }
+        }
+        mcp_output_socket=-1; mcp_send_failed=0; mcp_reset_pending();
+        mcp_out_stream = stdout;
+        close(cs);
     }
+}
+
+static void mcp_server_startup(void) {
     audio_init();
     ai_init();
     scheduler_init();
     audio_toggle_play(1);
     if (mcp_init_code && mcp_init_code[0]) track_load_from_code(mcp_init_code);
+}
+
+static void mcp_server_shutdown(void) {
+    scheduler_shutdown(); audio_shutdown(); ai_shutdown();
+}
+
+int mcp_run_tcp(int port) {
+    if (!mcp_auth_init(0)) {
+        log_console("mcp: --mcp-port requires TOMPOUCE_MCP_TOKEN (64 lowercase hex characters)");
+        return 1;
+    }
+    mcp_server_startup();
 
     int ls = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
-    if (ls < 0) { log_console("tcp: socket failed"); scheduler_shutdown(); audio_shutdown(); ai_shutdown(); return 1; }
+    if (ls < 0) { log_console("tcp: socket failed"); mcp_server_shutdown(); return 1; }
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     struct sockaddr_in addr;
@@ -1016,9 +1077,10 @@ int mcp_run_tcp(int port) {
         listen(ls, 4) != 0) {
         log_console("tcp: bind/listen %d failed", port);
         close(ls);
-        scheduler_shutdown(); audio_shutdown(); ai_shutdown(); return 1;
+        mcp_server_shutdown(); return 1;
     }
     log_console("mcp tcp on 127.0.0.1:%d", port);
+    mcp_serve_listener(ls);
     for (;;) {
         int cs = accept(ls, NULL, NULL);
         if (cs < 0) {
@@ -1057,8 +1119,48 @@ int mcp_run_tcp(int port) {
         close(cs);
     }
     close(ls);
-    scheduler_shutdown();
-    audio_shutdown();
-    ai_shutdown();
+    mcp_server_shutdown();
+    return 0;
+}
+
+/* Named Unix socket: isolated by path, so multiple instances never collide
+   on a TCP port. The socket is created 0600 and removed on shutdown. */
+int mcp_run_socket(const char *path) {
+    if (!path || !*path || strlen(path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+        log_console("mcp: invalid --mcp-socket path");
+        return 1;
+    }
+    if (!mcp_auth_init(0)) {
+        log_console("mcp: --mcp-socket requires TOMPOUCE_MCP_TOKEN (64 lowercase hex characters)");
+        return 1;
+    }
+    mcp_server_startup();
+    /* Create the parent directory if needed (owned 0700) so a named socket
+       under an isolated runtime dir works without extra setup. */
+    char directory[PATH_MAX];
+    snprintf(directory,sizeof(directory),"%s",path);
+    char *slash=strrchr(directory,'/');
+    if (slash && slash>directory) {
+        *slash=0;
+        if (mkdir(directory,0700)!=0 && errno!=EEXIST) {
+            log_console("mcp: socket directory %s failed: %s",directory,strerror(errno));
+            mcp_server_shutdown(); return 1;
+        }
+    }
+    unlink(path); /* refuse to inherit a stale socket */
+    int ls=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);
+    if (ls<0) { log_console("mcp: unix socket failed"); mcp_server_shutdown(); return 1; }
+    struct sockaddr_un addr;
+    memset(&addr,0,sizeof(addr));
+    addr.sun_family=AF_UNIX;
+    snprintf(addr.sun_path,sizeof(addr.sun_path),"%s",path);
+    if (bind(ls,(struct sockaddr *)&addr,sizeof(addr))!=0 || chmod(path,0600)!=0 || listen(ls,4)!=0) {
+        log_console("mcp: unix bind/listen %s failed: %s",path,strerror(errno));
+        close(ls); unlink(path); mcp_server_shutdown(); return 1;
+    }
+    log_console("mcp unix socket on %s",path);
+    mcp_serve_listener(ls);
+    close(ls); unlink(path);
+    mcp_server_shutdown();
     return 0;
 }

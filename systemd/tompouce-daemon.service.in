@@ -1,0 +1,19 @@
+[Unit]
+Description=Tompouce resident query engine (isolated test instance)
+After=pipewire.service wireplumber.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+# Isolated instance: its own token and socket under a dedicated runtime dir.
+# It never touches the interactive session's source, playback or config.
+Environment=DAEMON_DIR=@DAEMON_DIR@
+ExecStartPre=/usr/bin/sh -c 'umask 077; mkdir -p "$DAEMON_DIR"; test -s "$DAEMON_DIR/token" || od -An -N32 -tx1 /dev/urandom | tr -d " \\n" > "$DAEMON_DIR/token"'
+# The token is exported into the child environment only; it never appears in
+# argv, logs, URLs or the socket path.
+ExecStart=/usr/bin/sh -c 'TOMPOUCE_MCP_TOKEN=$(cat "$DAEMON_DIR/token"); export TOMPOUCE_MCP_TOKEN; exec @BIN_DIR@/tompouce --mcp-socket "$DAEMON_DIR/mcp.sock" --bpm 120'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

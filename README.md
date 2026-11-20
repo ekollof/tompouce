@@ -550,6 +550,28 @@ the MCP capability. TCP rejects HTTP preambles and unauthenticated frames,
 expires unauthenticated connections after two seconds and idle clients after
 ten seconds, and disconnects peers that cannot accept a response promptly.
 
+For an isolated resident instance (testing, a long-lived harness client), use a
+named Unix socket instead of a TCP port:
+
+```sh
+export TOMPOUCE_MCP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+./build/tompouce --mcp-socket /tmp/tompouce-test/mcp.sock --code 'note(60).s("sine")'
+```
+
+The socket is created `0600`, its parent directory is created `0700`, and the
+path fully isolates instances — no port conflicts with a running session.
+`scripts/tompoucectl.py --daemon-dir /tmp/tompouce-test --name music_get_status`
+reads the token from that directory and speaks MCP over the socket; the token
+never appears in argv or logs. SIGTERM/SIGINT close the listener and remove the
+socket. `--mcp-socket` and `--mcp-port` are mutually exclusive.
+
+`python3 scripts/install-daemon.py` writes an optional systemd **user** unit for
+a resident daemon with its own token and socket under `$XDG_RUNTIME_DIR/tompouce`.
+The unit is installed **disabled**: start it explicitly with
+`systemctl --user start tompouce-daemon`. It does not touch the interactive
+session's source, playback, config or audio routing. Use `--unit-dir` and
+`--runtime-dir` for isolated tests, `--force` to replace an existing unit/token.
+
 Remote sample and orchestra downloads validate the actual connection address
 on every connection, including redirects. They connect directly and ignore
 proxy environment variables so proxy-side DNS cannot bypass the public-address

@@ -31,6 +31,7 @@ PACKAGES = {
 }
 RUNTIME_FILES = [
     'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
+    'scripts/tompoucectl.py', 'scripts/install-daemon.py', 'systemd/tompouce-daemon.service.in',
     'web/index.html', 'web/companion.js', 'web/sounds.js', 'web/companion.css',
     'web/dist/editor.js', 'web/dist/licenses.txt', 'js/dist/licenses.txt',
     'thirdparty/STRUDEL-LICENSE', 'thirdparty/quickjs/LICENSE',

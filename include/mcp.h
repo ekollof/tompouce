@@ -6,6 +6,7 @@
 
 void mcp_run(int ui_mode, int tcp_port); /* blocks until the UI exits, or EOF */
 int mcp_run_tcp(int port); /* authenticated MCP over TCP; nonzero on startup failure */
+int mcp_run_socket(const char *path); /* authenticated MCP over a named Unix socket */
 void mcp_set_init_code(const char *code); /* evaluated once servers are up */
 void handle_request(cJSON *req); /* process one JSON-RPC message */
 int mcp_read_frame(int fd, char **out); /* read one newline-delimited frame */

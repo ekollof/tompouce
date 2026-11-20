@@ -47,8 +47,13 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       Verified with `pw-link -l` (only Carla input links) and `pw-record` from
       the plugin output (peak 28006, RMS 73.26, non-silent). Realtime is
       configured (rtkit active, `realtime` group, rtprio 98, memlock unlimited).
-      Formal round-trip MIDI-to-audio latency numbers under load are still not
-      recorded, but the signal path is established.
+      A relative MIDI-to-audio onset latency was later measured through a Carla
+      SF2 synth with the isolated daemon and one owned PipeWire capture: median
+      4.308 ms (18 pairs) and 4.354 ms (13 pairs) in two clean runs. This bounds
+      the added delay of MIDI output, the JACK bridge and the synth against the
+      local audio path; it is not absolute device latency. Repeatable with
+      `scripts/midi-latency-qa.py` (diagnostic, not a ctest gate). See
+      [measured latency](docs/plugin-hosting.md#measured-midi-to-audio-latency).
 - [x] `out` control for named PipeWire targets (exact node-name match):
       `s('saw').out('carla')` routes voices to a per-name stream (up to four,
       from the `TOMPOUCE_OUTPUT_NAMES` allowlist) with one shared render pass;
@@ -252,8 +257,11 @@ and measured divergences are recorded in the archive.
       `--mcp-socket <path>` (0600 named Unix socket, no TCP port) with
       `scripts/tompoucectl.py` and an optional disabled-by-default systemd user
       unit from `scripts/install-daemon.py`; `test_daemon` covers auth, isolation
-      and SIGTERM socket cleanup. A precise MIDI-to-audio latency number still
-      needs external MIDI injection permissions or an in-engine capture hook.
+      and SIGTERM socket cleanup. The daemon was used to measure relative
+      MIDI-to-audio onset latency through a separate SF2 synth (see
+      [measured latency](docs/plugin-hosting.md#measured-midi-to-audio-latency));
+      an absolute device-latency figure still needs external MIDI injection
+      permissions or an in-engine capture hook.
 
 Input beyond CC/note-on has been evaluated against the deployed stack:
 note-off, bend, touch and program messages do not become native CC entries.

@@ -93,6 +93,8 @@ Useful focused checks:
 - `node scripts/effects-reference-qa.mjs`
 - `node scripts/companion-qa.mjs`
 - `node scripts/csound-native-qa.mjs`
+- `python3 scripts/midi-latency-qa.py` (relative MIDI-to-audio latency through a
+  separate Carla synth; owned sink/processes; diagnostic, not a ctest gate)
 - `cmake --build build --target compare-audio` (Strudel.cc PCM; see Fidelity)
 
 PTY and integration scripts accept `TOMPOUCE_TEST_BINARY` to verify the installed

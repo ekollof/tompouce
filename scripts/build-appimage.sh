@@ -79,7 +79,7 @@ fi
 # The engine locates scripts/web/examples next to /proc/self/exe, so these
 # must be siblings of the real binary inside the AppImage.
 files=(
-  README.md LICENSE NOTICE
+  README.md LICENSE NOTICE alsoft.conf
   scripts/companion.py scripts/sound_import.py scripts/query-worker.mjs
   scripts/tompoucectl.py scripts/install-daemon.py scripts/fetch-banks.py
   scripts/install.py scripts/banks.lock.json scripts/gm-webaudiofont.lock.json

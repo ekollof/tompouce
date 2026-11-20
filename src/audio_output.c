@@ -651,7 +651,7 @@ static void portaudio_close(void) {
 static int portaudio_active(void) { return pa_output && Pa_IsStreamActive(pa_output)==1; }
 
 #ifdef HAVE_OPENAL
-#define OPENAL_DEFAULT_FRAMES 256
+#define OPENAL_DEFAULT_FRAMES 128
 #define OPENAL_DEFAULT_BUFFERS 2
 #define OPENAL_MAX_FRAMES 1024
 #define OPENAL_MAX_BUFFERS 8
@@ -664,7 +664,7 @@ static _Atomic unsigned long long openal_underruns;
 static unsigned openal_frames=OPENAL_DEFAULT_FRAMES;
 static unsigned openal_buffer_count=OPENAL_DEFAULT_BUFFERS;
 static float openal_pcm[OPENAL_MAX_FRAMES*2];
-static int openal_configured, openal_preset=3;
+static int openal_configured, openal_preset=1;
 static const unsigned openal_presets[][2]={
     {64,2}, {128,2}, {128,3}, {256,2}, {512,2}, {512,4}
 };
@@ -786,9 +786,6 @@ static unsigned long long openal_underrun_count(void) { return atomic_load(&open
 #endif
 
 static const OutputDriver output_drivers[]={
-#ifdef HAVE_OPENAL
-    {"OpenAL",openal_open,openal_close,openal_active},
-#endif
 #ifdef HAVE_PIPEWIRE
     {"PipeWire",pipewire_open,pipewire_close,pipewire_active},
 #endif
@@ -796,7 +793,10 @@ static const OutputDriver output_drivers[]={
     {"PulseAudio",pulse_open,pulse_close,pulse_active},
 #endif
     {"JACK",jack_open,portaudio_close,portaudio_active},
-    {"ALSA",alsa_open,portaudio_close,portaudio_active}
+    {"ALSA",alsa_open,portaudio_close,portaudio_active},
+#ifdef HAVE_OPENAL
+    {"OpenAL",openal_open,openal_close,openal_active}
+#endif
 };
 
 static int select_output(const OutputDriver *drivers, size_t count) {

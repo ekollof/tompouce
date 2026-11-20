@@ -30,7 +30,7 @@ PACKAGES = {
     'fedora': ['gcc', 'gcc-c++', 'make', 'cmake', 'ninja-build', 'pkgconf-pkg-config', 'xxd', 'notcurses-devel', 'portaudio-devel', 'pipewire-devel', 'pulseaudio-libs-devel', 'libsamplerate-devel', 'fluidsynth-devel', 'fluid-soundfont-gm', 'openal-soft-devel', 'libcurl-devel', 'cjson-devel', 'leveldb-devel', 'alsa-lib-devel', 'tree-sitter-devel', 'lilv-devel', 'python3', 'curl', 'unzip', 'tar', 'ca-certificates'],
 }
 RUNTIME_FILES = [
-    'tompouce', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
+    'tompouce', 'alsoft.conf', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
     'scripts/tompoucectl.py', 'scripts/install-daemon.py', 'systemd/tompouce-daemon.service.in',
     'web/index.html', 'web/companion.js', 'web/sounds.js', 'web/companion.css',
     'web/dist/editor.js', 'web/dist/licenses.txt', 'js/dist/licenses.txt',

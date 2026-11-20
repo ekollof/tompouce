@@ -259,12 +259,11 @@ After rebuilding a bundle, run the normal build again to embed it.
 ./build/tompouce
 ```
 
-Audio startup tries **OpenAL → PipeWire → PulseAudio → JACK → ALSA** when
-OpenAL is built, skipping unavailable backends and cleaning up failed
-connections before trying the next. Set `TOMPOUCE_AUDIO_BACKEND` to one of
-`OpenAL`, `PipeWire`, `PulseAudio`, `JACK` or `ALSA` to force a backend. OpenAL
-uses a queued 2×256-frame stream by default (about 11.6 ms) and absorbs render
-bursts that would otherwise miss the direct callback deadline. PipeWire and
+Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, with optional
+OpenAL selectable via `TOMPOUCE_AUDIO_BACKEND=OpenAL`. Missing or failed
+backends are skipped and cleaned up before trying the next. OpenAL uses a
+queued 2×128-frame stream (about 5.8 ms) plus the bundled app-specific
+`alsoft.conf` (64-frame period, stereo, no global config change). PipeWire and
 PulseAudio use their native clients; JACK and ALSA use explicitly selected
 PortAudio host APIs.
 `TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune

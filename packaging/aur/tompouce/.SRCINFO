@@ -1,7 +1,7 @@
 pkgbase = tompouce
 	pkgdesc = Terminal live-coding environment for music with an embedded Strudel runtime
 	pkgver = 0.1.0.r20261120.64c7ac0
-	pkgrel = 2
+	pkgrel = 3
 	url = https://github.com/ekollof/tompouce
 	arch = x86_64
 	license = AGPL-3.0-or-later

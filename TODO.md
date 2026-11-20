@@ -288,11 +288,12 @@ arbitrary npm resolution remain non-goals unless explicitly re-scoped.
 Kabelsalat device-input/mouse nodes and custom JavaScript UGens also require
 explicit scope and confinement design before implementation. The separate
 Hydra task above covers visualizer integration, not general browser input APIs.
-OpenAL is now the first-choice output backend when built (2×256 frames, about
-11.6 ms by default) and measured zero buffer underruns on the "Computer says
-no" stress pattern; `TOMPOUCE_OPENAL_FRAMES`/`TOMPOUCE_OPENAL_BUFFERS` tune it.
-PipeWire remains the automatic fallback, and other non-PipeWire backend
-underruns remain unmeasured.
+OpenAL is opt-in (`TOMPOUCE_AUDIO_BACKEND=OpenAL`) and ships an app-specific
+`alsoft.conf` with 64-frame stereo periods; our queue defaults to 128×2 (about
+5.8 ms). It measured zero PipeWire-profiler xruns on "Computer says no", but
+listening still reported choppiness at 2×256 before the config, so PipeWire
+stays the automatic default until the low-latency configuration is confirmed
+by ear. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Terminal blockers awaiting upstream
 

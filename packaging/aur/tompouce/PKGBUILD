@@ -3,7 +3,7 @@ pkgname=tompouce
 _commit=64c7ac03b9b2f79f340887ec0c606260aa274019
 _date=20261120
 pkgver=0.1.0.r${_date}.${_commit:0:7}
-pkgrel=2
+pkgrel=3
 pkgdesc='Terminal live-coding environment for music with an embedded Strudel runtime'
 arch=('x86_64')
 url='https://github.com/ekollof/tompouce'
@@ -37,7 +37,7 @@ package() {
   ln -s ../lib/tompouce/tompouce "$pkgdir/usr/bin/tompouce"
 
   local files=(
-    README.md LICENSE NOTICE
+    README.md LICENSE NOTICE alsoft.conf
     scripts/companion.py scripts/sound_import.py scripts/query-worker.mjs
     scripts/tompoucectl.py scripts/install-daemon.py
     systemd/tompouce-daemon.service.in

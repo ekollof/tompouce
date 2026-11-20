@@ -228,6 +228,7 @@ endforeach()
 foreach(runtime_directory IN LISTS runtime_directories)
     file(MAKE_DIRECTORY "${runtime_directory}")
     configure_file(strudeltutor.json "${runtime_directory}/examples/strudeltutor.json" COPYONLY)
+    configure_file(alsoft.conf "${runtime_directory}/alsoft.conf" COPYONLY)
     foreach(directory scripts web assets)
         file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}/${directory}"
             "${runtime_directory}/${directory}" SYMBOLIC)

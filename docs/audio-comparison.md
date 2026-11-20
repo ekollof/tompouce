@@ -119,16 +119,16 @@ repeated 48-second runs still average ~1.63–1.69 ms render with hundreds of
 over-budget callbacks, so this refactor did not materially change xrun gaps.
 Further gains need a different hot-path strategy, not just hoisting constants.
 The OpenAL backend ran the same Node-backed stress pattern with **zero buffer
-underruns**, and it is now the first-choice backend when built (PipeWire is the
-fallback). Its queue is 2×256 frames (about 11.6 ms), chosen after listening
-tests reported no artifacts there; smaller queues (64×2 at 2.9 ms and 128×2 at
-5.8 ms) also counted zero queue-empty events but were not accepted as the
-default from the counter alone. `TOMPOUCE_OPENAL_FRAMES` (64–1024), `TOMPOUCE_OPENAL_BUFFERS` (2–8) and the
-TUI `Ctrl+-`/`Ctrl+=` presets expose the tradeoff, and
-`TOMPOUCE_AUDIO_BACKEND=PipeWire` restores the direct path. The PipeWire
-fallback still showed tens of gaps in the same runs. This confirms that a queued
-output engine absorbs render bursts at a latency cost, without changing the
-synth/mix path.
+underruns**, but listening tests still reported choppiness at 2×256 frames.
+PipeWire's profiler showed OpenAL's stream running at its default 512-frame
+update period, so the app queue was shallower than OpenAL's own device period.
+An app-specific `alsoft.conf` now sets `period_size = 64`, `periods = 2` and
+`channels = stereo`; the resulting PipeWire node reports 64/48000 latency.
+OpenAL remains **opt-in** via `TOMPOUCE_AUDIO_BACKEND=OpenAL` (PipeWire stays
+the automatic default) until listening confirms the low-latency configuration.
+`TOMPOUCE_OPENAL_FRAMES` (64–1024), `TOMPOUCE_OPENAL_BUFFERS` (2–8) and the TUI
+`Ctrl+-`/`Ctrl+=` presets tune our queue; the default is now 128×2 (about
+5.8 ms). `TOMPOUCE_AUDIO_BACKEND=PipeWire` remains the direct path.
 
 Strudel's WebAudio output has no master limiter, only orbit gain 1 and the
 destination. Our live path previously used a tanh/clamp master stage; both

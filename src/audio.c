@@ -931,6 +931,47 @@ static void dispatch_voice_onsets(void) {
     for (int i=0;i<count;i++) if (voices[due[i]].active) voice_onset(&voices[due[i]]);
 }
 
+/* Freeze per-event pan/send constants once, when the voice is created. The
+   callback still applies them in the original order: fade -> pan law -> dry
+   and send multiplication. */
+static void cache_routing(Voice *v) {
+    int dsp = v->dsp.control.enabled;
+    v->route_dsp = dsp;
+    double ll = 1, lr = 0, rl = 0, rr = 1, left = 1, right = 1;
+    if (dsp) {
+        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW ||
+            v->inst == INST_PULSE || native_synth_stereo(v->native_program);
+        double pan = fmax(-1, fmin(1, v->pan));
+        if (!v->has_pan) {
+            /* With no pan control, WebAudio upmixes mono at unity. */
+        } else if (!stereo) {
+            ll = cos((pan + 1) * M_PI / 4); rr = sin((pan + 1) * M_PI / 4);
+        } else if (pan <= 0) {
+            lr = cos((pan + 1) * M_PI / 2); rr = sin((pan + 1) * M_PI / 2);
+        } else {
+            ll = cos(pan * M_PI / 2); rl = sin(pan * M_PI / 2);
+        }
+        v->route_dry = v->dsp.control.p[DSP_DRY];
+        v->route_room = v->dsp.control.p[DSP_ROOM];
+        v->route_room_size = v->dsp.control.p[DSP_SIZE];
+    } else {
+        left = v->pan <= 0 ? 1 : 1 - v->pan;
+        right = v->pan >= 0 ? 1 : 1 + v->pan;
+        v->route_dry = 1;
+        v->route_room = 0;
+        v->route_room_size = -1;
+    }
+    v->route_ll = ll; v->route_lr = lr; v->route_rl = rl; v->route_rr = rr;
+    v->route_left = left; v->route_right = right;
+    v->route_delay = v->delay_send;
+    v->route_src_pan = v->pan;
+    v->route_src_has_pan = v->has_pan;
+    v->route_src_channels = v->smp_channels;
+    v->route_src_inst = v->inst;
+    v->route_src_dsp = dsp;
+    v->route_src_program = v->native_program;
+}
+
 static void trigger_voice(Voice *v, AudioEvent *ev) {
     memset(v, 0, sizeof(Voice));
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
@@ -1075,6 +1116,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
             v->note_off_time = v->gate_end;
         }
     }
+    cache_routing(v);
     if (v->start_time<=audio_time+1e-10) voice_onset(v);
     else next_voice_onset=fmin(next_voice_onset,v->start_time);
 }
@@ -1503,6 +1545,16 @@ static void target_add(int target, double l, double r) {
 }
 
 static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
+    /* Directly constructed voices (internal tests) never pass through
+       trigger_voice; a zeroed cache is the sentinel for that case. */
+    if ((v->route_ll == 0 && v->route_lr == 0 && v->route_rl == 0 &&
+         v->route_rr == 0 && v->route_dry == 0) ||
+        v->pan != v->route_src_pan || v->has_pan != v->route_src_has_pan ||
+        v->smp_channels != v->route_src_channels || v->inst != v->route_src_inst ||
+        v->dsp.control.enabled != v->route_src_dsp ||
+        v->native_program != v->route_src_program ||
+        v->delay_send != v->route_delay)
+        cache_routing(v);
     /* Source transport may shorten note_off_time. The outer release node
        keeps the original hap and raw-release anchors instead. */
     if (v->graph_end>v->graph_fade_start && audio_time>v->graph_fade_start) {
@@ -1510,23 +1562,17 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         double fade=fmax(0,(v->graph_end-audio_time)/span);
         l*=fade; r*=fade;
     }
-    double left = v->pan <= 0 ? 1 : 1-v->pan;
-    double right = v->pan >= 0 ? 1 : 1+v->pan;
-    if (v->dsp.control.enabled) {
-        int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW || v->inst == INST_PULSE || native_synth_stereo(v->native_program);
-        double pan = fmax(-1,fmin(1,v->pan));
-        if (!v->has_pan) {
-            /* With no pan control, WebAudio upmixes mono at unity. */
-        } else if (!stereo) {
-            l *= cos((pan+1)*M_PI/4); r *= sin((pan+1)*M_PI/4);
-        } else if (pan <= 0) {
-            l += r*cos((pan+1)*M_PI/2); r *= sin((pan+1)*M_PI/2);
-        } else {
-            r += l*sin(pan*M_PI/2); l *= cos(pan*M_PI/2);
-        }
-        left = right = 1;
+    /* Pan law and send constants are frozen at note-on; the multiplication
+       order below is identical to the original per-sample calculation. */
+    double in_l = l, in_r = r;
+    if (v->route_lr == 0 && v->route_rl == 0) {
+        l = in_l * v->route_ll; r = in_r * v->route_rr;
+    } else {
+        l = in_l * v->route_ll + in_r * v->route_lr;
+        r = in_l * v->route_rl + in_r * v->route_rr;
     }
-    double dry = v->dsp.control.enabled ? v->dsp.control.p[DSP_DRY] : 1;
+    double left = v->route_left, right = v->route_right;
+    double dry = v->route_dry;
     unsigned scope_mask = v->scope_mask;
     for (int i = 0; scope_mask; i++, scope_mask >>= 1) if ((scope_mask&1u) && v->scope_generation == pattern_scope_generation[i])
         pattern_scope_frame[i] += (l*left+r*right)*dry*.5;
@@ -1535,12 +1581,12 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
        source is carried by the target buffer, never by the default stream. */
     if (v->out_target>0) return;
     mix->left += l*left*dry; mix->right += r*right*dry;
-    mix->delay_l += l*left*v->delay_send;
-    mix->delay_r += r*right*v->delay_send;
-    if (v->dsp.control.enabled) {
-        double room = v->dsp.control.p[DSP_ROOM];
+    mix->delay_l += l*left*v->route_delay;
+    mix->delay_r += r*right*v->route_delay;
+    if (v->route_dsp) {
+        double room = v->route_room;
         mix->room_l += l*left*room; mix->room_r += r*right*room;
-        if (room > 0) mix->room_size = v->dsp.control.p[DSP_SIZE];
+        if (room > 0) mix->room_size = v->route_room_size;
     }
 }
 #ifdef TOMPOUCE_RENDER_PROFILE

@@ -112,7 +112,12 @@ deadline; the voice loop is roughly 85% of render time, while `dsp_process` and
 `dsp_envelope` are negligible. Of the hot path, `route_voice` costs about 91
 cycles per call versus ~29 for `source_value`, and is called roughly nine times
 more often, so routing/mixing is the first target for a parity-preserving
-optimization.
+optimization. A follow-up change froze pan/send constants into preallocated
+`Voice` fields at note-on and replayed the original multiplication order;
+`ctest` (46/46), the nested-FX gates and the Bakery corpus still pass, but
+repeated 48-second runs still average ~1.63–1.69 ms render with hundreds of
+over-budget callbacks, so this refactor did not materially change xrun gaps.
+Further gains need a different hot-path strategy, not just hoisting constants.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

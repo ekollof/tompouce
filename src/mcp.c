@@ -294,7 +294,7 @@ static void handle_health(char *out, size_t outlen) {
     unsigned long long calls=0, gaps=0, max_gap=0, empty=0;
     audio_output_xrun_stats(&calls,&gaps,&max_gap,&empty);
     snprintf(out, outlen,
-        "playing=%s stream=%s backend=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s ref=%d pre=%.3f peak=%.6f xrun=%llu gaps=%llu empty=%llu max=%llums underruns=%llu",
+        "playing=%s stream=%s backend=%s bpm=%.0f t=%.1fs voices=%d/128 queue=%d compiled=%d song=%d/%d banks=%s(%d) midi=%s ref=%d peak=%.6f xrun=%llu gaps=%llu empty=%llu max=%llums underruns=%llu",
         audio_is_playing() ? "yes" : "no",
         audio_is_stream_active() ? "up" : "down",
         audio_backend_name(),
@@ -302,7 +302,7 @@ static void handle_health(char *out, size_t outlen) {
         scheduler_song_pos() + 1, scheduler_song_count(),
         banks_ready() ? "ready" : "indexing", banks_count(),
         midi_ready() ? "up" : "down", audio_reference_mode(),
-        audio_prepeak_level(), audio_peak_level(),
+        audio_peak_level(),
         calls, gaps, empty, max_gap/1000000ull, audio_output_underruns());
 #ifdef TOMPOUCE_RENDER_PROFILE
     unsigned long long rcalls=0, rmax=0, r2=0, r3=0, rtotal=0;

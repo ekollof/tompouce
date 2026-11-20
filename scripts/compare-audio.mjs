@@ -115,12 +115,16 @@ try {
   const bakery = JSON.parse(await fs.readFile('tests/fixtures/strudel-bakery.json', 'utf8'));
   for (const example of bakery.examples)
     if (hash(example.code)!==example.sha256) throw Error(`Bakery source hash mismatch: ${example.id}`);
+  const bassFugue = await fs.readFile('bassfugue.json','utf8').then(JSON.parse).catch(()=>null);
   const cases = [
     {name:'voicing-reset-default',code:"setDefaultVoicings('lefthand');resetVoicings();chord('C').voicing()",
       sound:'',cycles:1,cps:.5,window:1,correlation:null,eventsOnly:true},
     ...bakery.examples.map(example=>({name:`bakery-${example.id}`,title:example.title,
       source:example.entries,code:example.code,sound:'',cycles:4,cps:.5,window:1,
       correlation:null,eventsOnly:true})),
+    ...(bassFugue?.code?[{name:'bass-fugue-full-mix',
+      code:bassFugue.code.replace(/^\s*setcps\([^)]*\);?\s*$/gm,''),sound:'',
+      cycles:1,cps:1,window:1,correlation:.99}]:[]),
     ...[
       ['natural',''],['fast',`.speed(8).irspeed(8)`],['reverse',`.speed(-2).irspeed(-2)`],
       ['short-buffer',`.speed(8).irspeed(8).clip(1)`],
@@ -508,11 +512,11 @@ try {
       if(spec.fixtureIR){const bytes=Uint8Array.from(atob(${JSON.stringify(monoFixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.fixtureIR]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
-      let selected=pattern.filterValues(v=>v.s===spec.sound);
+      let selected=spec.sound?pattern.filterValues(v=>v.s===spec.sound):pattern;
       const haps=selected.queryArc(0,spec.cycles,{_cps:spec.cps}).filter(h=>h.hasOnset());
       // Metadata must not prime stateful helpers such as glide before PCM
       // rendering. The native renderer consumes its prepared haps once.
-      if(spec.freshRender)selected=(await evaluate(spec.code,__comparisonTranspiler.transpiler)).pattern.filterValues(v=>v.s===spec.sound);
+      if(spec.freshRender){const fresh=(await evaluate(spec.code,__comparisonTranspiler.transpiler)).pattern;selected=spec.sound?fresh.filterValues(v=>v.s===spec.sound):fresh;}
       const renderEvents=[];
       if(spec.freshRender) {
         const query=selected.queryArc.bind(selected);

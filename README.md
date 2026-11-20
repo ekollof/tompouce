@@ -271,11 +271,11 @@ PortAudio host APIs.
 that queue; the console logs the resulting depth. In the TUI, `Ctrl+-` and
 `Ctrl+=` step through OpenAL queue presets and F4 shows the active setting. The engine remains stereo at 44.1 kHz;
 libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a
-backend that cannot accept 44.1 kHz is skipped. Live monitoring applies a fixed
--12 dB headroom (no master limiter, matching Strudel's no-limiter output);
-`TOMPOUCE_LIVE_HEADROOM` overrides it from 0.05 to 1.0. F4 and MCP
-`music_health` show the selected backend, peak levels and backend-specific
-underruns; the console records startup failures. With no usable output, editing and MCP remain available with
+backend that cannot accept 44.1 kHz is skipped. Live output uses the same
+unity-gain reference path as the web comparison; a full-mix "Bass fuge" capture
+matches the deployed REPL at correlation 0.999997 with both peaking at 1.0.
+F4 and MCP `music_health` show the selected backend, peak level and
+backend-specific underruns; the console records startup failures. With no usable output, editing and MCP remain available with
 `stream=down backend=none`. Selection occurs at startup.
 
 External plugin hosts such as Carla can sit downstream of the normal PipeWire

@@ -54,12 +54,9 @@ static atomic_int playing;
 static atomic_int reference_mode;
 _Static_assert(ATOMIC_INT_LOCK_FREE==2,"output gain requires lock-free integer atomics");
 static atomic_uint output_gain_units=1000000;
-static double live_headroom=0.25;
 static _Atomic unsigned peak_units;
-static _Atomic unsigned prepeak_units;
-void audio_peak_reset(void) { atomic_store(&peak_units,0); atomic_store(&prepeak_units,0); }
+void audio_peak_reset(void) { atomic_store(&peak_units,0); }
 double audio_peak_level(void) { return atomic_load(&peak_units)/1000000.0; }
-double audio_prepeak_level(void) { return atomic_load(&prepeak_units)/1000000.0; }
 int audio_set_output_gain(double value) {
     if (!isfinite(value) || value<0 || value>1) return 0;
     atomic_store_explicit(&output_gain_units,(unsigned)lround(value*1000000),memory_order_relaxed);
@@ -2339,18 +2336,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             dc_l = L; lp_l = x; L = x;
             x = R - dc_r + 0.995 * lp_r;
             dc_r = R; lp_r = x; R = x;
-            /* Live monitoring uses a fixed -12 dB headroom. Strudel has no
-               master limiter; this only attenuates so dense mixes stay below
-               the device ceiling without dynamic clamping. The reference path
-               above remains the exact web-comparison PCM path. */
-            double pre=fmax(fabs(L),fabs(R));
-            unsigned pre_units=(unsigned)(pre*1000000.0);
-            unsigned pre_previous=atomic_load(&prepeak_units);
-            while (pre_units>pre_previous &&
-                   !atomic_compare_exchange_weak(&prepeak_units,&pre_previous,pre_units)) {}
-            L *= live_headroom; R *= live_headroom;
-            if (L > 1) L = 1; else if (L < -1) L = -1;
-            if (R > 1) R = 1; else if (R < -1) R = -1;
+            L = tanh(1.2 * L) * 1.1995;
+            R = tanh(1.2 * R) * 1.1995;
         }
 #ifdef TOMPOUCE_RENDER_PROFILE
         atomic_fetch_add(&section_master,audio_cycles()-c_master);
@@ -2390,13 +2377,6 @@ static void render_output(float *output, unsigned long frames) {
 }
 
 void audio_init(void) {
-    const char *headroom=getenv("TOMPOUCE_LIVE_HEADROOM");
-    if (headroom && headroom[0]) {
-        char *end=NULL;
-        double value=strtod(headroom,&end);
-        if (end && *end==0 && isfinite(value) && value>=.05 && value<=1)
-            live_headroom=value;
-    }
     convolution_simd_init();
     wt_init();
 #ifdef __linux__

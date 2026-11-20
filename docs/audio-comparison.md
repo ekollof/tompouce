@@ -132,15 +132,14 @@ synth/mix path.
 
 Strudel's WebAudio output has no master limiter, only orbit gain 1 and the
 destination. Our live path previously used a tanh/clamp master stage; both
-colored dense mixes. Measured pre-master peaks were 3.74 for "Computer says
-no" and 2.20 for "Bass fuge". Live monitoring now applies a fixed -12 dB
-headroom (`TOMPOUCE_LIVE_HEADROOM`, default 0.25) and no dynamic processing,
-giving final peaks 0.936 and 0.551; the offline `reference_mode == 1` PCM path
-is unchanged for the gates.
-`music_health` reports `pre=` and `peak=`, so the tradeoff is measurable. This
-does not claim Strudel loudness parity: the native full mix is hotter than the
-web's per-sound captures, and matching that needs independent full-mix
-comparison rather than a master compressor.
+colored dense mixes. A new diagnostic `bass-fugue-full-mix` case renders **all**
+events (empty sound filter) on both sides. It matches the deployed REPL at
+correlation **0.999997**, RMS ratio **1.000014**, with native and browser peaks
+both at 1.0. Strudel therefore also reaches the destination ceiling on this
+mix; the old clamp was not the source of the perceived distortion. Live output
+now uses the same unity-gain reference path as the gates, and
+`music_health` reports `ref=`, `peak=` and backend underruns. This is the first
+full-mix level gate; it does not establish PCM parity for every Bakery song.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

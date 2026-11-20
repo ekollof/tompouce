@@ -327,8 +327,8 @@ package. A production worker therefore needs a from-source embedder build
 (depot_tools, `gclient sync`, `gn`/`ninja`, roughly several GiB of checkout and
 a long build) pinned to an exact V8 revision and packaged with its notices,
 ICU data and snapshot. The host has 243 GiB free, 31 GiB RAM and 16 CPUs, so the
-build is feasible; it is the first real cost of this migration and has not been
-performed here.
+build is feasible; it is the first real cost of this migration. An isolated
+probe build is recorded below, but it is not a production backend.
 
 The AUR [`v8-r`](https://aur.archlinux.org/packages/v8-r) package is a possible
 developer shortcut: it pins V8 14.5.137, performs that same depot_tools build
@@ -342,6 +342,28 @@ notices that must be audited. Arch's official repositories currently provide
 only Node.js, not a standalone `v8`. Installing an AUR package changes system
 state and is not done as a test here; the release build still needs a V8
 revision pinned and owned by this project.
+
+### Pinned V8 16.0.94 build probe (2026-11-20)
+
+An isolated probe built the latest stable V8 tag (`16.0.94`,
+`3d4477abfde92d54e495b34b7fa14f585e5c476e`) with depot_tools pinned at
+`e923de63bfc631d5a09ef5324635d008d50dc0ca`, using the host's clang 23, lld
+and ninja, with no V8 system package installed. Measured here: fetch plus
+dependency sync took about three minutes (9.6 GiB V8 checkout, 1.2 GiB
+depot_tools); the `v8_monolith` build took 1406 s (23.4 min) and produced a
+131 MB `libv8_monolith.a` in a 913 MB output tree. Linking a minimal embedder
+also needs 47 Rust/ICU rlibs (~150 MB), an 11 MB `icudtl.dat`, `-latomic` and
+`lld` (V8 16 emits experimental CREL relocations); the resulting
+`hello-world` binary is 67 MB and ran successfully. A plain `ld` link with
+just `libv8_monolith.a` fails.
+
+This is a feasibility probe, not a production recipe. It disabled V8's
+in-process sandbox (the pinned default requires hardened libc++), disabled
+Chromium-specific clang plugins, pinned `clang_version = "23"`, and needed a
+compatibility symlink from `x86_64-unknown-linux-gnu` to Arch's
+`x86_64-pc-linux-gnu` clang resource directory. It shows a pinned, self-owned
+V8 embedder build is feasible on this host; it does not change the default
+backend or satisfy the acceptance gates above.
 
 The worker must link V8 as a single-threaded embedder: a minimal
 `v8::Platform`, one isolate entered by one thread, `TerminateExecution` driven

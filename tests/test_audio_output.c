@@ -87,7 +87,11 @@ static void sine_render(float *out, unsigned long frames) {
 int main(void) {
     test_named_targets();
     size_t n=sizeof(output_drivers)/sizeof(*output_drivers);
+#ifdef HAVE_OPENAL
+    assert(!strcmp(output_drivers[n-2].name,"ALSA") && !strcmp(output_drivers[n-1].name,"OpenAL"));
+#else
     assert(!strcmp(output_drivers[n-2].name,"JACK") && !strcmp(output_drivers[n-1].name,"ALSA"));
+#endif
 #ifdef HAVE_PIPEWIRE
     assert(!strcmp(output_drivers[0].name,"PipeWire"));
 #endif

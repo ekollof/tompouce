@@ -7,6 +7,30 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <errno.h>
+#ifdef TOMPOUCE_RENDER_PROFILE
+#include <time.h>
+static _Atomic unsigned long long render_calls, render_max_ns;
+static _Atomic unsigned long long render_over_2ms, render_over_3ms, render_total_ns;
+static long long render_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC,&ts);
+    return (long long)ts.tv_sec*1000000000ll+ts.tv_nsec;
+}
+void audio_render_profile_stats(unsigned long long *calls,
+    unsigned long long *max_ns, unsigned long long *over_2ms,
+    unsigned long long *over_3ms, unsigned long long *total_ns) {
+    if (calls) *calls=atomic_load(&render_calls);
+    if (max_ns) *max_ns=atomic_load(&render_max_ns);
+    if (over_2ms) *over_2ms=atomic_load(&render_over_2ms);
+    if (over_3ms) *over_3ms=atomic_load(&render_over_3ms);
+    if (total_ns) *total_ns=atomic_load(&render_total_ns);
+}
+void audio_render_profile_reset(void) {
+    atomic_store(&render_calls,0); atomic_store(&render_max_ns,0);
+    atomic_store(&render_over_2ms,0); atomic_store(&render_over_3ms,0);
+    atomic_store(&render_total_ns,0);
+}
+#endif
 #ifdef HAVE_PIPEWIRE
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
@@ -16,6 +40,11 @@
 #endif
 #ifdef HAVE_SAMPLERATE
 #include <samplerate.h>
+#endif
+#ifdef HAVE_OPENAL
+#include <AL/al.h>
+#include <AL/alc.h>
+#include <AL/alext.h>
 #endif
 
 #define OUTPUT_CHANNELS 2
@@ -297,6 +326,9 @@ static void pw_process(void *data) {
         if (buffer->requested && buffer->requested<frames) frames=(uint32_t)buffer->requested;
 #endif
         xrun_observe(frames);
+#ifdef TOMPOUCE_RENDER_PROFILE
+        long long render_started=render_now_ns();
+#endif
         int named=audio_output_named_count();
         for (int t=1;t<=named;t++) out_target_buffers[t]=target_shadow[t];
         /* Cap individual DSP calls, including unusually large server buffers. */
@@ -305,6 +337,18 @@ static void pw_process(void *data) {
             if (count>block_frames) count=block_frames;
             render_audio((float *)out->data+at*OUTPUT_CHANNELS,count); at+=(uint32_t)count;
         }
+#ifdef TOMPOUCE_RENDER_PROFILE
+        {
+            unsigned long long elapsed=(unsigned long long)(render_now_ns()-render_started);
+            atomic_fetch_add(&render_calls,1);
+            atomic_fetch_add(&render_total_ns,elapsed);
+            unsigned long long previous=atomic_load(&render_max_ns);
+            while (elapsed>previous &&
+                   !atomic_compare_exchange_weak(&render_max_ns,&previous,elapsed)) {}
+            if (elapsed>2000000ull) atomic_fetch_add(&render_over_2ms,1);
+            if (elapsed>3000000ull) atomic_fetch_add(&render_over_3ms,1);
+        }
+#endif
         if (named>0) {
             pthread_mutex_lock(&target_lock);
             for (int t=1;t<=named;t++)
@@ -605,6 +649,110 @@ static void portaudio_close(void) {
 }
 static int portaudio_active(void) { return pa_output && Pa_IsStreamActive(pa_output)==1; }
 
+#ifdef HAVE_OPENAL
+#define OPENAL_FRAMES 512
+#define OPENAL_BUFFERS 4
+static ALCdevice *openal_device;
+static ALCcontext *openal_context;
+static ALuint openal_source, openal_buffers[OPENAL_BUFFERS];
+static pthread_t openal_thread_handle;
+static atomic_int openal_stop;
+static _Atomic unsigned long long openal_underruns;
+static float openal_pcm[OPENAL_FRAMES*2];
+
+static void *openal_render_thread(void *unused) {
+    (void)unused;
+    alcMakeContextCurrent(openal_context);
+    while (!atomic_load(&openal_stop)) {
+        ALint processed=0, queued=0;
+        alGetSourcei(openal_source,AL_BUFFERS_PROCESSED,&processed);
+        alGetSourcei(openal_source,AL_BUFFERS_QUEUED,&queued);
+        if (queued==0) atomic_fetch_add(&openal_underruns,1);
+        while (processed-- > 0) {
+            ALuint buffer=0;
+            alSourceUnqueueBuffers(openal_source,1,&buffer);
+#ifdef TOMPOUCE_RENDER_PROFILE
+            long long render_started=render_now_ns();
+#endif
+            render_audio(openal_pcm,OPENAL_FRAMES);
+#ifdef TOMPOUCE_RENDER_PROFILE
+            {
+                unsigned long long elapsed=(unsigned long long)(render_now_ns()-render_started);
+                atomic_fetch_add(&render_calls,1);
+                atomic_fetch_add(&render_total_ns,elapsed);
+                unsigned long long previous=atomic_load(&render_max_ns);
+                while (elapsed>previous &&
+                       !atomic_compare_exchange_weak(&render_max_ns,&previous,elapsed)) {}
+                if (elapsed>2000000ull) atomic_fetch_add(&render_over_2ms,1);
+                if (elapsed>3000000ull) atomic_fetch_add(&render_over_3ms,1);
+            }
+#endif
+            alBufferData(buffer,AL_FORMAT_STEREO_FLOAT32,openal_pcm,
+                         (ALsizei)sizeof(openal_pcm),(ALsizei)SR);
+            alSourceQueueBuffers(openal_source,1,&buffer);
+        }
+        ALint state=0;
+        alGetSourcei(openal_source,AL_SOURCE_STATE,&state);
+        if (state!=AL_PLAYING) alSourcePlay(openal_source);
+        struct timespec pause={0,2000000};
+        nanosleep(&pause,NULL);
+    }
+    return NULL;
+}
+
+static int openal_open(void) {
+    openal_device=alcOpenDevice(NULL);
+    if (!openal_device) { snprintf(output_error,sizeof(output_error),"no OpenAL device"); return 0; }
+    openal_context=alcCreateContext(openal_device,NULL);
+    if (!openal_context || !alcMakeContextCurrent(openal_context)) {
+        snprintf(output_error,sizeof(output_error),"cannot create OpenAL context");
+        if (openal_context) alcDestroyContext(openal_context);
+        alcCloseDevice(openal_device);
+        openal_context=NULL; openal_device=NULL; return 0;
+    }
+    alGenSources(1,&openal_source);
+    alGenBuffers(OPENAL_BUFFERS,openal_buffers);
+    if (alGetError()!=AL_NO_ERROR) {
+        snprintf(output_error,sizeof(output_error),"cannot create OpenAL source");
+        alDeleteSources(1,&openal_source); alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+        alcMakeContextCurrent(NULL); alcDestroyContext(openal_context); alcCloseDevice(openal_device);
+        openal_context=NULL; openal_device=NULL; return 0;
+    }
+    memset(openal_pcm,0,sizeof(openal_pcm));
+    for (int i=0;i<OPENAL_BUFFERS;i++) {
+        alBufferData(openal_buffers[i],AL_FORMAT_STEREO_FLOAT32,openal_pcm,
+                     (ALsizei)sizeof(openal_pcm),(ALsizei)SR);
+        alSourceQueueBuffers(openal_source,1,&openal_buffers[i]);
+    }
+    alSourcePlay(openal_source);
+    atomic_store(&openal_stop,0);
+    atomic_store(&openal_underruns,0);
+    if (pthread_create(&openal_thread_handle,NULL,openal_render_thread,NULL)) {
+        snprintf(output_error,sizeof(output_error),"cannot start OpenAL thread");
+        alDeleteSources(1,&openal_source); alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+        alcMakeContextCurrent(NULL); alcDestroyContext(openal_context); alcCloseDevice(openal_device);
+        openal_context=NULL; openal_device=NULL; return 0;
+    }
+    return 1;
+}
+
+static void openal_close(void) {
+    if (!openal_context) return;
+    atomic_store(&openal_stop,1);
+    pthread_join(openal_thread_handle,NULL);
+    alSourceStop(openal_source);
+    alDeleteSources(1,&openal_source);
+    alDeleteBuffers(OPENAL_BUFFERS,openal_buffers);
+    alcMakeContextCurrent(NULL);
+    alcDestroyContext(openal_context);
+    alcCloseDevice(openal_device);
+    openal_context=NULL; openal_device=NULL;
+}
+
+static int openal_active(void) { return openal_context!=NULL && !atomic_load(&openal_stop); }
+static unsigned long long openal_underrun_count(void) { return atomic_load(&openal_underruns); }
+#endif
+
 static const OutputDriver output_drivers[]={
 #ifdef HAVE_PIPEWIRE
     {"PipeWire",pipewire_open,pipewire_close,pipewire_active},
@@ -613,18 +761,36 @@ static const OutputDriver output_drivers[]={
     {"PulseAudio",pulse_open,pulse_close,pulse_active},
 #endif
     {"JACK",jack_open,portaudio_close,portaudio_active},
-    {"ALSA",alsa_open,portaudio_close,portaudio_active}
+    {"ALSA",alsa_open,portaudio_close,portaudio_active},
+#ifdef HAVE_OPENAL
+    {"OpenAL",openal_open,openal_close,openal_active}
+#endif
 };
 
 static int select_output(const OutputDriver *drivers, size_t count) {
+    const char *requested=getenv("TOMPOUCE_AUDIO_BACKEND");
+    int matched=0;
     for (size_t i=0;i<count;i++) {
+        if (requested && requested[0] && strcmp(requested,drivers[i].name)) continue;
+        matched=1;
         snprintf(output_error,sizeof(output_error),"initialization failed");
         if (drivers[i].open()) {
             selected=&drivers[i]; log_console("audio: %s output ready (%.0f Hz stereo engine)",selected->name,SR); return 1;
         }
         drivers[i].close(); log_console("audio: %s unavailable: %s",drivers[i].name,output_error);
     }
+    if (requested && requested[0] && !matched)
+        log_console("audio: unknown backend '%s' (use PipeWire, PulseAudio, JACK or ALSA)",requested);
     log_console("audio: no output backend available"); return 0;
+}
+
+unsigned long long audio_output_underruns(void) {
+#ifdef HAVE_OPENAL
+    if (selected && !strcmp(selected->name,"OpenAL")) return openal_underrun_count();
+#endif
+    unsigned long long calls=0, gaps=0, max_gap=0, empty=0;
+    audio_output_xrun_stats(&calls,&gaps,&max_gap,&empty);
+    return gaps;
 }
 
 int audio_output_start(AudioOutputRender render, unsigned long frames) {

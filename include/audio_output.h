@@ -23,6 +23,9 @@ const char *audio_output_name(void);
 void audio_output_xrun_stats(unsigned long long *calls, unsigned long long *gaps,
     unsigned long long *max_gap_ns, unsigned long long *empty);
 void audio_output_xrun_reset(void);
+/* Backend-specific missed-buffer count: PipeWire gaps, OpenAL queue empties,
+   zero for backends that do not account for them. */
+unsigned long long audio_output_underruns(void);
 
 #ifdef TOMPOUCE_RENDER_PROFILE
 /* Compile-time diagnostic: callback render duration histogram. */

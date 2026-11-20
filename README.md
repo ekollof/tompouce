@@ -135,7 +135,7 @@ at a time. F1 remains the Tompouce keybinding reference.
 ## Components
 
 - `src/audio.c` — native real-time synth + drum voices
-- `src/audio_output.c` — PipeWire/PulseAudio/JACK/ALSA output selection
+- `src/audio_output.c` — pluggable PipeWire/PulseAudio/JACK/ALSA/OpenAL output selection
 - `src/native_synth.c` — ZzFX, bytebeat and bounded Kabelsalat playback
 - `src/osc_output.c` — timestamped native UDP OSC output
 - `src/slider.c` — `slider()` live values and source-site bindings
@@ -258,14 +258,18 @@ After rebuilding a bundle, run the normal build again to embed it.
 ./build/tompouce
 ```
 
-Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, skipping unavailable
-backends and cleaning up failed connections before trying the next. PipeWire and
-PulseAudio use their native clients; JACK and ALSA use explicitly selected
-PortAudio host APIs. The engine remains stereo at 44.1 kHz; libsamplerate handles
-JACK/device clocks such as 48 kHz. Without libsamplerate, a backend that cannot
-accept 44.1 kHz is skipped. F4 and MCP `music_health` show the selected backend;
-the console records startup failures. With no usable output, editing and MCP
-remain available with `stream=down backend=none`. Selection occurs at startup.
+Audio startup tries **PipeWire → PulseAudio → JACK → ALSA**, then optional
+**OpenAL** when built, skipping unavailable backends and cleaning up failed
+connections before trying the next. Set `TOMPOUCE_AUDIO_BACKEND` to one of
+`PipeWire`, `PulseAudio`, `JACK`, `ALSA` or `OpenAL` to force a backend. PipeWire
+and PulseAudio use their native clients; JACK and ALSA use explicitly selected
+PortAudio host APIs; OpenAL uses a queued 4×512-frame stream and is useful when
+the direct callback misses its deadline. The engine remains stereo at 44.1 kHz;
+libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a
+backend that cannot accept 44.1 kHz is skipped. F4 and MCP `music_health` show
+the selected backend and backend-specific underruns; the console records startup
+failures. With no usable output, editing and MCP remain available with
+`stream=down backend=none`. Selection occurs at startup.
 
 External plugin hosts such as Carla can sit downstream of the normal PipeWire
 output with no Tompouce changes; see [external plugin hosting](docs/plugin-hosting.md)

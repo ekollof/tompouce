@@ -95,6 +95,7 @@ endfunction()
 tompouce_optional(PIPEWIRE "libpipewire-0.3>=0.3.7" src/audio_output.c)
 tompouce_optional(PULSE libpulse src/audio_output.c)
 tompouce_optional(SAMPLERATE samplerate src/audio_output.c)
+tompouce_optional(OPENAL openal src/audio_output.c)
 tompouce_optional(FLUIDSYNTH "fluidsynth>=2.2" src/gm_synth.c)
 
 # Opt-in native V8 query worker. QuickJS stays the default backend; this only

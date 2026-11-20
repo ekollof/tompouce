@@ -125,6 +125,12 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit);
 
 /* nerd-pane stats (thread-safe snapshots) */
 int audio_active_voices(void);
+#ifdef TOMPOUCE_RENDER_PROFILE
+void audio_section_profile_stats(unsigned long long *voice,
+    unsigned long long *fx, unsigned long long *master);
+void audio_hot_profile_stats(unsigned long long *source, unsigned long long *route,
+    unsigned long long *scalls, unsigned long long *rcalls);
+#endif
 int audio_retiring_voices(void);
 void audio_voice_stats(int *active_out, int by_inst[10]);
 const char *audio_inst_name(int inst);

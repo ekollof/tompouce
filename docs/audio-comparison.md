@@ -104,7 +104,15 @@ peaking around 156. So this is not a simple buffer-size or voice-count problem:
 the single real-time callback and its per-block render cost are the bottleneck,
 whereas the browser's WebAudio graph has look-ahead scheduling and a different
 voice/buffer architecture. Voice-pool policy and per-block render profiling for
-this composition remain open diagnostics.
+this composition remain open diagnostics. A compile-time
+`-DTOMPOUCE_RENDER_PROFILE` build exposes render/section/DSP/hot-path counters
+through `music_health`. Measured over a 48-second Node-backed run: average
+callback render ~1.5–1.7 ms with peaks ~3.9–4.2 ms against a 2.9 ms block
+deadline; the voice loop is roughly 85% of render time, while `dsp_process` and
+`dsp_envelope` are negligible. Of the hot path, `route_voice` costs about 91
+cycles per call versus ~29 for `source_value`, and is called roughly nine times
+more often, so routing/mixing is the first target for a parity-preserving
+optimization.
 
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot

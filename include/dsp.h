@@ -97,6 +97,12 @@ void dsp_read_adsr(const cJSON *value, const char *const names[4], const double 
 double dsp_filter_frequency(const DspParams *params, int type, double age, double gate);
 void dsp_init(DspState *state, const DspParams *p);
 double dsp_process(DspState *state, double sample, double age, double gate);
+#ifdef TOMPOUCE_RENDER_PROFILE
+void dsp_profile_stats(unsigned long long *calls, unsigned long long *total_cycles,
+                       unsigned long long *max_cycles);
+void dsp_envelope_profile_stats(unsigned long long *calls,
+                                unsigned long long *total_cycles);
+#endif
 double dsp_frequency(DspState *state, double freq, double age, double gate);
 /* Sine wavetable gain: 1 below Nyquist/2^(1/3), then 3*log2(Nyquist/|f|),
    and 0 at ±Nyquist. Phase still advances at the clamped frequency. */

@@ -4,6 +4,9 @@
 #include "scheduler.h"
 #include "audio.h"
 #include "audio_output.h"
+#ifdef TOMPOUCE_RENDER_PROFILE
+#include "dsp.h"
+#endif
 #include "ai.h"
 #include "tui.h"
 #include "midi.h"
@@ -299,6 +302,37 @@ static void handle_health(char *out, size_t outlen) {
         scheduler_song_pos() + 1, scheduler_song_count(),
         banks_ready() ? "ready" : "indexing", banks_count(),
         midi_ready() ? "up" : "down", calls, gaps, empty, max_gap/1000000ull);
+#ifdef TOMPOUCE_RENDER_PROFILE
+    unsigned long long rcalls=0, rmax=0, r2=0, r3=0, rtotal=0;
+    audio_render_profile_stats(&rcalls,&rmax,&r2,&r3,&rtotal);
+    size_t used=strlen(out);
+    if (used+160<outlen)
+        snprintf(out+used,outlen-used," render=%llu max=%.0fus over2=%llu over3=%llu avg=%.0fus",
+            rcalls,(double)rmax/1000,r2,r3,
+            rcalls?(double)rtotal/(double)rcalls/1000:0.0);
+    unsigned long long dcalls=0, dtotal=0, dmax=0;
+    dsp_profile_stats(&dcalls,&dtotal,&dmax);
+    used=strlen(out);
+    if (used+120<outlen)
+        snprintf(out+used,outlen-used," dsp=%llu max=%llukcyc avg=%llukcyc",
+            dcalls,dmax/1000,dcalls?dtotal/dcalls/1000:0);
+    unsigned long long sv=0, sf=0, sm=0;
+    audio_section_profile_stats(&sv,&sf,&sm);
+    used=strlen(out);
+    if (used+100<outlen)
+        snprintf(out+used,outlen-used," sec=%llu/%llu/%llu",sv/1000,sf/1000,sm/1000);
+    unsigned long long ec=0, et=0;
+    dsp_envelope_profile_stats(&ec,&et);
+    used=strlen(out);
+    if (used+90<outlen)
+        snprintf(out+used,outlen-used," env=%llu avg=%llukcyc",ec,ec?et/ec/1000:0);
+    unsigned long long hs=0,hr=0,hs_calls=0,hr_calls=0;
+    audio_hot_profile_stats(&hs,&hr,&hs_calls,&hr_calls);
+    used=strlen(out);
+    if (used+110<outlen)
+        snprintf(out+used,outlen-used," hot=%lluk/%lluk calls=%llu/%llu",
+            hs/1000,hr/1000,hs_calls,hr_calls);
+#endif
 }
 
 static cJSON *text_result(const char *text, int is_error) {

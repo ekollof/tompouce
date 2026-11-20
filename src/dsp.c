@@ -1,6 +1,12 @@
 #include "dsp.h"
 #include "common.h"
 #include <float.h>
+#ifdef TOMPOUCE_RENDER_PROFILE
+#include <stdatomic.h>
+#include <time.h>
+static _Atomic unsigned long long dsp_calls, dsp_total_ns, dsp_max_ns;
+static unsigned long long dsp_cycles(void);
+#endif
 
 typedef struct { const char *name; double initial, min, max; } Parameter;
 static const Parameter parameters[] = {
@@ -225,12 +231,32 @@ static double held_envelope(double t, double a, double d, double s) {
     return s;
 }
 
-double dsp_envelope(double age, double gate, double a, double d, double s, double r) {
+static double dsp_envelope_impl(double age, double gate, double a, double d, double s, double r) {
     if (age < 0) return 0;
     if (age <= gate) return held_envelope(age, a, d, s);
     if (r <= 0 || age >= gate + r) return 0;
     return held_envelope(gate, a, d, s) * (1 - (age - gate) / r);
 }
+
+#ifdef TOMPOUCE_RENDER_PROFILE
+static _Atomic unsigned long long env_calls, env_total_cycles;
+void dsp_envelope_profile_stats(unsigned long long *calls,
+                                unsigned long long *total_cycles) {
+    if (calls) *calls=atomic_load(&env_calls);
+    if (total_cycles) *total_cycles=atomic_load(&env_total_cycles);
+}
+double dsp_envelope(double age, double gate, double a, double d, double s, double r) {
+    unsigned long long started=dsp_cycles();
+    double result=dsp_envelope_impl(age,gate,a,d,s,r);
+    atomic_fetch_add(&env_calls,1);
+    atomic_fetch_add(&env_total_cycles,dsp_cycles()-started);
+    return result;
+}
+#else
+double dsp_envelope(double age, double gate, double a, double d, double s, double r) {
+    return dsp_envelope_impl(age,gate,a,d,s,r);
+}
+#endif
 
 static double exponential_ramp(double from, double to, double fraction) {
     from = fmax(.001,from); to = fmax(.001,to);
@@ -624,7 +650,7 @@ static double mod_wave(int shape, double skew, double phase) {
     }
 }
 
-double dsp_process(DspState *s, double x, double age, double gate) {
+static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     if (!s->control.enabled) return x;
     const double *p = s->control.p;
     int update = (s->tick++ & 31) == 0;
@@ -727,6 +753,35 @@ double dsp_process(DspState *s, double x, double age, double gate) {
     x *= p[DSP_POST];
     return isfinite(x) ? clamp(x, -64, 64) : 0;
 }
+
+#ifdef TOMPOUCE_RENDER_PROFILE
+static unsigned long long dsp_cycles(void) {
+    unsigned int low, high;
+    __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+    return ((unsigned long long)high << 32) | low;
+}
+void dsp_profile_stats(unsigned long long *calls, unsigned long long *total_cycles,
+                       unsigned long long *max_cycles) {
+    if (calls) *calls=atomic_load(&dsp_calls);
+    if (total_cycles) *total_cycles=atomic_load(&dsp_total_ns);
+    if (max_cycles) *max_cycles=atomic_load(&dsp_max_ns);
+}
+double dsp_process(DspState *s, double x, double age, double gate) {
+    unsigned long long started=dsp_cycles();
+    double result=dsp_process_impl(s,x,age,gate);
+    unsigned long long elapsed=dsp_cycles()-started;
+    atomic_fetch_add(&dsp_calls,1);
+    atomic_fetch_add(&dsp_total_ns,elapsed);
+    unsigned long long previous=atomic_load(&dsp_max_ns);
+    while (elapsed>previous &&
+           !atomic_compare_exchange_weak(&dsp_max_ns,&previous,elapsed)) {}
+    return result;
+}
+#else
+double dsp_process(DspState *s, double x, double age, double gate) {
+    return dsp_process_impl(s,x,age,gate);
+}
+#endif
 
 double dsp_noise(DspState *s, int color) {
     unsigned seed = s->noise_seed;

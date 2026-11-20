@@ -24,4 +24,12 @@ void audio_output_xrun_stats(unsigned long long *calls, unsigned long long *gaps
     unsigned long long *max_gap_ns, unsigned long long *empty);
 void audio_output_xrun_reset(void);
 
+#ifdef TOMPOUCE_RENDER_PROFILE
+/* Compile-time diagnostic: callback render duration histogram. */
+void audio_render_profile_stats(unsigned long long *calls,
+    unsigned long long *max_ns, unsigned long long *over_2ms,
+    unsigned long long *over_3ms, unsigned long long *total_ns);
+void audio_render_profile_reset(void);
+#endif
+
 #endif

@@ -16,6 +16,28 @@
 #include "prep_pool.h"
 #include "prep_profile.h"
 #include "convolution_mix.h"
+#ifdef TOMPOUCE_RENDER_PROFILE
+static _Atomic unsigned long long section_voice, section_fx, section_master;
+static unsigned long long audio_cycles(void) {
+    unsigned int low, high;
+    __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+    return ((unsigned long long)high << 32) | low;
+}
+static _Atomic unsigned long long source_cycles, route_cycles, source_calls, route_calls;
+void audio_hot_profile_stats(unsigned long long *source, unsigned long long *route,
+    unsigned long long *scalls, unsigned long long *rcalls) {
+    if (source) *source=atomic_load(&source_cycles);
+    if (route) *route=atomic_load(&route_cycles);
+    if (scalls) *scalls=atomic_load(&source_calls);
+    if (rcalls) *rcalls=atomic_load(&route_calls);
+}
+void audio_section_profile_stats(unsigned long long *voice,
+    unsigned long long *fx, unsigned long long *master) {
+    if (voice) *voice=atomic_load(&section_voice);
+    if (fx) *fx=atomic_load(&section_fx);
+    if (master) *master=atomic_load(&section_master);
+}
+#endif
 #ifdef __linux__
 #include <alsa/asoundlib.h>
 /* ALSA probing spams stderr, which shares the terminal with the Notcurses
@@ -1480,7 +1502,7 @@ static void target_add(int target, double l, double r) {
     }
 }
 
-static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
+static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     /* Source transport may shorten note_off_time. The outer release node
        keeps the original hap and raw-release anchors instead. */
     if (v->graph_end>v->graph_fade_start && audio_time>v->graph_fade_start) {
@@ -1521,6 +1543,16 @@ static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
         if (room > 0) mix->room_size = v->dsp.control.p[DSP_SIZE];
     }
 }
+#ifdef TOMPOUCE_RENDER_PROFILE
+static void route_voice(Voice *v, double l, double r, VoiceMix *mix) {
+    unsigned long long started=audio_cycles();
+    route_voice_impl(v,l,r,mix);
+    atomic_fetch_add(&route_calls,1);
+    atomic_fetch_add(&route_cycles,audio_cycles()-started);
+}
+#else
+#define route_voice route_voice_impl
+#endif
 
 /* Worklet input is the enveloped source, before event gain and native effects.
    One graph reads the first input channel and supplies both output channels. */
@@ -1696,7 +1728,7 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     mix->right += de_r;
 }
 
-static double source_value(const Voice *v, double position, int channel) {
+static double source_value_impl(const Voice *v, double position, int channel) {
     if (v->dsp.control.p[DSP_LOOP] > 0) {
         double lo = v->smplen*v->dsp.control.p[DSP_LOOPBEGIN];
         double hi = v->smplen*v->dsp.control.p[DSP_LOOPEND];
@@ -1717,6 +1749,17 @@ static double source_value(const Voice *v, double position, int channel) {
     double b = index+1 < v->smplen ? v->smpbuf[(size_t)(index+1)*2+channel] : reverse_offset?0:a;
     return a+(b-a)*fraction;
 }
+#ifdef TOMPOUCE_RENDER_PROFILE
+static double source_value(const Voice *v, double position, int channel) {
+    unsigned long long started=audio_cycles();
+    double result=source_value_impl(v,position,channel);
+    atomic_fetch_add(&source_calls,1);
+    atomic_fetch_add(&source_cycles,audio_cycles()-started);
+    return result;
+}
+#else
+#define source_value source_value_impl
+#endif
 
 /* Audio callback */
 static int pa_callback(const void *input, void *output, unsigned long frameCount,
@@ -1736,6 +1779,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         double cs_l = 0, cs_r = 0;
         double duck_g[N_ORBITS];
         orbits_ensure();
+#ifdef TOMPOUCE_RENDER_PROFILE
+        unsigned long long c_voice=audio_cycles();
+#endif
         if (playing || atomic_load(&reference_mode)) {
             pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
@@ -2141,12 +2187,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             pattern_scope_publish();
             pthread_mutex_unlock(&voice_lock);
         }
+#ifdef TOMPOUCE_RENDER_PROFILE
+        atomic_fetch_add(&section_voice,audio_cycles()-c_voice);
+        unsigned long long c_fx=audio_cycles();
+#endif
         for (int o = 0; o < N_ORBITS; o++) {
             native_reverb(o, &mixes[o]);
             orbit_delay(o, &mixes[o]);
             L += mixes[o].left * duck_g[o];
             R += mixes[o].right * duck_g[o];
         }
+#ifdef TOMPOUCE_RENDER_PROFILE
+        atomic_fetch_add(&section_fx,audio_cycles()-c_fx);
+        unsigned long long c_master=audio_cycles();
+#endif
         L += cs_l;
         R += cs_r;
         /* ---- master fx chain (all params plain doubles, lock-free) ---- */
@@ -2235,6 +2289,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             L = tanh(1.2 * L) * 1.1995;
             R = tanh(1.2 * R) * 1.1995;
         }
+#ifdef TOMPOUCE_RENDER_PROFILE
+        atomic_fetch_add(&section_master,audio_cycles()-c_master);
+#endif
         /* All backends consume this bus, including held Csound notes and
            effect tails. Unity preserves the existing PCM operation order. */
         if (output_gain==0) L=R=0;

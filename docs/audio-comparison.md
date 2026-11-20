@@ -123,8 +123,8 @@ underruns**, and it is now the first-choice backend when built (PipeWire is the
 fallback). Its queue is 2×256 frames (about 11.6 ms), chosen after listening
 tests reported no artifacts there; smaller queues (64×2 at 2.9 ms and 128×2 at
 5.8 ms) also counted zero queue-empty events but were not accepted as the
-default from the counter alone. `TOMPOUCE_OPENAL_FRAMES` (64–1024) and
-`TOMPOUCE_OPENAL_BUFFERS` (2–8) expose the tradeoff, and
+default from the counter alone. `TOMPOUCE_OPENAL_FRAMES` (64–1024), `TOMPOUCE_OPENAL_BUFFERS` (2–8) and the
+TUI `Ctrl+-`/`Ctrl+=` presets expose the tradeoff, and
 `TOMPOUCE_AUDIO_BACKEND=PipeWire` restores the direct path. The PipeWire
 fallback still showed tens of gaps in the same runs. This confirms that a queued
 output engine absorbs render bursts at a latency cost, without changing the

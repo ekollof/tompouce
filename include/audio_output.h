@@ -26,6 +26,11 @@ void audio_output_xrun_reset(void);
 /* Backend-specific missed-buffer count: PipeWire gaps, OpenAL queue empties,
    zero for backends that do not account for them. */
 unsigned long long audio_output_underruns(void);
+/* Adjust the active backend's latency preset. Only OpenAL currently supports
+   live reconfiguration; returns 1 on success. */
+int audio_output_adjust_latency(int direction);
+/* Human-readable current latency/queue setting, e.g. "OpenAL 256x2 11.6ms". */
+const char *audio_output_latency_label(void);
 
 #ifdef TOMPOUCE_RENDER_PROFILE
 /* Compile-time diagnostic: callback render duration histogram. */

@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "slider.h"
 #include "audio.h"
+#include "audio_output.h"
 #include "javascript.h"
 #include "convolution_mix.h"
 #include "common.h"
@@ -3422,6 +3423,7 @@ static const DocLine cheat[] = {
     {3, "F10 / F11         Narrow / widen the editor pane"},
     {3, "F12               Fullscreen piano roll + scope (Esc returns)"},
     {3, "Ctrl+Left/Right   Adjust live slider at cursor"},
+    {3, "Ctrl+- / Ctrl+=   Lower / raise OpenAL buffer preset (F4 shows it)"},
     {3, "F4 Volume        Drag, wheel or focus and use arrows; /volume 0..1"},
     {3, "Alt+Up/Down      Raise / lower output volume by 1% (any pane)"},
     {0, ""},
@@ -3743,8 +3745,10 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         state_line(&row,maxrow,c0+1,w-2,"inline=%s lines=%d images=%d/%d footer=%s F12=%s",
             inline_visuals?"on":"off",inline_count,graphics_pending_count,GRAPHICS_IMAGES,
             editor_scope?"enabled":"off",show_viz?"on":"off");
-        state_line(&row,maxrow,c0+1,w-2,"audio=%s %s %.0fHz stereo MIDI=%s banks=%s:%d",
-            audio_is_stream_active()?"up":"down",audio_backend_name(),SR,midi_ready()?"up":"down",banks_ready()?"ready":"indexing",banks_count());
+        state_line(&row,maxrow,c0+1,w-2,"audio=%s %s %.0fHz queue=%s MIDI=%s banks=%s:%d",
+            audio_is_stream_active()?"up":"down",audio_backend_name(),SR,
+            audio_output_latency_label(),midi_ready()?"up":"down",
+            banks_ready()?"ready":"indexing",banks_count());
         state_line(&row,maxrow,c0+1,w-2,"song=%s hold=%s position=%d/%d",scheduler_song_on()?"on":"off",
             scheduler_song_hold()?"on":"off",scheduler_song_pos()+1,scheduler_song_count());
     }
@@ -4879,6 +4883,13 @@ void tui_run(void) {
                 slider_info(i, &v, NULL, NULL, NULL);
                 snprintf(status_msg, sizeof(status_msg), "slider %d = %.3g", i + 1, v);
             }
+            continue;
+        } else if (ch == 31 || ch == 29) { /* Ctrl+- / Ctrl+= */
+            int direction=ch==29?1:-1;
+            if (audio_output_adjust_latency(direction))
+                snprintf(status_msg,sizeof(status_msg),"audio %s",audio_output_latency_label());
+            else
+                snprintf(status_msg,sizeof(status_msg),"latency presets apply to the OpenAL backend only");
             continue;
         } else if (ch == ((int)NCKEY_F00+(5)) || ch == 18) {
             do_perform();

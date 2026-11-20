@@ -268,7 +268,8 @@ bursts that would otherwise miss the direct callback deadline. PipeWire and
 PulseAudio use their native clients; JACK and ALSA use explicitly selected
 PortAudio host APIs.
 `TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune
-that queue; the console logs the resulting depth. The engine remains stereo at 44.1 kHz;
+that queue; the console logs the resulting depth. In the TUI, `Ctrl+-` and
+`Ctrl+=` step through OpenAL queue presets and F4 shows the active setting. The engine remains stereo at 44.1 kHz;
 libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a
 backend that cannot accept 44.1 kHz is skipped. F4 and MCP `music_health` show
 the selected backend and backend-specific underruns; the console records startup

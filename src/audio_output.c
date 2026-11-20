@@ -664,6 +664,11 @@ static _Atomic unsigned long long openal_underruns;
 static unsigned openal_frames=OPENAL_DEFAULT_FRAMES;
 static unsigned openal_buffer_count=OPENAL_DEFAULT_BUFFERS;
 static float openal_pcm[OPENAL_MAX_FRAMES*2];
+static int openal_configured, openal_preset=3;
+static const unsigned openal_presets[][2]={
+    {64,2}, {128,2}, {128,3}, {256,2}, {512,2}, {512,4}
+};
+#define OPENAL_PRESET_COUNT (sizeof(openal_presets)/sizeof(openal_presets[0]))
 
 static void *openal_render_thread(void *unused) {
     (void)unused;
@@ -706,15 +711,22 @@ static void *openal_render_thread(void *unused) {
 }
 
 static int openal_open(void) {
-    const char *frames_env=getenv("TOMPOUCE_OPENAL_FRAMES");
-    const char *buffers_env=getenv("TOMPOUCE_OPENAL_BUFFERS");
-    if (frames_env && frames_env[0]) {
-        long value=strtol(frames_env,NULL,10);
-        if (value>=64 && value<=OPENAL_MAX_FRAMES) openal_frames=(unsigned)value;
-    }
-    if (buffers_env && buffers_env[0]) {
-        long value=strtol(buffers_env,NULL,10);
-        if (value>=2 && value<=OPENAL_MAX_BUFFERS) openal_buffer_count=(unsigned)value;
+    if (!openal_configured) {
+        const char *frames_env=getenv("TOMPOUCE_OPENAL_FRAMES");
+        const char *buffers_env=getenv("TOMPOUCE_OPENAL_BUFFERS");
+        if (frames_env && frames_env[0]) {
+            long value=strtol(frames_env,NULL,10);
+            if (value>=64 && value<=OPENAL_MAX_FRAMES) openal_frames=(unsigned)value;
+        }
+        if (buffers_env && buffers_env[0]) {
+            long value=strtol(buffers_env,NULL,10);
+            if (value>=2 && value<=OPENAL_MAX_BUFFERS) openal_buffer_count=(unsigned)value;
+        }
+        openal_preset=-1;
+        for (size_t i=0;i<OPENAL_PRESET_COUNT;i++)
+            if (openal_presets[i][0]==openal_frames &&
+                openal_presets[i][1]==openal_buffer_count) openal_preset=(int)i;
+        openal_configured=1;
     }
     openal_device=alcOpenDevice(NULL);
     if (!openal_device) { snprintf(output_error,sizeof(output_error),"no OpenAL device"); return 0; }
@@ -811,6 +823,45 @@ unsigned long long audio_output_underruns(void) {
     unsigned long long calls=0, gaps=0, max_gap=0, empty=0;
     audio_output_xrun_stats(&calls,&gaps,&max_gap,&empty);
     return gaps;
+}
+
+int audio_output_adjust_latency(int direction) {
+#ifdef HAVE_OPENAL
+    if (!selected || strcmp(selected->name,"OpenAL")) return 0;
+    int index=openal_preset;
+    if (index<0) {
+        index=0;
+        for (size_t i=1;i<OPENAL_PRESET_COUNT;i++)
+            if (openal_presets[i][0]<openal_frames) index=(int)i;
+    }
+    int next=index+direction;
+    if (next<0) next=0;
+    if (next>=(int)OPENAL_PRESET_COUNT) next=(int)OPENAL_PRESET_COUNT-1;
+    if (next==index && openal_preset>=0) return 1;
+    openal_close();
+    openal_frames=openal_presets[next][0];
+    openal_buffer_count=openal_presets[next][1];
+    openal_preset=next;
+    if (!openal_open()) return 0;
+    return openal_active();
+#else
+    (void)direction;
+    return 0;
+#endif
+}
+
+const char *audio_output_latency_label(void) {
+    static char label[64];
+#ifdef HAVE_OPENAL
+    if (selected && !strcmp(selected->name,"OpenAL")) {
+        snprintf(label,sizeof(label),"OpenAL %ux%u %.1fms",
+            openal_frames,openal_buffer_count,
+            1000.0*openal_frames*openal_buffer_count/SR);
+        return label;
+    }
+#endif
+    snprintf(label,sizeof(label),"native");
+    return label;
 }
 
 int audio_output_start(AudioOutputRender render, unsigned long frames) {

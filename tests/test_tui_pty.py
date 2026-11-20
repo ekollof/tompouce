@@ -616,6 +616,9 @@ else:
     _engine_label = b'engine=QuickJS'
 check("F4 JavaScript engine label", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=_engine_label)
+if os.environ.get('TOMPOUCE_TEST_OPENAL') == '1':
+    check("OpenAL latency hotkey", "note('c4').gain(0)", b'\x1d',
+          expected="note('c4').gain(0)", observed=b'audio OpenAL')
 check("F4 SIMD diagnostics", "note('c4').gain(0)", b'\x1bOS',
       expected="note('c4').gain(0)", observed=b'SIMD conv=c mode=c cpu=', simd='c')
 check("output volume mouse and keys", "note('c4').gain(0)", output_volume=True,

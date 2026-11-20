@@ -945,8 +945,10 @@ void mcp_run(int ui_mode, int tcp_port) {
         int saved_out = dup(1);
         mcp_out_stream = fdopen(saved_out, "w");
         /* reopen stdin/stdout to terminal for UI */
-        freopen("/dev/tty", "r", stdin);
-        freopen("/dev/tty", "w", stdout);
+        if (!freopen("/dev/tty", "r", stdin))
+            log_console("mcp: cannot reopen /dev/tty for input");
+        if (!freopen("/dev/tty", "w", stdout))
+            log_console("mcp: cannot reopen /dev/tty for output");
         tui_init();
         if (mcp_init_code && mcp_init_code[0]) tui_load_initial(mcp_init_code);
         tui_run();

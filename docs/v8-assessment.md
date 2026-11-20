@@ -330,6 +330,19 @@ ICU data and snapshot. The host has 243 GiB free, 31 GiB RAM and 16 CPUs, so the
 build is feasible; it is the first real cost of this migration and has not been
 performed here.
 
+The AUR [`v8-r`](https://aur.archlinux.org/packages/v8-r) package is a possible
+developer shortcut: it pins V8 14.5.137, performs that same depot_tools build
+with system ICU and clang/lld, and installs shared `libv8`, `libv8_libbase` and
+`libv8_libplatform` libraries, headers and pkg-config files (plus Abseil, zlib
+and partition_alloc component libraries). It is usable for prototyping the C++
+shim, but not as the project's dependency: it is AUR-only, was flagged
+out-of-date in January 2026, its source repository was archived and its
+maintainer announced they are stepping away, and the component build adds
+notices that must be audited. Arch's official repositories currently provide
+only Node.js, not a standalone `v8`. Installing an AUR package changes system
+state and is not done as a test here; the release build still needs a V8
+revision pinned and owned by this project.
+
 The worker must link V8 as a single-threaded embedder: a minimal
 `v8::Platform`, one isolate entered by one thread, `TerminateExecution` driven
 by a parent-side watchdog, a heap limit plus separate external-memory accounting,

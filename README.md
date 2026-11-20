@@ -198,6 +198,20 @@ cmake -S . -B build-minimal -G Ninja -DWITH_PIPEWIRE=OFF -DWITH_PULSE=OFF \
 cmake --build build-minimal --parallel 4
 ```
 
+A single-file [AppImage](https://appimage.org/) can be built from a compiled
+binary with `scripts/build-appimage.sh` (ImageMagick and curl are needed;
+`appimagetool` is downloaded on first use):
+
+```sh
+scripts/build-appimage.sh tompouce-x86_64.AppImage
+```
+
+It bundles the engine, its scripts/web assets and the shared-library closure,
+and runs against the host glibc. Sound banks are not included (they are several
+GiB): set `TOMPOUCE_BANKS` to a bank directory or install them separately. Use
+`TOMPOUCE_APPIMAGE_BINARY` to package another build, for example one made with
+`-DWITH_CSOUND=OFF` so no private Csound library is bundled.
+
 Optional libraries default to enabled when found. Explicit `-DWITH_...=ON`
 requires the corresponding package; `OFF` disables it. Csound is enabled when
 found unless `-DWITH_CSOUND=OFF` is set. Use `-DCSOUND_PREFIX=/path` or

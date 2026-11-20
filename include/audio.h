@@ -134,6 +134,11 @@ int audio_debug_snapshot(char *out, size_t outlen, int limit);
 
 /* nerd-pane stats (thread-safe snapshots) */
 int audio_active_voices(void);
+/* Highest absolute output sample since the last reset/play start. */
+void audio_peak_reset(void);
+double audio_peak_level(void);
+double audio_prepeak_level(void);
+int audio_reference_mode(void);
 #ifdef TOMPOUCE_RENDER_PROFILE
 void audio_section_profile_stats(unsigned long long *voice,
     unsigned long long *fx, unsigned long long *master);

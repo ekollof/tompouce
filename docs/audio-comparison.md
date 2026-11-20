@@ -130,6 +130,18 @@ fallback still showed tens of gaps in the same runs. This confirms that a queued
 output engine absorbs render bursts at a latency cost, without changing the
 synth/mix path.
 
+Strudel's WebAudio output has no master limiter, only orbit gain 1 and the
+destination. Our live path previously used a tanh/clamp master stage; both
+colored dense mixes. Measured pre-master peaks were 3.74 for "Computer says
+no" and 2.20 for "Bass fuge". Live monitoring now applies a fixed -12 dB
+headroom (`TOMPOUCE_LIVE_HEADROOM`, default 0.25) and no dynamic processing,
+giving final peaks 0.936 and 0.551; the offline `reference_mode == 1` PCM path
+is unchanged for the gates.
+`music_health` reports `pre=` and `peak=`, so the tradeoff is measurable. This
+does not claim Strudel loudness parity: the native full mix is hotter than the
+web's per-sound captures, and matching that needs independent full-mix
+comparison rather than a master compressor.
+
 Reaching the unchanged 200 ms budget on QuickJS therefore needs about 25% less
 per-hap JavaScript work, not cheaper haps. The options are batching the hot
 `Hap`/`Pattern` operations into a native applicator that still invokes the

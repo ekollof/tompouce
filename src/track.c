@@ -89,7 +89,7 @@ int track_load_from_code(const char *code_buf) {
     if (replace_javascript) event_queue_new_program(HUGE_VAL);
     else event_queue_clear();
     audio_set_csound(javascript_csound(program));
-    audio_set_reference_mode(1);
+    audio_set_reference_mode(2); /* live: limiter, not the offline PCM clamp */
     javascript_activate_sliders(program);
     Track *t = &tracks[0];
     memset(t,0,sizeof(*t));

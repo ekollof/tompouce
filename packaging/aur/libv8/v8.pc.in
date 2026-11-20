@@ -4,5 +4,5 @@ libdir=${prefix}/lib/libv8
 Name: v8
 Description: Pinned V8 JavaScript engine static embedder library
 Version: @VERSION@
-Cflags: -I${libdir}
+Cflags: -I${libdir} -I${libdir}/include
 Libs: -L${libdir} -l:libv8_all.ld -latomic -ldl -lpthread -lrt

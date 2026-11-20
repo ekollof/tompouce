@@ -32,7 +32,8 @@ static pthread_mutex_t query_worker_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int worker_backend_enabled(void) {
     const char *mode = getenv("TOMPOUCE_QUERY_BACKEND");
-    return mode && (!strcmp(mode, "node") || !strcmp(mode, "v8"));
+    return mode && (!strcmp(mode, "node") || !strcmp(mode, "v8") ||
+                    !strcmp(mode, "native"));
 }
 
 struct JsProgram {

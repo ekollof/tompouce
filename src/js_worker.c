@@ -276,14 +276,32 @@ static char *default_script_path(void) {
 
 JsWorker *js_worker_start(const char *node_path, const char *script_path,
     char *error, int errorlen) {
-    const char *node = node_path && node_path[0] ? node_path : "node";
+    /* Opt-in native V8 worker: a separately built C++ binary that speaks the
+       same frames. QuickJS stays the default; the Node worker remains valid. */
+    const char *backend = getenv("TOMPOUCE_QUERY_BACKEND");
+    int native = backend && !strcmp(backend, "native");
     char node_exe[1200];
-    if (!resolve_node(node, node_exe, sizeof(node_exe))) {
-        set_error(error, errorlen, "node executable not found");
-        return NULL;
+    char worker_exe[1200];
+    if (native) {
+        const char *configured = getenv("TOMPOUCE_V8_WORKER");
+        if (!configured || !configured[0] ||
+            snprintf(worker_exe, sizeof(worker_exe), "%s", configured) >=
+                (int)sizeof(worker_exe) || access(worker_exe, X_OK)) {
+            set_error(error, errorlen, "native V8 worker not found (TOMPOUCE_V8_WORKER)");
+            return NULL;
+        }
+    } else {
+        const char *node = node_path && node_path[0] ? node_path : "node";
+        if (!resolve_node(node, node_exe, sizeof(node_exe))) {
+            set_error(error, errorlen, "node executable not found");
+            return NULL;
+        }
     }
-    char *script = script_path && script_path[0] ? strdup(script_path) : default_script_path();
-    if (!script) { set_error(error, errorlen, "query worker script not found"); return NULL; }
+    char *script = NULL;
+    if (!native) {
+        script = script_path && script_path[0] ? strdup(script_path) : default_script_path();
+        if (!script) { set_error(error, errorlen, "query worker script not found"); return NULL; }
+    }
     int in_pipe[2], out_pipe[2];
     if (pipe2(in_pipe, O_CLOEXEC) || pipe2(out_pipe, O_CLOEXEC)) {
         free(script); set_error(error, errorlen, "worker pipe creation failed"); return NULL;
@@ -303,10 +321,12 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         if (getppid() == 1) _exit(127);
         prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
         struct rlimit core = {0, 0}, files = {64, 64};
-        /* Node reserves about 1.1 GiB of address space before any song runs;
-           2 GiB leaves headroom for the 256 MiB heap and external buffers
-           while bounding runaway allocation. */
-        struct rlimit address = {2ull*1024*1024*1024, 2ull*1024*1024*1024};
+        /* Node reserves about 1.1 GiB before any song runs; V8 reserves its
+           own pointer-compression cages. Bound both, with more headroom for
+           the static embedder. */
+        unsigned long long address_limit = native
+            ? 256ull*1024*1024*1024 : 2ull*1024*1024*1024;
+        struct rlimit address = {address_limit, address_limit};
         struct rlimit cpu = {3600, 3600};
         setrlimit(RLIMIT_CORE, &core);
         setrlimit(RLIMIT_NOFILE, &files);
@@ -316,7 +336,9 @@ JsWorker *js_worker_start(const char *node_path, const char *script_path,
         close(in_pipe[0]); close(in_pipe[1]); close(out_pipe[0]); close(out_pipe[1]);
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
-        char *argv[] = {node_exe, "--max-old-space-size=256", script, NULL};
+        char *node_argv[] = {node_exe, "--max-old-space-size=256", script, NULL};
+        char *native_argv[] = {worker_exe, NULL};
+        char **argv = native ? native_argv : node_argv;
         char *envp[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
             "LC_ALL=C.UTF-8", "TMPDIR=/tmp", NULL};
         execve(argv[0], argv, envp);

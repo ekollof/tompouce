@@ -97,6 +97,30 @@ tompouce_optional(PULSE libpulse src/audio_output.c)
 tompouce_optional(SAMPLERATE samplerate src/audio_output.c)
 tompouce_optional(FLUIDSYNTH "fluidsynth>=2.2" src/gm_synth.c)
 
+# Opt-in native V8 query worker. QuickJS stays the default backend; this only
+# builds a separate process that speaks the existing worker JSON protocol.
+option(WITH_V8 "Build the native V8 query worker" OFF)
+if(WITH_V8)
+    enable_language(CXX)
+    pkg_check_modules(V8 REQUIRED IMPORTED_TARGET v8)
+    add_executable(tompouce-v8-worker src/v8_worker.cc)
+    target_compile_features(tompouce-v8-worker PRIVATE cxx_std_20)
+    target_compile_definitions(tompouce-v8-worker PRIVATE
+        V8_COMPRESS_POINTERS V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+        V8_31BIT_SMIS_ON_64BIT_ARCH)
+    target_compile_options(tompouce-v8-worker PRIVATE ${V8_CFLAGS_OTHER})
+    # The imported target can collapse nested include dirs; V8's headers use
+    # both the include root and its parent in quoted includes.
+    foreach(v8_include IN LISTS V8_INCLUDE_DIRS)
+        target_compile_options(tompouce-v8-worker PRIVATE -I${v8_include})
+        target_compile_options(tompouce-v8-worker PRIVATE -I${v8_include}/include)
+    endforeach()
+    # V8 16 emits experimental CREL relocations that GNU ld cannot read.
+    target_link_options(tompouce-v8-worker PRIVATE -fuse-ld=lld)
+    target_link_directories(tompouce-v8-worker PRIVATE ${V8_LIBRARY_DIRS})
+    target_link_libraries(tompouce-v8-worker PRIVATE PkgConfig::V8)
+endif()
+
 option(WITH_CSOUND "Enable Csound when available" ON)
 set(default_csound "")
 foreach(candidate "$ENV{HOME}/.local/opt/tompouce-csound7" "$ENV{HOME}/.local/opt/strudelterm-csound7")

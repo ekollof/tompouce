@@ -19,7 +19,7 @@ source=("git+https://chromium.googlesource.com/chromium/tools/depot_tools.git#co
 sha256sums=('SKIP'
             'SKIP'
             '32c42327ca81fa0f4caaea2065ea301df7685e7178863bf67024bfc3dae52477'
-            'd1473bc94bffb91a839daa8af4ed5600ae4fcd9c74268f4a3dba7296792417ea'
+            'f8c8ab3e0aa07b9db6f95cd0c5aa091897cbd3efe465118ffae922ca2f0918ee'
             'e4d73724f0ce92941ee9c205e515fda3197b339b388b991edaf5d5df0ba1db63')
 
 _clang_major() {
@@ -27,9 +27,6 @@ _clang_major() {
 }
 
 prepare() {
-  # Arch uses the pc clang resource triple; V8 hardcodes the LLVM one.
-  patch -d "$srcdir/v8" -Np1 -i "$srcdir/clang-arch-triple.patch"
-
   # Sync third_party deps into the already pinned checkout. managed=False keeps
   # gclient from replacing the source tree that makepkg downloaded.
   cat > "$srcdir/.gclient" <<'EOF'
@@ -47,6 +44,9 @@ EOF
   cd "$srcdir"
   python3 depot_tools/gclient.py sync --gclientfile=.gclient -D --force \
     --reset --revision "$_v8_commit"
+
+  # build/ is a DEPS-managed checkout, so this must run after the sync.
+  patch -d "$srcdir/v8" -Np1 -i "$srcdir/clang-arch-triple.patch"
 }
 
 build() {

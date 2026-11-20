@@ -182,11 +182,14 @@ static void test_confinement(void) {
         FILE *file = fopen(limits, "r");
         expect(file != NULL, "worker limits are readable");
         int core_zero = 0, address_bound = 0;
+        const char *backend = getenv("TOMPOUCE_QUERY_BACKEND");
+        const char *expected_limit = backend && !strcmp(backend, "native")
+            ? "274877906944" : "2147483648";
         if (file) {
             char line[256];
             while (fgets(line, sizeof(line), file)) {
                 if (strstr(line, "Max core file size") && strstr(line, " 0 ")) core_zero = 1;
-                if (strstr(line, "Max address space") && strstr(line, "2147483648")) address_bound = 1;
+                if (strstr(line, "Max address space") && strstr(line, expected_limit)) address_bound = 1;
             }
             fclose(file);
         }

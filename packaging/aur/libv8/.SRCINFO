@@ -1,0 +1,32 @@
+pkgbase = libv8
+	pkgdesc = Pinned V8 JavaScript engine as a static embedder library
+	pkgver = 16.0.94
+	pkgrel = 1
+	url = https://v8.dev
+	arch = x86_64
+	license = BSD-3-Clause
+	license = Apache-2.0
+	license = MIT
+	license = Zlib
+	license = ICU
+	makedepends = clang
+	makedepends = lld
+	makedepends = git
+	makedepends = python
+	makedepends = ninja
+	depends = glibc
+	depends = gcc-libs
+	options = !strip
+	options = !debug
+	source = git+https://chromium.googlesource.com/chromium/tools/depot_tools.git#commit=e923de63bfc631d5a09ef5324635d008d50dc0ca
+	source = git+https://chromium.googlesource.com/v8/v8.git#commit=3d4477abfde92d54e495b34b7fa14f585e5c476e
+	source = clang-arch-triple.patch
+	source = v8.pc.in
+	source = USAGE.md
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = 32c42327ca81fa0f4caaea2065ea301df7685e7178863bf67024bfc3dae52477
+	sha256sums = d1473bc94bffb91a839daa8af4ed5600ae4fcd9c74268f4a3dba7296792417ea
+	sha256sums = e4d73724f0ce92941ee9c205e515fda3197b339b388b991edaf5d5df0ba1db63
+
+pkgname = libv8

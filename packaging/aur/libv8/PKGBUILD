@@ -1,0 +1,114 @@
+# Maintainer: REPLACE_ME <replace@example.com>
+pkgname=libv8
+pkgver=16.0.94
+pkgrel=1
+pkgdesc='Pinned V8 JavaScript engine as a static embedder library'
+arch=('x86_64')
+url='https://v8.dev'
+license=('BSD-3-Clause' 'Apache-2.0' 'MIT' 'Zlib' 'ICU')
+depends=('glibc' 'gcc-libs')
+makedepends=('clang' 'lld' 'git' 'python' 'ninja')
+options=('!strip' '!debug')
+_v8_commit=3d4477abfde92d54e495b34b7fa14f585e5c476e
+_depot_commit=e923de63bfc631d5a09ef5324635d008d50dc0ca
+source=("git+https://chromium.googlesource.com/chromium/tools/depot_tools.git#commit=${_depot_commit}"
+        "git+https://chromium.googlesource.com/v8/v8.git#commit=${_v8_commit}"
+        clang-arch-triple.patch
+        v8.pc.in
+        USAGE.md)
+sha256sums=('SKIP'
+            'SKIP'
+            '32c42327ca81fa0f4caaea2065ea301df7685e7178863bf67024bfc3dae52477'
+            'd1473bc94bffb91a839daa8af4ed5600ae4fcd9c74268f4a3dba7296792417ea'
+            'e4d73724f0ce92941ee9c205e515fda3197b339b388b991edaf5d5df0ba1db63')
+
+_clang_major() {
+  clang --version | sed -n '1s/.*version \([0-9][0-9]*\).*/\1/p'
+}
+
+prepare() {
+  # Arch uses the pc clang resource triple; V8 hardcodes the LLVM one.
+  patch -d "$srcdir/v8" -Np1 -i "$srcdir/clang-arch-triple.patch"
+
+  # Sync third_party deps into the already pinned checkout. managed=False keeps
+  # gclient from replacing the source tree that makepkg downloaded.
+  cat > "$srcdir/.gclient" <<'EOF'
+solutions = [
+  {
+    'managed': False,
+    'name': 'v8',
+    'url': 'https://chromium.googlesource.com/v8/v8.git',
+    'custom_deps': {},
+  },
+]
+EOF
+  export PATH="$srcdir/depot_tools:$PATH"
+  export DEPOT_TOOLS_UPDATE=0 DEPOT_TOOLS_METRICS=0 PYTHONDONTWRITEBYTECODE=1
+  cd "$srcdir"
+  python3 depot_tools/gclient.py sync --gclientfile=.gclient -D --force \
+    --reset --revision "$_v8_commit"
+}
+
+build() {
+  export PATH="$srcdir/depot_tools:$PATH"
+  export DEPOT_TOOLS_UPDATE=0 DEPOT_TOOLS_METRICS=0 PYTHONDONTWRITEBYTECODE=1
+  local clang_major
+  clang_major=$(_clang_major)
+  cd "$srcdir/v8"
+  python3 "$srcdir/depot_tools/gn.py" gen out/release --args="
+    is_debug = false
+    is_component_build = false
+    v8_monolithic = true
+    v8_use_external_startup_data = false
+    v8_enable_i18n_support = true
+    v8_enable_sandbox = false
+    use_custom_libcxx = false
+    use_sysroot = false
+    is_clang = true
+    clang_use_chrome_plugins = false
+    use_cppgc_clang_plugin = false
+    clang_version = \"${clang_major}\"
+    clang_base_path = \"/usr\"
+    treat_warnings_as_errors = false
+    symbol_level = 0
+    v8_enable_backtrace = false
+    v8_enable_disassembler = false
+    v8_enable_object_print = false
+  "
+  /usr/bin/ninja -C out/release v8_monolith
+}
+
+package() {
+  local out="$srcdir/v8/out/release"
+  local dest="$pkgdir/usr/lib/libv8"
+  local rlibs lib clang_major builtins
+
+  install -d "$dest/obj"
+  install -Dm644 "$out/obj/libv8_monolith.a" "$dest/obj/libv8_monolith.a"
+  install -Dm644 "$out/icudtl.dat" "$dest/icudtl.dat"
+  cp -a "$srcdir/v8/include" "$dest/include"
+
+  rlibs=$(grep -m1 '^  rlibs = ' "$out/obj/d8.ninja" | sed 's/^  rlibs = //')
+  for lib in $rlibs; do
+    install -Dm644 "$out/$lib" "$dest/$lib"
+  done
+
+  clang_major=$(_clang_major)
+  builtins="/usr/lib/clang/${clang_major}/lib/x86_64-pc-linux-gnu/libclang_rt.builtins.a"
+  install -Dm644 "$builtins" "$dest/clang_builtins.a"
+
+  {
+    echo 'GROUP('
+    echo "  /usr/lib/libv8/obj/libv8_monolith.a"
+    for lib in $rlibs; do echo "  /usr/lib/libv8/$lib"; done
+    echo '  /usr/lib/libv8/clang_builtins.a'
+    echo ')'
+  } > "$dest/libv8_all.ld"
+
+  install -d "$pkgdir/usr/lib/pkgconfig"
+  sed "s/@VERSION@/${pkgver}/" "$srcdir/v8.pc.in" > "$pkgdir/usr/lib/pkgconfig/v8.pc"
+  for lib in "$srcdir"/v8/LICENSE*; do
+    install -Dm644 "$lib" "$pkgdir/usr/share/licenses/$pkgname/$(basename "$lib")"
+  done
+  install -Dm644 "$srcdir/USAGE.md" "$pkgdir/usr/share/doc/$pkgname/USAGE.md"
+}

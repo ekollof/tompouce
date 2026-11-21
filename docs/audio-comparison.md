@@ -122,7 +122,11 @@ One such step removed the per-sample routing cache validation: every routing
 input is frozen at note-on, so the callback only needs a `route_cached` check.
 On a 15-second "Computer says no" PipeWire run the profile build moved from
 ~1.63 ms to **1.40 ms** average render, from ~29% to **8.4%** of callbacks over
-2 ms, and from ~5.1 ms to **3.6 ms** maximum. The audio/reference gates and the
+2 ms, and from ~5.1 ms to **3.6 ms** maximum. A follow-up two-lane SSE2 path
+computes the adjacent left/right pan, dry, delay and room sends together; it
+keeps per-lane operation order and leaves scope/named-target voices scalar.
+Measured route cost moved from ~62 to ~60 cycles per call and average render
+to ~1.38 ms, so this is incremental rather than structural. The audio/reference gates and the
 supersaw exactness test pass; the known `tui_pty` vi startup case remains
 timing-flaky.
 The earlier OpenAL **zero-underrun** reading was a blind spot: it only counted

@@ -9,6 +9,9 @@
 #include <limits.h>
 #include <pthread.h>
 #include <sched.h>
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 #include "js_number.h"
 #include "wavetable.h"
 #include "sampler.h"
@@ -1562,6 +1565,41 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     /* Pan law and send constants are frozen at note-on; the multiplication
        order below is identical to the original per-sample calculation. */
     double in_l = l, in_r = r;
+#if defined(__SSE2__)
+    /* Left and right are adjacent doubles and use the same pan/send math.
+       Per-lane operations match the scalar path exactly; no cross-lane sum
+       occurs. Scope and named-target voices stay on the scalar path. */
+    if (v->scope_mask == 0 && v->out_target == 0) {
+        __m128d in = _mm_set_pd(in_r,in_l);
+        __m128d routed;
+        if (v->route_lr == 0 && v->route_rl == 0)
+            routed = _mm_mul_pd(in,_mm_set_pd(v->route_rr,v->route_ll));
+        else
+            routed = _mm_add_pd(
+                _mm_mul_pd(_mm_set1_pd(in_l),
+                    _mm_set_pd(v->route_rl,v->route_ll)),
+                _mm_mul_pd(_mm_set1_pd(in_r),
+                    _mm_set_pd(v->route_rr,v->route_lr)));
+        __m128d side=_mm_set_pd(v->route_right,v->route_left);
+        __m128d dry=_mm_mul_pd(_mm_mul_pd(routed,side),
+            _mm_set1_pd(v->route_dry));
+        _mm_storeu_pd(&mix->left,
+            _mm_add_pd(_mm_loadu_pd(&mix->left),dry));
+        __m128d delayed=_mm_mul_pd(_mm_mul_pd(routed,side),
+            _mm_set1_pd(v->route_delay));
+        _mm_storeu_pd(&mix->delay_l,
+            _mm_add_pd(_mm_loadu_pd(&mix->delay_l),delayed));
+        if (v->route_dsp) {
+            double room=v->route_room;
+            __m128d roomed=_mm_mul_pd(_mm_mul_pd(routed,side),
+                _mm_set1_pd(room));
+            _mm_storeu_pd(&mix->room_l,
+                _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
+            if (room > 0) mix->room_size=v->route_room_size;
+        }
+        return;
+    }
+#endif
     if (v->route_lr == 0 && v->route_rl == 0) {
         l = in_l * v->route_ll; r = in_r * v->route_rr;
     } else {

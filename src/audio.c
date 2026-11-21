@@ -6,6 +6,8 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <limits.h>
+#include <pthread.h>
+#include <sched.h>
 #include "js_number.h"
 #include "wavetable.h"
 #include "sampler.h"
@@ -55,8 +57,10 @@ static atomic_int reference_mode;
 _Static_assert(ATOMIC_INT_LOCK_FREE==2,"output gain requires lock-free integer atomics");
 static atomic_uint output_gain_units=1000000;
 static _Atomic unsigned peak_units;
+static atomic_int render_rt_priority=-1;
 void audio_peak_reset(void) { atomic_store(&peak_units,0); }
 double audio_peak_level(void) { return atomic_load(&peak_units)/1000000.0; }
+int audio_render_realtime(void) { return atomic_load(&render_rt_priority); }
 int audio_set_output_gain(double value) {
     if (!isfinite(value) || value<0 || value>1) return 0;
     atomic_store_explicit(&output_gain_units,(unsigned)lround(value*1000000),memory_order_relaxed);
@@ -2365,6 +2369,13 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
 }
 
 static void render_output(float *output, unsigned long frames) {
+    int policy=0;
+    struct sched_param parameter={0};
+    if (pthread_getschedparam(pthread_self(),&policy,&parameter)==0)
+        atomic_store(&render_rt_priority,
+            policy==SCHED_FIFO || policy==SCHED_RR ? parameter.sched_priority : 0);
+    else
+        atomic_store(&render_rt_priority,0);
     (void)pa_callback(NULL,output,frames,NULL,0,NULL);
     unsigned peak=0;
     for (unsigned long i=0;i<frames*2;i++) {

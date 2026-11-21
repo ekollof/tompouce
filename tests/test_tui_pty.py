@@ -241,6 +241,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 lines=text.splitlines()
                 match=next((i,line.index('Volume')+7) for i,line in enumerate(lines) if 'Volume' in line)
                 row,col=match
+                assert re.search(rb'audio=up [^\n]*xrun=\d+ rt=(?:on|off)', text.encode()), (name,'audio diagnostics missing',text)
                 generation=re.search(rb'gen=(\d+)',screen_text(output))
                 assert generation, text
                 x,y=col+5,row+1  # fourth bar cell: 4/9, snapped to .44

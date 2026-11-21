@@ -918,6 +918,19 @@ const char *audio_output_latency_label(void) {
     return label;
 }
 
+const char *audio_output_queue_label(void) {
+    static char label[32];
+#ifdef HAVE_OPENAL
+    if (selected && !strcmp(selected->name,"OpenAL")) {
+        snprintf(label,sizeof(label),"%ux%u %.1fms",
+            openal_frames,openal_buffer_count,
+            1000.0*openal_frames*openal_buffer_count/SR);
+        return label;
+    }
+#endif
+    return "native";
+}
+
 int audio_output_start(AudioOutputRender render, unsigned long frames) {
     if (selected) return selected->active();
     if (!render || frames<64 || frames>OUTPUT_FRAMES) return 0;

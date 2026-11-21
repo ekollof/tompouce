@@ -3745,10 +3745,11 @@ static void draw_state_at(int r0, int c0, int h, int w) {
         state_line(&row,maxrow,c0+1,w-2,"inline=%s lines=%d images=%d/%d footer=%s F12=%s",
             inline_visuals?"on":"off",inline_count,graphics_pending_count,GRAPHICS_IMAGES,
             editor_scope?"enabled":"off",show_viz?"on":"off");
-        state_line(&row,maxrow,c0+1,w-2,"audio=%s %s %.0fHz queue=%s MIDI=%s banks=%s:%d",
-            audio_is_stream_active()?"up":"down",audio_backend_name(),SR,
-            audio_output_latency_label(),midi_ready()?"up":"down",
-            banks_ready()?"ready":"indexing",banks_count());
+        int realtime=audio_render_realtime();
+        state_line(&row,maxrow,c0+1,w-2,"audio=%s %s %.0fk %s xrun=%llu rt=%s",
+            audio_is_stream_active()?"up":"down",audio_backend_name(),SR/1000.0,
+            audio_output_queue_label(),audio_output_underruns(),
+            realtime>0?"on":realtime==0?"off":"?");
         state_line(&row,maxrow,c0+1,w-2,"song=%s hold=%s position=%d/%d",scheduler_song_on()?"on":"off",
             scheduler_song_hold()?"on":"off",scheduler_song_pos()+1,scheduler_song_count());
     }

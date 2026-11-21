@@ -96,8 +96,7 @@ tompouce_optional(PIPEWIRE "libpipewire-0.3>=0.3.7" src/audio_output.c)
 tompouce_optional(PULSE libpulse src/audio_output.c)
 tompouce_optional(SAMPLERATE samplerate src/audio_output.c)
 tompouce_optional(OPENAL openal src/audio_output.c)
-# Optional RTKit client for promoting the OpenAL render thread. The direct
-# SCHED_FIFO path remains available when libsystemd is absent.
+# Optional RTKit client for promoting the OpenAL feeder thread.
 if(WITH_OPENAL)
     pkg_check_modules(SYSTEMD QUIET IMPORTED_TARGET libsystemd)
     if(SYSTEMD_FOUND)

@@ -33,6 +33,8 @@ int audio_output_queue_depth(void);
 int audio_output_adjust_latency(int direction);
 /* Human-readable current latency/queue setting, e.g. "OpenAL 256x2 11.6ms". */
 const char *audio_output_latency_label(void);
+/* Compact queue setting for F4, e.g. "256x2 11.6ms" or "native". */
+const char *audio_output_queue_label(void);
 
 #ifdef TOMPOUCE_RENDER_PROFILE
 /* Compile-time diagnostic: callback render duration histogram. */

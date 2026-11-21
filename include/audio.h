@@ -137,6 +137,9 @@ int audio_active_voices(void);
 /* Highest absolute output sample since the last reset/play start. */
 void audio_peak_reset(void);
 double audio_peak_level(void);
+/* Priority of the thread currently rendering audio; 0 when not real-time,
+   -1 before the first render block. */
+int audio_render_realtime(void);
 int audio_reference_mode(void);
 #ifdef TOMPOUCE_RENDER_PROFILE
 void audio_section_profile_stats(unsigned long long *voice,

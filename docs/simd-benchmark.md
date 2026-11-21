@@ -361,12 +361,14 @@ partition accumulation order and avoid FMA/reassociation.
 The supersaw unison bank now has an AVX2 kernel as well. Each lane advances one
 independent oscillator with the same double-precision arithmetic as the C
 reference, and `dsp_supersaw` still sums the resulting values in unison-index
-order. A profile build playing two supersaw voices with `unison(100)` measured
-`render avg=173us` with `TOMPOUCE_SIMD=c` and `avg=127us` with `avx2` on the
-same 256-frame callback (about 27% less render time). This is a workload
-observation, not a deadline guarantee. `tests/test_dsp_supersaw_simd.c`
-compares values and phase updates byte-for-byte for every voice count from 1
-to 100, including vector tails, zero/NaN ratios and high frequencies.
+order. The SIMD path is used from four oscillators upward, so the default
+five-voice supersaw benefits; smaller groups stay scalar. A profile build
+playing two supersaw voices with `unison(100)` measured `render avg=173us` with
+`TOMPOUCE_SIMD=c` and `avg=127us` with `avx2` on the same 256-frame callback
+(about 27% less render time). This is a workload observation, not a deadline
+guarantee. `tests/test_dsp_supersaw_simd.c` compares values and phase updates
+byte-for-byte for every voice count from 1 to 100, including vector tails,
+zero/NaN ratios and high frequencies.
 
 Maintain initialization-time CPU/OS selection and the force-implementation
 override. No allocation or dispatch reconfiguration belongs in the callback.

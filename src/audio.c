@@ -976,6 +976,8 @@ static void cache_routing(Voice *v) {
     v->route_ll = ll; v->route_lr = lr; v->route_rl = rl; v->route_rr = rr;
     v->route_left = left; v->route_right = right;
     v->route_delay = v->delay_send;
+    v->route_side_one = left == 1 && right == 1;
+    v->route_dry_one = v->route_dry == 1;
     v->route_cached = 1;
 }
 
@@ -1581,18 +1583,18 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
                 _mm_mul_pd(_mm_set1_pd(in_r),
                     _mm_set_pd(v->route_rr,v->route_lr)));
         __m128d side=_mm_set_pd(v->route_right,v->route_left);
-        __m128d dry=_mm_mul_pd(_mm_mul_pd(routed,side),
-            _mm_set1_pd(v->route_dry));
+        __m128d base=routed;
+        if (!v->route_side_one) base=_mm_mul_pd(base,side);
+        __m128d dry=v->route_dry_one?base:
+            _mm_mul_pd(base,_mm_set1_pd(v->route_dry));
         _mm_storeu_pd(&mix->left,
             _mm_add_pd(_mm_loadu_pd(&mix->left),dry));
-        __m128d delayed=_mm_mul_pd(_mm_mul_pd(routed,side),
-            _mm_set1_pd(v->route_delay));
+        __m128d delayed=_mm_mul_pd(base,_mm_set1_pd(v->route_delay));
         _mm_storeu_pd(&mix->delay_l,
             _mm_add_pd(_mm_loadu_pd(&mix->delay_l),delayed));
         if (v->route_dsp) {
             double room=v->route_room;
-            __m128d roomed=_mm_mul_pd(_mm_mul_pd(routed,side),
-                _mm_set1_pd(room));
+            __m128d roomed=_mm_mul_pd(base,_mm_set1_pd(room));
             _mm_storeu_pd(&mix->room_l,
                 _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
             if (room > 0) mix->room_size=v->route_room_size;
@@ -1652,14 +1654,19 @@ static void mix_voice(Voice *v, double sample, VoiceMix *mix) {
         double input=v->amp!=0?sample/v->amp:0;
         mix_graph_effect(v,input,input,mix); return;
     }
-    sample = dsp_process(&v->dsp,sample,v->age,v->gate_end-v->start_time);
+    if (v->dsp.control.enabled)
+        sample = dsp_process(&v->dsp,sample,v->age,v->gate_end-v->start_time);
     route_voice(v,sample,sample,mix);
 }
 
 static void mix_supersaw(Voice *v, double amplitude, VoiceMix *mix) {
-    double age = v->age, gate = v->gate_end-v->start_time;
-    double left = dsp_process(&v->dsp,v->dsp.supersaw_l*amplitude,age,gate);
-    double right = dsp_process(&v->dsp_right,v->dsp.supersaw_r*amplitude,age,gate);
+    double left=v->dsp.supersaw_l*amplitude;
+    double right=v->dsp.supersaw_r*amplitude;
+    if (v->dsp.control.enabled) {
+        double age = v->age, gate = v->gate_end-v->start_time;
+        left = dsp_process(&v->dsp,left,age,gate);
+        right = dsp_process(&v->dsp_right,right,age,gate);
+    }
     route_voice(v,left,right,mix);
 }
 

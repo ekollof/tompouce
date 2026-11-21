@@ -42,7 +42,7 @@ keys. Native audio does not reproduce every browser waveform or parameter.
   receiver, by default `127.0.0.1:57120`. `gm_` sounds stay local samples.
 - **SIMD audio kernels.** Spectrum accumulation uses AVX2, AVX, SSE2 or
   portable C, and the supersaw unison bank has a bit-exact AVX2 kernel for
-  eight or more oscillators. The ISA is chosen once from CPU support before
+  four or more oscillators. The ISA is chosen once from CPU support before
   playback; the audio callback does not detect features. F4 shows the active
   convolution kernel; `TOMPOUCE_SIMD` can force one.
 

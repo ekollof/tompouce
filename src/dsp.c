@@ -857,7 +857,7 @@ void dsp_supersaw_init(DspState *s, unsigned seed) {
 double dsp_supersaw(DspState *s, double frequency) {
     double left = 0, right = 0;
     double pan_l=s->supersaw_pan_l,pan_r=s->supersaw_pan_r;
-    if (s->supersaw_voices >= 8) {
+    if (s->supersaw_voices >= 4) {
         double values[DSP_SUPERSAW_VOICES];
         dsp_supersaw_values(s,frequency,values);
         /* Keep the original index-order sum; the kernel only computes the

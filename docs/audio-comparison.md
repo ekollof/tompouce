@@ -126,7 +126,12 @@ On a 15-second "Computer says no" PipeWire run the profile build moved from
 computes the adjacent left/right pan, dry, delay and room sends together; it
 keeps per-lane operation order and leaves scope/named-target voices scalar.
 Measured route cost moved from ~62 to ~60 cycles per call and average render
-to ~1.38 ms, so this is incremental rather than structural. The audio/reference gates and the
+to ~1.38 ms, so this is incremental rather than structural. Common un-panned
+voices now skip exact `*1` side/dry multiplies, and voices with DSP disabled
+skip the `dsp_process` calls entirely. Over a 35-second stress run the maximum
+callback is still about 3.0 ms against the 2.9 ms PipeWire deadline, so rare
+xruns remain; eliminating them needs the block/SoA voice renderer rather than
+more scalar micro-optimizations. The audio/reference gates and the
 supersaw exactness test pass; the known `tui_pty` vi startup case remains
 timing-flaky.
 The earlier OpenAL **zero-underrun** reading was a blind spot: it only counted

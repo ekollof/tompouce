@@ -309,6 +309,19 @@ static void pw_state_changed(void *data, enum pw_stream_state old, enum pw_strea
 
 static void pw_process(void *data) {
     (void)data;
+    static atomic_int logged_thread;
+    if (!atomic_exchange(&logged_thread,1)) {
+        char thread_name[32]="?";
+        pthread_getname_np(pthread_self(),thread_name,sizeof(thread_name));
+        int policy=0; struct sched_param parameter={0};
+        pthread_getschedparam(pthread_self(),&policy,&parameter);
+#ifdef SCHED_RESET_ON_FORK
+        policy &= ~SCHED_RESET_ON_FORK;
+#endif
+        log_console("audio: PipeWire process thread %s real-time=%s priority=%d",
+            thread_name,policy==SCHED_FIFO || policy==SCHED_RR ? "yes" : "no",
+            parameter.sched_priority);
+    }
     /* Test-only stall injection (owned null-sink runs): sleep once inside
        the output thread so the next gap accounting fires for certain. */
     if (!xrun_injected && xrun_inject_ms > 0 && atomic_load(&xrun_calls) >= 10) {

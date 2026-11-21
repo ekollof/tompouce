@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "audio.h"
 #include "audio_output.h"
 #include <portaudio.h>
@@ -2371,10 +2372,13 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
 static void render_output(float *output, unsigned long frames) {
     int policy=0;
     struct sched_param parameter={0};
-    if (pthread_getschedparam(pthread_self(),&policy,&parameter)==0)
+    if (pthread_getschedparam(pthread_self(),&policy,&parameter)==0) {
+#ifdef SCHED_RESET_ON_FORK
+        policy &= ~SCHED_RESET_ON_FORK;
+#endif
         atomic_store(&render_rt_priority,
             policy==SCHED_FIFO || policy==SCHED_RR ? parameter.sched_priority : 0);
-    else
+    } else
         atomic_store(&render_rt_priority,0);
     (void)pa_callback(NULL,output,frames,NULL,0,NULL);
     unsigned peak=0;

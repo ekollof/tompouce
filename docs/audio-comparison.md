@@ -136,9 +136,9 @@ PipeWire's profiler showed zero xruns for the engine, sink and driver over an
 whether the render thread has real-time scheduling. `music_health` reports the
 full `calls/gaps/empty/max/minq/rt` breakdown. The OpenAL feeder asks RTKit for
 priority 10 (direct `SCHED_FIFO` fallback); `ps -L` then shows
-`tompouce-audio` as `FF 10`. PipeWire owns its data-loop thread, so F4 reports
-`rt=off` there unless the distribution promotes it; its measured 1.00× clock
-did not depend on that.
+`tompouce-audio` as `FF 10`. PipeWire runs the stream callback on its
+`data-loop.0` thread, which is already real-time (`SCHED_FIFO`, priority 83)
+with `SCHED_RESET_ON_FORK`; F4 masks that flag and reports `rt=on`.
 
 Real-time priority alone does not make OpenAL match the native callback. With
 the full TUI and the 128-voice stress source, the OpenAL audio clock advanced

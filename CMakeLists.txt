@@ -96,8 +96,8 @@ tompouce_optional(PIPEWIRE "libpipewire-0.3>=0.3.7" src/audio_output.c)
 tompouce_optional(PULSE libpulse src/audio_output.c)
 tompouce_optional(SAMPLERATE samplerate src/audio_output.c)
 tompouce_optional(OPENAL openal src/audio_output.c)
-# Optional RTKit client for promoting the OpenAL feeder thread.
-if(WITH_OPENAL)
+# Optional RTKit client for promoting the active audio render thread.
+if(WITH_OPENAL OR WITH_PIPEWIRE)
     pkg_check_modules(SYSTEMD QUIET IMPORTED_TARGET libsystemd)
     if(SYSTEMD_FOUND)
         target_compile_definitions(tompouce_options INTERFACE HAVE_RTKIT)

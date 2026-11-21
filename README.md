@@ -275,8 +275,9 @@ native clients; JACK and ALSA use explicitly selected PortAudio host APIs.
 `TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune
 that queue; the console logs the resulting depth. In the TUI, `Ctrl+-` and
 `Ctrl+=` step through OpenAL queue presets; F4 shows the active queue, backend
-xrun count and whether the render thread is real-time. `music_health` carries
-the full `calls/gaps/empty/max/minq/rt` breakdown. The engine remains stereo at 44.1 kHz;
+xrun count and whether the render thread is real-time. PipeWire's callback runs
+on its real-time `data-loop.0`; OpenAL's feeder requests `SCHED_FIFO` directly.
+`music_health` carries the full `calls/gaps/empty/max/minq/rt` breakdown. The engine remains stereo at 44.1 kHz;
 libsamplerate handles JACK/device clocks such as 48 kHz. Without libsamplerate, a
 backend that cannot accept 44.1 kHz is skipped. Live output uses the same
 unity-gain reference path as the web comparison; a full-mix "Bass fuge" capture

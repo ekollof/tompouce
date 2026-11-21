@@ -290,12 +290,35 @@ explicit scope and confinement design before implementation. The separate
 Hydra task above covers visualizer integration, not general browser input APIs.
 OpenAL is opt-in (`TOMPOUCE_AUDIO_BACKEND=OpenAL`) and ships an app-specific
 `alsoft.conf` with 64-frame stereo periods; our queue defaults to 256×2 (about
-11.6 ms). The render profiler shows "Computer says no" peaking at 128 voices
-with average callback render ~1.4–3.2 ms and max 6.6 ms; 128-frame queues
-stopped/restarted the source 21–59 times in eight seconds, while 256×2, 256×3
-and 512×2 measured zero stops. The remaining low-latency path is the render hot
-path itself: average/max callback cost still needs to come down before smaller
-queues are safe. Other non-PipeWire backend underruns remain unmeasured.
+11.6 ms). The render profiler shows "Computer says no" peaking at 128 voices. After the
+route-cache, two-lane SSE2, supersaw AVX2 and disabled-DSP changes, average
+callback render is about 1.4–1.6 ms with occasional peaks around 3.0–3.3 ms
+against the 2.9 ms PipeWire deadline, so rare xruns remain. 128-frame OpenAL
+queues stopped/restarted the source before those changes; 256×2, 256×3 and
+512×2 measured zero stops. The remaining low-latency path is the block/SoA
+voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
+
+## Render and SIMD performance
+
+- [ ] Block/SoA voice renderer: batch four frames (or four voices) so
+      envelopes, per-voice filters, routing and dry/delay/room sends can use
+      SIMD. Preserve per-frame and per-voice summation order, keep the scalar
+      fallback, and cover onsets, retirement, stealing and effect tails. Target
+      "Computer says no" at 128 voices staying inside the 128-frame PipeWire
+      deadline with zero gaps on the real device. Add forced C/SSE2/AVX2 PCM
+      equivalence tests before landing it.
+- [ ] Later SIMD kernels, only after measurement:
+  - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
+    block/SoA layout rather than frame lanes
+  - four-frame routing/mix and sample interpolation; the current two-lane SSE2
+    route and paired source interpolation were only incremental or neutral
+  - stereo delay and independent reverb combs; feedback state must stay per
+    lane, and the convolution reverb is already SIMD
+  - stretch/FFT and visualizer FFT only if preparation or UI becomes the
+    bottleneck; the audio callback stays FFT-free
+- [ ] Keep the existing `TOMPOUCE_SIMD` runtime policy, C fallback, per-kernel
+      target flags and no-FMA rule. Every new kernel needs byte-exact PCM
+      comparisons and forced-ISA runs; do not add a global `-mavx2` build.
 
 ## Terminal blockers awaiting upstream
 

@@ -45,6 +45,14 @@ foreach(mode auto c sse2 avx avx2 invalid)
 endforeach()
 add_test(NAME convolution_portable COMMAND test_convolution_simd_portable)
 set_tests_properties(convolution_portable PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=avx2" TIMEOUT 120)
+add_executable(test_dsp_supersaw_simd EXCLUDE_FROM_ALL tests/test_dsp_supersaw_simd.c)
+set_target_properties(test_dsp_supersaw_simd PROPERTIES EXCLUDE_FROM_ALL FALSE
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+target_compile_options(test_dsp_supersaw_simd PRIVATE -UNDEBUG -O3 -ffp-contract=off -funroll-loops)
+target_link_libraries(test_dsp_supersaw_simd PRIVATE tompouce_core)
+add_test(NAME dsp_supersaw_simd COMMAND test_dsp_supersaw_simd)
+set_tests_properties(dsp_supersaw_simd PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=auto" TIMEOUT 60)
+
 add_custom_target(test-simd-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=c $<TARGET_FILE:test_convolution_simd_sanitize>
     COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=sse2 $<TARGET_FILE:test_convolution_simd_sanitize>

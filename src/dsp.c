@@ -1,4 +1,5 @@
 #include "dsp.h"
+#include "dsp_supersaw.h"
 #include "common.h"
 #include <float.h>
 #ifdef TOMPOUCE_RENDER_PROFILE
@@ -856,20 +857,32 @@ void dsp_supersaw_init(DspState *s, unsigned seed) {
 double dsp_supersaw(DspState *s, double frequency) {
     double left = 0, right = 0;
     double pan_l=s->supersaw_pan_l,pan_r=s->supersaw_pan_r;
-    for (unsigned i = 0; i < s->supersaw_voices; i++) {
-        double rate=frequency*s->saw_ratio[i]/SR, x=0;
-        /* Near-one fractional unison and extreme spreads can overflow the
-           exponential. Keep invalid oscillators silent and state finite. */
-        if (s->saw_ratio[i]>0 && isfinite(rate)) {
-            rate-=floor(rate);
-            double phase=s->saw_phase[i];
-            x=2*phase-1-poly_blep(phase,fmin(rate,1-rate));
-            phase+=rate;
-            if (phase>=1) phase-=1;
-            s->saw_phase[i]=phase;
+    if (s->supersaw_voices >= 8) {
+        double values[DSP_SUPERSAW_VOICES];
+        dsp_supersaw_values(s,frequency,values);
+        /* Keep the original index-order sum; the kernel only computes the
+           independent oscillator values and advances their phases. */
+        for (unsigned i=0;i<s->supersaw_voices;i++) {
+            double x=values[i];
+            left += x*pan_l; right += x*pan_r;
+            double swap=pan_l; pan_l=pan_r; pan_r=swap;
         }
-        left += x*pan_l; right += x*pan_r;
-        double swap=pan_l; pan_l=pan_r; pan_r=swap;
+    } else {
+        for (unsigned i = 0; i < s->supersaw_voices; i++) {
+            double rate=frequency*s->saw_ratio[i]/SR, x=0;
+            /* Near-one fractional unison and extreme spreads can overflow the
+               exponential. Keep invalid oscillators silent and state finite. */
+            if (s->saw_ratio[i]>0 && isfinite(rate)) {
+                rate-=floor(rate);
+                double phase=s->saw_phase[i];
+                x=2*phase-1-poly_blep(phase,fmin(rate,1-rate));
+                phase+=rate;
+                if (phase>=1) phase-=1;
+                s->saw_phase[i]=phase;
+            }
+            left += x*pan_l; right += x*pan_r;
+            double swap=pan_l; pan_l=pan_r; pan_r=swap;
+        }
     }
     s->supersaw_l = left*s->supersaw_gain;
     s->supersaw_r = right*s->supersaw_gain;

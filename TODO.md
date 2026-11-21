@@ -315,11 +315,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         retirement tests pass; routing-only staging is PCM-exact but measured
         neutral, so it is infrastructure rather than a speedup.
       - [ ] Move sample source/envelope and per-voice DSP work into the block
-        path; routing alone does not reduce the hot render cost. A trial that
-        pre-rendered four frames of eligible bank-sample voices ahead of the
-        frame loop regressed the stress run (max ~4.4 ms, two gaps) and was
-        reverted. The next attempt needs true SoA lanes for filter/envelope
-        state, not a separate per-voice lookahead pass.
+        path; routing alone does not reduce the hot render cost. Two trials
+        were reverted: four-frame lookahead of individual sample voices (max
+        ~4.4 ms, two gaps) and a four-voice SoA sample pass with AoS
+        gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks). The next attempt
+        needs a native SoA `Voice` layout with filters/envelopes operating on
+        lanes directly; grouping AoS voices is not enough.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

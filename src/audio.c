@@ -973,12 +973,7 @@ static void cache_routing(Voice *v) {
     v->route_ll = ll; v->route_lr = lr; v->route_rl = rl; v->route_rr = rr;
     v->route_left = left; v->route_right = right;
     v->route_delay = v->delay_send;
-    v->route_src_pan = v->pan;
-    v->route_src_has_pan = v->has_pan;
-    v->route_src_channels = v->smp_channels;
-    v->route_src_inst = v->inst;
-    v->route_src_dsp = dsp;
-    v->route_src_program = v->native_program;
+    v->route_cached = 1;
 }
 
 static void trigger_voice(Voice *v, AudioEvent *ev) {
@@ -1554,16 +1549,9 @@ static void target_add(int target, double l, double r) {
 }
 
 static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
-    /* Directly constructed voices (internal tests) never pass through
-       trigger_voice; a zeroed cache is the sentinel for that case. */
-    if ((v->route_ll == 0 && v->route_lr == 0 && v->route_rl == 0 &&
-         v->route_rr == 0 && v->route_dry == 0) ||
-        v->pan != v->route_src_pan || v->has_pan != v->route_src_has_pan ||
-        v->smp_channels != v->route_src_channels || v->inst != v->route_src_inst ||
-        v->dsp.control.enabled != v->route_src_dsp ||
-        v->native_program != v->route_src_program ||
-        v->delay_send != v->route_delay)
-        cache_routing(v);
+    /* Routing inputs are frozen at note-on. Directly constructed voices
+       (internal tests) start with route_cached == 0. */
+    if (!v->route_cached) cache_routing(v);
     /* Source transport may shorten note_off_time. The outer release node
        keeps the original hap and raw-release anchors instead. */
     if (v->graph_end>v->graph_fade_start && audio_time>v->graph_fade_start) {

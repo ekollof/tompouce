@@ -26,6 +26,8 @@ void audio_output_xrun_reset(void);
 /* Backend-specific missed-buffer count: PipeWire gaps, OpenAL queue empties,
    zero for backends that do not account for them. */
 unsigned long long audio_output_underruns(void);
+/* OpenAL minimum queued app buffers observed since start; -1 elsewhere. */
+int audio_output_queue_depth(void);
 /* Adjust the active backend's latency preset. Only OpenAL currently supports
    live reconfiguration; returns 1 on success. */
 int audio_output_adjust_latency(int direction);

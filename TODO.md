@@ -289,11 +289,13 @@ Kabelsalat device-input/mouse nodes and custom JavaScript UGens also require
 explicit scope and confinement design before implementation. The separate
 Hydra task above covers visualizer integration, not general browser input APIs.
 OpenAL is opt-in (`TOMPOUCE_AUDIO_BACKEND=OpenAL`) and ships an app-specific
-`alsoft.conf` with 64-frame stereo periods; our queue defaults to 128×2 (about
-5.8 ms). It measured zero PipeWire-profiler xruns on "Computer says no", but
-listening still reported choppiness at 2×256 before the config, so PipeWire
-stays the automatic default until the low-latency configuration is confirmed
-by ear. Other non-PipeWire backend underruns remain unmeasured.
+`alsoft.conf` with 64-frame stereo periods; our queue defaults to 256×2 (about
+11.6 ms). The render profiler shows "Computer says no" peaking at 128 voices
+with average callback render ~1.4–3.2 ms and max 6.6 ms; 128-frame queues
+stopped/restarted the source 21–59 times in eight seconds, while 256×2, 256×3
+and 512×2 measured zero stops. The remaining low-latency path is the render hot
+path itself: average/max callback cost still needs to come down before smaller
+queues are safe. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Terminal blockers awaiting upstream
 

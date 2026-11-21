@@ -651,7 +651,7 @@ static void portaudio_close(void) {
 static int portaudio_active(void) { return pa_output && Pa_IsStreamActive(pa_output)==1; }
 
 #ifdef HAVE_OPENAL
-#define OPENAL_DEFAULT_FRAMES 128
+#define OPENAL_DEFAULT_FRAMES 256
 #define OPENAL_DEFAULT_BUFFERS 2
 #define OPENAL_MAX_FRAMES 1024
 #define OPENAL_MAX_BUFFERS 8
@@ -661,12 +661,13 @@ static ALuint openal_source, openal_buffers[OPENAL_MAX_BUFFERS];
 static pthread_t openal_thread_handle;
 static atomic_int openal_stop;
 static _Atomic unsigned long long openal_underruns;
+static atomic_int openal_min_queued;
 static unsigned openal_frames=OPENAL_DEFAULT_FRAMES;
 static unsigned openal_buffer_count=OPENAL_DEFAULT_BUFFERS;
 static float openal_pcm[OPENAL_MAX_FRAMES*2];
-static int openal_configured, openal_preset=1;
+static int openal_configured, openal_preset=2;
 static const unsigned openal_presets[][2]={
-    {64,2}, {128,2}, {128,3}, {256,2}, {512,2}, {512,4}
+    {64,2}, {128,2}, {256,2}, {256,3}, {512,2}, {512,4}
 };
 #define OPENAL_PRESET_COUNT (sizeof(openal_presets)/sizeof(openal_presets[0]))
 
@@ -674,10 +675,15 @@ static void *openal_render_thread(void *unused) {
     (void)unused;
     alcMakeContextCurrent(openal_context);
     while (!atomic_load(&openal_stop)) {
-        ALint processed=0, queued=0;
+        ALint processed=0, queued=0, state=0;
         alGetSourcei(openal_source,AL_BUFFERS_PROCESSED,&processed);
         alGetSourcei(openal_source,AL_BUFFERS_QUEUED,&queued);
+        alGetSourcei(openal_source,AL_SOURCE_STATE,&state);
         if (queued==0) atomic_fetch_add(&openal_underruns,1);
+        else if (state!=AL_PLAYING) atomic_fetch_add(&openal_underruns,1);
+        int previous_min=atomic_load(&openal_min_queued);
+        while (queued<previous_min &&
+               !atomic_compare_exchange_weak(&openal_min_queued,&previous_min,queued)) {}
         while (processed-- > 0) {
             ALuint buffer=0;
             alSourceUnqueueBuffers(openal_source,1,&buffer);
@@ -701,7 +707,6 @@ static void *openal_render_thread(void *unused) {
                          (ALsizei)(openal_frames*2*sizeof(float)),(ALsizei)SR);
             alSourceQueueBuffers(openal_source,1,&buffer);
         }
-        ALint state=0;
         alGetSourcei(openal_source,AL_SOURCE_STATE,&state);
         if (state!=AL_PLAYING) alSourcePlay(openal_source);
         struct timespec pause={0,2000000};
@@ -755,6 +760,7 @@ static int openal_open(void) {
     alSourcePlay(openal_source);
     atomic_store(&openal_stop,0);
     atomic_store(&openal_underruns,0);
+    atomic_store(&openal_min_queued,(int)openal_buffer_count);
     if (pthread_create(&openal_thread_handle,NULL,openal_render_thread,NULL)) {
         snprintf(output_error,sizeof(output_error),"cannot start OpenAL thread");
         alDeleteSources(1,&openal_source);
@@ -783,6 +789,7 @@ static void openal_close(void) {
 
 static int openal_active(void) { return openal_context!=NULL && !atomic_load(&openal_stop); }
 static unsigned long long openal_underrun_count(void) { return atomic_load(&openal_underruns); }
+static int openal_queue_depth(void) { return atomic_load(&openal_min_queued); }
 #endif
 
 static const OutputDriver output_drivers[]={
@@ -823,6 +830,13 @@ unsigned long long audio_output_underruns(void) {
     unsigned long long calls=0, gaps=0, max_gap=0, empty=0;
     audio_output_xrun_stats(&calls,&gaps,&max_gap,&empty);
     return gaps;
+}
+
+int audio_output_queue_depth(void) {
+#ifdef HAVE_OPENAL
+    if (selected && !strcmp(selected->name,"OpenAL")) return openal_queue_depth();
+#endif
+    return -1;
 }
 
 int audio_output_adjust_latency(int direction) {

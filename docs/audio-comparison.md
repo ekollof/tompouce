@@ -133,7 +133,17 @@ PipeWire's profiler showed zero xruns for the engine, sink and driver over an
 `TOMPOUCE_AUDIO_BACKEND=OpenAL` (PipeWire stays the automatic default).
 `TOMPOUCE_OPENAL_FRAMES` (64–1024), `TOMPOUCE_OPENAL_BUFFERS` (2–8) and the TUI
 `Ctrl+-`/`Ctrl+=` presets tune the queue; `music_health` reports `xrun=` and
-`minq=` for OpenAL. `TOMPOUCE_AUDIO_BACKEND=PipeWire` remains the direct path.
+`minq=` for OpenAL. The OpenAL feeder asks RTKit for priority 10 (direct
+`SCHED_FIFO` fallback); `ps -L` then shows `tompouce-audio` as `FF 10`.
+
+Real-time priority alone does not make OpenAL match the native callback. With
+the full TUI and the 128-voice stress source, the OpenAL audio clock advanced
+0.91× wall before RT and 0.93× after, while the PipeWire callback advanced
+**1.00× wall with zero gaps**. OpenAL's feeder blocks inside its own
+device/queue, so CPU priority cannot recover the lost time. PipeWire is the
+recommended backend for CPU-heavy songs; OpenAL remains useful for its
+independent queue on systems where the native path xruns.
+`TOMPOUCE_AUDIO_BACKEND=PipeWire` remains the direct path.
 
 Strudel's WebAudio output has no master limiter, only orbit gain 1 and the
 destination. Our live path previously used a tanh/clamp master stage; both

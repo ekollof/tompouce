@@ -96,6 +96,15 @@ tompouce_optional(PIPEWIRE "libpipewire-0.3>=0.3.7" src/audio_output.c)
 tompouce_optional(PULSE libpulse src/audio_output.c)
 tompouce_optional(SAMPLERATE samplerate src/audio_output.c)
 tompouce_optional(OPENAL openal src/audio_output.c)
+# Optional RTKit client for promoting the OpenAL render thread. The direct
+# SCHED_FIFO path remains available when libsystemd is absent.
+if(WITH_OPENAL)
+    pkg_check_modules(SYSTEMD QUIET IMPORTED_TARGET libsystemd)
+    if(SYSTEMD_FOUND)
+        target_compile_definitions(tompouce_options INTERFACE HAVE_RTKIT)
+        target_link_libraries(tompouce_options INTERFACE PkgConfig::SYSTEMD)
+    endif()
+endif()
 tompouce_optional(FLUIDSYNTH "fluidsynth>=2.2" src/gm_synth.c)
 
 # Opt-in native V8 query worker. QuickJS stays the default backend; this only

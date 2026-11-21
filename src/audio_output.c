@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "audio_output.h"
 #include "audio.h"
@@ -651,6 +652,41 @@ static void portaudio_close(void) {
 static int portaudio_active(void) { return pa_output && Pa_IsStreamActive(pa_output)==1; }
 
 #ifdef HAVE_OPENAL
+#if defined(__linux__)
+#include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#ifdef HAVE_RTKIT
+#include <systemd/sd-bus.h>
+#endif
+static int rtkit_make_realtime(unsigned priority) {
+#ifdef HAVE_RTKIT
+    sd_bus *bus=NULL;
+    sd_bus_error error=SD_BUS_ERROR_NULL;
+    if (sd_bus_open_system(&bus)<0) return 0;
+    int result=sd_bus_call_method(bus,
+        "org.freedesktop.RealtimeKit1","/org/freedesktop/RealtimeKit1",
+        "org.freedesktop.RealtimeKit1","MakeThreadRealtime",
+        &error,NULL,"tu",(uint64_t)syscall(SYS_gettid),(uint32_t)priority);
+    sd_bus_error_free(&error);
+    sd_bus_unref(bus);
+    return result>=0;
+#else
+    (void)priority;
+    return 0;
+#endif
+}
+static void openal_raise_priority(void) {
+    static atomic_int reported;
+    if (rtkit_make_realtime(10)) return;
+    struct sched_param parameter={.sched_priority=10};
+    if (pthread_setschedparam(pthread_self(),SCHED_FIFO,&parameter)==0) return;
+    if (!atomic_exchange(&reported,1))
+        log_console("audio: real-time scheduling unavailable; UI load can starve OpenAL");
+}
+#else
+static void openal_raise_priority(void) {}
+#endif
 #define OPENAL_DEFAULT_FRAMES 256
 #define OPENAL_DEFAULT_BUFFERS 2
 #define OPENAL_MAX_FRAMES 1024
@@ -673,6 +709,10 @@ static const unsigned openal_presets[][2]={
 
 static void *openal_render_thread(void *unused) {
     (void)unused;
+#if defined(__linux__)
+    pthread_setname_np(pthread_self(),"tompouce-audio");
+#endif
+    openal_raise_priority();
     alcMakeContextCurrent(openal_context);
     while (!atomic_load(&openal_stop)) {
         ALint processed=0, queued=0, state=0;

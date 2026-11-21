@@ -265,9 +265,13 @@ backends are skipped and cleaned up before trying the next. OpenAL uses a
 queued 2×256-frame stream (about 11.6 ms) plus the bundled app-specific
 `alsoft.conf` (64-frame period, stereo, no global config change). The smaller
 128-frame queues stopped and restarted the OpenAL source under 128-voice render
-spikes; 256×2 measured zero source stops while covering those spikes. PipeWire
-and PulseAudio use their native clients; JACK and ALSA use explicitly selected
-PortAudio host APIs.
+spikes; 256×2 measured zero source stops while covering those spikes. The
+OpenAL feeder asks RTKit (then direct `SCHED_FIFO`) for real-time priority.
+Even with that, OpenAL's separate feeder loses clock time under a loaded TUI:
+the dense Bakery stress source ran at 0.93× wall. The native PipeWire callback
+measured 1.00× wall with zero gaps on the same source, so PipeWire remains the
+recommended backend for CPU-heavy songs. PipeWire and PulseAudio use their
+native clients; JACK and ALSA use explicitly selected PortAudio host APIs.
 `TOMPOUCE_OPENAL_FRAMES` (64–1024) and `TOMPOUCE_OPENAL_BUFFERS` (2–8) tune
 that queue; the console logs the resulting depth. In the TUI, `Ctrl+-` and
 `Ctrl+=` step through OpenAL queue presets and F4 shows the active setting. The engine remains stereo at 44.1 kHz;

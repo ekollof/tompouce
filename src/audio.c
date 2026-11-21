@@ -22,6 +22,7 @@
 #include "prep_pool.h"
 #include "prep_profile.h"
 #include "convolution_mix.h"
+#include "render_block.h"
 #ifdef TOMPOUCE_RENDER_PROFILE
 static _Atomic unsigned long long section_voice, section_fx, section_master;
 static unsigned long long audio_cycles(void) {
@@ -374,6 +375,13 @@ static int silent_clock;
    Moving a Voice transfers its prepared references; the callback never frees. */
 enum { VOICE_SLOTS = MAX_VOICES*2 };
 static Voice voices[VOICE_SLOTS];
+/* Four-frame routing staging. Only used while voice_lock is held and the
+   block contains no pending onsets, scope voices or named targets. */
+static int block_staging, block_lock_held;
+static unsigned block_frame;
+static double block_input_l[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
+static double block_input_r[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
+static unsigned char block_staged[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
 static unsigned retirement_overflow;
 /* Producers already hold voice_lock. Only the scheduler formats/logs errors;
    the callback writes bounded records, including when playback is stopped. */
@@ -1564,6 +1572,14 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         double fade=fmax(0,(v->graph_end-audio_time)/span);
         l*=fade; r*=fade;
     }
+    if (block_staging && v>=voices && v<voices+VOICE_SLOTS &&
+        block_frame<RENDER_BLOCK_FRAMES) {
+        unsigned slot=(unsigned)(v-voices);
+        block_input_l[slot][block_frame]=l;
+        block_input_r[slot][block_frame]=r;
+        block_staged[slot][block_frame]=1;
+        return;
+    }
     /* Pan law and send constants are frozen at note-on; the multiplication
        order below is identical to the original per-sample calculation. */
     double in_l = l, in_r = r;
@@ -1855,14 +1871,48 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
     (void)input; (void)timeInfo; (void)statusFlags; (void)userData;
     float *out = (float*)output;
     const double output_gain=audio_get_output_gain();
-    for (unsigned long i = 0; i < frameCount; i++) {
-        VoiceMix mixes[N_ORBITS];
+    VoiceMix frame_mixes[RENDER_BLOCK_FRAMES][N_ORBITS];
+    double frame_cs_l[RENDER_BLOCK_FRAMES], frame_cs_r[RENDER_BLOCK_FRAMES];
+    double frame_duck_g[RENDER_BLOCK_FRAMES][N_ORBITS];
+    double frame_times[RENDER_BLOCK_FRAMES];
+    for (unsigned long base=0; base<frameCount; ) {
+        unsigned long count=frameCount-base;
+        if (count>RENDER_BLOCK_FRAMES) count=RENDER_BLOCK_FRAMES;
+        frame_times[0]=audio_time;
+        for (unsigned long j=1;j<count;j++) frame_times[j]=frame_times[j-1]+1.0/SR;
+        /* Stage routing for full blocks with no voice onset, scope voice or
+           named target. Holding voice_lock makes the routing coefficients
+           stable through the block; partial blocks use the scalar path. */
+        block_staging=0; block_lock_held=0;
+        if (count==RENDER_BLOCK_FRAMES &&
+            (playing || atomic_load(&reference_mode))) {
+            double last=frame_times[count-1];
+            if (next_voice_onset>last+1e-10) {
+                pthread_mutex_lock(&voice_lock);
+                block_lock_held=1;
+                int stage=next_voice_onset>last+1e-10;
+                for (int v=0;v<VOICE_SLOTS && stage;v++)
+                    if (voices[v].active &&
+                        (voices[v].scope_mask || voices[v].out_target))
+                        stage=0;
+                if (stage) {
+                    block_staging=1;
+                    memset(block_staged,0,sizeof(block_staged));
+                } else {
+                    pthread_mutex_unlock(&voice_lock);
+                    block_lock_held=0;
+                }
+            }
+        }
+        for (unsigned long j=0;j<count;j++) {
+        audio_time=frame_times[j];
+        block_frame=(unsigned)j;
+        VoiceMix *mixes=frame_mixes[j];
         memset(pattern_scope_frame,0,sizeof(pattern_scope_frame));
         for (int o = 0; o < N_ORBITS; o++) {
             mixes[o] = (VoiceMix){0};
             mixes[o].room_size = -1;
         }
-        double L = 0, R = 0;
         for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) target_dry_l[t]=target_dry_r[t]=0;
         double cs_l = 0, cs_r = 0;
         double duck_g[N_ORBITS];
@@ -1871,7 +1921,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         unsigned long long c_voice=audio_cycles();
 #endif
         if (playing || atomic_load(&reference_mode)) {
-            pthread_mutex_lock(&voice_lock);
+            if (!block_lock_held) pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
             dispatch_voice_onsets();
             for (int v = 0; v < VOICE_SLOTS; v++) {
@@ -2263,9 +2313,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 duck_t[o] += dt;
             }
             pattern_scope_publish();
-            pthread_mutex_unlock(&voice_lock);
+            if (!block_lock_held) pthread_mutex_unlock(&voice_lock);
         } else {
-            pthread_mutex_lock(&voice_lock);
+            if (!block_lock_held) pthread_mutex_lock(&voice_lock);
             double discard_l = 0, discard_r = 0;
             csound_program_sample(csound_program,&discard_l,&discard_r);
             for (int o = 0; o < N_ORBITS; o++) {
@@ -2273,10 +2323,51 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 duck_t[o] += 1.0 / SR;
             }
             pattern_scope_publish();
-            pthread_mutex_unlock(&voice_lock);
+            if (!block_lock_held) pthread_mutex_unlock(&voice_lock);
         }
+        frame_cs_l[j]=cs_l; frame_cs_r[j]=cs_r;
+        for (int o = 0; o < N_ORBITS; o++) frame_duck_g[j][o]=duck_g[o];
 #ifdef TOMPOUCE_RENDER_PROFILE
         atomic_fetch_add(&section_voice,audio_cycles()-c_voice);
+#endif
+        }
+        if (block_staging) {
+            VoiceMixBlock orbit_blocks[N_ORBITS];
+            memset(orbit_blocks,0,sizeof(orbit_blocks));
+            for (int o=0;o<N_ORBITS;o++)
+                for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
+                    orbit_blocks[o].room_size[j]=-1;
+            for (int slot=0;slot<VOICE_SLOTS;slot++) {
+                unsigned mask=0;
+                for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
+                    if (block_staged[slot][j]) mask|=1u<<j;
+                if (!mask) continue;
+                int orbit=voices[slot].orbit;
+                if (orbit<0 || orbit>=N_ORBITS) orbit=0;
+                render_block_route_mask(&voices[slot],block_input_l[slot],
+                    block_input_r[slot],&orbit_blocks[orbit],mask);
+            }
+            for (int o=0;o<N_ORBITS;o++) for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++) {
+                VoiceMix *m=&frame_mixes[j][o];
+                m->left=orbit_blocks[o].left[j];
+                m->right=orbit_blocks[o].right[j];
+                m->delay_l=orbit_blocks[o].delay_l[j];
+                m->delay_r=orbit_blocks[o].delay_r[j];
+                m->room_l=orbit_blocks[o].room_l[j];
+                m->room_r=orbit_blocks[o].room_r[j];
+                m->room_size=orbit_blocks[o].room_size[j];
+            }
+            pthread_mutex_unlock(&voice_lock);
+            block_lock_held=0;
+            block_staging=0;
+        }
+        for (unsigned long j=0;j<count;j++) {
+        audio_time=frame_times[j];
+        VoiceMix *mixes=frame_mixes[j];
+        double cs_l=frame_cs_l[j], cs_r=frame_cs_r[j];
+        double L=0, R=0;
+        double *duck_g=frame_duck_g[j];
+#ifdef TOMPOUCE_RENDER_PROFILE
         unsigned long long c_fx=audio_cycles();
 #endif
         for (int o = 0; o < N_ORBITS; o++) {
@@ -2384,21 +2475,22 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
            effect tails. Unity preserves the existing PCM operation order. */
         if (output_gain==0) L=R=0;
         else if (output_gain!=1) { L*=output_gain; R*=output_gain; }
-        out[i*2] = (float)L;
-        out[i*2+1] = (float)R;
+        out[(base+j)*2] = (float)L;
+        out[(base+j)*2+1] = (float)R;
         for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) {
             float *buffer=out_target_buffers[t];
             if (!buffer) continue;
             double gain=output_gain;
-            buffer[i*2]=(float)(target_dry_l[t]*gain);
-            buffer[i*2+1]=(float)(target_dry_r[t]*gain);
+            buffer[(base+j)*2]=(float)(target_dry_l[t]*gain);
+            buffer[(base+j)*2+1]=(float)(target_dry_r[t]*gain);
         }
         /* scope tap: lock-free ring for the viz pane (single writer) */
         scope_buf[scope_pos & (SCOPE_N - 1)] = (float)((L + R) * 0.5);
         scope_pos++;
-        audio_time += 1.0/SR; // careful increments per sample globally
+        }
+        base += count;
+        audio_time=frame_times[count-1]+1.0/SR;
     }
-    // We incremented audio_time frameCount times? Actually loop does per sample. But audio_time update above per sample yes.
     return paContinue;
 }
 

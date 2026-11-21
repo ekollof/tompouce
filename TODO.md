@@ -309,9 +309,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       equivalence tests before landing it.
       - [x] Four-frame routing/send kernel (`src/render_block.c`) with exact C
         and AVX2 paths and `test_render_block`.
-      - [ ] Split the per-frame voice stage from the effect/master stage, then
-        stage four frames through the block kernel. Blocks with pending onsets,
-        scope or named targets keep the scalar route.
+      - [x] Split the per-frame voice stage from the effect/master stage and
+        stage full blocks through the block kernel. Blocks with pending onsets,
+        scope or named targets keep the scalar route. Audio/reference and
+        retirement tests pass; routing-only staging is PCM-exact but measured
+        neutral, so it is infrastructure rather than a speedup.
+      - [ ] Move sample source/envelope and per-voice DSP work into the block
+        path; routing alone does not reduce the hot render cost.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

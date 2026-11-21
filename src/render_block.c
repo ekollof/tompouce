@@ -6,8 +6,9 @@
 #include <immintrin.h>
 #endif
 
-void render_block_route_c(const Voice *voice, const double *in_l,
-                          const double *in_r, VoiceMixBlock *mix) {
+static void render_block_route_mask_c(const Voice *voice, const double *in_l,
+                                      const double *in_r, VoiceMixBlock *mix,
+                                      unsigned mask) {
     const double ll=voice->route_ll, lr=voice->route_lr;
     const double rl=voice->route_rl, rr=voice->route_rr;
     const double left=voice->route_left, right=voice->route_right;
@@ -15,6 +16,7 @@ void render_block_route_c(const Voice *voice, const double *in_l,
     const double room=voice->route_room;
     int simple=lr==0 && rl==0;
     for (unsigned i=0;i<RENDER_BLOCK_FRAMES;i++) {
+        if (!(mask&(1u<<i))) continue;
         double l, r;
         if (simple) {
             l=in_l[i]*ll; r=in_r[i]*rr;
@@ -33,6 +35,12 @@ void render_block_route_c(const Voice *voice, const double *in_l,
             if (room>0) mix->room_size[i]=voice->route_room_size;
         }
     }
+}
+
+void render_block_route_c(const Voice *voice, const double *in_l,
+                          const double *in_r, VoiceMixBlock *mix) {
+    render_block_route_mask_c(voice,in_l,in_r,mix,
+        (1u<<RENDER_BLOCK_FRAMES)-1);
 }
 
 #if RENDER_BLOCK_HAVE_AVX2
@@ -98,4 +106,14 @@ void render_block_route(const Voice *voice, const double *in_l,
     }
 #endif
     render_block_route_c(voice,in_l,in_r,mix);
+}
+
+void render_block_route_mask(const Voice *voice, const double *in_l,
+                             const double *in_r, VoiceMixBlock *mix,
+                             unsigned mask) {
+    if (mask==(1u<<RENDER_BLOCK_FRAMES)-1) {
+        render_block_route(voice,in_l,in_r,mix);
+        return;
+    }
+    render_block_route_mask_c(voice,in_l,in_r,mix,mask);
 }

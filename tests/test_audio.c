@@ -526,14 +526,14 @@ int main(void) {
     VoiceMix mix = {0};
     route_voice(&pan_voice,1,1,&mix);
     assert(mix.left==1 && mix.right==1); /* No pan means unity upmix. */
-    pan_voice.has_pan=1; memset(&mix,0,sizeof(mix));
+    pan_voice.has_pan=1; pan_voice.route_cached=0; memset(&mix,0,sizeof(mix));
     route_voice(&pan_voice,1,1,&mix);
     assert(fabs(mix.left-sqrt(.5)) < 1e-9 && fabs(mix.right-sqrt(.5)) < 1e-9);
-    pan_voice.smp_channels = 2;
+    pan_voice.smp_channels = 2; pan_voice.route_cached=0;
     memset(&mix,0,sizeof(mix));
     route_voice(&pan_voice,1,.25,&mix);
     assert(fabs(mix.left-1) < 1e-9 && fabs(mix.right-.25) < 1e-9);
-    pan_voice.pan = 1; memset(&mix,0,sizeof(mix));
+    pan_voice.pan = 1; pan_voice.route_cached=0; memset(&mix,0,sizeof(mix));
     route_voice(&pan_voice,1,.25,&mix);
     assert(fabs(mix.left) < 1e-9 && fabs(mix.right-1.25) < 1e-9);
 

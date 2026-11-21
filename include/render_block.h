@@ -24,6 +24,9 @@ typedef struct {
    samples after graph fade and uses only voices without scope/named targets. */
 void render_block_route(const Voice *voice, const double *in_l,
     const double *in_r, VoiceMixBlock *mix);
+/* Only frames whose bit is set in mask are routed. */
+void render_block_route_mask(const Voice *voice, const double *in_l,
+    const double *in_r, VoiceMixBlock *mix, unsigned mask);
 void render_block_route_c(const Voice *voice, const double *in_l,
     const double *in_r, VoiceMixBlock *mix);
 #if RENDER_BLOCK_HAVE_AVX2

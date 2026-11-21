@@ -678,9 +678,9 @@ static int rtkit_make_realtime(unsigned priority) {
 }
 static void openal_raise_priority(void) {
     static atomic_int reported;
-    if (rtkit_make_realtime(10)) return;
     struct sched_param parameter={.sched_priority=10};
     if (pthread_setschedparam(pthread_self(),SCHED_FIFO,&parameter)==0) return;
+    if (rtkit_make_realtime(10)) return;
     if (!atomic_exchange(&reported,1))
         log_console("audio: real-time scheduling unavailable; UI load can starve OpenAL");
 }

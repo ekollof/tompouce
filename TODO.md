@@ -307,6 +307,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       "Computer says no" at 128 voices staying inside the 128-frame PipeWire
       deadline with zero gaps on the real device. Add forced C/SSE2/AVX2 PCM
       equivalence tests before landing it.
+      - [x] Four-frame routing/send kernel (`src/render_block.c`) with exact C
+        and AVX2 paths and `test_render_block`.
+      - [ ] Split the per-frame voice stage from the effect/master stage, then
+        stage four frames through the block kernel. Blocks with pending onsets,
+        scope or named targets keep the scalar route.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

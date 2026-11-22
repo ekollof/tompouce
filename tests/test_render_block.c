@@ -40,6 +40,17 @@ static void compare(int cross, int dsp, double room) {
     render_block_route_c(&voice,in_l,in_r,&a);
     render_block_route_avx2(&voice,in_l,in_r,&b);
     assert(!memcmp(&a,&b,sizeof(a)));
+    double scope_c[RENDER_BLOCK_FRAMES]={0}, scope_avx2[RENDER_BLOCK_FRAMES]={0};
+    render_block_route_mask_scope_c(&voice,in_l,in_r,&a,
+        (1u<<RENDER_BLOCK_FRAMES)-1,scope_c);
+    render_block_route_avx2_scope(&voice,in_l,in_r,&b,scope_avx2);
+    assert(!memcmp(scope_c,scope_avx2,sizeof(scope_c)));
+    for (unsigned i=0;i<RENDER_BLOCK_FRAMES;i++) {
+        double l=in_l[i]*voice.route_ll+(voice.route_lr!=0?in_r[i]*voice.route_lr:0);
+        double r=in_r[i]*voice.route_rr+(voice.route_rl!=0?in_l[i]*voice.route_rl:0);
+        double want=(l*voice.route_left+r*voice.route_right)*voice.route_dry*.5;
+        assert(scope_c[i]==want);
+    }
 }
 
 int main(void) {

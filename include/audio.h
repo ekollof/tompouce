@@ -15,6 +15,7 @@ typedef struct Voice {
     DspState dsp_right;
     int active;
     int out_target; /* 0 default, 1..4 named output streams */
+    int soa_lane, soa_active, soa_pending; /* from-allocation SoA bank */
     unsigned scope_mask, scope_generation;
     int inst;
     double freq;

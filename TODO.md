@@ -335,13 +335,28 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         35-second "Computer says no" run measured 41 gaps and max ~3.33 ms, so
         it was reverted. Lane grouping/synchronization and per-frame filter
         updates still cost more than the scalar path.
-      - [x] From-allocation SoA voice bank (`src/soa_voice.c`): source,
-        position/step, ADSR, gate/release, LPF with LPE/LFO coefficient
-        updates, and per-lane output state. `test_soa_voice` matches the scalar
-        sample/DSP path exactly for mono/stereo and LPE/non-LPE cases.
-      - [ ] Wire the SoA voice bank into the main allocator and route order,
-        support the remaining active filters/effects, then run the full PCM
-        gates and benchmark "Computer says no" against the 128-frame deadline.
+      - [x] From-allocation SoA voice bank (`src/soa_voice.c`): sample and
+        sine/saw/square/triangle sources, position/step, ADSR, gate/release,
+        oscillator phase, low-pass with LPE/LFO coefficient updates, identity
+        filtering for DSP-bypassed voices, and per-lane output state.
+        `test_soa_voice` matches the scalar paths exactly, including four-lane
+        group isolation and lane removal.
+      - [x] Wire the bank into allocation and route order. Lanes are admitted
+        at the next four-frame block boundary, so no state is copied per block;
+        the scalar loop routes a lane at its own slot position (or stages it
+        through `render_block`), preserving mixing order and pattern-scope taps.
+        Retirement copies current lane state before eviction.
+      - [x] "Computer says no" on PipeWire 128-frame quanta: roughly 75 lanes
+        per block now cover the source/envelope/filter/routing hot path.
+        Repeated 35-second runs measure average render ~1.24-1.30 ms, maximum
+        2.4-2.95 ms, zero callbacks over 3 ms and zero gaps in 9 of the last 10
+        runs. One 53 ms outlier occurred while lock waits stayed at 8-22 us, so
+        it was an external stall rather than callback work. The 128-frame
+        deadline is met with roughly 15% headroom on the maximum.
+      - [ ] Extend lanes to the remaining per-sample effects (band/high-pass,
+        vowel, phaser, chorus, distortion) and to supersaw/native sources, then
+        revisit the compact active-voice list. Those paths are still scalar and
+        account for the residual tail near the 2.9 ms deadline.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

@@ -27,6 +27,10 @@ void render_block_route(const Voice *voice, const double *in_l,
 /* Only frames whose bit is set in mask are routed. */
 void render_block_route_mask(const Voice *voice, const double *in_l,
     const double *in_r, VoiceMixBlock *mix, unsigned mask);
+/* As above, and when scope is non-NULL writes each frame's pre-bus scope tap
+   (the scalar (l*left+r*right)*dry*.5 value) into scope[0..3]. */
+void render_block_route_mask_scope(const Voice *voice, const double *in_l,
+    const double *in_r, VoiceMixBlock *mix, unsigned mask, double *scope);
 void render_block_route_c(const Voice *voice, const double *in_l,
     const double *in_r, VoiceMixBlock *mix);
 #if RENDER_BLOCK_HAVE_AVX2

@@ -138,9 +138,27 @@ DSP work, not yet a performance win. Release LTO is a separate, measured
 build-level improvement: on the same 35-second profile run it reduced average
 callback render from ~1.63 ms to ~1.59 ms and over-3-ms callbacks to one.
 `-DWITH_LTO=OFF` restores the previous build. The four-voice sample SoA
-experiments were reverted; see `TODO.md` for their measurements. The audio/reference gates and the
-supersaw exactness test pass; the known `tui_pty` vi startup case remains
-timing-flaky.
+experiments were reverted; see `TODO.md` for their measurements.
+
+The from-allocation SoA bank now owns most of this composition. Qualifying
+sample and sine/saw/square/triangle voices copy a compact lane once, at the
+next four-frame block boundary after onset, and the lane then owns source
+position, ADSR, oscillator phase, low-pass state (including LPE/LFO coefficient
+updates) and routing constants. Voices with no active DSP use an identity
+biquad, which reproduces the scalar bypass and clamp exactly. Pattern scopes
+are accumulated from the staged routing taps, so scope voices no longer disable
+block staging. On the 128-frame PipeWire stress run about **75 lanes per block**
+are active; repeated 35-second runs measure **~1.24-1.30 ms average** callback
+render with a **2.4-2.95 ms maximum**, no callbacks over 3 ms and **zero PipeWire
+gaps** in 9 of the last 10 runs. The single 53 ms outlier was not callback work:
+the maximum `voice_lock` wait stayed at 8-22 us across the same runs. Retiring a
+bank voice copies its current lane state first, and the browser retirement
+envelope/cut suite (62 cases) plus the vowel impulse suite still pass. Band/high
+pass, vowel, phaser, chorus, distortion, supersaw and native sources remain
+scalar and account for the residual tail near the 2.9 ms deadline.
+
+The audio/reference gates and the supersaw exactness test pass; the known
+`tui_pty` vi startup case remains timing-flaky.
 The earlier OpenAL **zero-underrun** reading was a blind spot: it only counted
 an empty app queue. A source-state check now also counts OpenAL stopping and
 restarting while buffers are still queued. With the dense "Computer says no"

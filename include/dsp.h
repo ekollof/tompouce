@@ -95,6 +95,12 @@ void dsp_params_init(DspParams *p);
 void dsp_params_read(DspParams *p, const cJSON *value);
 void dsp_read_adsr(const cJSON *value, const char *const names[4], const double defaults[4], double out[4]);
 double dsp_filter_frequency(const DspParams *params, int type, double age, double gate);
+/* Same computation from cached cutoff/envelope controls. */
+double dsp_filter_frequency_values(double cutoff, double depth, double anchor,
+    double attack, double decay, double sustain, double release,
+    double age, double gate);
+/* Low-pass coefficients for a cached cutoff/Q pair. */
+void dsp_lowpass_q(DspBiquad *filter, double hz, double q);
 int dsp_filter_only(const DspState *state);
 void dsp_filter_coefficients(const DspParams *params, int type, double hz,
     DspBiquad *filter);

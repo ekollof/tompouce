@@ -23,6 +23,7 @@
 #include "prep_profile.h"
 #include "convolution_mix.h"
 #include "render_block.h"
+#include "soa_voice.h"
 #ifdef TOMPOUCE_RENDER_PROFILE
 static _Atomic unsigned long long section_voice, section_fx, section_master;
 static unsigned long long audio_cycles(void) {
@@ -382,6 +383,212 @@ static unsigned block_frame;
 static double block_input_l[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
 static double block_input_r[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
 static unsigned char block_staged[VOICE_SLOTS][RENDER_BLOCK_FRAMES];
+static double frame_scope[RENDER_BLOCK_FRAMES][N_PATTERN_SCOPES];
+static SoaVoiceBank soa_bank;
+static Voice *soa_bank_owner[SOA_VOICE_LANES];
+static double soa_out_l[SOA_VOICE_FRAMES*SOA_VOICE_LANES];
+static double soa_out_r[SOA_VOICE_FRAMES*SOA_VOICE_LANES];
+static void soa_bank_reset(void);
+static void soa_bank_release(Voice *v);
+
+static int soa_kind_for(const Voice *v) {
+    if (v->smpbuf)
+        return v->smp_channels>=1 && v->smp_channels<=2 ? SOA_KIND_SAMPLE : -1;
+    switch (v->inst) {
+        case INST_SINE: return SOA_KIND_SINE;
+        case INST_SAW: return SOA_KIND_SAW;
+        case INST_SQUARE: return SOA_KIND_SQUARE;
+        case INST_TRI: return SOA_KIND_TRI;
+        default: return -1;
+    }
+}
+
+static int soa_bank_eligible(const Voice *v) {
+    if (!v->active || v->retiring || v->stretch_buffer) return 0;
+    if (native_synth_effect(v->native_program)) return 0;
+    if (!v->dsp.control.enabled) return 0;
+    if (v->dsp.effects_active && !dsp_filter_only(&v->dsp)) return 0;
+    if (!v->dsp.effects_active &&
+        (v->dsp.control.noise_mix>0 || v->dsp.control.source_noise)) return 0;
+    if (v->out_target || v->graph_end>v->graph_fade_start) return 0;
+    if (v->dsp.pitch_active || v->dsp.fm_active) return 0;
+    if (v->lpf_hz>0) return 0;
+    int kind=soa_kind_for(v);
+    if (kind<0) return 0;
+    if (kind==SOA_KIND_SAMPLE) {
+        if (v->cut_pending || v->smpstep<0) return 0;
+        if (v->dsp.control.p[DSP_LOOP]>0) return 0;
+        if (v->smppos<0 || v->smplen<=0) return 0;
+        if (v->smp_channels==2 && !dsp_filter_only(&v->dsp_right)) return 0;
+    } else if (v->lfo_tgt!=0) return 0;
+    return 1;
+}
+
+static void soa_bank_release(Voice *v) {
+    if (!v) return;
+    int lane=v->soa_lane;
+    if (v->soa_active && lane>=0 && lane<SOA_VOICE_LANES) {
+        soa_voice_bank_remove(&soa_bank,lane);
+        soa_bank_owner[lane]=NULL;
+    }
+    v->soa_active=0; v->soa_lane=-1; v->soa_pending=0;
+}
+
+static void soa_bank_reset(void) {
+    soa_voice_bank_clear(&soa_bank);
+    memset(soa_bank_owner,0,sizeof(soa_bank_owner));
+    for (int i=0;i<VOICE_SLOTS;i++) {
+        voices[i].soa_active=0;
+        voices[i].soa_lane=-1;
+        voices[i].soa_pending=0;
+    }
+}
+
+static void soa_lane_from_voice(SoaVoiceLane *l, Voice *v, int kind) {
+    memset(l,0,sizeof(*l));
+    l->owner=v; l->onset_serial=v->onset_serial; l->kind=kind;
+    l->orbit=v->orbit; l->out_target=v->out_target;
+    l->route_dsp=v->route_dsp;
+    l->ll=v->route_ll; l->lr=v->route_lr; l->rl=v->route_rl;
+    l->rr=v->route_rr; l->left=v->route_left; l->right=v->route_right;
+    l->dry=v->route_dry; l->delay=v->route_delay;
+    l->room=v->route_room; l->room_size=v->route_room_size;
+    l->scope_mask=v->scope_mask; l->scope_generation=v->scope_generation;
+    l->amp=v->amp; l->wave_gain=v->waveform_gain>0?v->waveform_gain:1;
+    l->age=v->age; l->gate=v->gate_end-v->start_time;
+    l->att=v->vatt; l->dec=v->vdec; l->sus=v->vsus; l->rel=v->vrel;
+    l->raw_rel=v->vrel;
+    l->env_att=v->vatt>=0?v->vatt:0.005;
+    l->env_dec=v->vdec>=0?v->vdec:0.1;
+    l->env_sus=v->vsus>=0?v->vsus:0.6;
+    l->env_rel=v->vrel>=0?v->vrel:0.15;
+    if (l->env_att<0.001) l->env_att=0.001;
+    if (l->env_dec<0) l->env_dec=0;
+    if (l->env_sus<0) l->env_sus=0;
+    if (l->env_sus>1) l->env_sus=1;
+    if (l->env_rel<0.005) l->env_rel=0.005;
+    l->env=v->env; l->released=v->released;
+    l->note_off_time=v->note_off_time;
+    l->release_time=v->release_time;
+    l->release_start_level=v->release_start_level;
+    l->tick=v->dsp.tick;
+    l->filterless=!v->dsp.effects_active;
+    if (l->filterless) {
+        /* dsp_process bypasses its filter and only clamps; an identity biquad
+           reproduces that exactly in the shared four-lane kernel. */
+        memset(&l->biquad_l,0,sizeof(l->biquad_l));
+        memset(&l->biquad_r,0,sizeof(l->biquad_r));
+        l->biquad_l.b0=1; l->biquad_r.b0=1;
+    } else {
+        l->biquad_l=v->dsp.filter[0];
+        l->biquad_r=v->dsp_right.filter[0];
+    }
+    if (kind==SOA_KIND_SAMPLE) {
+        l->buf=v->smpbuf; l->channels=v->smp_channels; l->smplen=v->smplen;
+        l->pos=v->smppos; l->step=v->smpstep;
+        l->stereo_filter=l->channels==2;
+    } else {
+        l->freq=v->freq*(v->stretch_factor>0?v->stretch_factor:1);
+        l->phase=v->phase;
+        l->phase_inc=2*M_PI*l->freq/SR;
+        l->pw=v->pw;
+    }
+    const double *p=v->dsp.control.p;
+    l->lpf=p[DSP_LPF]; l->lpq=p[DSP_LPQ]; l->lpe=p[DSP_LPE];
+    l->lanchor=p[DSP_ANCHOR]; l->lpa=p[DSP_LPA]; l->lpd=p[DSP_LPD];
+    l->lps=p[DSP_LPS]; l->lpr=p[DSP_LPR];
+}
+
+/* Lanes start at four-frame block boundaries, so the scalar path has advanced
+   the owner through the previous block and no state is copied per block. */
+static void soa_bank_admit_pending(void) {
+    for (int i=0;i<VOICE_SLOTS;i++) {
+        Voice *v=&voices[i];
+        if (!v->soa_pending || v->soa_active) continue;
+        v->soa_pending=0;
+        if (!soa_bank_eligible(v)) continue;
+        SoaVoiceLane lane;
+        soa_lane_from_voice(&lane,v,soa_kind_for(v));
+        int index=soa_voice_bank_add(&soa_bank,&lane);
+        if (index<0) continue;
+        soa_bank_owner[index]=v;
+        v->soa_lane=index; v->soa_active=1;
+    }
+}
+
+static void soa_bank_process(const double *times, unsigned count) {
+    if (!count || count>SOA_VOICE_FRAMES) return;
+    soa_voice_bank_process(&soa_bank,count,times,soa_out_l,soa_out_r);
+    if (block_staging) {
+        for (int index=0;index<SOA_VOICE_LANES;index++) {
+            Voice *v=soa_bank_owner[index];
+            if (!v || !v->soa_active || v->soa_lane!=index ||
+                v->onset_serial!=soa_bank.lanes[index].onset_serial) continue;
+            int slot=(int)(v-voices);
+            if (slot<0 || slot>=VOICE_SLOTS) continue;
+            unsigned rendered=soa_bank.lanes[index].rendered;
+            for (unsigned j=0;j<count;j++) {
+                if (!(rendered&(1u<<j))) continue;
+                block_input_l[slot][j]=soa_out_l[j*SOA_VOICE_LANES+index];
+                block_input_r[slot][j]=soa_out_r[j*SOA_VOICE_LANES+index];
+                block_staged[slot][j]=1;
+            }
+        }
+    }
+}
+
+/* Refresh a lane owner's scalar fields. Eviction copies the Voice, so the
+   mirrored state must be current before retire_voice_locked runs. */
+static void soa_bank_sync_one(Voice *v) {
+    if (!v || !v->soa_active) return;
+    int index=v->soa_lane;
+    if (index<0 || index>=SOA_VOICE_LANES || soa_bank_owner[index]!=v) return;
+    SoaVoiceLane *l=&soa_bank.lanes[index];
+    if (v->onset_serial!=l->onset_serial) return;
+    int group=index/4, sub=index%4;
+    v->age=l->age; v->smppos=l->pos; v->phase=l->phase;
+    v->env=l->env; v->released=l->released; v->dsp.tick=l->tick;
+    v->release_time=l->release_time;
+    v->release_start_level=l->release_start_level;
+    v->dsp.filter[0].b0=soa_bank.filter_l[group].b0[sub];
+    v->dsp.filter[0].b1=soa_bank.filter_l[group].b1[sub];
+    v->dsp.filter[0].b2=soa_bank.filter_l[group].b2[sub];
+    v->dsp.filter[0].a1=soa_bank.filter_l[group].a1[sub];
+    v->dsp.filter[0].a2=soa_bank.filter_l[group].a2[sub];
+    v->dsp.filter[0].z1=soa_bank.filter_l[group].z1[sub];
+    v->dsp.filter[0].z2=soa_bank.filter_l[group].z2[sub];
+    if (l->stereo_filter) {
+        v->dsp_right.filter[0].b0=soa_bank.filter_r[group].b0[sub];
+        v->dsp_right.filter[0].b1=soa_bank.filter_r[group].b1[sub];
+        v->dsp_right.filter[0].b2=soa_bank.filter_r[group].b2[sub];
+        v->dsp_right.filter[0].a1=soa_bank.filter_r[group].a1[sub];
+        v->dsp_right.filter[0].a2=soa_bank.filter_r[group].a2[sub];
+        v->dsp_right.filter[0].z1=soa_bank.filter_r[group].z1[sub];
+        v->dsp_right.filter[0].z2=soa_bank.filter_r[group].z2[sub];
+    }
+}
+
+static void soa_bank_sync_back(void) {
+    for (int index=0;index<SOA_VOICE_LANES;index++) {
+        Voice *v=soa_bank_owner[index];
+        if (!v) continue;
+        SoaVoiceLane *l=&soa_bank.lanes[index];
+        /* The slot may have been cleared or reused without trigger_voice
+           (owned tests and direct reset paths). Drop the orphan lane instead
+           of writing stale state into the new occupant. */
+        if (!v->soa_active || v->soa_lane!=index ||
+            v->onset_serial!=l->onset_serial) {
+            soa_voice_bank_remove(&soa_bank,index);
+            soa_bank_owner[index]=NULL;
+            continue;
+        }
+        soa_bank_sync_one(v);
+        if (l->ended) {
+            v->active=0;
+            soa_bank_release(v);
+        }
+    }
+}
 static unsigned retirement_overflow;
 /* Producers already hold voice_lock. Only the scheduler formats/logs errors;
    the callback writes bounded records, including when playback is stopped. */
@@ -912,6 +1119,7 @@ static void voice_onset(Voice *v) {
             duck_atk[o]=fmax(0,v->onset_duck_attack); duck_t[o]=0;
         }
     }
+    if (soa_bank_eligible(v)) v->soa_pending=1;
 }
 
 /* Web sample cut schedules gain automation when the source is prepared.
@@ -990,7 +1198,9 @@ static void cache_routing(Voice *v) {
 }
 
 static void trigger_voice(Voice *v, AudioEvent *ev) {
+    soa_bank_release(v);
     memset(v, 0, sizeof(Voice));
+    v->soa_lane=-1;
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
     v->out_target = ev->out_target;
     dbg_token(v->token, sizeof(v->token), ev->token);
@@ -1401,6 +1611,9 @@ static VoiceResources retire_voice_locked(int chosen, double incoming_time) {
     VoiceResources displaced=voice_resources(&voices[slot]);
     voices[slot]=voices[chosen];
     Voice *voice=&voices[slot];
+    /* A retired graph is always rendered by the scalar path; its former lane
+       stays with the source slot until trigger_voice releases it. */
+    voice->soa_active=0; voice->soa_lane=-1; voice->soa_pending=0;
     voice->retiring=1;
     voice->retire_end=incoming_time+.25;
     voice->retire_anchor=audio_time; voice->retire_level=1;
@@ -1533,6 +1746,7 @@ void audio_trigger_event(AudioEvent *ev) {
     }
     /* Superdough applies the vocoder's 40 ms preroll before pool eviction. */
     double source_time=ev->time-(ev->stretch>0?.04:0);
+    soa_bank_sync_one(&voices[chosen]);
     VoiceResources previous=voices[chosen].active?retire_voice_locked(chosen,source_time):voice_resources(&voices[chosen]);
     trigger_voice(&voices[chosen], ev);
     if (voices[chosen].active)
@@ -1880,29 +2094,30 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         if (count>RENDER_BLOCK_FRAMES) count=RENDER_BLOCK_FRAMES;
         frame_times[0]=audio_time;
         for (unsigned long j=1;j<count;j++) frame_times[j]=frame_times[j-1]+1.0/SR;
-        /* Stage routing for full blocks with no voice onset, scope voice or
-           named target. Holding voice_lock makes the routing coefficients
-           stable through the block; partial blocks use the scalar path. */
+        /* Stage routing for full blocks with no voice onset or named target.
+           Holding voice_lock makes the routing coefficients and scope
+           generations stable through the block; partial blocks use the scalar
+           path. Pattern scopes are published from the staged taps. */
         block_staging=0; block_lock_held=0;
-        if (count==RENDER_BLOCK_FRAMES &&
-            (playing || atomic_load(&reference_mode))) {
-            double last=frame_times[count-1];
-            if (next_voice_onset>last+1e-10) {
-                pthread_mutex_lock(&voice_lock);
-                block_lock_held=1;
-                int stage=next_voice_onset>last+1e-10;
-                for (int v=0;v<VOICE_SLOTS && stage;v++)
-                    if (voices[v].active &&
-                        (voices[v].scope_mask || voices[v].out_target))
-                        stage=0;
-                if (stage) {
-                    block_staging=1;
-                    memset(block_staged,0,sizeof(block_staged));
-                } else {
-                    pthread_mutex_unlock(&voice_lock);
-                    block_lock_held=0;
+        int render_active=playing || atomic_load(&reference_mode);
+        if (render_active) {
+            pthread_mutex_lock(&voice_lock);
+            block_lock_held=1;
+            soa_bank_admit_pending();
+            if (count==RENDER_BLOCK_FRAMES) {
+                double last=frame_times[count-1];
+                if (next_voice_onset>last+1e-10) {
+                    int stage=1;
+                    for (int v=0;v<VOICE_SLOTS && stage;v++)
+                        if (voices[v].active && voices[v].out_target)
+                            stage=0;
+                    if (stage) {
+                        block_staging=1;
+                        memset(block_staged,0,sizeof(block_staged));
+                    }
                 }
             }
+            soa_bank_process(frame_times,count);
         }
         for (unsigned long j=0;j<count;j++) {
         audio_time=frame_times[j];
@@ -1928,6 +2143,23 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 Voice *V = &voices[v];
                 if (!V->active) {
                     if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
+                    continue;
+                }
+                if (V->soa_active) {
+                    /* The lane already rendered this frame. Route at the
+                       voice's slot position so the mixing order matches the
+                       scalar loop exactly. */
+                    if (!block_staging) {
+                        SoaVoiceLane *lane=&soa_bank.lanes[V->soa_lane];
+                        if (lane->rendered&(1u<<block_frame)) {
+                            int orbit=V->orbit;
+                            if (orbit<0 || orbit>=N_ORBITS) orbit=0;
+                            route_voice(V,
+                                soa_out_l[block_frame*SOA_VOICE_LANES+V->soa_lane],
+                                soa_out_r[block_frame*SOA_VOICE_LANES+V->soa_lane],
+                                &mixes[orbit]);
+                        }
+                    }
                     continue;
                 }
                 if (V->retiring && audio_time>=V->retire_end-1e-10) {
@@ -2312,7 +2544,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 duck_g[o] = orbit_duck_gain(o);
                 duck_t[o] += dt;
             }
-            pattern_scope_publish();
+            /* Staged blocks publish their scope taps after routing the whole
+               block, in the same per-frame order. */
+            if (!block_staging) pattern_scope_publish();
             if (!block_lock_held) pthread_mutex_unlock(&voice_lock);
         } else {
             if (!block_lock_held) pthread_mutex_lock(&voice_lock);
@@ -2337,6 +2571,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             for (int o=0;o<N_ORBITS;o++)
                 for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
                     orbit_blocks[o].room_size[j]=-1;
+            memset(frame_scope,0,sizeof(frame_scope));
             for (int slot=0;slot<VOICE_SLOTS;slot++) {
                 unsigned mask=0;
                 for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
@@ -2344,8 +2579,19 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 if (!mask) continue;
                 int orbit=voices[slot].orbit;
                 if (orbit<0 || orbit>=N_ORBITS) orbit=0;
-                render_block_route_mask(&voices[slot],block_input_l[slot],
-                    block_input_r[slot],&orbit_blocks[orbit],mask);
+                double scope[RENDER_BLOCK_FRAMES]={0};
+                unsigned scope_mask=voices[slot].scope_mask;
+                render_block_route_mask_scope(&voices[slot],block_input_l[slot],
+                    block_input_r[slot],&orbit_blocks[orbit],mask,
+                    scope_mask?scope:NULL);
+                for (unsigned m=scope_mask, i=0;m;i++,m>>=1)
+                    if ((m&1u) && voices[slot].scope_generation==pattern_scope_generation[i])
+                        for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
+                            if (mask&(1u<<j)) frame_scope[j][i]+=scope[j];
+            }
+            for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++) {
+                memcpy(pattern_scope_frame,frame_scope[j],sizeof(pattern_scope_frame));
+                pattern_scope_publish();
             }
             for (int o=0;o<N_ORBITS;o++) for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++) {
                 VoiceMix *m=&frame_mixes[j][o];
@@ -2357,9 +2603,14 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 m->room_r=orbit_blocks[o].room_r[j];
                 m->room_size=orbit_blocks[o].room_size[j];
             }
+            soa_bank_sync_back();
             pthread_mutex_unlock(&voice_lock);
             block_lock_held=0;
             block_staging=0;
+        } else if (block_lock_held) {
+            soa_bank_sync_back();
+            pthread_mutex_unlock(&voice_lock);
+            block_lock_held=0;
         }
         for (unsigned long j=0;j<count;j++) {
         audio_time=frame_times[j];
@@ -2554,7 +2805,7 @@ void audio_shutdown(void) {
 }
 void audio_toggle_play(int on) {
     playing = on ? 1 : 0;
-    if (on) audio_peak_reset();
+    if (on) { audio_peak_reset(); soa_bank_reset(); }
 }
 int audio_is_playing(void) { return playing; }
 int audio_is_stream_active(void) {

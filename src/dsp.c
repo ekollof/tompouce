@@ -266,17 +266,16 @@ static double exponential_ramp(double from, double to, double fraction) {
 
 /* Match the frequency automation endpoints of Superdough getParamADSR,
    including arithmetic sustain levels and notes shorter than a segment. */
-double dsp_filter_frequency(const DspParams *params, int type, double age, double gate) {
-    if (!params || type < 0 || type > 2) return 0;
-    const double *p = params->p;
-    int base = type*7;
-    double depth = fabs(p[base+2]);
-    double low = fmin(20000,p[base]*pow(2,-depth*p[DSP_ANCHOR]));
-    double high = fmin(20000,p[base]*pow(2,depth*(1-p[DSP_ANCHOR])));
-    double start = p[base+2] < 0 ? high : low;
-    double peak = p[base+2] < 0 ? low : high;
-    double sustain = start+(peak-start)*p[base+5];
-    double a = p[base+3], d = p[base+4], r = p[base+6];
+double dsp_filter_frequency_values(double cutoff, double depth, double anchor,
+    double attack, double decay, double sustain_ratio, double release,
+    double age, double gate) {
+    double adepth = fabs(depth);
+    double low = fmin(20000,cutoff*pow(2,-adepth*anchor));
+    double high = fmin(20000,cutoff*pow(2,adepth*(1-anchor)));
+    double start = depth < 0 ? high : low;
+    double peak = depth < 0 ? low : high;
+    double sustain = start+(peak-start)*sustain_ratio;
+    double a = attack, d = decay, r = release;
     double attack_end = fmin(a,gate);
     double attack_value = a > 0 ? start+(peak-start)*attack_end/a : peak;
     double decay_end = fmin(a+d,gate);
@@ -288,6 +287,14 @@ double dsp_filter_frequency(const DspParams *params, int type, double age, doubl
     else held = gate < a ? attack_value : gate < a+d ? decay_value : sustain;
     if (age <= gate) return held;
     return r > 0 ? exponential_ramp(held,start,(age-gate)/r) : start;
+}
+
+double dsp_filter_frequency(const DspParams *params, int type, double age, double gate) {
+    if (!params || type < 0 || type > 2) return 0;
+    const double *p = params->p;
+    int base = type*7;
+    return dsp_filter_frequency_values(p[base],p[base+2],p[DSP_ANCHOR],
+        p[base+3],p[base+4],p[base+5],p[base+6],age,gate);
 }
 
 static void coefficients(DspBiquad *f, int type, double hz, double q) {
@@ -309,6 +316,11 @@ void dsp_filter_coefficients(const DspParams *params, int type, double hz,
     coefficients(filter,type,hz,params->p[type*7+1]);
 }
 
+void dsp_lowpass_q(DspBiquad *filter, double hz, double q) {
+    if (!filter) return;
+    coefficients(filter,0,hz,q);
+}
+
 int dsp_filter_only(const DspState *state) {
     if (!state || !state->control.enabled || !state->effects_active) return 0;
     const double *p=state->control.p;
@@ -316,7 +328,8 @@ int dsp_filter_only(const DspState *state) {
         p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 || p[DSP_CRUSH]<16 ||
         p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 || p[DSP_TREM]>0 ||
         p[DSP_COMP]<0 || p[DSP_PHASER]>0 || p[DSP_CHORUS]>0 ||
-        p[DSP_POST]!=1 || p[DSP_CUT]>0 || state->control.noise_mix>0 ||
+        p[DSP_POST]!=1 || p[DSP_CUT]>0 || p[DSP_LPRATE]>0 ||
+        p[DSP_PWRATE]>0 || state->control.noise_mix>0 ||
         state->control.source_noise) return 0;
     return 1;
 }

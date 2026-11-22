@@ -202,6 +202,12 @@ try {
       code:`note(69).s('sine').gain(.4).clip(.05).release(${release}).K(sine(sFreq).mul(.1).out()).fxr(.005)`,cycles:1,cps:.5,window:.2,correlation:.99})),
     {name:'fx-nested-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-nested-inner-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800).gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-graph-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out()).FX(x=>x.lpf(200))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-graph-out-channels',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out(0).mul(.5).out(1)).FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-worklet-effect-gain',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).worklet('audioin().delay(.05).out()').FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-worklet-effect-tail',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).worklet('audioin().delay(.1).out()').fxr(.4).FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.8,correlation:.99},
+
+
     {name:'kabel-fxr-short-release',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.05).release(0).worklet('audioin().add(.1).out()').fxr(.005)`,cycles:1,cps:.5,window:.2,correlation:.99},
     ...[
       ['gain-low',`.gain(.2).worklet('audioin().fold(8).out()')`],

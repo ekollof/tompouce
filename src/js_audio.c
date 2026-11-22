@@ -295,6 +295,16 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     if (!cJSON_IsArray(chains)) return;
     int count = cJSON_GetArraySize(chains);
     if (count <= 0 || count > 8) return;
+    /* A K() graph source replaces the oscillator/sample outside the FX chain:
+       the deployed renderer does not apply the chain's default gain there.
+       Worklet audioin effects and ordinary sources still enter the chain. */
+    const cJSON *program=cJSON_GetObjectItemCaseSensitive(v,"_nativeProgram");
+    const cJSON *kind=cJSON_IsObject(program)?
+        cJSON_GetObjectItemCaseSensitive(program,"kind"):NULL;
+    const cJSON *effect=cJSON_IsObject(program)?
+        cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
+    if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
+        !cJSON_IsTrue(effect)) return;
     double chain_gain = .8;
     for (int i = 0; i < count; i++) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(

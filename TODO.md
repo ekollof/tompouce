@@ -224,8 +224,14 @@ and measured divergences are recorded in the archive.
       startup now have independent web comparisons. Nested `FX(...)` chains now
       have two gated cases (`fx-nested-`, correlation 0.99999996, RMS ratio
       1.0003): query-time materialization exposes bounded step descriptors and
-      the native renderer applies the web chain's default 0.8 gain. Individual
-      filter/send/pan steps are materialized but not replayed yet. See
+      the native renderer applies the web chain's default 0.8 gain. Four `fx-`
+      gates cover the graph/effect boundary: the web does not apply that chain
+      gain to a `K()` graph source, so the native renderer skips it there
+      (`fx-graph-source-lpf` 0.99999997/1.0003 and `fx-graph-out-channels`
+      0.99999994/1.0004) while keeping it for `audioin()` worklet effects
+      (`fx-worklet-effect-gain` and `fx-worklet-effect-tail`, both
+      0.99999994/1.0004). Individual filter/send/pan steps are materialized but
+      not replayed yet. See
       [Kabelsalat effect tails](docs/audio-comparison.md#kabelsalat-effect-tails-and-input-routing).
 - [ ] Extend shared-effect checks beyond the 24 send/orbit/fixed-IR/lifetime
       cases: two `shared-room-source-` gates cover a panned source

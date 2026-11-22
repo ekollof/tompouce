@@ -148,6 +148,30 @@ static void test_sample_windows(void) {
     assert(!sample->active && sample->smppos == 4);
 }
 
+/* The deployed renderer applies the FX chain's default gain to ordinary
+   sources and worklet audioin effects, but not to a K() graph source. */
+static void test_fx_graph_gain(void) {
+    static const char *base =
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":69,\"s\":\"sine\","
+        "\"gain\":0.3,\"clip\":0.1,"
+        "\"_fxSteps\":[{\"steps\":[]}],%s}}";
+    char text[512];
+    const char *cases[] = {
+        "\"_nativeProgram\":{\"kind\":\"graph\",\"effect\":false}",
+        "\"_nativeProgram\":{\"kind\":\"graph\",\"effect\":true}",
+        "\"x\":0"
+    };
+    const double expected[] = {0.3, 0.24, 0.24};
+    for (int i=0;i<3;i++) {
+        snprintf(text,sizeof(text),base,cases[i]);
+        cJSON *hap=cJSON_Parse(text); assert(hap);
+        AudioEvent event;
+        assert(js_audio_event(hap,0,2,&event));
+        assert(fabs(event.gain-expected[i])<1e-12);
+        cJSON_Delete(hap);
+    }
+}
+
 static void test_convolution(void) {
     enum { FRAMES = 513, INPUT = 777 };
     float impulse[FRAMES*2], signal[INPUT*2];
@@ -654,6 +678,7 @@ int main(void) {
     event_queue_clear();
 
     test_sample_windows();
+    test_fx_graph_gain();
     test_sample_connection_lifetime();
     test_sample_pitch_quantum();
     test_convolution();

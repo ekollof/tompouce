@@ -1169,7 +1169,15 @@ filter/send/pan steps are materialized but not yet replayed, because replaying
 the filter step changed the waveform without matching the web chain. The two
 `fx-nested-` cases are now gated at the unchanged 0.99 correlation and 0.85–1.15
 RMS ratio: correlation 0.99999996 and ratio 1.0003. No threshold or baseline
-was changed.
+was changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
+source replaces the oscillator or sample outside the FX chain, and the deployed
+renderer does not apply the chain's default gain there. The native renderer now
+skips that gain for graph sources while keeping it for `audioin()` worklet
+effects and ordinary sources. `fx-graph-source-lpf` (correlation 0.999999966,
+ratio 1.0003), `fx-graph-out-channels` (0.999999937, 1.0004),
+`fx-worklet-effect-gain` (0.999999942, 1.0004) and
+`fx-worklet-effect-tail` (0.999999932, 1.0004) pass at the unchanged
+thresholds.
 
 Eight `kabel-fxr-` gates compare actual browser worklet output with native PCM:
 zero/short/extended cleanup times, feedback, clipped and naturally ending

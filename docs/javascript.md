@@ -461,7 +461,9 @@ The cleanup and fade use the original hap end and the raw `release` control;
 natural sample endings do not move them. The source ADSR's minimum release is
 separate: `.release(0).fxr(.005)` still fades over five milliseconds after the
 hap end, while a naturally ending sample can leave a much later delay tail.
-General nested `FX(...)` chains remain outside this coverage.
+General nested `FX(...)` chains remain outside this coverage. The graph/effect
+boundary is covered: a `K()` source does not receive the chain's default gain,
+while `audioin()` worklet effects and ordinary sources do.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

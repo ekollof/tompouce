@@ -114,8 +114,11 @@ static void test_engine_resolution(void) {
        An env override uses a different plugin, so the hash only applies to the
        default fixture. Strudel.cc has no LV2 counterpart; this deterministic
        PCM hash is the reference gate for the LV2 path. */
-    if (!getenv("TOMPOUCE_LV2_TEST_PLUGIN"))
+    const char *override=getenv("TOMPOUCE_LV2_TEST_PLUGIN");
+    if (!override)
         assert(hash==4044680287945718928ull && frames==13231);
+    else if (!strcmp(override,"urn:tompouce:test:gain"))
+        assert(hash==7545553860082693879ull && frames==13231);
     printf("LV2 engine resolution ok: %d frames, energy %.4f, hash %llu\n",
         frames,energy,(unsigned long long)hash);
 }
@@ -141,7 +144,8 @@ int main(void) {
             if (strstr(line,"Max address space") && strstr(line,"2147483648")) address_bound=1;
         }
         fclose(file);
-        assert(core_zero && address_bound);
+        assert(core_zero);
+        if (!getenv("TOMPOUCE_LV2_WORKER_SANITIZE")) assert(address_bound);
     }
     float input[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
     float output[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
@@ -152,7 +156,9 @@ int main(void) {
     assert(!lv2_worker_set_control(worker,9999,1.0f,error,sizeof(error)));
     assert(!lv2_worker_set_control(worker,0,NAN,error,sizeof(error)));
     assert(lv2_worker_set_control(worker,0,1.0f,error,sizeof(error)));
-    assert(lv2_worker_process(worker,input,output,LV2_WORKER_FRAMES,error,sizeof(error)));
+    int process_ok=lv2_worker_process(worker,input,output,LV2_WORKER_FRAMES,error,sizeof(error));
+    if (!process_ok) fprintf(stderr,"lv2 worker process failed: %s\n",error);
+    assert(process_ok);
     double energy=0;
     for (unsigned i=0;i<LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS;i++) {
         assert(isfinite(output[i]));

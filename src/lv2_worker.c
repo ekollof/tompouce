@@ -15,6 +15,7 @@
 #endif
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <math.h>
 #include <poll.h>
 #include <signal.h>
@@ -257,11 +258,21 @@ Lv2Worker *lv2_worker_start(const char *plugin_uri, double sample_rate,
         struct rlimit core={0,0}, files={64,64};
         struct rlimit address={2ull*1024*1024*1024,2ull*1024*1024*1024};
         setrlimit(RLIMIT_CORE,&core); setrlimit(RLIMIT_NOFILE,&files);
-        setrlimit(RLIMIT_AS,&address);
+        /* ASan reserves a large shadow address range; the test-only escape
+           lets the sanitized worker exercise the host glue. Normal runs keep
+           the 2 GiB confinement limit. */
+        if (getenv("TOMPOUCE_LV2_WORKER_SANITIZE")) {
+            struct rlimit unlimited={RLIM_INFINITY,RLIM_INFINITY};
+            setrlimit(RLIMIT_AS,&unlimited);
+        } else {
+            setrlimit(RLIMIT_AS,&address);
+        }
         dup2(to_child[0],STDIN_FILENO); dup2(from_child[1],STDOUT_FILENO);
         close(to_child[0]); close(to_child[1]); close(from_child[0]); close(from_child[1]);
-        int devnull=open("/dev/null",O_WRONLY);
-        if (devnull>=0) { dup2(devnull,STDERR_FILENO); close(devnull); }
+        if (!getenv("TOMPOUCE_LV2_WORKER_SANITIZE")) {
+            int devnull=open("/dev/null",O_WRONLY);
+            if (devnull>=0) { dup2(devnull,STDERR_FILENO); close(devnull); }
+        }
         _exit(child_main(STDIN_FILENO,STDOUT_FILENO));
     }
     close(to_child[0]); close(from_child[1]);
@@ -271,7 +282,7 @@ Lv2Worker *lv2_worker_start(const char *plugin_uri, double sample_rate,
         write_all(to_child[1],plugin_uri,uri_length);
     Lv2FrameHeader header;
     if (ok && read_all(from_child[0],&header,sizeof(header)) && header.ok) {
-        Lv2Worker *worker=malloc(sizeof(*worker));
+        Lv2Worker *worker=calloc(1,sizeof(*worker));
         if (worker) {
             worker->pid=pid; worker->in_fd=to_child[1]; worker->out_fd=from_child[0];
             return worker;

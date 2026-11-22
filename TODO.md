@@ -91,15 +91,17 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       for all safe plugins — 3155 ports across 219 plugins on this box — so
       slider mapping has a stable reference; the live plugin path itself is
       still not wired into the scheduler.
-- [ ] One instrument and one effect behind compare gates (rendered output vs
-      a pinned reference render), plus failure tests (missing/broken plugin,
-      dead worker, preset rejection) and sanitizer coverage of the host glue.
-      The instrument side now has a pinned offline PCM hash for the LSP
-      oscillator (13231 frames, deterministic across runs), the gain effect has
-      its existing engine-path hash, and control-port rejection (invalid index,
-      non-finite value) is tested alongside the missing-plugin and dead-worker
-      cases. The engine-path gain hash currently skips here because resolution
-      is unavailable in this environment, and sanitizer coverage remains open.
+- [x] One instrument and one effect behind pinned reference gates, plus
+      failure tests (missing/broken plugin, dead worker, preset rejection) and
+      sanitizer coverage of the host glue. The instrument side has a pinned
+      offline PCM hash for the LSP oscillator (13231 frames, deterministic
+      across runs), the gain effect has its engine-path hash, and control-port
+      rejection (invalid index, non-finite value) is tested alongside the
+      missing-plugin and dead-worker cases. The self-contained
+      `tests/fixtures/lv2-test` gain fixture now pins its own engine-path hash
+      and runs under ASan/UBSan (`test-sanitize`), including worker plugin
+      instantiation and PCM processing. External MIDI/instrument fixtures skip
+      when those plugins are unavailable; the owned gain fixture does not.
 - [x] Document supported classes, the no-UI ceiling, per-user plugin setup
       (licenses/installs stay with the user) and the rtkit/Wine notes.
       See [external plugin hosting](docs/plugin-hosting.md#supported-classes-and-the-ui-ceiling).

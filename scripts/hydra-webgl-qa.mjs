@@ -184,7 +184,7 @@ try {
     await s2.initImage(painted('#f00','#0f0').toDataURL());
     const imageReady=await wait(s2);
     const image=run(src(s2),3000);
-    let camera=null,screen=null,stubError=null,imageError=s2.error;
+    let camera=null,screen=null,stream=null,stubError=null,imageError=s2.error;
     const own=Object.getOwnPropertyDescriptor(navigator,'mediaDevices');
     const capture=()=>{const c=painted('#0f0','#00f');
       return c.captureStream?c.captureStream(10):null;};
@@ -202,8 +202,11 @@ try {
     }
     if(own) Object.defineProperty(navigator,'mediaDevices',own);
     else delete navigator.mediaDevices;
-    s0.clear(); s1.clear(); s2.clear();
-    return {imageReady,image,camera,screen,stubError,imageError};
+    await s3.initStream(capture());
+    if(await wait(s3)) stream=run(src(s3),3300);
+    else stream={error:-1,detail:s3.error,min:0,max:0,mean:0};
+    s0.clear(); s1.clear(); s2.clear(); s3.clear();
+    return {imageReady,image,camera,screen,stream,stubError,imageError};
   })()`);
   const checkSource=(name,value)=>{
     if (!value || value.error!==0 || !Number.isFinite(value.mean) ||
@@ -218,10 +221,12 @@ try {
   } else {
     checkSource('camera source', sourceResults.camera);
     checkSource('screen source', sourceResults.screen);
+    checkSource('stream source', sourceResults.stream);
     console.log('hydra sources:', JSON.stringify({
       image: sourceResults.imageReady,
       camera: sourceResults.camera && sourceResults.camera.mean,
-      screen: sourceResults.screen && sourceResults.screen.mean
+      screen: sourceResults.screen && sourceResults.screen.mean,
+      stream: sourceResults.stream && sourceResults.stream.mean
     }));
   }
 

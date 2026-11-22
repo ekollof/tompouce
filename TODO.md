@@ -315,10 +315,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         (max ~4.4 ms, two gaps), four-voice AoS gather/scatter (max ~3.55 ms,
         13 over-3-ms callbacks), and block-boundary native SoA copy (max
         ~4.18 ms, one gap). All were PCM-exact and slower.
-      - [ ] Persistent SoA sample pool admitted at `voice_onset`, not recopied
-        each block. Keep lane state across staged blocks; sync from the owner
-        only after a non-staged block or a new onset. Preserve voice-slot route
-        order, scalar fallback and PCM gates.
+      - [x] Persistent SoA sample pool admitted at `voice_onset`, with lane
+        state kept across staged blocks and owner sync only after fallback
+        blocks. It passed the audio/retirement gates but measured slower again
+        (max ~4.19 ms, one gap), so it was reverted. Sample-only SoA is
+        exhausted; the next attempt must include the DSP low-pass/biquad and
+        envelope work in the same lanes.
       - [ ] Add SoA low-pass/biquad and envelope lanes for the DSP hot path,
         then measure against the 128-frame deadline on the real device.
 - [ ] Later SIMD kernels, only after measurement:

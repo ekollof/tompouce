@@ -34,6 +34,10 @@ class InstallerTest(unittest.TestCase):
         for name in re.findall(r'configure_file\(\s*([A-Za-z0-9_.-]+)\s+', cmake):
             self.assertIn(name, installer.STAGED_FILES)
 
+    def test_hydra_runtime_assets_are_copied(self):
+        for name in ('web/hydra.html', 'web/hydra.js'):
+            self.assertIn(name, installer.RUNTIME_FILES)
+
     def test_out_of_tree_runtime_copy(self):
         with tempfile.TemporaryDirectory() as root:
             source, application = Path(root) / 'source', Path(root) / 'installed'

@@ -134,7 +134,11 @@ xruns remain; eliminating them needs the block/SoA voice renderer rather than
 more scalar micro-optimizations. The callback now has a four-frame voice/effect
 split and can stage routing through `src/render_block.c`; the staged route is
 PCM-exact but measured neutral, so it is a foundation for blocking source and
-DSP work, not yet a performance win. The audio/reference gates and the
+DSP work, not yet a performance win. Release LTO is a separate, measured
+build-level improvement: on the same 35-second profile run it reduced average
+callback render from ~1.63 ms to ~1.59 ms and over-3-ms callbacks to one.
+`-DWITH_LTO=OFF` restores the previous build. The four-voice sample SoA
+experiments were reverted; see `TODO.md` for their measurements. The audio/reference gates and the
 supersaw exactness test pass; the known `tui_pty` vi startup case remains
 timing-flaky.
 The earlier OpenAL **zero-underrun** reading was a blind spot: it only counted

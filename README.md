@@ -182,7 +182,8 @@ Other CMake generators are supported in separate build directories.
 Builds automatically use `ccache` when installed, including the installer's
 temporary builds. Disable it with `-DWITH_CCACHE=OFF`; an explicit
 `CMAKE_C_COMPILER_LAUNCHER` takes precedence. Inspect cache reuse with
-`ccache --show-stats`.
+`ccache --show-stats`. Release builds also enable link-time optimization when
+the compiler supports IPO; disable it with `-DWITH_LTO=OFF`.
 
 Requirements: `notcurses-core` (Notcurses 3.0.9 or newer), `portaudio-2.0`, `libcurl`,
 `libcjson`, `leveldb`, ALSA and `tree-sitter` 0.25+ development libraries, plus

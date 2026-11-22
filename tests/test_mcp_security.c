@@ -93,7 +93,7 @@ int main(void) {
     /* The spectrum tool returns a fixed, bounded band count. */
     fd=client();
     snprintf(request,sizeof(request),"{\"auth\":\"%s\",\"method\":\"tools/call\","
-        "\"params\":{\"name\":\"music_audio_spectrum\",\"arguments\":{}}}\n",
+        "\"params\":{\"name\":\"music_audio_spectrum\",\"arguments\":{\"id\":1}}}\n",
         mcp_tcp_token());
     transmit(fd,request);
     char spectrum[8192]; ssize_t spectral=recv(fd,spectrum,sizeof(spectrum)-1,0);
@@ -110,6 +110,8 @@ int main(void) {
     assert(spectrumData);
     assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(
         spectrumData,"bands"))==64);
+    const cJSON *spectrumId=cJSON_GetObjectItemCaseSensitive(spectrumData,"id");
+    assert(cJSON_IsNumber(spectrumId) && spectrumId->valuedouble==1);
     cJSON_Delete(spectrumData); cJSON_Delete(spectrumEnvelope);
     close(fd); mcp_poll();
 

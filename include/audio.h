@@ -15,6 +15,7 @@ typedef struct Voice {
     DspState dsp_right;
     int active;
     int out_target; /* 0 default, 1..4 named output streams */
+    int analyser_id, analyser_fft; /* per-pattern analyser tap */
     int soa_lane, soa_active, soa_pending; /* from-allocation SoA bank */
     unsigned scope_mask, scope_generation;
     int inst;
@@ -151,6 +152,9 @@ const char *audio_inst_name(int inst);
 /* recent master output, oldest first (for the scope); returns count */
 int audio_scope_copy(float *out, int n);
 int audio_pattern_scope_copy(unsigned mask, unsigned generation, float *out, int n);
+/* Per-pattern analyze(id) taps; id is 1..N_ANALYSERS. */
+int audio_analyser_copy(int analyser, unsigned generation, float *out, int n);
+int audio_analyser_fft_size(int analyser);
 
 int note_name_to_midi(const char *name);
 double midi_to_freq(int midi);

@@ -38,6 +38,7 @@ typedef struct {
 /* Strudel effect buses. Orbit 1 is the JS default. Legacy events use 0. */
 #define N_ORBITS 12
 #define N_PATTERN_SCOPES 32
+#define N_ANALYSERS 32
 
 typedef struct StretchBuffer StretchBuffer;
 
@@ -83,6 +84,8 @@ typedef struct {
     double fx_release;  /* optional downstream effect cleanup extension */
     double graph_release; /* raw cleanup release, before source ADSR minima */
     int out_target;     /* 0 default stream, 1..4 named PipeWire targets */
+    int analyser_id;    /* Superdough analyze(id): 1..N_ANALYSERS, 0 = none */
+    int analyser_fft;   /* Superdough fft exponent: size = 2 ** (fft + 5) */
     int midi_chan;      // MIDI channel 0-15, -1 = off
     int midi_note;      // MIDI note for midi out, -1 = none
     int midi_channel_count; /* -1 empty, 0 legacy scalar, 1..16 ordered fan-out */

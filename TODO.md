@@ -10,11 +10,16 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
-- [ ] Per-pattern `analyze`/`fft` controls. The terminal runtime still ignores
-      `analyze(id)` and `fft(size)` in native events; the terminal `spectrum`
-      view and the Hydra page's `a.fft` use the master-output FFT. A bounded
-      per-analyzer tap and selectable FFT size outside the audio callback are
-      still needed before claiming this part of the Strudel visual API.
+- [x] Per-pattern `analyze`/`fft` controls. Native events now carry
+      `analyze(id)` and the `fft` exponent (default 8), replay them through
+      `FX(...)`, and feed up to 32 bounded analyser taps with generation tags.
+      `fftSize` follows Superdough's `2 ** (fft + 5)` mapping, capped by the
+      4096-sample ring; `music_audio_spectrum` selects the tap with `id`
+      (0 = master) and computes the FFT in the MCP thread, never the audio
+      callback. `test_javascript` covers direct, `_scope()` and nested/outer
+      values; `test_audio`/`test_audio_sanitize` cover tap energy, FFT sizes,
+      generation replacement, staged blocks and unchanged PCM; `test_mcp_security`
+      bounds the `id` argument and response.
 - [x] Hydra learn-page examples. The browser page now bundles the pinned
       Strudel pattern packages for `H(pattern)`, resolves function-valued Hydra
       parameters per frame, maps `o0`–`o3` to previous-frame feedback, feeds

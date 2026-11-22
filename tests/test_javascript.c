@@ -691,6 +691,40 @@ static void test_lv2param_control(void) {
 /* Materialized FX(...) closures can route shared room/delay sends. Outer
    controls are applied after FX in the web, so they must win; K() graph sources
    remain outside the scale/gain boundary. */
+static void test_analyser_controls(void) {
+    JsProgram *program=NULL;
+    cJSON *haps=query("note(60).analyze(7).fft(4)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    AudioEvent event;
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.analyser_id==7 && event.analyser_fft==4);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60)._scope()",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.analyser_id==1 && event.analyser_fft==8);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).FX(x=>x.analyze(3).fft(2))",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.analyser_id==3 && event.analyser_fft==2);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).analyze(5).fft(4).FX(x=>x.analyze(3).fft(2))",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.analyser_id==5 && event.analyser_fft==4);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).analyze(99).fft(99)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.analyser_id==N_ANALYSERS && event.analyser_fft==10);
+    cJSON_Delete(haps); javascript_free(program);
+}
+
 static void test_hydra_learn_examples(void) {
     /* The four examples from https://strudel.cc/learn/hydra/ must keep
        evaluating their musical branches with the terminal's inert visual
@@ -1379,6 +1413,7 @@ int main(int argc, char **argv) {
     haps=query("await initHydra();src(s0)",&program);
     assert(cJSON_GetArraySize(haps)==0);
     cJSON_Delete(haps); javascript_free(program);
+    test_analyser_controls();
     test_hydra_learn_examples();
     test_fx_shared_routing();
     puts("JavaScript/Strudel runtime ok");

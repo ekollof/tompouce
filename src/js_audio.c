@@ -336,6 +336,7 @@ enum {
     FX_OP_FM_SUSTAIN, FX_OP_FM_RELEASE, FX_OP_FM_ENV, FX_OP_FM_WAVE,
     FX_OP_FM_MATRIX, FX_OP_IR, FX_OP_IRSPEED, FX_OP_IRBEGIN,
     FX_OP_ROOMFADE, FX_OP_ROOMLP, FX_OP_ROOMDIM,
+    FX_OP_ANALYZE, FX_OP_FFT,
     FX_OP_COUNT
 };
 
@@ -378,7 +379,8 @@ static const FxName fx_names[] = {
     {"fmsustain",FX_OP_FM_SUSTAIN},{"fmrelease",FX_OP_FM_RELEASE},
     {"fmenv",FX_OP_FM_ENV},{"fmwave",FX_OP_FM_WAVE},
     {"ir",FX_OP_IR},{"irspeed",FX_OP_IRSPEED},{"irbegin",FX_OP_IRBEGIN},
-    {"roomfade",FX_OP_ROOMFADE},{"roomlp",FX_OP_ROOMLP},{"roomdim",FX_OP_ROOMDIM}
+    {"roomfade",FX_OP_ROOMFADE},{"roomlp",FX_OP_ROOMLP},{"roomdim",FX_OP_ROOMDIM},
+    {"analyze",FX_OP_ANALYZE},{"fft",FX_OP_FFT}
 };
 
 static int fx_op(const char *name) {
@@ -715,6 +717,14 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                     matrix_b>=0 && matrix_b<9)
                     ev->dsp.matrix[matrix_a][matrix_b]=value;
                 break;
+            case FX_OP_ANALYZE:
+                if (value>=0 && value<=N_ANALYSERS)
+                    ev->analyser_id=(int)round(value);
+                break;
+            case FX_OP_FFT:
+                if (value>=0 && value<=10)
+                    ev->analyser_fft=(int)round(value);
+                break;
             default:
                 break;
             }
@@ -734,6 +744,10 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     memset(ev,0,sizeof(*ev));
     ev->scope_mask = (unsigned)control(hap,"scopeMask",0,0,4294967295.0);
     ev->out_target = audio_output_target(text_control(v,"_out"));
+    /* Superdough analyze(id) attaches the voice to a shared analyser node.
+       fft is an exponent: fftSize = 2 ** (fft + 5), default 8 (8192). */
+    ev->analyser_id = (int)round(control(v,"analyze",0,0,(double)N_ANALYSERS));
+    ev->analyser_fft = (int)round(control(v,"fft",8,0,10));
     ev->time = origin + begin->valuedouble * seconds;
     ev->duration = fmin(60,(end->valuedouble - begin->valuedouble) * seconds);
     double clip = control(v,"clip",1,0,64);

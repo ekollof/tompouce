@@ -461,8 +461,8 @@ void handle_request(cJSON *req) {
             "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"number\"}}}");
         ADDTOOL("music_audio_scope", "Bounded read-only audio waveform and voice metrics for visualizers.",
             "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}");
-        ADDTOOL("music_audio_spectrum", "Bounded read-only logarithmic audio spectrum for visualizers.",
-            "{\"type\":\"object\",\"properties\":{}}");
+        ADDTOOL("music_audio_spectrum", "Bounded read-only logarithmic audio spectrum for visualizers; id 0 is the master mix, 1..32 selects a pattern analyze(id) tap.",
+            "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":32}}}");
         ADDTOOL("music_sounds", "Search playable samples, drum-machines, synths, wavetables and user sounds. Returns JSON catalog text.",
             "{\"type\":\"object\",\"properties\":{\"category\":{\"type\":\"string\"},\"query\":{\"type\":\"string\"},\"offset\":{\"type\":\"integer\"},\"limit\":{\"type\":\"integer\"}}}");
         ADDTOOL("music_reload_sounds", "Reload imported sounds from confined application storage; source/playback unchanged.",
@@ -671,7 +671,19 @@ void handle_request(cJSON *req) {
             enum { ANALYSER_SAMPLES = 4096 };
             float samples[ANALYSER_SAMPLES];
             float bands[SPECTRUM_BANDS];
-            int count=audio_scope_copy(samples,ANALYSER_SAMPLES);
+            int analyser=0;
+            const cJSON *analyser_arg=args?cJSON_GetObjectItemCaseSensitive(args,"id"):NULL;
+            if (cJSON_IsNumber(analyser_arg) && isfinite(analyser_arg->valuedouble))
+                analyser=(int)analyser_arg->valuedouble;
+            if (analyser<0) analyser=0;
+            if (analyser>N_ANALYSERS) analyser=N_ANALYSERS;
+            unsigned generation=track_count==1?tracks[0].compile_generation:0;
+            int count;
+            if (analyser>0) {
+                int fft=audio_analyser_fft_size(analyser);
+                count=audio_analyser_copy(analyser,generation,samples,
+                    fft>0&&fft<ANALYSER_SAMPLES?fft:ANALYSER_SAMPLES);
+            } else count=audio_scope_copy(samples,ANALYSER_SAMPLES);
             terminal_graphics_fft(samples,count,44100,bands);
             double energy=0;
             for (int i=0;i<count;i++) energy+=(double)samples[i]*samples[i];
@@ -682,10 +694,10 @@ void handle_request(cJSON *req) {
                 cJSON_AddNumberToObject(root,"rms",count?sqrt(energy/count):0);
                 cJSON_AddNumberToObject(root,"playing",audio_is_playing()?1:0);
                 cJSON_AddNumberToObject(root,"bpm",audio_get_bpm());
+                cJSON_AddNumberToObject(root,"id",analyser);
                 /* Tag the analysed frame with the accepted source so a
                    visualizer can discard pre-evaluation data. */
-                cJSON_AddNumberToObject(root,"generation",
-                    track_count==1?tracks[0].compile_generation:0);
+                cJSON_AddNumberToObject(root,"generation",generation);
                 for (int i=0;i<SPECTRUM_BANDS;i++)
                     cJSON_AddItemToArray(list,cJSON_CreateNumber((int)(bands[i]*10)/10.0));
                 char *text=cJSON_PrintUnformatted(root);

@@ -352,6 +352,87 @@ static void test_pattern_scopes(void) {
     memset(voices,0,sizeof(voices));
 }
 
+static void test_analysers(void) {
+    memset(voices,0,sizeof(voices));
+    memset(analyser_generation,0,sizeof(analyser_generation));
+    for (int i=0;i<N_ANALYSERS;i++)
+        atomic_store_explicit(&analyser_fft_size[i],0,memory_order_relaxed);
+    AudioEvent a = {0}, b;
+    a.inst = INST_SINE; a.smp = -1; a.freq = 220; a.gain = .02;
+    a.time = audio_time; a.duration = 2; a.att = 0; a.rel = .01; a.sus = 1;
+    a.generation = 321;
+    a.analyser_id = 1; a.analyser_fft = 4; /* 2 ** (4 + 5) = 512 */
+    b = a; b.freq = 880; b.gain = .04; b.analyser_id = 2; b.analyser_fft = 0;
+    audio_trigger_event(&a); audio_trigger_event(&b);
+    playing = 1;
+    float output[512], first[256], second[256], absent[256];
+    pa_callback(NULL,output,256,NULL,0,NULL);
+    assert(audio_analyser_copy(1,321,first,256) == 256);
+    assert(audio_analyser_copy(2,321,second,256) == 256);
+    assert(audio_analyser_copy(3,321,absent,256) == 256);
+    assert(audio_analyser_fft_size(1) == 512);
+    assert(audio_analyser_fft_size(2) == 32);
+    assert(audio_analyser_fft_size(3) == 0);
+    double energy_a = 0, energy_b = 0, difference = 0;
+    for (int i = 0; i < 256; i++) {
+        assert(absent[i] == 0);
+        energy_a += first[i]*first[i]; energy_b += second[i]*second[i];
+        difference += fabs(first[i]-second[i]);
+        assert(fabs(first[i]+second[i]-(output[2*i]+output[2*i+1])*.5) < 1e-7);
+    }
+    assert(energy_a > 1e-5 && energy_b > energy_a && difference > .01);
+
+    /* Analyser taps do not change the rendered master output. */
+    float without_taps[512];
+    memset(voices,0,sizeof(voices));
+    a.analyser_id = b.analyser_id = 0;
+    audio_trigger_event(&a); audio_trigger_event(&b);
+    pa_callback(NULL,without_taps,256,NULL,0,NULL);
+    assert(!memcmp(output,without_taps,sizeof(output)));
+
+    /* A re-evaluated source discards the old generation's tap, while an
+       untouched analyser keeps publishing. */
+    memset(voices,0,sizeof(voices));
+    a.analyser_id = 1; b.analyser_id = 2;
+    a.time = b.time = audio_time;
+    audio_trigger_event(&a); audio_trigger_event(&b);
+    a.generation = 322;
+    a.time = audio_time;
+    audio_trigger_event(&a);
+    voices[2].amp = 0; /* Silent replacement voice in the new generation. */
+    pa_callback(NULL,output,256,NULL,0,NULL);
+    audio_analyser_copy(1,322,first,256);
+    for (int i = 0; i < 256; i++) assert(first[i] == 0);
+    audio_analyser_copy(2,321,second,256);
+    energy_b = 0;
+    for (int i = 0; i < 256; i++) energy_b += second[i]*second[i];
+    assert(energy_b > 1e-5);
+    audio_analyser_copy(1,323,first,256);
+    for (int i = 0; i < 256; i++) assert(first[i] == 0);
+
+    /* Four-frame staged blocks publish the same taps after routing. */
+    memset(voices,0,sizeof(voices));
+    memset(analyser_generation,0,sizeof(analyser_generation));
+    a.generation = 400; a.analyser_id = 3; a.analyser_fft = 5; /* 1024 */
+    a.freq = 440; a.gain = .1; a.time = audio_time;
+    audio_trigger_event(&a);
+    float warm[2];
+    pa_callback(NULL,warm,1,NULL,0,NULL); /* dispatch the onset first */
+    float staged[8];
+    pa_callback(NULL,staged,4,NULL,0,NULL);
+    float tap[64];
+    assert(audio_analyser_copy(3,400,tap,64) == 64);
+    assert(audio_analyser_fft_size(3) == 1024);
+    double staged_energy = 0;
+    for (int i = 0; i < 64; i++) staged_energy += tap[i]*tap[i];
+    assert(staged_energy > 1e-9);
+    assert(tap[63] > 0);
+
+    memset(voices,0,sizeof(voices));
+    memset(analyser_generation,0,sizeof(analyser_generation));
+    next_voice_onset = HUGE_VAL;
+}
+
 static void test_live_scope_attachment(void) {
     const char *code="stack(note(60).s('sine').gain(.1),note(72).s('sine').gain(.2))";
     const char *editor="stack(note(60).s('sine').gain(.1)._scope(),note(72).s('sine').gain(.2))";
@@ -860,6 +941,7 @@ int main(void) {
     test_convolution();
     test_stretch();
     test_pattern_scopes();
+    test_analysers();
     test_live_scope_attachment();
     test_supersaw_callback();
     test_supersaw_quantum_start();

@@ -694,6 +694,13 @@ static atomic_uint pattern_scope_pos;
 static unsigned pattern_scope_generation[N_PATTERN_SCOPES]; /* voice_lock */
 static double pattern_scope_frame[N_PATTERN_SCOPES]; /* callback only */
 
+/* Superdough analyze(id) taps share the scope ring position and generation
+   tags. FFT size is selected by the latest fft exponent for that id. */
+static atomic_ullong analyser_tap[N_ANALYSERS][SCOPE_N];
+static unsigned analyser_generation[N_ANALYSERS]; /* voice_lock */
+static double analyser_frame[N_ANALYSERS]; /* callback only */
+static atomic_int analyser_fft_size[N_ANALYSERS];
+
 int audio_pattern_scope_copy(unsigned mask, unsigned generation, float *out, int n) {
     if (!out || n <= 0) return 0;
     if (n > SCOPE_N) n = SCOPE_N;
@@ -723,7 +730,38 @@ static void pattern_scope_publish(void) {
         unsigned long long packed = ((unsigned long long)pattern_scope_generation[i]<<32)|bits;
         atomic_store_explicit(&pattern_scope[i][position&(SCOPE_N-1)],packed,memory_order_relaxed);
     }
+    for (int i = 0; i < N_ANALYSERS; i++) {
+        float sample = (float)analyser_frame[i]; unsigned bits;
+        memcpy(&bits,&sample,sizeof(bits));
+        unsigned long long packed = ((unsigned long long)analyser_generation[i]<<32)|bits;
+        atomic_store_explicit(&analyser_tap[i][position&(SCOPE_N-1)],packed,memory_order_relaxed);
+    }
     atomic_store_explicit(&pattern_scope_pos,position+1,memory_order_release);
+}
+
+int audio_analyser_copy(int analyser, unsigned generation, float *out, int n) {
+    if (!out || analyser <= 0 || analyser > N_ANALYSERS || n <= 0) return 0;
+    if (n > SCOPE_N) n = SCOPE_N;
+    int feed = analyser - 1;
+    unsigned position = atomic_load_explicit(&pattern_scope_pos,memory_order_acquire);
+    for (int j = 0; j < n; j++) {
+        double value = 0;
+        unsigned at = (position-(unsigned)n+(unsigned)j)&(SCOPE_N-1);
+        if (position >= (unsigned)(n-j)) {
+            unsigned long long packed = atomic_load_explicit(&analyser_tap[feed][at],memory_order_relaxed);
+            if (!generation || (unsigned)(packed>>32) == generation) {
+                unsigned bits = (unsigned)packed; float sample;
+                memcpy(&sample,&bits,sizeof(sample)); value = sample;
+            }
+        }
+        out[j] = (float)value;
+    }
+    return n;
+}
+
+int audio_analyser_fft_size(int analyser) {
+    if (analyser <= 0 || analyser > N_ANALYSERS) return 0;
+    return atomic_load_explicit(&analyser_fft_size[analyser-1],memory_order_relaxed);
 }
 
 int audio_scope_copy(float *out, int n) {
@@ -1125,6 +1163,17 @@ static void voice_onset(Voice *v) {
     }
     for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
         pattern_scope_generation[i]=v->scope_generation;
+    if (v->analyser_id>0 && v->analyser_id<=N_ANALYSERS) {
+        int index=v->analyser_id-1;
+        analyser_generation[index]=v->scope_generation;
+        int exponent=v->analyser_fft;
+        if (exponent<0) exponent=0;
+        if (exponent>10) exponent=10;
+        long size=1L<<(exponent+5);
+        if (size<32) size=32;
+        if (size>SCOPE_N) size=SCOPE_N;
+        atomic_store_explicit(&analyser_fft_size[index],(int)size,memory_order_relaxed);
+    }
     if (!v->dsp.control.enabled && v->delay_send>0) {
         if (v->onset_delay_time>=0) orbit_dt[v->orbit]=v->onset_delay_time;
         if (v->onset_delay_feedback>=0) orbit_fb[v->orbit]=v->onset_delay_feedback;
@@ -1220,6 +1269,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->soa_lane=-1;
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
     v->out_target = ev->out_target;
+    v->analyser_id = ev->analyser_id; v->analyser_fft = ev->analyser_fft;
     dbg_token(v->token, sizeof(v->token), ev->token);
     if (ev->dsp.enabled) dsp_init(&v->dsp, &ev->dsp);
     else v->dsp.control.enabled=v->dsp_right.control.enabled=0;
@@ -1855,7 +1905,7 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     /* Left and right are adjacent doubles and use the same pan/send math.
        Per-lane operations match the scalar path exactly; no cross-lane sum
        occurs. Scope and named-target voices stay on the scalar path. */
-    if (v->scope_mask == 0 && v->out_target == 0) {
+    if (v->scope_mask == 0 && v->out_target == 0 && v->analyser_id == 0) {
         __m128d in = _mm_set_pd(in_r,in_l);
         __m128d routed;
         if (v->route_lr == 0 && v->route_rl == 0)
@@ -1897,6 +1947,9 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     unsigned scope_mask = v->scope_mask;
     for (int i = 0; scope_mask; i++, scope_mask >>= 1) if ((scope_mask&1u) && v->scope_generation == pattern_scope_generation[i])
         pattern_scope_frame[i] += (l*left+r*right)*dry*.5;
+    if (v->analyser_id>0 && v->analyser_id<=N_ANALYSERS &&
+        v->scope_generation == analyser_generation[v->analyser_id-1])
+        analyser_frame[v->analyser_id-1] += (l*left+r*right)*dry*.5;
     target_add(v->out_target,l*left*dry,r*right*dry);
     /* Named targets bypass the shared orbit/effect bus entirely; their dry
        source is carried by the target buffer, never by the default stream. */
@@ -2179,6 +2232,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         block_frame=(unsigned)j;
         VoiceMix *mixes=frame_mixes[j];
         memset(pattern_scope_frame,0,sizeof(pattern_scope_frame));
+        memset(analyser_frame,0,sizeof(analyser_frame));
         for (int o = 0; o < N_ORBITS; o++) {
             mixes[o] = (VoiceMix){0};
             mixes[o].room_size = -1;
@@ -2627,6 +2681,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
                     orbit_blocks[o].room_size[j]=-1;
             memset(frame_scope,0,sizeof(frame_scope));
+            double frame_analyser[RENDER_BLOCK_FRAMES][N_ANALYSERS];
+            memset(frame_analyser,0,sizeof(frame_analyser));
             for (int slot=0;slot<VOICE_SLOTS;slot++) {
                 unsigned mask=0;
                 for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
@@ -2636,16 +2692,23 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                 if (orbit<0 || orbit>=N_ORBITS) orbit=0;
                 double scope[RENDER_BLOCK_FRAMES]={0};
                 unsigned scope_mask=voices[slot].scope_mask;
+                int analyser=voices[slot].analyser_id;
+                int tap=scope_mask || (analyser>0 && analyser<=N_ANALYSERS);
                 render_block_route_mask_scope(&voices[slot],block_input_l[slot],
                     block_input_r[slot],&orbit_blocks[orbit],mask,
-                    scope_mask?scope:NULL);
+                    tap?scope:NULL);
                 for (unsigned m=scope_mask, i=0;m;i++,m>>=1)
                     if ((m&1u) && voices[slot].scope_generation==pattern_scope_generation[i])
                         for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
                             if (mask&(1u<<j)) frame_scope[j][i]+=scope[j];
+                if (analyser>0 && analyser<=N_ANALYSERS &&
+                    voices[slot].scope_generation==analyser_generation[analyser-1])
+                    for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
+                        if (mask&(1u<<j)) frame_analyser[j][analyser-1]+=scope[j];
             }
             for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++) {
                 memcpy(pattern_scope_frame,frame_scope[j],sizeof(pattern_scope_frame));
+                memcpy(analyser_frame,frame_analyser[j],sizeof(analyser_frame));
                 pattern_scope_publish();
             }
             for (int o=0;o<N_ORBITS;o++) for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++) {

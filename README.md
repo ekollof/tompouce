@@ -325,8 +325,9 @@ loopback-only; audio stays native. Standalone launching via
 independent of F12. It uses the same authenticated loopback helper with
 read-only `music_audio_scope`, `music_audio_spectrum` and `music_get_code` tools
 (bounded waveform plus BPM/playing state, and while `detectAudio` is enabled a
-4096-sample master-mix FFT reduced to 64 logarithmic bands; analysis is polled
-at 8 Hz and source is read when its generation changes); it has no control
+4096-sample master-mix FFT reduced to 64 logarithmic bands, and `id` 1..32
+selects a pattern `analyze(id)` tap; analysis is polled at 8 Hz and source is
+read when its generation changes); it has no control
 access to the engine and exits with its parent. It renders the audio scope by
 default, evaluates the visual calls in the current source with inert music
 stubs, renders a bounded Hydra-style WebGL graph (generators, the full built-in

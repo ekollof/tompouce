@@ -565,8 +565,12 @@ by the terminal runtime. It enables inert Hydra source/texture chains,
 evaluate. Options such as `feedStrudel` and `detectAudio` are ignored by the
 terminal; there is no visual rendering, audio/video capture, resource fetching
 or execution of visual callbacks, and its `a.fft` is an inert zero buffer.
-Pattern `analyze`/`fft` controls still do not receive a per-pattern mixer tap.
-The console points to `/hydra` once per evaluation. The placeholder does not
+`analyze(id)` and `fft(exponent)` on musical patterns are independent of the
+terminal placeholder: native events attach to up to 32 generation-tagged taps.
+`fftSize` follows Superdough's `2 ** (exponent + 5)` mapping (default 8) and is
+capped by the 4096-sample analysis ring. `music_audio_spectrum` takes `id`
+0 (master) or 1..32 and runs the Hann FFT in the MCP thread; taps never change
+the rendered PCM. The console points to `/hydra` once per evaluation. The placeholder does not
 open a browser; the separate `/hydra` browser visualizer renders a bounded
 Hydra-style graph through WebGL (all built-in generators and effects,
 camera/screen/image sources, and previous-frame feedback) and falls back to the

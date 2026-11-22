@@ -558,6 +558,40 @@ static void test_switchangel_bmod(void) {
     puts("Switch Angel bmod routing ok");
 }
 
+/* The pinned roller2 helper stacks a custom bstab sample with two
+   oscillators. The query must retain all three names so the missing sample
+   is reported/rejected individually instead of renaming the sound. */
+static void test_switchangel_roller2(void) {
+    const char *fixture =
+        "register('acidenv',(x,pat)=>pat.lpf(100).lpenv(x*9).lps(.2).lpd(.12).lpq(2));\n"
+        "window.roller2=(acidenv=.5)=>s(\"bstab:1:.6,supersaw:1:.6,white:0:.3\")\n"
+        " .detune(rand).begin(\"<0 .02>/4\").room(.5).acidenv(acidenv).lpq(0)\n"
+        " .postgain(1.2).diode([2.5,.6]).sustain(.45).dec(.2);\n";
+    char root[]="/tmp/tompouce-saroller-XXXXXX", config[512], path[700];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    setenv("XDG_CONFIG_HOME",root,1);
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    assert(!mkdir(config,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    write_module(path,fixture);
+    JsProgram *program=NULL;
+    cJSON *haps=query("roller2()",&program);
+    assert(haps && cJSON_GetArraySize(haps)==3);
+    const char *names[]={"bstab","supersaw","white"};
+    for (int i=0;i<3;i++) {
+        const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,i),"value");
+        const cJSON *name=cJSON_GetObjectItemCaseSensitive(value,"s");
+        assert(cJSON_IsString(name) && !strcmp(name->valuestring,names[i]));
+    }
+    cJSON_Delete(haps); javascript_free(program);
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+    puts("Switch Angel roller2 sample names ok");
+}
+
 static void test_tutorial(void) {
     FILE *file=fopen("strudeltutor.json","rb"); assert(file);
     assert(!fseek(file,0,SEEK_END)); long length=ftell(file); assert(length>0);
@@ -946,6 +980,7 @@ int main(int argc, char **argv) {
     test_switchangel_fx();
     test_switchangel_humanize();
     test_switchangel_bmod();
+    test_switchangel_roller2();
     test_lv2param_control();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);

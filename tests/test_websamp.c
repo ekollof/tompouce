@@ -378,6 +378,15 @@ static void test_installed_catalogs(void) {
         char dir[2048];
         expect(bank_find_dir("tr909", dir, sizeof(dir)), "TR-909 compact bank alias");
         expect(strstr(dir, "RolandTR909") != NULL, "TR-909 alias targets the installed machine");
+        /* The pinned starter's roller2 helper uses a custom bstab sample
+           that is not part of the public installed manifests. Do not
+           substitute the unrelated generic stab bank. */
+        if (access("assets/banks/Dirt-Samples/strudel.json", R_OK) == 0) {
+            expect(!websamp_default_url("bstab", 0, url, (int)sizeof(url)),
+                "starter bstab has no installed default sample");
+            expect(websamp_default_url("stab", 0, url, (int)sizeof(url)),
+                "generic Dirt stab is present but is not bstab");
+        }
         const char *pieces[] = {"bd", "hh", "sd", "cp"};
         for (size_t i=0;i<sizeof(pieces)/sizeof(pieces[0]);i++) {
             char token[32];

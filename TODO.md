@@ -403,10 +403,15 @@ and measured divergences are recorded in the archive.
       samples (`bd` len 20547, `hh` len 6888). The starter's active
       `s("wt_digital")` wavetable also resolves from the installed
       uzu-wavetables catalog. The commented TR-909 example now resolves.
-- [ ] Starter samples absent from the installed manifests (for example
-      `bstab` in the pinned `roller2` helper) and other non-TR bank aliases
-      remain open. See
-      [prebake support](docs/prebakes.md) for the supported startup/file contract.
+- [x] Pinned `roller2`/`bstab` sample path. The public installed manifests
+      have no `bstab` default; only the unrelated generic Dirt `stab` bank is
+      present. The native profile keeps the starter's three haps and rejects
+      `bstab` individually with the existing sample-unavailable warning rather
+      than substituting `stab`. `test_switchangel_roller2` checks the
+      `bstab`/`supersaw`/`white` query names; `test_websamp` checks that
+      `bstab` has no installed default and that generic `stab` exists. An
+      owned engine confirmed the two oscillator voices play alongside the
+      rejected sample. Other non-TR bank aliases remain open.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and
       can be reloaded on later evaluations (explicit persistence). Traversal,

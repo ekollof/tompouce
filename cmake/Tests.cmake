@@ -26,6 +26,8 @@ if(LILV_FOUND)
         "${LV2_TEST_BUNDLE}/gain.ttl" COPYONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-synth.ttl"
         "${LV2_TEST_BUNDLE}/midi-synth.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-preset.ttl"
+        "${LV2_TEST_BUNDLE}/midi-preset.ttl" COPYONLY)
     add_library(tompouce_lv2_test_gain MODULE tests/fixtures/lv2-test/gain.c)
     set_target_properties(tompouce_lv2_test_gain PROPERTIES
         PREFIX "" OUTPUT_NAME "gain" LIBRARY_OUTPUT_DIRECTORY "${LV2_TEST_BUNDLE}")

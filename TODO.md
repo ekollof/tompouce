@@ -131,12 +131,21 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       measured a long note's scope RMS 0.291 and peak 0.502, and with
       `.lv2param('Gain', .25)` RMS 0.071 and peak 0.126, with `voices=0` and no
       gaps.
-- [ ] LV2 state/preset files (not just control-port values) mapped to existing
-      sliders. Live slots persist for the session (bounded at eight), receive
-      all-notes-off when playback stops, and rely on the render thread for
-      best-effort latency; per-plugin crash isolation must not take down or
-      stall playback. Discovery reads control-port metadata for all safe
-      plugins — 3155 ports across 219 plugins on this box.
+- [x] Installed LV2 presets that declare control-port values. The worker
+      resolves `pset:Preset` resources linked from the bundle manifest, loads a
+      preset by URI or display label, applies declared `pset:hasPort` values and
+      reports updated control metadata back to the slot. `Pattern.lv2preset()`
+      emits a control-only event when it has no note, so a held note keeps
+      sounding. `test_lv2_worker` checks label and URI loading plus a sound-level
+      change; `test_live_lv2` changes a preset mid-note under the sanitized
+      worker. A headless engine run measured RMS 0.294 for a long note and 0.074
+      with `.lv2preset('Quiet')`, with `voices=0`.
+- [ ] Arbitrary LV2 state files and plugin-specific state (not declared control
+      ports) mapped to existing sliders. Live slots persist for the session
+      (bounded at eight), receive all-notes-off when playback stops, and rely on
+      the render thread for best-effort latency; per-plugin crash isolation must
+      not take down or stall playback. Discovery reads control-port metadata for
+      all safe plugins — 3155 ports across 219 plugins on this box.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

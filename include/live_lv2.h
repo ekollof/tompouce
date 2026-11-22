@@ -21,6 +21,8 @@ int live_lv2_note(int slot, double at, double duration, int channel, int note,
 int live_lv2_cc(int slot, double at, int channel, int control, int value);
 /* Queue a named LV2 control-port value at `at`; bounded metadata clamps it. */
 int live_lv2_control(int slot, double at, const char *name, float value);
+/* Queue an installed LV2 preset (URI or display label) at `at`. */
+int live_lv2_preset(int slot, double at, const char *preset);
 /* Inspect the bounded control-port metadata copied at acquisition. */
 int live_lv2_parameter_count(int slot);
 int live_lv2_parameter_info(int slot, int index, char name[64], float *min,

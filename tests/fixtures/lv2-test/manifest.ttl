@@ -1,4 +1,5 @@
 @prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
 <urn:tompouce:test:gain>
@@ -10,3 +11,13 @@
     a lv2:Plugin ;
     lv2:binary <midi-synth.so> ;
     rdfs:seeAlso <midi-synth.ttl> .
+
+<urn:tompouce:test:midi-synth#quiet>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:midi-synth> ;
+    rdfs:seeAlso <midi-preset.ttl> .
+
+<urn:tompouce:test:midi-synth#loud>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:midi-synth> ;
+    rdfs:seeAlso <midi-preset.ttl> .

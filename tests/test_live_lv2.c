@@ -74,6 +74,23 @@ int main(void) {
     assert(loud>quiet*2);
     mix_energy(44100/2);
 
+    /* Installed presets resolve by label and apply their declared port values
+       without retriggering the held note. */
+    now=live_lv2_time(slot)+.02;
+    assert(live_lv2_note(slot,now,1.0,0,57,127,-1,0));
+    usleep(80000);
+    double preset_full=mix_energy(44100/5);
+    assert(preset_full>10);
+    assert(live_lv2_preset(slot,live_lv2_time(slot),"Quiet"));
+    usleep(30000);
+    mix_energy(44100/10);
+    double preset_quiet=mix_energy(44100/10);
+    assert(preset_quiet>0 && preset_quiet<preset_full*.6);
+    assert(!live_lv2_preset(-1,0,"Quiet"));
+    assert(!live_lv2_preset(slot,0,""));
+    mix_energy(44100);
+    assert(live_lv2_control(slot,live_lv2_time(slot),"Gain",1.0f));
+
     /* CC 74 = 0 before note-on silences the fixture; CC 74 = 127 restores it. */
     now=live_lv2_time(slot)+.02;
     assert(live_lv2_note(slot,now,.1,0,57,127,74,0));

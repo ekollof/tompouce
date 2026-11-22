@@ -44,5 +44,9 @@ int lv2_worker_is_instrument(const Lv2Worker *worker);
 int lv2_worker_control_count(const Lv2Worker *worker);
 int lv2_worker_control(const Lv2Worker *worker, int index, uint32_t *port,
     char name[LV2_WORKER_CONTROL_NAME], float *min, float *max, float *value);
+/* Load an installed LV2 preset by URI or display label, applying its declared
+   control-port values. The worker reports updated controls back. */
+int lv2_worker_load_preset(Lv2Worker *worker, const char *preset,
+    char *error, size_t error_size);
 
 #endif

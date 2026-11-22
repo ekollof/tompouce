@@ -1,0 +1,21 @@
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<urn:tompouce:test:midi-synth#quiet>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:midi-synth> ;
+    rdfs:label "Quiet" ;
+    pset:hasPort [
+        lv2:symbol "gain" ;
+        pset:value 0.25
+    ] .
+
+<urn:tompouce:test:midi-synth#loud>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:midi-synth> ;
+    rdfs:label "Loud" ;
+    pset:hasPort [
+        lv2:symbol "gain" ;
+        pset:value 1.0
+    ] .

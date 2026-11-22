@@ -1680,12 +1680,14 @@ static int oldest_full_pool_voice(void) {
 void audio_trigger_event(AudioEvent *ev) {
     if (ev->csound_only || ev->osc_only || ev->midi_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
-    if (ev->live_lv2==0 && ev->lv2_param_count>0 && ev->lv2_uri[0]) {
+    if (ev->live_lv2==0 && (ev->lv2_param_count>0 || ev->lv2_preset[0]) &&
+        ev->lv2_uri[0]) {
         int acquired=live_lv2_acquire(ev->lv2_uri,SR,audio_time_now(),NULL,0);
         if (acquired>=0) ev->live_lv2=acquired+1;
     }
     if (ev->live_lv2 > 0) {
         int slot=ev->live_lv2-1;
+        if (ev->lv2_preset[0]) live_lv2_preset(slot,ev->time,ev->lv2_preset);
         for (int i=0;i<ev->lv2_param_count;i++)
             live_lv2_control(slot,ev->time,ev->lv2_params[i].name,
                 ev->lv2_params[i].value);

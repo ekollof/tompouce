@@ -201,7 +201,19 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   change and the bounded control queue under the sanitized worker. A headless
   engine run measured a long note's scope RMS 0.291/peak 0.502, and with
   `.lv2param('Gain', .25)` RMS 0.071/peak 0.126, with `voices=0` and no gaps.
-  LV2 state/preset files remain open.
+
+  Installed port-value presets load through the same worker. The child resolves
+  `pset:Preset` resources related to the plugin, loads the selected preset
+  resource (`lilv_world_load_resource`), and reports the declared `pset:hasPort`
+  values back to the slot so later `.lv2param` calls see the new values.
+  `Pattern.lv2preset(name)` accepts a preset URI or display label and emits a
+  control-only event when it has no note. `test_lv2_worker` checks label and URI
+  loading plus a sound-level change, and `test_live_lv2` changes a preset while a
+  note is held. A headless engine run measured a long note's scope RMS 0.294,
+  and with `.lv2preset('Quiet')` RMS 0.074, with `voices=0`. Preset data must be
+  declared in the bundle manifest (type, `lv2:appliesTo`, `rdfs:seeAlso`) because
+  lilv does not discover unrelated preset resources. Arbitrary LV2 state files
+  and plugin-specific state remain open.
 
   For effects and plugins without a MIDI input, the offline path is in place:
   `s('lv2:<uri>')` is prepared off the audio callback through the worker

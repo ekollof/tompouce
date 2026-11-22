@@ -141,6 +141,41 @@ static void test_control_metadata(void) {
     puts("LV2 control metadata ok");
 }
 
+/* Installed port-value presets load through the worker and update the cached
+   controls before the next block. */
+static void test_presets(void) {
+    char error[512]="";
+    Lv2Worker *worker=lv2_worker_start("urn:tompouce:test:midi-synth",44100,
+        error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 presets: %s\n",error[0]?error:"unavailable"); return; }
+    assert(lv2_worker_load_preset(worker,"Quiet",error,sizeof(error)));
+    int found=0; float quiet_value=0;
+    for (int i=0;i<lv2_worker_control_count(worker);i++) {
+        char name[64]=""; float min=0,max=0,value=0;
+        assert(lv2_worker_control(worker,i,NULL,name,&min,&max,&value));
+        if (!strcasecmp(name,"Gain")) { found=1; quiet_value=value; }
+    }
+    assert(found && fabs(quiet_value-.25)<1e-6);
+    float in[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS]={0};
+    float out[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
+    const unsigned char on[3]={0x90,57,127};
+    assert(lv2_worker_send_midi(worker,on,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    double quiet=0; for (int i=0;i<LV2_WORKER_FRAMES*2;i++) quiet+=fabs(out[i]);
+    assert(quiet>0);
+    assert(lv2_worker_load_preset(worker,"urn:tompouce:test:midi-synth#loud",
+        error,sizeof(error)));
+    assert(lv2_worker_send_midi(worker,on,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    double loud=0; for (int i=0;i<LV2_WORKER_FRAMES*2;i++) loud+=fabs(out[i]);
+    assert(loud>quiet*3);
+    assert(!lv2_worker_load_preset(worker,"NoSuchPreset",error,sizeof(error)));
+    /* A rejected request still drains its reply; the next command works. */
+    assert(lv2_worker_load_preset(worker,"Quiet",error,sizeof(error)));
+    lv2_worker_stop(worker);
+    puts("LV2 preset loading and control mapping ok");
+}
+
 /* A deterministic instrument reference render: the LSP oscillator becomes an
    owned PCM buffer through the same worker protocol. Strudel.cc has no LV2
    counterpart, so this pinned hash is the reference gate for the instrument
@@ -223,6 +258,7 @@ int main(void) {
     test_midi();
     test_midi_timing();
     test_control_metadata();
+    test_presets();
     test_engine_resolution();
     test_engine_midi();
     test_instrument_reference();

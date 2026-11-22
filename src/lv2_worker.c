@@ -12,6 +12,7 @@
 #include <lv2/atom/atom.h>
 #include <lv2/atom/util.h>
 #include <lv2/midi/midi.h>
+#include <lv2/presets/presets.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -22,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -44,7 +46,10 @@ typedef struct {
     uint32_t index;
     float min, max, value;
     char name[LV2_WORKER_CONTROL_NAME];
+    char symbol[LV2_WORKER_CONTROL_NAME];
 } Lv2ControlWire;
+#define LV2_WORKER_PRESET 0xFFFFFFFFu
+#define LV2_WORKER_PRESET_MAX 128
 
 struct Lv2Worker {
     pid_t pid;
@@ -89,8 +94,9 @@ static int write_all(int fd, const void *data, size_t size) {
 typedef struct {
     uint32_t index;
     int audio, atom, input, output, control;
-    float value;
+    float value, min, max;
     char name[LV2_WORKER_CONTROL_NAME];
+    char symbol[LV2_WORKER_CONTROL_NAME];
 } Lv2PortInfo;
 
 #define LV2_URI_TABLE 512
@@ -109,6 +115,84 @@ static LV2_URID lv2_map_uri(LV2_URID_Map_Handle handle, const char *uri) {
         return ++state->count;
     }
     return 0;
+}
+
+static int apply_preset(LilvWorld *world, const LilvPlugin *plugin,
+                        Lv2PortInfo *ports, unsigned nports,
+                        Lv2ControlWire *controls, int control_count,
+                        const char *request, Lv2ControlWire *updates,
+                        int *update_count) {
+    *update_count=0;
+    LilvNode *preset_type=lilv_new_uri(world,LV2_PRESETS__Preset);
+    LilvNode *label_pred=lilv_new_uri(world,"http://www.w3.org/2000/01/rdf-schema#label");
+    LilvNode *name_pred=lilv_new_uri(world,"http://usefulinc.com/ns/doap#name");
+    LilvNodes *related=preset_type?lilv_plugin_get_related(plugin,preset_type):NULL;
+    const LilvNode *selected=NULL;
+    int by_uri=strstr(request,"://")!=NULL || !strncmp(request,"urn:",4);
+    unsigned scanned=0;
+    LILV_FOREACH(nodes,it,related) {
+        const LilvNode *node=lilv_nodes_get(related,it);
+        if (++scanned>256) break;
+        if (!lilv_node_is_uri(node)) continue;
+        if (by_uri) {
+            if (!strcmp(lilv_node_as_uri(node),request)) { selected=node; break; }
+        } else {
+            /* Preset labels live in the resource's data file, which lilv does
+               not parse until the resource is explicitly loaded. */
+            if (lilv_world_load_resource(world,node)<0) continue;
+            LilvNode *label=lilv_world_get(world,node,label_pred,NULL);
+            LilvNode *name=lilv_world_get(world,node,name_pred,NULL);
+            int match=(label && lilv_node_is_string(label) &&
+                !strcasecmp(lilv_node_as_string(label),request)) ||
+                (name && lilv_node_is_string(name) &&
+                !strcasecmp(lilv_node_as_string(name),request));
+            lilv_node_free(label); lilv_node_free(name);
+            if (match) { selected=node; break; }
+        }
+    }
+    int ok=0;
+    if (selected) {
+        if (by_uri) lilv_world_load_resource(world,selected);
+        LilvNode *has_port=lilv_new_uri(world,
+            "http://lv2plug.in/ns/ext/presets#hasPort");
+        LilvNode *symbol_pred=lilv_new_uri(world,
+            "http://lv2plug.in/ns/lv2core#symbol");
+        LilvNode *value_pred=lilv_new_uri(world,LV2_PRESETS__value);
+        LilvNodes *port_nodes=lilv_world_find_nodes(world,selected,has_port,NULL);
+        int changed=0;
+        LILV_FOREACH(nodes,pit,port_nodes) {
+            if (changed>=LV2_WORKER_CONTROLS_MAX) break;
+            const LilvNode *port_node=lilv_nodes_get(port_nodes,pit);
+            LilvNode *symbol=lilv_world_get(world,port_node,symbol_pred,NULL);
+            LilvNode *value=lilv_world_get(world,port_node,value_pred,NULL);
+            if (symbol && value && lilv_node_is_string(symbol) &&
+                (lilv_node_is_float(value)||lilv_node_is_int(value))) {
+                const char *name=lilv_node_as_string(symbol);
+                float parsed=lilv_node_is_float(value)?lilv_node_as_float(value):
+                    (float)lilv_node_as_int(value);
+                for (unsigned pi=0;pi<nports;pi++) {
+                    if (!ports[pi].control || strcmp(ports[pi].symbol,name)) continue;
+                    if (parsed<ports[pi].min) parsed=ports[pi].min;
+                    if (parsed>ports[pi].max) parsed=ports[pi].max;
+                    ports[pi].value=parsed;
+                    for (int ci=0;ci<control_count;ci++)
+                        if (controls[ci].index==pi) {
+                            controls[ci].value=parsed;
+                            updates[changed++]=controls[ci];
+                            break;
+                        }
+                    break;
+                }
+            }
+            lilv_node_free(symbol); lilv_node_free(value);
+        }
+        if (port_nodes) lilv_nodes_free(port_nodes);
+        lilv_node_free(has_port); lilv_node_free(symbol_pred); lilv_node_free(value_pred);
+        if (changed) { ok=1; *update_count=changed; }
+    }
+    if (related) lilv_nodes_free(related);
+    lilv_node_free(preset_type); lilv_node_free(label_pred); lilv_node_free(name_pred);
+    return ok;
 }
 
 static int child_main(int in_fd, int out_fd) {
@@ -169,7 +253,10 @@ static int child_main(int in_fd, int out_fd) {
         ports[i].audio=ports[i].atom=ports[i].input=ports[i].output=0;
         ports[i].control=0;
         ports[i].value=0;
+        ports[i].min=0;
+        ports[i].max=1;
         ports[i].name[0]=0;
+        ports[i].symbol[0]=0;
         if (!port) continue;
         ports[i].audio=lilv_port_is_a(plugin,port,audio);
         ports[i].atom=lilv_port_is_a(plugin,port,atom_port);
@@ -191,6 +278,11 @@ static int child_main(int in_fd, int out_fd) {
                 if (text) snprintf(ports[i].name,sizeof(ports[i].name),"%s",text);
                 lilv_node_free(name_node);
             }
+            const LilvNode *symbol_node=lilv_port_get_symbol(plugin,port);
+            if (symbol_node) {
+                const char *text=lilv_node_as_string(symbol_node);
+                if (text) snprintf(ports[i].symbol,sizeof(ports[i].symbol),"%s",text);
+            }
             LilvNodes *low=minimum?lilv_port_get_value(plugin,port,minimum):NULL;
             LilvNodes *high=maximum?lilv_port_get_value(plugin,port,maximum):NULL;
             LilvNode *low_node=low?lilv_nodes_get_first(low):NULL;
@@ -201,6 +293,8 @@ static int child_main(int in_fd, int out_fd) {
             wire->max=high_node && lilv_node_is_float(high_node)?lilv_node_as_float(high_node):1.0f;
             wire->value=ports[i].value;
             snprintf(wire->name,sizeof(wire->name),"%s",ports[i].name);
+            snprintf(wire->symbol,sizeof(wire->symbol),"%s",ports[i].symbol);
+            ports[i].min=wire->min; ports[i].max=wire->max;
             lilv_nodes_free(low); lilv_nodes_free(high);
             if (!isfinite(wire->min) || !isfinite(wire->max) || wire->max<wire->min) {
                 control_count--;
@@ -242,6 +336,22 @@ static int child_main(int in_fd, int out_fd) {
     for (;;) {
         Lv2FrameHeader header;
         if (!read_all(in_fd,&header,sizeof(header))) break;
+        if (header.frames==LV2_WORKER_PRESET) {
+            if (header.bytes==0 || header.bytes>LV2_WORKER_PRESET_MAX) break;
+            char request[LV2_WORKER_PRESET_MAX+1]={0};
+            if (!read_all(in_fd,request,header.bytes)) break;
+            Lv2ControlWire updates[LV2_WORKER_CONTROLS_MAX];
+            int update_count=0;
+            int preset_ok=apply_preset(world,plugin,ports,nports,control_wire,
+                control_count,request,updates,&update_count);
+            Lv2FrameHeader reply={.frames=0,.bytes=0,.caps=0,.ok=preset_ok};
+            uint32_t update_wire=(uint32_t)update_count;
+            if (!write_all(out_fd,&reply,sizeof(reply)) ||
+                !write_all(out_fd,&update_wire,sizeof(update_wire)) ||
+                (update_count && !write_all(out_fd,updates,
+                    (size_t)update_count*sizeof(updates[0])))) break;
+            continue;
+        }
         if (header.frames==0) {
             uint32_t port=0; float value=0;
             if (!read_all(in_fd,&port,sizeof(port)) || !read_all(in_fd,&value,sizeof(value))) break;
@@ -480,6 +590,45 @@ int lv2_worker_is_instrument(const Lv2Worker *worker) {
 int lv2_worker_control_count(const Lv2Worker *worker) {
     return worker?worker->control_count:0;
 }
+int lv2_worker_load_preset(Lv2Worker *worker, const char *preset,
+                           char *error, size_t error_size) {
+    if (error && error_size) error[0]=0;
+    size_t length=preset?strlen(preset):0;
+    if (!worker || !preset || length==0 || length>LV2_WORKER_PRESET_MAX) {
+        if (error && error_size) snprintf(error,error_size,"invalid LV2 preset");
+        return 0;
+    }
+    Lv2FrameHeader header={.frames=LV2_WORKER_PRESET,.bytes=(uint32_t)length,.ok=0};
+    if (!write_all(worker->in_fd,&header,sizeof(header)) ||
+        !write_all(worker->in_fd,preset,length) ||
+        !read_all(worker->out_fd,&header,sizeof(header))) {
+        if (error && error_size) snprintf(error,error_size,"LV2 preset request failed");
+        return 0;
+    }
+    /* The child always sends the update count after the reply header, even for
+       a rejected preset; draining it keeps the control pipe in sync. */
+    uint32_t count=0;
+    Lv2ControlWire updates[LV2_WORKER_CONTROLS_MAX];
+    if (!read_all(worker->out_fd,&count,sizeof(count)) ||
+        count>LV2_WORKER_CONTROLS_MAX ||
+        (count && !read_all(worker->out_fd,updates,
+            (size_t)count*sizeof(updates[0])))) {
+        if (error && error_size) snprintf(error,error_size,"LV2 preset response failed");
+        return 0;
+    }
+    if (!header.ok) {
+        if (error && error_size) snprintf(error,error_size,"LV2 preset rejected");
+        return 0;
+    }
+    for (uint32_t u=0;u<count;u++)
+        for (int i=0;i<worker->control_count;i++)
+            if (worker->controls[i].index==updates[u].index) {
+                worker->controls[i]=updates[u];
+                break;
+            }
+    return 1;
+}
+
 int lv2_worker_control(const Lv2Worker *worker, int index, uint32_t *port,
                        char name[LV2_WORKER_CONTROL_NAME], float *min,
                        float *max, float *value) {

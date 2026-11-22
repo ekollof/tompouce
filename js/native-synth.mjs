@@ -247,4 +247,19 @@ export function installNative(core) {
     return this.withValue(value=>(parameter)=>({...value,[key]:parameter}))
       .appLeft(core.reify(value));
   };
+  /**
+   * Load an installed LV2 preset by URI or display label on a live instrument.
+   * Presets only change declared control-port values; arbitrary state files are
+   * not accepted. Without a note this emits a control-only event.
+   * @name lv2preset
+   * @param {string} name preset URI or label, at most 128 characters
+   * @example
+   * s('lv2:urn:example:synth').lv2preset('Quiet')
+   */
+  core.Pattern.prototype.lv2preset=function(name) {
+    if (typeof name!=='string' || !name || name.length>128 ||
+        /[\u0000-\u001f]/.test(name))
+      throw new Error('Invalid LV2 preset');
+    return this.withValue(value=>({...value,lv2preset:name}));
+  };
 }

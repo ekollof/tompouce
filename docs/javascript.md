@@ -479,10 +479,13 @@ MIDI input and no audio input; effects keep the offline path. The instance runs
 in a confined worker with a bounded render thread, stereo ring and note/CC
 queue. `Pattern.lv2param(name, value)` sets an input control port by its display
 name (case-insensitive, clamped to the declared range) and accepts a number,
-slider or pattern. Without a note the event only changes parameters, so a
-separate long note keeps sounding. Control changes are applied between
-256-frame blocks. `test_live_lv2` and `test_lv2_worker` cover the metadata,
-timing, queue bounds and sanitized worker; LV2 state/preset files remain open.
+slider or pattern. `Pattern.lv2preset(name)` loads an installed preset by URI
+or display label and applies its declared control-port values without
+retriggering. Without a note either method only changes parameters, so a
+separate long note keeps sounding. Control and preset changes are applied
+between 256-frame blocks; arbitrary LV2 state files and plugin-specific state
+are not accepted. `test_live_lv2` and `test_lv2_worker` cover the metadata,
+timing, queue bounds, preset loading and sanitized worker.
 
 ### OSC output
 

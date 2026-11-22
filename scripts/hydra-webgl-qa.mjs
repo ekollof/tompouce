@@ -1,8 +1,8 @@
 /* Headless smoke test for the WebGL Hydra backend and the /hydra page.
    Serves a disposable page and a stub analysis endpoint, renders GLSL
    generator/effect chains in Chromium, reads pixels back, and then drives the
-   real page through one poll and a custom graph. No engine or audio device is
-   touched. */
+   real page through one poll, a custom graph and the four learn-page examples.
+   No engine or audio device is touched. */
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -17,10 +17,69 @@ const realPage = (await fs.readFile(path.resolve('web/hydra.html'), 'utf8'))
 const scope = Array.from({length:192}, (_, i) => Math.sin(i * .19) * .7);
 const scopeReply = JSON.stringify({result:{content:[{type:'text',
   text:JSON.stringify({scope,bpm:120,playing:1,generation:1})}]}});
+const bands = Array.from({length:64}, (_, i) => -40 - (i % 7) * 3);
+const spectrumReply = JSON.stringify({result:{content:[{type:'text',
+  text:JSON.stringify({bands,rms:.2,bpm:120,playing:1,generation:1})}]}});
 const pageCode = 'await initHydra({feedStrudel:1});\n' +
   'osc(6).color(1,.5,.2).out();\n' +
   '$: note("c4 e4").s("sine").gain(.1)';
-const codeReply = JSON.stringify({result:{content:[{type:'text',text:pageCode}]}});
+/* The four examples from https://strudel.cc/learn/hydra/. */
+const examples = [
+  `await initHydra()
+osc(10, 0.9, 300)
+.color(0.9, 0.7, 0.8)
+.diff(
+osc(45, 0.3, 100)
+.color(0.9, 0.9, 0.9)
+.rotate(0.18)
+.pixelate(12)
+.kaleid()
+)
+.scrollX(10)
+.colorama()
+.luma()
+.repeatX(4)
+.repeatY(4)
+.modulate(
+osc(1, -0.9, 300)
+)
+.scale(2)
+.out()
+
+note("[a,c,e,<a4 ab4 g4 gb4>,b4]/2")
+.s("sawtooth").vib(2)
+.lpf(600).lpa(2).lpenv(6)`,
+  `await initHydra()
+let pattern = "3 4 5 [6 7]*2"
+shape(H(pattern)).out(o0)
+n(pattern).scale("A:minor").piano().room(1)`,
+  `await initHydra({detectAudio:true})
+let pattern = "<3 4 5 [6 7]*2>"
+shape(H(pattern)).repeat()
+  .scrollY(
+    ()=> a.fft[0]*.25
+  )
+  .add(src(o0).color(.71 ).scrollX(.005),.95)
+.out(o0)
+n(pattern).scale("A:minor").piano().room(1)`,
+  `await initHydra({feedStrudel:1})
+//
+src(s0).kaleid(H("<4 5 6>"))
+  .diff(osc(1,0.5,5))
+  .modulateScale(osc(2,-0.25,1))
+  .out()
+//
+
+$: s("bd*4,[hh:0:<.5 1>]*8,~ rim").bank("RolandTR909").speed(.9)
+
+$: note("[<g1!3 <bb1 <f1 d1>>>]\*3").s("sawtooth")
+
+.room(.75).sometimes(add(note(12))).clip(.3)
+.lpa(.05).lpenv(-4).lpf(2000).lpq(8).ftype('24db')
+
+all(x=>x.fft(4).scope({pos:0,smear:.95}))`,
+];
+let activeCode = pageCode;
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -31,7 +90,10 @@ const server = http.createServer(async (request, response) => {
         let name = '';
         try { name = JSON.parse(body).name; } catch (error) {}
         response.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
-        response.end(name === 'music_get_code' ? codeReply : scopeReply);
+        const reply = name === 'music_get_code'
+          ? JSON.stringify({result:{content:[{type:'text',text:activeCode}]}})
+          : name === 'music_audio_spectrum' ? spectrumReply : scopeReply;
+        response.end(reply);
       });
       return;
     }
@@ -40,13 +102,16 @@ const server = http.createServer(async (request, response) => {
       response.end(barePage);
       return;
     }
-    if (request.url === '/page') {
+    if (request.url === '/page' || /^\/page[1-4]$/.test(request.url)) {
+      const index = /^\/page([1-4])$/.exec(request.url);
+      if (index) activeCode = examples[Number(index[1]) - 1];
       response.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'});
       response.end(realPage);
       return;
     }
-    if (request.url === '/hydra.js') {
-      const script = await fs.readFile(path.resolve('web/hydra.js'));
+    if (request.url === '/hydra.js' || request.url === '/patterns.js') {
+      const name = request.url === '/patterns.js' ? 'dist/patterns.js' : 'hydra.js';
+      const script = await fs.readFile(path.resolve('web', name));
       response.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store'});
       response.end(script);
       return;
@@ -265,11 +330,55 @@ try {
     console.error('page', pageResult);
   }
 
+  /* The four learn-page examples must evaluate, render, and expose H(),
+     detectAudio's a.fft, and feedStrudel's s0 canvas. */
+  const exampleResults = [];
+  for (let i=1;i<=4;i++) {
+    await browser.page(url + 'page' + i);
+    await browser.until('window.Hydra && Hydra.ready === true', 10000);
+    await browser.until('document.getElementById("hud").textContent.indexOf("WebGL graph") >= 0', 10000);
+    await browser.until('window.__hydraCodeError === null', 5000);
+    if (i === 3) await browser.until('a.fft[0] > 0', 5000);
+    if (i === 4) await browser.until('s0.element && s0.element.tagName === "CANVAS" && s0.ready', 5000);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const result = await browser.evaluate(`(() => {
+      const gl=__hydraGL, canvas=document.getElementById('stage');
+      const data=new Uint8Array(canvas.width*canvas.height*4);
+      gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,data);
+      let min=999,max=-1,sum=0;
+      for(let i=0;i<data.length;i+=4){const value=data[i]+data[i+1]+data[i+2];
+        if(value<min)min=value;if(value>max)max=value;sum+=value;}
+      return {error:gl.getError(),min,max,mean:sum/(data.length/4),
+        codeError:window.__hydraCodeError||null,
+        h:typeof H==='function'?H('3 4 5 [6 7]*2')():null,
+        fft:a.fft.slice(0,4),
+        s0:!!(s0.element&&s0.element.tagName==='CANVAS'),
+        output:!!window.__hydraOutput};
+    })()`);
+    exampleResults.push(result);
+    if (result.error!==0 || result.mean<=0 || result.max<=result.min ||
+        result.codeError || !result.output) {
+      failures++; console.error('learn example '+i, result);
+    }
+  }
+  if (!(exampleResults[1] && exampleResults[1].h >= 3 && exampleResults[1].h <= 7)) {
+    failures++; console.error('H pattern', exampleResults[1] && exampleResults[1].h);
+  }
+  if (!(exampleResults[2] && exampleResults[2].fft[0] > 0)) {
+    failures++; console.error('detectAudio fft', exampleResults[2] && exampleResults[2].fft);
+  }
+  if (!(exampleResults[3] && exampleResults[3].s0)) {
+    failures++; console.error('feedStrudel s0', exampleResults[3] && exampleResults[3].s0);
+  }
+  console.log('hydra learn examples:', JSON.stringify(exampleResults.map((result,index)=>({
+    example:index+1,mean:result.mean,min:result.min,max:result.max,
+    fft:result.fft,h:result.h,s0:result.s0}))));
+
   if (failures) {
     console.error(`hydra WebGL smoke failed: ${failures} case(s)`);
     process.exitCode = 1;
   } else {
-    console.log('hydra WebGL generators, full effects, feedback, camera/screen/image sources, page source graph and code overlay ok');
+    console.log('hydra WebGL generators, full effects, feedback, camera/screen/image sources, page source graph, code overlay and learn examples ok');
   }
 } catch (error) {
   if (/WebGL unavailable/.test(String(error))) {

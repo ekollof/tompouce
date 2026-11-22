@@ -27,7 +27,8 @@ static uint32_t ink(const VisualOptions *o, const VisualNote *n, int active) {
     return opacity(c,n->gain);
 }
 
-/* Hann-windowed real input, iterative radix-2 FFT. UI thread only. */
+/* Hann-windowed real input, iterative radix-2 FFT. Stack-only so the
+   foreground and bounded MCP analysis calls can use it off the audio callback. */
 void terminal_graphics_fft(const float *samples, int count, double rate, float bands[SPECTRUM_BANDS]) {
     double re[4096]={0}, imaginary[4096]={0}, sum=0;
     for (int i=0;i<SPECTRUM_BANDS;i++) bands[i]=-160;

@@ -35,7 +35,7 @@ class InstallerTest(unittest.TestCase):
             self.assertIn(name, installer.STAGED_FILES)
 
     def test_hydra_runtime_assets_are_copied(self):
-        for name in ('web/hydra.html', 'web/hydra.js'):
+        for name in ('web/hydra.html', 'web/hydra.js', 'web/dist/patterns.js'):
             self.assertIn(name, installer.RUNTIME_FILES)
 
     def test_out_of_tree_runtime_copy(self):

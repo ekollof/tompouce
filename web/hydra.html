@@ -11,6 +11,7 @@
 <canvas id="stage" width="960" height="540"></canvas>
 <div id="hud">waiting for engine analysis…</div>
 <pre id="source"></pre>
+<script nonce="EDITOR_STYLE_NONCE" src="/patterns.js"></script>
 <script nonce="EDITOR_STYLE_NONCE" src="/hydra.js"></script>
 <script nonce="EDITOR_STYLE_NONCE">
 const token = 'COMPANION_TOKEN';
@@ -21,6 +22,8 @@ const hud = document.getElementById('hud');
 const sourcePanel = document.getElementById('source');
 let phase = 0, last = null, sourceGeneration = null;
 let loadedCode = null, codeGeneration = null, codeError = null;
+let renderError = null, analyserEnabled = false, feedEnabled = false;
+let cycle = 0, cycleMs = 0;
 const musicStub = new Proxy(function(){ return musicStub; }, {
   get(target, property) {
     if (property === Symbol.toPrimitive) return () => 0;
@@ -28,9 +31,96 @@ const musicStub = new Proxy(function(){ return musicStub; }, {
     return musicStub;
   },
 });
+
+/* Hydra's analyser object. detectAudio feeds it from the engine's bounded
+   spectrum instead of a microphone so the visualizer never asks for device
+   permission and the desktop engine stays the only audio source. */
+const analyser = {
+  fft: [], bins: [], settings: [], cutoff: 0, scale: 1, smooth: .4, isDrawing: false,
+  setBins(count) {
+    const n = Math.max(1, Math.min(64, Math.floor(Number(count) || 4)));
+    this.fft = Array(n).fill(0);
+    this.bins = Array(n).fill(0);
+    this.settings = Array.from({length:n}, () => ({
+      cutoff:this.cutoff, scale:this.scale, smooth:this.smooth}));
+    for (let i=0;i<n;i++)
+      globalThis['a'+i] = (scale=1, offset=0) => () => (analyser.fft[i] * scale + offset);
+    return this;
+  },
+  setCutoff(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return this;
+    this.cutoff = n;
+    for (const setting of this.settings) setting.cutoff = n;
+    return this;
+  },
+  setSmooth(value) {
+    const n = Math.max(0, Math.min(.99, Number(value)));
+    if (!Number.isFinite(n)) return this;
+    this.smooth = n;
+    for (const setting of this.settings) setting.smooth = n;
+    return this;
+  },
+  setScale(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return this;
+    this.scale = n;
+    for (const setting of this.settings) setting.scale = n;
+    return this;
+  },
+  setMax() { return this; },
+  show() { this.isDrawing = true; return this; },
+  hide() { this.isDrawing = false; return this; },
+};
+analyser.setBins(4);
+globalThis.a = analyser;
+
+/* Strudel-style feeding canvas: src(s0) samples the live scope when the
+   source asks for feedStrudel. The terminal draws its own inline images; this
+   canvas is the browser-side equivalent for Hydra. */
+const feedCanvas = document.createElement('canvas');
+feedCanvas.width = 512; feedCanvas.height = 288;
+const feedCtx = feedCanvas.getContext('2d');
+function drawFeed(samples, now) {
+  const width = feedCanvas.width, height = feedCanvas.height;
+  feedCtx.fillStyle = 'rgba(7,9,16,.28)';
+  feedCtx.fillRect(0,0,width,height);
+  feedCtx.strokeStyle = '#1d2740';
+  feedCtx.lineWidth = 1;
+  for (let i=1;i<4;i++) {
+    const x = width*i/4;
+    feedCtx.beginPath(); feedCtx.moveTo(x,0); feedCtx.lineTo(x,height); feedCtx.stroke();
+  }
+  if (!samples.length) return;
+  let energy = 0;
+  for (const value of samples) energy += Math.abs(value);
+  energy = energy / samples.length;
+  const hue = (now * .02 + energy * 80) % 360;
+  feedCtx.strokeStyle = `hsl(${hue} 85% 65%)`;
+  feedCtx.lineWidth = 2.5;
+  feedCtx.beginPath();
+  for (let i=0;i<samples.length;i++) {
+    const x = i/(samples.length-1)*width;
+    const y = height*.5 - Number(samples[i]||0)*height*.42;
+    if (i===0) feedCtx.moveTo(x,y); else feedCtx.lineTo(x,y);
+  }
+  feedCtx.stroke();
+}
+function attachFeed() {
+  if (feedEnabled) return;
+  feedEnabled = true;
+  if (globalThis.s0 && typeof globalThis.s0.init === 'function')
+    globalThis.s0.init({src:feedCanvas});
+}
+
 const visualBase = Object.create(null);
-visualBase.initHydra = async () => visualBase;
-visualBase.H = () => 0;
+visualBase.initHydra = async (options={}) => {
+  if (options && options.detectAudio) analyserEnabled = true;
+  if (options && options.feedStrudel) attachFeed();
+  return globalThis.Hydra || visualBase;
+};
+visualBase.H = (pattern) => globalThis.TompouceHydraPatterns
+  ? globalThis.TompouceHydraPatterns.H(pattern) : (() => 0);
 visualBase.hush = () => globalThis.Hydra && globalThis.Hydra.hush ? globalThis.Hydra.hush() : undefined;
 visualBase.setResolution = (width,height) => globalThis.Hydra && Hydra.setResolution ? Hydra.setResolution(width,height) : undefined;
 visualBase.render = () => undefined;
@@ -96,6 +186,38 @@ function drawScope(samples) {
   ctx.moveTo(0,height/2); ctx.lineTo(width,height/2); ctx.stroke();
   return energy;
 }
+function updateAnalyser(bands) {
+  if (!Array.isArray(bands) || !bands.length || !analyser.fft.length) return;
+  const count = analyser.fft.length;
+  const spacing = Math.max(1, Math.floor(bands.length / count));
+  const previous = analyser.bins.slice();
+  for (let i=0;i<count;i++) {
+    let sum = 0, weight = 0;
+    for (let j=i*spacing;j<Math.min(bands.length,(i+1)*spacing);j++) {
+      const db = Number(bands[j]);
+      sum += Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 70) / 60)) : 0;
+      weight++;
+    }
+    const value = weight ? sum / weight : 0;
+    const setting = analyser.settings[i] || {cutoff:analyser.cutoff,scale:analyser.scale,smooth:analyser.smooth};
+    const mixed = value * (1 - setting.smooth) + (previous[i] || 0) * setting.smooth;
+    analyser.bins[i] = mixed;
+    analyser.fft[i] = Math.max(0, (mixed - setting.cutoff) / Math.max(.0001, setting.scale));
+  }
+}
+async function pollAnalyser() {
+  try {
+    const reply = await fetch('/api/tool', {method:'POST',
+      headers:{'Content-Type':'application/json','X-Companion-Token':token},
+      body:JSON.stringify({name:'music_audio_spectrum',arguments:{}})});
+    if (!reply.ok) return;
+    const payload = await reply.json();
+    const text = payload.result && payload.result.content && payload.result.content[0] && payload.result.content[0].text;
+    if (!text) return;
+    const data = JSON.parse(text);
+    updateAnalyser(data.bands);
+  } catch (error) { /* keep the previous analyser frame */ }
+}
 async function poll() {
   try {
     const reply = await fetch('/api/tool', {method:'POST',
@@ -108,7 +230,7 @@ async function poll() {
         const data = JSON.parse(text);
         if (typeof data.generation === 'number') {
           if (sourceGeneration !== null && data.generation !== sourceGeneration) {
-            last = null; phase = 0; // new source: drop the stale waveform frame
+            last = null; phase = 0; cycle = 0; cycleMs = 0; // new source: drop stale visual time
           }
           sourceGeneration = data.generation;
         }
@@ -117,26 +239,43 @@ async function poll() {
       }
     }
   } catch (error) { /* keep the last frame on a dropped poll */ }
+  if (analyserEnabled) await pollAnalyser();
   if (globalThis.__hydraOutput && typeof __hydraOutput._render === 'function') {
+    hud.textContent = renderError ? 'hydra: ' + renderError
+      : 'hydra: WebGL graph · ' + (last && last.bpm ? last.bpm.toFixed(1) + ' bpm' : 'waiting');
+  } else {
+    const samples = last && last.scope ? last.scope : [];
+    hud.textContent = last
+      ? `hydra: ${last.playing ? 'playing' : 'stopped'} · ${Number(last.bpm||0).toFixed(1)} bpm · ${samples.length} samples`
+      : (codeError ? 'hydra code: ' + codeError
+        : globalThis.Hydra && Hydra.error ? 'hydra: ' + Hydra.error : 'waiting for engine analysis…');
+  }
+  setTimeout(poll, 125); // bounded to 8 Hz for analysis; rendering stays on rAF
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const bpm = last && Number.isFinite(last.bpm) && last.bpm > 0 ? last.bpm : 120;
+  const dt = cycleMs ? Math.min(.25, Math.max(0, (now - cycleMs) / 1000)) : 0;
+  cycleMs = now;
+  cycle += dt * bpm / 240;
+  if (globalThis.TompouceHydraPatterns) TompouceHydraPatterns.setCycle(cycle);
+  if (feedEnabled) drawFeed(last && last.scope ? last.scope : [], now);
+  const output = globalThis.__hydraOutput;
+  if (output && typeof output._render === 'function') {
     showScope(false);
     try {
-      __hydraOutput._render(last && last.scope ? last.scope : [], performance.now());
-      hud.textContent = 'hydra: WebGL graph · ' + (last && last.bpm ? last.bpm.toFixed(1) + ' bpm' : 'waiting');
+      output._render(last && last.scope ? last.scope : [], now);
+      renderError = null;
     } catch (error) {
+      renderError = error && error.message ? error.message : 'render error';
       showScope(true);
-      hud.textContent = 'hydra: ' + (error && error.message ? error.message : 'render error');
     }
-    setTimeout(poll, 125);
-    return;
+  } else {
+    showScope(true);
+    drawScope(last && last.scope ? last.scope : []);
   }
-  showScope(true);
-  const samples = last && last.scope ? last.scope : [];
-  const energy = drawScope(samples);
-  hud.textContent = last
-    ? `hydra: ${last.playing ? 'playing' : 'stopped'} · ${last.bpm.toFixed(1)} bpm · rms ${energy.toFixed(3)} · ${samples.length} samples`
-    : (codeError ? 'hydra code: ' + codeError
-      : globalThis.Hydra && Hydra.error ? 'hydra: ' + Hydra.error : 'waiting for engine analysis…');
-  setTimeout(poll, 125); // bounded to 8 Hz
 }
+requestAnimationFrame(frame);
 poll();
 </script></body></html>

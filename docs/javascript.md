@@ -559,24 +559,37 @@ opts into the smaller set. Supplemental local manifests preserve the REPL's
 entries. Absent installed manifests still require explicit maps. Sample
 recordings are downloaded during installation rather than bundled in Git.
 
-`await initHydra(...)` is accepted as an audio-only compatibility placeholder.
-It enables inert Hydra source/texture chains, `s0`–`s3`/`o0`–`o3` buffers and
-`H()`, while musical branches continue to evaluate. Options such as
-`feedStrudel` and `detectAudio` are ignored; there is no visual rendering,
-audio/video capture, resource fetching or execution of visual callbacks.
-`a.fft` is an inert zero buffer, and pattern `analyze`/`fft` controls are not
-fed by the native mixer.
-The console points to `/hydra` once per evaluation. The placeholder
-does not open a browser; the separate `/hydra` browser visualizer renders a
-bounded Hydra-style graph through WebGL (all built-in generators and effects,
+`await initHydra(...)` is accepted as an audio-only compatibility placeholder
+by the terminal runtime. It enables inert Hydra source/texture chains,
+`s0`–`s3`/`o0`–`o3` buffers and `H()`, while musical branches continue to
+evaluate. Options such as `feedStrudel` and `detectAudio` are ignored by the
+terminal; there is no visual rendering, audio/video capture, resource fetching
+or execution of visual callbacks, and its `a.fft` is an inert zero buffer.
+Pattern `analyze`/`fft` controls still do not receive a per-pattern mixer tap.
+The console points to `/hydra` once per evaluation. The placeholder does not
+open a browser; the separate `/hydra` browser visualizer renders a bounded
+Hydra-style graph through WebGL (all built-in generators and effects,
 camera/screen/image sources, and previous-frame feedback) and falls back to the
 2D audio scope when no graph is set. The page reads the current source through
 the read-only `music_get_code` bridge when the source generation changes,
 evaluates its visual calls in the browser with inert stubs for musical calls,
-and overlays the source on the output. `hydra_webgl` exercises generators, the
-full effect set, `prev` feedback, owned canvas-backed camera/screen stubs,
-image sources, resolution changes, source-driven graph switching and the code
-overlay in headless Chromium. Custom `setFunction` GLSL and patchbay stream
+and overlays the source on the output. `web/dist/patterns.js` bundles the same
+pinned Strudel core and mini-notation packages so `H(pattern)` returns live
+numeric pattern values at the engine's cycle position. Function-valued Hydra
+parameters, including arrow functions over `a.fft`, are resolved every frame;
+`o0`–`o3` outputs sample the previous rendered frame.
+
+With `detectAudio:true`, the page fills `a.fft` from
+`music_audio_spectrum`: a 4096-sample Hann FFT of the master mix, reduced to 64
+logarithmic bands outside the audio callback in the MCP thread. `setBins`,
+`setSmooth`, `setCutoff` and `setScale` follow Hydra's analyser settings; the
+engine's own audio is used instead of requesting microphone permission. With
+`feedStrudel:1`, `s0` is a live Strudel-style scope canvas drawn from the same
+bounded waveform feed. `hydra_webgl` exercises generators, the full effect set,
+`prev` feedback, owned canvas-backed camera/screen stubs, image sources,
+resolution changes, source-driven graph switching, the code overlay, `H()`,
+`detectAudio`, `feedStrudel` and the four `https://strudel.cc/learn/hydra/`
+examples in headless Chromium. Custom `setFunction` GLSL and patchbay stream
 names are not accepted by this bounded backend.
 
 ## Pitch compensation and convolution

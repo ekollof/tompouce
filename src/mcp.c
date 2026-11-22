@@ -15,6 +15,7 @@
 #include "songfile.h"
 #include "sounds.h"
 #include "sound_store.h"
+#include "terminal_graphics.h"
 #include <cjson/cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -460,6 +461,8 @@ void handle_request(cJSON *req) {
             "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"number\"}}}");
         ADDTOOL("music_audio_scope", "Bounded read-only audio waveform and voice metrics for visualizers.",
             "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}");
+        ADDTOOL("music_audio_spectrum", "Bounded read-only logarithmic audio spectrum for visualizers.",
+            "{\"type\":\"object\",\"properties\":{}}");
         ADDTOOL("music_sounds", "Search playable samples, drum-machines, synths, wavetables and user sounds. Returns JSON catalog text.",
             "{\"type\":\"object\",\"properties\":{\"category\":{\"type\":\"string\"},\"query\":{\"type\":\"string\"},\"offset\":{\"type\":\"integer\"},\"limit\":{\"type\":\"integer\"}}}");
         ADDTOOL("music_reload_sounds", "Reload imported sounds from confined application storage; source/playback unchanged.",
@@ -659,6 +662,32 @@ void handle_request(cJSON *req) {
                     track_count==1?tracks[0].compile_generation:0);
                 for (int i=0;i<count;i++)
                     cJSON_AddItemToArray(scope,cJSON_CreateNumber((int)(samples[i]*10000)/10000.0));
+                char *text=cJSON_PrintUnformatted(root);
+                snprintf(out,outcap,"%s",text?text:"{}");
+                free(text);
+            } else snprintf(out,outcap,"{}");
+            cJSON_Delete(root);
+        } else if (strcmp(tname, "music_audio_spectrum") == 0) {
+            enum { ANALYSER_SAMPLES = 4096 };
+            float samples[ANALYSER_SAMPLES];
+            float bands[SPECTRUM_BANDS];
+            int count=audio_scope_copy(samples,ANALYSER_SAMPLES);
+            terminal_graphics_fft(samples,count,44100,bands);
+            double energy=0;
+            for (int i=0;i<count;i++) energy+=(double)samples[i]*samples[i];
+            cJSON *root=cJSON_CreateObject();
+            cJSON *list=cJSON_CreateArray();
+            if (root && list) {
+                cJSON_AddItemToObject(root,"bands",list);
+                cJSON_AddNumberToObject(root,"rms",count?sqrt(energy/count):0);
+                cJSON_AddNumberToObject(root,"playing",audio_is_playing()?1:0);
+                cJSON_AddNumberToObject(root,"bpm",audio_get_bpm());
+                /* Tag the analysed frame with the accepted source so a
+                   visualizer can discard pre-evaluation data. */
+                cJSON_AddNumberToObject(root,"generation",
+                    track_count==1?tracks[0].compile_generation:0);
+                for (int i=0;i<SPECTRUM_BANDS;i++)
+                    cJSON_AddItemToArray(list,cJSON_CreateNumber((int)(bands[i]*10)/10.0));
                 char *text=cJSON_PrintUnformatted(root);
                 snprintf(out,outcap,"%s",text?text:"{}");
                 free(text);

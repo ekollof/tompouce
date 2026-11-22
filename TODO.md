@@ -10,17 +10,26 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
-- [ ] Per-pattern `analyze`/`fft` controls. The terminal runtime currently
-      ignores `analyze(id)` and `fft(size)` in native events; the terminal
-      `spectrum` view uses the master-output FFT, and the Hydra page has no
-      live `a.fft` analyser source. A bounded per-analyzer tap and FFT outside
-      the audio callback are still needed before claiming this part of the
-      Strudel visual API.
+- [ ] Per-pattern `analyze`/`fft` controls. The terminal runtime still ignores
+      `analyze(id)` and `fft(size)` in native events; the terminal `spectrum`
+      view and the Hydra page's `a.fft` use the master-output FFT. A bounded
+      per-analyzer tap and selectable FFT size outside the audio callback are
+      still needed before claiming this part of the Strudel visual API.
+- [x] Hydra learn-page examples. The browser page now bundles the pinned
+      Strudel pattern packages for `H(pattern)`, resolves function-valued Hydra
+      parameters per frame, maps `o0`–`o3` to previous-frame feedback, feeds
+      `detectAudio`'s `a.fft` from a bounded master-mix `music_audio_spectrum`
+      tool, attaches a Strudel-style scope canvas as `s0` for `feedStrudel`,
+      and renders on `requestAnimationFrame` while analysis stays at 8 Hz.
+      `hydra_webgl` runs the four `strudel.cc/learn/hydra/` examples; the
+      terminal runtime's inert placeholders are unchanged, and
+      `test_javascript` evaluates each example's musical branches.
 - [x] `/hydra` command: a separate loopback visualizer is now implemented and
       independent of F12 — `/hydra` / `/hydra stop` spawn a browser tab through
       the companion helper with a private token, Host/Origin checks, read-only
-      `music_audio_scope` and `music_get_code` MCP tools (bounded 16–192 samples,
-      polled at 8 Hz) and a parent-pid session guard. `tests/test_companion.py`
+      `music_audio_scope`, `music_audio_spectrum` and `music_get_code` MCP tools
+      (bounded 16–192 sample waveform, 64-band master FFT while `detectAudio`
+      is enabled, polled at 8 Hz) and a parent-pid session guard. `tests/test_companion.py`
       covers the tool allowlist and auth. `web/hydra.js` renders through WebGL: generators
       (`osc`, `shape`, `solid`, `noise`, `voronoi`, `gradient`, `src`, `prev`),
       coordinate and color effects (`rotate`, `scale`, `pixelate`, `posterize`,
@@ -37,7 +46,7 @@ verification, installation and upstream terminal constraints.
       graph is set. `hydra_webgl` is a headless Chromium smoke test for
       generator output, the full effect set, feedback, owned canvas-backed
       camera/screen stubs, image sources, resolution changes, source-driven
-      graph switching and the code overlay. The scope tool includes the
+      graph switching, the code overlay and the four learn-page examples. The scope tool includes the
       accepted source's `generation`, and
       the page drops stale frames when it changes. The page reads source
       through `music_get_code`, evaluates visual calls with inert musical

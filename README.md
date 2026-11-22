@@ -323,14 +323,20 @@ loopback-only; audio stays native. Standalone launching via
 
 `/hydra` opens a separate loopback visualizer tab (`/hydra stop` closes it),
 independent of F12. It uses the same authenticated loopback helper with
-read-only `music_audio_scope` and `music_get_code` tools (bounded waveform plus
-BPM/playing state, polled at 8 Hz; source read when its generation changes); it
-has no control access to the engine and exits with its parent. It renders the
-audio scope by default, evaluates the visual calls in the current source with
-inert music stubs, renders a bounded Hydra-style WebGL graph (generators, the
-full built-in effect set, `prev` feedback, and `s0`–`s3` camera/screen/image
-sources), and overlays the source text. Custom `setFunction` GLSL and patchbay
-streams remain outside this bounded backend.
+read-only `music_audio_scope`, `music_audio_spectrum` and `music_get_code` tools
+(bounded waveform plus BPM/playing state, and while `detectAudio` is enabled a
+4096-sample master-mix FFT reduced to 64 logarithmic bands; analysis is polled
+at 8 Hz and source is read when its generation changes); it has no control
+access to the engine and exits with its parent. It renders the audio scope by
+default, evaluates the visual calls in the current source with inert music
+stubs, renders a bounded Hydra-style WebGL graph (generators, the full built-in
+effect set, `prev` feedback, and `s0`–`s3` camera/screen/image sources), and
+overlays the source text. `H()` uses the pinned Strudel pattern packages in the
+browser; `detectAudio` feeds `a.fft` from the native spectrum and `feedStrudel`
+attaches a live scope canvas as `s0`, so the four examples on
+<https://strudel.cc/learn/hydra/> run. Rendering runs on
+`requestAnimationFrame`; analysis polling stays bounded at 8 Hz. Custom
+`setFunction` GLSL and patchbay streams remain outside this bounded backend.
 
 Native ZzFX (`s('z_sine')` and related sounds), bytebeat (`s('bytebeat').bbexpr('t')`)
 and Kabelsalat graphs (`note(60).K(sine(sFreq).mul(.1).out())`) run without a browser.

@@ -90,6 +90,29 @@ int main(void) {
     cJSON_Delete(metrics); cJSON_Delete(envelope);
     close(fd); mcp_poll();
 
+    /* The spectrum tool returns a fixed, bounded band count. */
+    fd=client();
+    snprintf(request,sizeof(request),"{\"auth\":\"%s\",\"method\":\"tools/call\","
+        "\"params\":{\"name\":\"music_audio_spectrum\",\"arguments\":{}}}\n",
+        mcp_tcp_token());
+    transmit(fd,request);
+    char spectrum[8192]; ssize_t spectral=recv(fd,spectrum,sizeof(spectrum)-1,0);
+    assert(spectral>0); spectrum[spectral]=0;
+    assert(strstr(spectrum,"bands") && strstr(spectrum,"rms") && strstr(spectrum,"bpm"));
+    cJSON *spectrumEnvelope=cJSON_Parse(spectrum);
+    assert(spectrumEnvelope);
+    const cJSON *spectrumContent=cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetObjectItemCaseSensitive(spectrumEnvelope,"result"),"content");
+    const cJSON *spectrumText=cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(spectrumContent,0),"text");
+    cJSON *spectrumData=spectrumText&&cJSON_IsString(spectrumText)?
+        cJSON_Parse(spectrumText->valuestring):NULL;
+    assert(spectrumData);
+    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(
+        spectrumData,"bands"))==64);
+    cJSON_Delete(spectrumData); cJSON_Delete(spectrumEnvelope);
+    close(fd); mcp_poll();
+
     fd=client();
     snprintf(request,sizeof(request),"{\"auth\":\"%s\",\"method\":\"ping\"} garbage\n",mcp_tcp_token());
     transmit(fd,request); assert(mcp_input_fd<0); close(fd);

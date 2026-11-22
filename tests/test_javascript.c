@@ -691,6 +691,47 @@ static void test_lv2param_control(void) {
 /* Materialized FX(...) closures can route shared room/delay sends. Outer
    controls are applied after FX in the web, so they must win; K() graph sources
    remain outside the scale/gain boundary. */
+static void test_hydra_learn_examples(void) {
+    /* The four examples from https://strudel.cc/learn/hydra/ must keep
+       evaluating their musical branches with the terminal's inert visual
+       placeholders. H() is a browser-side pattern query; here it is zero. */
+    const char *sources[] = {
+        "await initHydra()\n"
+        "osc(10, 0.9, 300).color(0.9, 0.7, 0.8).diff(\n"
+        "osc(45, 0.3, 100).color(0.9, 0.9, 0.9).rotate(0.18)\n"
+        ".pixelate(12).kaleid()).scrollX(10).colorama().luma()\n"
+        ".repeatX(4).repeatY(4).modulate(osc(1, -0.9, 300)).scale(2).out()\n"
+        "note(\"[a,c,e,<a4 ab4 g4 gb4>,b4]/2\").s(\"sawtooth\").vib(2)\n"
+        ".lpf(600).lpa(2).lpenv(6)",
+        "await initHydra()\n"
+        "let pattern = \"3 4 5 [6 7]*2\"\n"
+        "shape(H(pattern)).out(o0)\n"
+        "n(pattern).scale(\"A:minor\").piano().room(1)",
+        "await initHydra({detectAudio:true})\n"
+        "let pattern = \"<3 4 5 [6 7]*2>\"\n"
+        "shape(H(pattern)).repeat().scrollY(()=> a.fft[0]*.25)\n"
+        ".add(src(o0).color(.71).scrollX(.005),.95).out(o0)\n"
+        "n(pattern).scale(\"A:minor\").piano().room(1)",
+        "await initHydra({feedStrudel:1})\n"
+        "src(s0).kaleid(H(\"<4 5 6>\")).diff(osc(1,0.5,5))\n"
+        ".modulateScale(osc(2,-0.25,1)).out()\n"
+        "$: s(\"bd*4,[hh:0:<.5 1>]*8,~ rim\").bank(\"RolandTR909\").speed(.9)\n"
+        "$: note(\"[<g1!3 <bb1 <f1 d1>>>]*3\").s(\"sawtooth\")\n"
+        ".room(.75).sometimes(add(note(12))).clip(.3)\n"
+        ".lpa(.05).lpenv(-4).lpf(2000).lpq(8).ftype('24db')\n"
+        "all(x=>x.fft(4).scope({pos:0,smear:.95}))",
+    };
+    for (unsigned i=0;i<sizeof(sources)/sizeof(sources[0]);i++) {
+        JsProgram *program=NULL;
+        cJSON *haps=query(sources[i],&program);
+        if (cJSON_GetArraySize(haps)<=0)
+            fprintf(stderr,"hydra learn example %u produced no haps\n",i+1);
+        assert(cJSON_GetArraySize(haps)>0);
+        cJSON_Delete(haps);
+        javascript_free(program);
+    }
+}
+
 static void test_fx_shared_routing(void) {
     const char *code =
         "note(60).s('sine').FX(x=>x.room(.3).size(4).dry(.6)"
@@ -1338,6 +1379,7 @@ int main(int argc, char **argv) {
     haps=query("await initHydra();src(s0)",&program);
     assert(cJSON_GetArraySize(haps)==0);
     cJSON_Delete(haps); javascript_free(program);
+    test_hydra_learn_examples();
     test_fx_shared_routing();
     puts("JavaScript/Strudel runtime ok");
     return 0;

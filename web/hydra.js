@@ -30,6 +30,15 @@
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   }
+  /* Hydra params may be functions of time (H() patterns, audio reactions).
+     Keep those callable and resolve them per rendered frame. */
+  function param(value, fallback) {
+    return typeof value === 'function' ? value : number(value, fallback);
+  }
+  function resolveParam(value, time, fallback) {
+    const n = typeof value === 'function' ? Number(value(time)) : Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
   function clamp(value, low, high) { return Math.min(high, Math.max(low, value)); }
 
   const VERTEX = `attribute vec2 a_pos;
@@ -472,6 +481,21 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
       source.params=params||null;
       return source.attach(stream);
     };
+    /* Hydra's generic init({src}) accepts a canvas/video/image. feedStrudel
+       uses it to make s0 the Strudel-style draw canvas. */
+    source.init=function(options) {
+      const element=options && options.src;
+      const tag=element && element.tagName;
+      if (!element || (tag!=='CANVAS' && tag!=='VIDEO' && tag!=='IMG')) {
+        source.error='unsupported source';
+        return source;
+      }
+      if (source.stream && source.stream.getTracks)
+        for (const track of source.stream.getTracks()) track.stop();
+      source.element=element; source.stream=null;
+      source.dynamic=tag!=='IMG'; source.ready=false; source.error=null;
+      return source;
+    };
     source.initImage=function(url,params) {
       source.params=params||null;
       const text=String(url||'').slice(0,SOURCE_URL_MAX);
@@ -518,6 +542,9 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
   }
   const s0=makeSource('s0'), s1=makeSource('s1');
   const s2=makeSource('s2'), s3=makeSource('s3');
+  /* Output tokens sample the previous rendered frame. The page draws one
+     active chain at a time, so all four names share the feedback texture. */
+  const outputs=[0,1,2,3].map(index=>Object.freeze({kind:'output',index}));
 
   let renderTime=0;
   function draw(info,target,texture,texture2,params,prev) {
@@ -527,7 +554,7 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
     if (info.time) gl.uniform1f(info.time,renderTime);
     if (info.resolution) gl.uniform2f(info.resolution,WIDTH,HEIGHT);
     for (let i=0;i<params.length && i<8;i++)
-      if (info.uniforms[i]) gl.uniform1f(info.uniforms[i],params[i]);
+      if (info.uniforms[i]) gl.uniform1f(info.uniforms[i],resolveParam(params[i],renderTime,0));
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D,texture||scopeTexture);
     if (info.texture) gl.uniform1i(info.texture,0);
@@ -575,91 +602,95 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
   }
 
   const proto={
-    rotate(angle,speed) { return make('rotate',[number(angle,10),number(speed,0)],[this]); },
+    rotate(angle,speed) { return make('rotate',[param(angle,10),param(speed,0)],[this]); },
     scale(amount,xMult,yMult,offsetX,offsetY) {
-      return make('scale',[number(amount,1.5),number(xMult,1),number(yMult,1),
-        number(offsetX,.5),number(offsetY,.5)],[this]);
+      return make('scale',[param(amount,1.5),param(xMult,1),param(yMult,1),
+        param(offsetX,.5),param(offsetY,.5)],[this]);
     },
-    pixelate(x,y) { return make('pixelate',[number(x,20),number(y===undefined?x:y,20)],[this]); },
-    posterize(bins,gamma) { return make('posterize',[number(bins,3),number(gamma,.6)],[this]); },
-    shift(r,g,b,a) { return make('shift',[number(r,.5),number(g,0),number(b,0),number(a,0)],[this]); },
+    pixelate(x,y) { return make('pixelate',[param(x,20),param(y===undefined?x:y,20)],[this]); },
+    posterize(bins,gamma) { return make('posterize',[param(bins,3),param(gamma,.6)],[this]); },
+    shift(r,g,b,a) { return make('shift',[param(r,.5),param(g,0),param(b,0),param(a,0)],[this]); },
     repeat(x,y,offsetX,offsetY) {
-      return make('repeat',[number(x,3),number(y===undefined?x:y,3),
-        number(offsetX,0),number(offsetY,0)],[this]);
+      return make('repeat',[param(x,3),param(y===undefined?x:y,3),
+        param(offsetX,0),param(offsetY,0)],[this]);
     },
-    repeatX(reps,offset) { return make('repeatX',[number(reps,3),number(offset,0)],[this]); },
-    repeatY(reps,offset) { return make('repeatY',[number(reps,3),number(offset,0)],[this]); },
-    kaleid(count) { return make('kaleid',[number(count,4)],[this]); },
+    repeatX(reps,offset) { return make('repeatX',[param(reps,3),param(offset,0)],[this]); },
+    repeatY(reps,offset) { return make('repeatY',[param(reps,3),param(offset,0)],[this]); },
+    kaleid(count) { return make('kaleid',[param(count,4)],[this]); },
     scroll(x,y,speedX,speedY) {
-      return make('scroll',[number(x,.5),number(y,.5),
-        number(speedX,0),number(speedY,0)],[this]);
+      return make('scroll',[param(x,.5),param(y,.5),
+        param(speedX,0),param(speedY,0)],[this]);
     },
-    scrollX(x,speed) { return make('scrollX',[number(x,.5),number(speed,0)],[this]); },
-    scrollY(y,speed) { return make('scrollY',[number(y,.5),number(speed,0)],[this]); },
-    modulate(other,amount) { return make('modulate',[number(amount,.1)],[this,other]); },
+    scrollX(x,speed) { return make('scrollX',[param(x,.5),param(speed,0)],[this]); },
+    scrollY(y,speed) { return make('scrollY',[param(y,.5),param(speed,0)],[this]); },
+    modulate(other,amount) { return make('modulate',[param(amount,.1)],[this,other]); },
     modulateRepeat(other,repeatX,repeatY,offsetX,offsetY) {
-      return make('modulateRepeat',[number(repeatX,3),number(repeatY,3),
-        number(offsetX,.5),number(offsetY,.5)],[this,other]);
+      return make('modulateRepeat',[param(repeatX,3),param(repeatY,3),
+        param(offsetX,.5),param(offsetY,.5)],[this,other]);
     },
     modulateRepeatX(other,reps,offset) {
-      return make('modulateRepeatX',[number(reps,3),number(offset,.5)],[this,other]);
+      return make('modulateRepeatX',[param(reps,3),param(offset,.5)],[this,other]);
     },
     modulateRepeatY(other,reps,offset) {
-      return make('modulateRepeatY',[number(reps,3),number(offset,.5)],[this,other]);
+      return make('modulateRepeatY',[param(reps,3),param(offset,.5)],[this,other]);
     },
     modulateKaleid(other,count) {
-      return make('modulateKaleid',[number(count,4)],[this,other]);
+      return make('modulateKaleid',[param(count,4)],[this,other]);
     },
     modulateScrollX(other,x,speed) {
-      return make('modulateScrollX',[number(x,.5),number(speed,0)],[this,other]);
+      return make('modulateScrollX',[param(x,.5),param(speed,0)],[this,other]);
     },
     modulateScrollY(other,y,speed) {
-      return make('modulateScrollY',[number(y,.5),number(speed,0)],[this,other]);
+      return make('modulateScrollY',[param(y,.5),param(speed,0)],[this,other]);
     },
     modulateScale(other,multiple,offset) {
-      return make('modulateScale',[number(multiple,1),number(offset,1)],[this,other]);
+      return make('modulateScale',[param(multiple,1),param(offset,1)],[this,other]);
     },
     modulatePixelate(other,multiple,offset) {
-      return make('modulatePixelate',[number(multiple,10),number(offset,3)],[this,other]);
+      return make('modulatePixelate',[param(multiple,10),param(offset,3)],[this,other]);
     },
     modulateRotate(other,multiple,offset) {
-      return make('modulateRotate',[number(multiple,1),number(offset,0)],[this,other]);
+      return make('modulateRotate',[param(multiple,1),param(offset,0)],[this,other]);
     },
     modulateHue(other,amount) {
-      return make('modulateHue',[number(amount,1)],[this,other]);
+      return make('modulateHue',[param(amount,1)],[this,other]);
     },
-    add(other,amount) { return make('add',[number(amount,1)],[this,other]); },
-    sub(other,amount) { return make('sub',[number(amount,1)],[this,other]); },
+    add(other,amount) { return make('add',[param(amount,1)],[this,other]); },
+    sub(other,amount) { return make('sub',[param(amount,1)],[this,other]); },
     layer(other) { return make('layer',[0],[this,other]); },
-    blend(other,amount) { return make('blend',[number(amount,.5)],[this,other]); },
-    mult(other,amount) { return make('mult',[number(amount,1)],[this,other]); },
+    blend(other,amount) { return make('blend',[param(amount,.5)],[this,other]); },
+    mult(other,amount) { return make('mult',[param(amount,1)],[this,other]); },
     diff(other) { return make('diff',[0],[this,other]); },
     mask(other) { return make('mask',[0],[this,other]); },
-    invert(amount) { return make('invert',[number(amount,1)],[this]); },
-    contrast(amount) { return make('contrast',[number(amount,1.6)],[this]); },
-    brightness(amount) { return make('brightness',[number(amount,.4)],[this]); },
+    invert(amount) { return make('invert',[param(amount,1)],[this]); },
+    contrast(amount) { return make('contrast',[param(amount,1.6)],[this]); },
+    brightness(amount) { return make('brightness',[param(amount,.4)],[this]); },
     luma(threshold,tolerance) {
-      return make('luma',[number(threshold,.5),number(tolerance,.1)],[this]);
+      return make('luma',[param(threshold,.5),param(tolerance,.1)],[this]);
     },
     thresh(threshold,tolerance) {
-      return make('thresh',[number(threshold,.5),number(tolerance,.04)],[this]);
+      return make('thresh',[param(threshold,.5),param(tolerance,.04)],[this]);
     },
     color(r,g,b,a) {
-      return make('color',[number(r,1),number(g,1),number(b,1),number(a,1)],[this]);
+      return make('color',[param(r,1),param(g,1),param(b,1),param(a,1)],[this]);
     },
-    saturate(amount) { return make('saturate',[number(amount,2)],[this]); },
-    hue(angle) { return make('hue',[number(angle,.4)],[this]); },
-    colorama(amount) { return make('colorama',[number(amount,.005)],[this]); },
-    r(scale,offset) { return make('r',[number(scale,1),number(offset,0)],[this]); },
-    g(scale,offset) { return make('g',[number(scale,1),number(offset,0)],[this]); },
-    b(scale,offset) { return make('b',[number(scale,1),number(offset,0)],[this]); },
-    a(scale,offset) { return make('a',[number(scale,1),number(offset,0)],[this]); },
+    saturate(amount) { return make('saturate',[param(amount,2)],[this]); },
+    hue(angle) { return make('hue',[param(angle,.4)],[this]); },
+    colorama(amount) { return make('colorama',[param(amount,.005)],[this]); },
+    r(scale,offset) { return make('r',[param(scale,1),param(offset,0)],[this]); },
+    g(scale,offset) { return make('g',[param(scale,1),param(offset,0)],[this]); },
+    b(scale,offset) { return make('b',[param(scale,1),param(offset,0)],[this]); },
+    a(scale,offset) { return make('a',[param(scale,1),param(offset,0)],[this]); },
     sum(scale) {
       const values=Array.isArray(scale)?scale:[scale,scale,scale,scale];
-      return make('sum',[number(values[0],1),number(values[1],1),
-        number(values[2],1),number(values[3],1)],[this]);
+      return make('sum',[param(values[0],1),param(values[1],1),
+        param(values[2],1),param(values[3],1)],[this]);
     },
-    out() { global.__hydraOutput=this; return this; }
+    out(target) {
+      if (target && target.kind==='output') this.outputIndex=target.index;
+      global.__hydraOutput=this;
+      return this;
+    }
   };
 
   function make(kind,params,inputs) {
@@ -697,12 +728,12 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
   };
 
   const methods={
-    osc(freq,sync,offset) { return make('osc',[number(freq,60),number(sync,.1),number(offset,0)],[]); },
-    shape(sides,radius,smoothing) { return make('shape',[number(sides,3),number(radius,.3),number(smoothing,.01)],[]); },
-    solid(r,g,b,a) { return make('solid',[number(r,1),number(g,1),number(b,1),number(a,1)],[]); },
-    noise(scale,offset) { return make('noise',[number(scale,3),number(offset,.1)],[]); },
-    voronoi(scale,speed,blending) { return make('voronoi',[number(scale,5),number(speed,.3),number(blending,.3)],[]); },
-    gradient(speed) { return make('gradient',[number(speed,0)],[]); },
+    osc(freq,sync,offset) { return make('osc',[param(freq,60),param(sync,.1),param(offset,0)],[]); },
+    shape(sides,radius,smoothing) { return make('shape',[param(sides,3),param(radius,.3),param(smoothing,.01)],[]); },
+    solid(r,g,b,a) { return make('solid',[param(r,1),param(g,1),param(b,1),param(a,1)],[]); },
+    noise(scale,offset) { return make('noise',[param(scale,3),param(offset,.1)],[]); },
+    voronoi(scale,speed,blending) { return make('voronoi',[param(scale,5),param(speed,.3),param(blending,.3)],[]); },
+    gradient(speed) { return make('gradient',[param(speed,0)],[]); },
     prev() { return make('prev',[],[]); },
     src(o) {
       if (o && o.kind==='source') {
@@ -710,12 +741,16 @@ void main(){ vec4 a=texture2D(u_tex,v_uv),b=texture2D(u_tex2,v_uv);
         node.source=o;
         return node;
       }
+      if (o && o.kind==='output') return make('prev',[],[]);
       return o && typeof o.kind==='string'?o:make('src',[],[]);
     }
   };
   Object.assign(api,methods);
-  Object.assign(api,{s0,s1,s2,s3,setResolution,hush});
+  Object.assign(api,{s0,s1,s2,s3,o0:outputs[0],o1:outputs[1],o2:outputs[2],
+    o3:outputs[3],setResolution,hush});
   global.s0=s0; global.s1=s1; global.s2=s2; global.s3=s3;
+  global.o0=outputs[0]; global.o1=outputs[1];
+  global.o2=outputs[2]; global.o3=outputs[3];
   global.setResolution=setResolution; global.hush=hush;
   api.ready=true;
   global.Hydra=api;

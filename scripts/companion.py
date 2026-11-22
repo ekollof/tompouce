@@ -40,7 +40,7 @@ def main():
     tools.update({"music_sounds", "music_reload_sounds"})
     if args.hydra:
         # The visualizer gets bounded read-only analysis and source access.
-        tools = {"music_audio_scope", "music_get_code"}
+        tools = {"music_audio_scope", "music_audio_spectrum", "music_get_code"}
 
     def call_mcp(name, arguments):
         message = {"jsonrpc": "2.0", "id": 1, "auth": mcp_token, "method": "tools/call",
@@ -86,7 +86,8 @@ def main():
             files["/sounds.js"] = ("sounds.js", "text/javascript")
             if args.hydra:
                 files = {"/": ("hydra.html", "text/html; charset=utf-8"),
-                         "/hydra.js": ("hydra.js", "text/javascript")}
+                         "/hydra.js": ("hydra.js", "text/javascript"),
+                         "/patterns.js": ("dist/patterns.js", "text/javascript")}
             if self.path not in files:
                 self.send(404, b'{}')
                 return

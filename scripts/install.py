@@ -35,7 +35,7 @@ STAGED_FILES = ('CMakeLists.txt', 'README.md', 'LICENSE', 'NOTICE', 'strudeltuto
 RUNTIME_FILES = [
     'tompouce', 'alsoft.conf', 'README.md', 'LICENSE', 'NOTICE', 'scripts/companion.py', 'scripts/sound_import.py', 'scripts/query-worker.mjs',
     'scripts/tompoucectl.py', 'scripts/install-daemon.py', 'systemd/tompouce-daemon.service.in',
-    'web/index.html', 'web/hydra.html', 'web/hydra.js',
+    'web/index.html', 'web/hydra.html', 'web/hydra.js', 'web/dist/patterns.js',
     'web/companion.js', 'web/sounds.js', 'web/companion.css',
     'web/dist/editor.js', 'web/dist/licenses.txt', 'js/dist/licenses.txt',
     'thirdparty/STRUDEL-LICENSE', 'thirdparty/quickjs/LICENSE',

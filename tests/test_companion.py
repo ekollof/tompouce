@@ -43,11 +43,14 @@ class HydraTest(unittest.TestCase):
         assert "Tompouce hydra" in line
         cls.url = re.search(r"http://127\.0\.0\.1:\d+", line).group()
         html = urllib.request.urlopen(cls.url).read().decode()
-        assert "music_audio_scope" in html and "COMPANION_TOKEN" not in html
-        assert 'src="/hydra.js"' in html
+        assert "music_audio_scope" in html and "music_audio_spectrum" in html
+        assert "COMPANION_TOKEN" not in html
+        assert 'src="/hydra.js"' in html and 'src="/patterns.js"' in html
         script = urllib.request.urlopen(cls.url + "/hydra.js").read().decode()
         for name in ("osc", "shape", "solid", "noise", "src", "rotate", "scale", "repeatX", "out"):
             assert name in script
+        patterns = urllib.request.urlopen(cls.url + "/patterns.js").read().decode()
+        assert "TompouceHydraPatterns" in patterns and "strudel" in patterns.lower()
         cls.token = re.search(r"const token = '([^']+)'", html).group(1)
 
     @classmethod
@@ -68,7 +71,9 @@ class HydraTest(unittest.TestCase):
     def test_only_analysis_tool(self):
         reply = json.loads(self.post("/api/tool", "music_audio_scope").read())
         assert "scope" in reply["result"]["content"][0]["text"]
-        assert self.calls == ["music_audio_scope"]
+        spectrum = json.loads(self.post("/api/tool", "music_audio_spectrum").read())
+        assert spectrum["result"] is not None
+        assert self.calls == ["music_audio_scope", "music_audio_spectrum"]
         for name in ("music_evaluate",):
             with self.assertRaises(urllib.error.HTTPError):
                 self.post("/api/tool", name)

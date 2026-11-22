@@ -13,6 +13,8 @@ typedef struct Voice {
     const NativeSynth *native_program;
     DspState dsp;
     DspState dsp_right;
+    int stereo_filter_type; /* -1 or single filter type for persistent lanes */
+    DspBiquad2 stereo_filter;
     int active;
     int out_target; /* 0 default, 1..4 named output streams */
     int analyser_id, analyser_fft; /* per-pattern analyser tap */

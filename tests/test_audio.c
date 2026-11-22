@@ -576,6 +576,81 @@ static void bench_procedural_hh(void) {
     playing=old; audio_set_reference_mode(0);
 }
 
+/* Scalar stereo samples that the SoA bank does not admit use the persistent
+   two-lane filter path; it must match two scalar dsp_process calls exactly. */
+static void test_stereo_filter_playback(void) {
+    float stereo[128];
+    for (int i=0;i<128;i++) stereo[i]=(float)((i*29%101)-50)/97.0f;
+    DspParams params; dsp_params_init(&params); params.enabled=1;
+    params.p[DSP_LPF]=2400; params.p[DSP_LPQ]=1.2;
+    float scalar[8], persistent[8];
+    double old_time=audio_time; int old_playing=playing;
+    int old_reference=audio_reference_mode();
+    playing=1; audio_set_reference_mode(1);
+    for (int mode=0;mode<2;mode++) {
+        memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+        Voice *v=&voices[0];
+        v->active=1; active_voice_add(0);
+        v->smpbuf=stereo; v->smplen=64; v->smp_channels=2;
+        v->smpstep=1; v->smp_end=1; v->smp_gate=1;
+        v->gate_end=v->note_off_time=10; v->start_time=0;
+        v->amp=.1; v->vsus=1; v->vrel=.01;
+        v->delay_send=0; v->route_delay=0; v->route_room=0; v->route_dsp=0;
+        dsp_init(&v->dsp,&params); dsp_init(&v->dsp_right,&params);
+        v->stereo_filter_type=-1;
+        if (mode) {
+            assert(prepare_stereo_filter(v));
+            assert(v->stereo_filter_type==0);
+        }
+        audio_time=0; event_queue_clear();
+        pa_callback(NULL,mode?persistent:scalar,4,NULL,0,NULL);
+    }
+    assert(!memcmp(scalar,persistent,sizeof(scalar)));
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    audio_time=old_time; playing=old_playing;
+    audio_set_reference_mode(old_reference);
+}
+
+/* Callback-level cost of the persistent stereo filter on a looping sample
+   voice (the SoA bank does not admit loops). Both arms render the same state. */
+static void bench_stereo_filter_callback(void) {
+    enum { FRAMES=4096, BLOCKS=256 };
+    float *stereo=malloc(FRAMES*2*sizeof(float));
+    assert(stereo);
+    for (int i=0;i<FRAMES*2;i++) stereo[i]=(float)((i*29%101)-50)/97.0f;
+    DspParams params; dsp_params_init(&params); params.enabled=1;
+    params.p[DSP_LPF]=2400; params.p[DSP_LPQ]=1.2; params.p[DSP_LOOP]=1;
+    int old_playing=playing, old_reference=audio_reference_mode();
+    double old_time=audio_time;
+    float pcm[512];
+    double elapsed[2]={0,0};
+    for (int mode=0;mode<2;mode++) {
+        memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+        Voice *v=&voices[0];
+        v->active=1; active_voice_add(0);
+        v->smpbuf=stereo; v->smplen=FRAMES; v->smp_channels=2;
+        v->smpstep=1; v->smp_end=1; v->smp_gate=1;
+        v->gate_end=v->note_off_time=1000; v->start_time=0;
+        v->amp=.1; v->vsus=1; v->vrel=.01;
+        v->delay_send=0; v->route_delay=0; v->route_room=0; v->route_dsp=0;
+        dsp_init(&v->dsp,&params); dsp_init(&v->dsp_right,&params);
+        v->stereo_filter_type=-1;
+        if (mode) assert(prepare_stereo_filter(v));
+        playing=1; audio_set_reference_mode(1); audio_time=0;
+        struct timespec a,b;
+        assert(!clock_gettime(CLOCK_MONOTONIC,&a));
+        for (int block=0;block<BLOCKS;block++)
+            pa_callback(NULL,pcm,256,NULL,0,NULL);
+        assert(!clock_gettime(CLOCK_MONOTONIC,&b));
+        elapsed[mode]=(b.tv_sec-a.tv_sec)*1e3+(b.tv_nsec-a.tv_nsec)/1e6;
+    }
+    printf("stereo filter callback: scalar %.3f ms, persistent %.3f ms (%.2fx)\n",
+        elapsed[0],elapsed[1],elapsed[1]>0?elapsed[0]/elapsed[1]:0);
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    audio_time=old_time; playing=old_playing;
+    audio_set_reference_mode(old_reference); free(stereo);
+}
+
 static void test_supersaw_soa_equivalence(void) {
     double old_time=audio_time; int old_playing=playing;
     playing=1; audio_set_reference_mode(1);
@@ -907,6 +982,7 @@ int main(void) {
        Averaging to mono would cancel this signal. No audio device is needed. */
     float stereo[] = {.25f,-.5f,.125f,.375f};
     Voice *v = &voices[0];
+    v->stereo_filter_type = -1;
     v->active = 1; v->smpbuf = stereo; v->smplen = 2;
     v->smp_channels = 2; v->smpstep = 1; v->smp_end = 1;
     v->smp_gate = 1; v->gate_end = v->note_off_time = 1;
@@ -1063,6 +1139,8 @@ int main(void) {
     test_analysers();
     test_live_scope_attachment();
     test_supersaw_callback();
+    test_stereo_filter_playback();
+    bench_stereo_filter_callback();
     test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
     test_supersaw_soa_equivalence();

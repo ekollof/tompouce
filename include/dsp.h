@@ -52,6 +52,10 @@ typedef struct {
 } DspBiquad;
 
 typedef struct {
+    double b0[2], b1[2], b2[2], a1[2], a2[2], z1[2], z2[2];
+} DspBiquad2;
+
+typedef struct {
     DspParams control;
     DspBiquad filter[6], formant[5];
     double formant_gain[5];
@@ -110,6 +114,11 @@ void dsp_init(DspState *state, const DspParams *p);
 double dsp_process(DspState *state, double sample, double age, double gate);
 int dsp_process_stereo_filter(DspState *left, DspState *right,
     double xl, double xr, double age, double gate, double *yl, double *yr);
+/* Persistent two-lane state: coefficients update every 32 samples and the
+   filter state is carried in `state`, not rebuilt per sample. */
+int dsp_stereo_filter_step(DspState *left, DspState *right, DspBiquad2 *state,
+    int type, double xl, double xr, double age, double gate,
+    double *yl, double *yr);
 #ifdef TOMPOUCE_RENDER_PROFILE
 void dsp_profile_stats(unsigned long long *calls, unsigned long long *total_cycles,
                        unsigned long long *max_cycles);

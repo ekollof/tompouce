@@ -579,16 +579,21 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       (0.76x) on this box, so it is not used by the audio path. The scalar C
       path remains; this kernel needs a block/batch layout before it can pay
       for conversion and call overhead.
-- [x] Per-voice stereo biquad candidate measured. A two-lane
-      `DspBiquad2` kernel is byte-exact against C in `test_voice_soa_dsp`
-      (including forced direct AVX2 calls); a 200,000-frame batch measured
-      **1.22x** AVX2 over C. A per-call `dsp_process_stereo_filter` wrapper
-      measured **1.15x slower** than two scalar `dsp_process` calls because of
-      state construction/call overhead, so it is not integrated. The kernel
-      needs a persistent/block layout before the per-voice path can benefit.
+- [x] Persistent per-voice stereo filter. The byte-exact two-lane
+      `DspBiquad2` kernel now keeps coefficients and state in the voice
+      instead of rebuilding them per sample. `test_voice_soa_dsp` compares C
+      and direct AVX2 calls byte-for-byte; `test_dsp` matches
+      `dsp_stereo_filter_step` against two scalar `dsp_process` calls over
+      4096 frames. Production triggers enable it for stereo samples the SoA
+      bank cannot admit (loops and other fallback voices) and for supersaw;
+      the SoA bank keeps its own four-lane path. A 256-block callback
+      benchmark measured **1.02-1.04x** over scalar (ASAN 1.00x), while the
+      kernel-only 200,000-frame batch is **1.21-1.28x**. Callback runs with
+      `TOMPOUCE_SIMD=c` and `TOMPOUCE_SIMD=avx2` both pass the audio gates.
+      This is a measured fallback-path gain, not a whole-callback speedup.
 - [ ] Later SIMD kernels, only after measurement:
-  - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
-    block/SoA layout rather than frame lanes
+  - per-voice stereo DSP beyond the single-filter path, and FM oscillators;
+    IIR recurrences need the block/SoA layout rather than frame lanes
   - four-frame routing/mix and sample interpolation; the current two-lane SSE2
     route and paired source interpolation were only incremental or neutral
   - stereo delay and independent reverb combs; feedback state must stay per

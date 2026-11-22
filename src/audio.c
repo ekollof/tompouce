@@ -474,6 +474,21 @@ static int soa_bank_eligible(const Voice *v) {
     return 1;
 }
 
+/* Persistent two-lane filter for scalar stereo voices that the SoA bank did
+   not admit. It avoids rebuilding coefficients/state for every sample. */
+static int prepare_stereo_filter(Voice *v) {
+    if (!v) return 0;
+    v->stereo_filter_type=-1;
+    if (v->stretch_buffer || v->lpf_hz>0) return 0;
+    if (!(v->smp_channels==2 || v->inst==INST_SUPERSAW)) return 0;
+    int type=dsp_single_filter(&v->dsp);
+    if (type<0 || dsp_single_filter(&v->dsp_right)!=type) return 0;
+    DspBiquad pair[2]={v->dsp.filter[type*2],v->dsp_right.filter[type*2]};
+    dsp_biquad2_init(&v->stereo_filter,pair);
+    v->stereo_filter_type=type;
+    return 1;
+}
+
 static void soa_bank_release(Voice *v) {
     if (!v) return;
     int lane=v->soa_lane;
@@ -627,6 +642,10 @@ static void soa_bank_sync_one(Voice *v) {
         v->dsp_right.filter[at].a2=soa_bank.filter_r[group].a2[sub];
         v->dsp_right.filter[at].z1=soa_bank.filter_r[group].z1[sub];
         v->dsp_right.filter[at].z2=soa_bank.filter_r[group].z2[sub];
+    }
+    if (v->stereo_filter_type>=0) {
+        DspBiquad pair[2]={v->dsp.filter[at],v->dsp_right.filter[at]};
+        dsp_biquad2_init(&v->stereo_filter,pair);
     }
 }
 
@@ -1457,6 +1476,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
             v->note_off_time = v->gate_end;
         }
     }
+    prepare_stereo_filter(v);
     cache_routing(v);
     if (v->start_time<=audio_time+1e-10) voice_onset(v);
     else next_voice_onset=fmin(next_voice_onset,v->start_time);
@@ -2049,8 +2069,15 @@ static void mix_supersaw(Voice *v, double amplitude, VoiceMix *mix) {
     double right=v->dsp.supersaw_r*amplitude;
     if (v->dsp.control.enabled) {
         double age = v->age, gate = v->gate_end-v->start_time;
-        left = dsp_process(&v->dsp,left,age,gate);
-        right = dsp_process(&v->dsp_right,right,age,gate);
+        double fl,fr;
+        if (v->stereo_filter_type>=0 &&
+            dsp_stereo_filter_step(&v->dsp,&v->dsp_right,&v->stereo_filter,
+                v->stereo_filter_type,left,right,age,gate,&fl,&fr)) {
+            left=fl; right=fr;
+        } else {
+            left = dsp_process(&v->dsp,left,age,gate);
+            right = dsp_process(&v->dsp_right,right,age,gate);
+        }
     }
     route_voice(v,left,right,mix);
 }
@@ -2450,7 +2477,15 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     g*=cut_gain;
                     double s = left*V->amp*g;
                     if (native_synth_effect(V->native_program)) mix_graph_effect(V,left*g,right*g,vm);
-                    else if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
+                    else if (V->smp_channels == 2 && V->stereo_filter_type>=0) {
+                        right *= V->amp*g;
+                        double gate = V->gate_end-V->start_time, fl,fr;
+                        if (dsp_stereo_filter_step(&V->dsp,&V->dsp_right,&V->stereo_filter,
+                                V->stereo_filter_type,s,right,age,gate,&fl,&fr))
+                            route_voice(V,fl,fr,vm);
+                        else route_voice(V,dsp_process(&V->dsp,s,age,gate),
+                            dsp_process(&V->dsp_right,right,age,gate),vm);
+                    } else if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
                         right *= V->amp*g;
                         double gate = V->gate_end-V->start_time;
                         route_voice(V,dsp_process(&V->dsp,s,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);

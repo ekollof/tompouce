@@ -574,11 +574,16 @@ static void test_shared_fx_routing_and_live_edit(void) {
     cJSON *room=cJSON_Parse(
         "{\"begin\":0,\"end\":0.5,\"value\":{\"note\":64,\"s\":\"sine\","
         "\"gain\":0.1,\"orbit\":9,\"_fxSteps\":[{\"steps\":["
-        "{\"op\":\"room\",\"args\":[0.4]},{\"op\":\"size\",\"args\":[3]}]}]}}");
+        "{\"op\":\"room\",\"args\":[0.4]},{\"op\":\"size\",\"args\":[3]},"
+        "{\"op\":\"lpf\",\"args\":[500]},{\"op\":\"pan\",\"args\":[0.2]},"
+        "{\"op\":\"coarse\",\"args\":[3]}]}]}}");
     assert(room);
     AudioEvent second;
     assert(js_audio_event(room,0,1,&second));
     assert(fabs(second.dsp.p[DSP_ROOM]-.4)<1e-9);
+    assert(fabs(second.dsp.p[DSP_LPF]-500)<1e-9);
+    assert(second.has_pan && fabs(second.pan+.6)<1e-9);
+    assert(fabs(second.dsp.p[DSP_COARSE]-3)<1e-9);
     audio_trigger_event(&second);
     pa_callback(NULL,block,256,NULL,0,NULL);
     double energy=0;

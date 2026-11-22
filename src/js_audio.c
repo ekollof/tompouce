@@ -306,11 +306,63 @@ static int fx_arg_number(const cJSON *step, int index, double *out) {
     return 0;
 }
 
+enum {
+    FX_OP_ROOM, FX_OP_SIZE, FX_OP_DRY, FX_OP_DELAY, FX_OP_DELAYTIME,
+    FX_OP_DELAYFEEDBACK,
+    FX_OP_LPF, FX_OP_LPQ, FX_OP_LPA, FX_OP_LPD, FX_OP_LPS, FX_OP_LPR,
+    FX_OP_LPE,
+    FX_OP_HPF, FX_OP_HPQ, FX_OP_HPA, FX_OP_HPD, FX_OP_HPS, FX_OP_HPR,
+    FX_OP_HPE,
+    FX_OP_BPF, FX_OP_BPQ, FX_OP_BPA, FX_OP_BPD, FX_OP_BPS, FX_OP_BPR,
+    FX_OP_BPE,
+    FX_OP_PAN, FX_OP_COARSE, FX_OP_FTYPE,
+    FX_OP_COUNT
+};
+
+typedef struct { const char *name; int op; } FxName;
+static const FxName fx_names[] = {
+    {"room",FX_OP_ROOM},{"size",FX_OP_SIZE},{"roomsize",FX_OP_SIZE},
+    {"dry",FX_OP_DRY},{"delay",FX_OP_DELAY},{"delaytime",FX_OP_DELAYTIME},
+    {"delayfeedback",FX_OP_DELAYFEEDBACK},
+    {"lpf",FX_OP_LPF},{"cutoff",FX_OP_LPF},{"lpq",FX_OP_LPQ},
+    {"resonance",FX_OP_LPQ},{"lpa",FX_OP_LPA},{"lpattack",FX_OP_LPA},
+    {"lpd",FX_OP_LPD},{"lpdecay",FX_OP_LPD},{"lps",FX_OP_LPS},
+    {"lpsustain",FX_OP_LPS},{"lpr",FX_OP_LPR},{"lprelease",FX_OP_LPR},
+    {"lpe",FX_OP_LPE},{"lpenv",FX_OP_LPE},
+    {"hpf",FX_OP_HPF},{"hcutoff",FX_OP_HPF},{"hpq",FX_OP_HPQ},
+    {"hresonance",FX_OP_HPQ},{"hpa",FX_OP_HPA},{"hpattack",FX_OP_HPA},
+    {"hpd",FX_OP_HPD},{"hpdecay",FX_OP_HPD},{"hps",FX_OP_HPS},
+    {"hpsustain",FX_OP_HPS},{"hpr",FX_OP_HPR},{"hprelease",FX_OP_HPR},
+    {"hpe",FX_OP_HPE},{"hpenv",FX_OP_HPE},
+    {"bpf",FX_OP_BPF},{"bandf",FX_OP_BPF},{"bpq",FX_OP_BPQ},
+    {"bandq",FX_OP_BPQ},{"bpa",FX_OP_BPA},{"bpattack",FX_OP_BPA},
+    {"bpd",FX_OP_BPD},{"bpdecay",FX_OP_BPD},{"bps",FX_OP_BPS},
+    {"bpsustain",FX_OP_BPS},{"bpr",FX_OP_BPR},{"bprelease",FX_OP_BPR},
+    {"bpe",FX_OP_BPE},{"bpenv",FX_OP_BPE},
+    {"pan",FX_OP_PAN},{"coarse",FX_OP_COARSE},{"ftype",FX_OP_FTYPE},
+    {"delaysync",FX_OP_DELAYTIME}
+};
+
+static int fx_op(const char *name) {
+    if (!name) return -1;
+    for (unsigned i=0;i<sizeof(fx_names)/sizeof(fx_names[0]);i++)
+        if (!strcmp(name,fx_names[i].name)) return fx_names[i].op;
+    return -1;
+}
+
+static unsigned fx_outer_mask(const cJSON *v) {
+    unsigned mask=0;
+    for (unsigned i=0;i<sizeof(fx_names)/sizeof(fx_names[0]);i++)
+        if (cJSON_HasObjectItem(v,fx_names[i].name))
+            mask|=1u<<(unsigned)fx_names[i].op;
+    return mask;
+}
+
 /* Apply query-time materialized FX(...) steps. The web invokes each closure
    per event; those chains start from superdough's default gain of 0.8.
-   Shared room/delay sends are replayed here; outer controls win because the
-   deployed chain applies them after FX(...). Filter/pan steps still wait for
-   their own PCM gates. */
+   Shared room/delay sends and filter/pan/coarse routing are replayed here;
+   outer controls win because the deployed chain applies them after FX(...).
+   Other graph-local steps still wait for their own PCM gates. */
 static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
     if (!cJSON_IsArray(chains)) return;
@@ -326,13 +378,7 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
     if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
         !cJSON_IsTrue(effect)) return;
-    int outer_room=cJSON_HasObjectItem(v,"room");
-    int outer_size=cJSON_HasObjectItem(v,"size") || cJSON_HasObjectItem(v,"roomsize");
-    int outer_dry=cJSON_HasObjectItem(v,"dry");
-    int outer_delay=cJSON_HasObjectItem(v,"delay");
-    int outer_delaytime=cJSON_HasObjectItem(v,"delaytime") ||
-        cJSON_HasObjectItem(v,"delaysync");
-    int outer_delayfb=cJSON_HasObjectItem(v,"delayfeedback");
+    unsigned outer=fx_outer_mask(v);
     double chain_gain = .8;
     for (int i = 0; i < count; i++) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
@@ -345,26 +391,107 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
             const cJSON *op = cJSON_IsObject(step)
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
-            const char *name = op->valuestring;
+            int operation=fx_op(op->valuestring);
+            if (operation<0 || (outer&(1u<<(unsigned)operation))) continue;
             double value=0;
-            if (!strcmp(name,"room") && !outer_room && fx_arg_number(step,0,&value) &&
-                value>=0 && value<=1)
-                ev->dsp.p[DSP_ROOM]=value;
-            else if ((!strcmp(name,"size") || !strcmp(name,"roomsize")) &&
-                !outer_size && fx_arg_number(step,0,&value) && value>=0 && value<=10)
-                ev->dsp.p[DSP_SIZE]=value;
-            else if (!strcmp(name,"dry") && !outer_dry &&
-                fx_arg_number(step,0,&value) && value>=0 && value<=1)
-                ev->dsp.p[DSP_DRY]=value;
-            else if (!strcmp(name,"delay") && !outer_delay &&
-                fx_arg_number(step,0,&value) && value>=0 && value<=1)
-                ev->delay_send=value;
-            else if (!strcmp(name,"delaytime") && !outer_delaytime &&
-                fx_arg_number(step,0,&value) && value>=0 && value<=1)
-                ev->delay_time=value;
-            else if (!strcmp(name,"delayfeedback") && !outer_delayfb &&
-                fx_arg_number(step,0,&value) && value>=0 && value<=.98)
-                ev->delay_fb=value;
+            if (!fx_arg_number(step,0,&value)) continue;
+            switch (operation) {
+            case FX_OP_ROOM:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_ROOM]=value;
+                break;
+            case FX_OP_SIZE:
+                if (value>=0 && value<=10) ev->dsp.p[DSP_SIZE]=value;
+                break;
+            case FX_OP_DRY:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_DRY]=value;
+                break;
+            case FX_OP_DELAY:
+                if (value>=0 && value<=1) ev->delay_send=value;
+                break;
+            case FX_OP_DELAYTIME:
+                if (value>=0 && value<=1) ev->delay_time=value;
+                break;
+            case FX_OP_DELAYFEEDBACK:
+                if (value>=0 && value<=.98) ev->delay_fb=value;
+                break;
+            case FX_OP_LPF:
+                if (value>=0 && value<=20000) ev->dsp.p[DSP_LPF]=value;
+                break;
+            case FX_OP_LPQ:
+                if (value>=.05 && value<=50) ev->dsp.p[DSP_LPQ]=value;
+                break;
+            case FX_OP_LPA:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_LPA]=value;
+                break;
+            case FX_OP_LPD:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_LPD]=value;
+                break;
+            case FX_OP_LPS:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_LPS]=value;
+                break;
+            case FX_OP_LPR:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_LPR]=value;
+                break;
+            case FX_OP_LPE:
+                if (value>=-16 && value<=16) ev->dsp.p[DSP_LPE]=value;
+                break;
+            case FX_OP_HPF:
+                if (value>=0 && value<=20000) ev->dsp.p[DSP_HPF]=value;
+                break;
+            case FX_OP_HPQ:
+                if (value>=.05 && value<=50) ev->dsp.p[DSP_HPQ]=value;
+                break;
+            case FX_OP_HPA:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_HPA]=value;
+                break;
+            case FX_OP_HPD:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_HPD]=value;
+                break;
+            case FX_OP_HPS:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_HPS]=value;
+                break;
+            case FX_OP_HPR:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_HPR]=value;
+                break;
+            case FX_OP_HPE:
+                if (value>=-16 && value<=16) ev->dsp.p[DSP_HPE]=value;
+                break;
+            case FX_OP_BPF:
+                if (value>=0 && value<=20000) ev->dsp.p[DSP_BPF]=value;
+                break;
+            case FX_OP_BPQ:
+                if (value>=.05 && value<=50) ev->dsp.p[DSP_BPQ]=value;
+                break;
+            case FX_OP_BPA:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_BPA]=value;
+                break;
+            case FX_OP_BPD:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_BPD]=value;
+                break;
+            case FX_OP_BPS:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_BPS]=value;
+                break;
+            case FX_OP_BPR:
+                if (value>=0 && value<=30) ev->dsp.p[DSP_BPR]=value;
+                break;
+            case FX_OP_BPE:
+                if (value>=-16 && value<=16) ev->dsp.p[DSP_BPE]=value;
+                break;
+            case FX_OP_PAN:
+                if (value>=0 && value<=1) {
+                    ev->pan=value*2-1;
+                    ev->has_pan=1;
+                }
+                break;
+            case FX_OP_COARSE:
+                if (value>=1 && value<=1024) ev->dsp.p[DSP_COARSE]=value;
+                break;
+            case FX_OP_FTYPE:
+                if (value>=0 && value<=2) ev->dsp.p[DSP_FTYPE]=value;
+                break;
+            default:
+                break;
+            }
         }
     }
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;

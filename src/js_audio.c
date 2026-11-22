@@ -245,10 +245,41 @@ static int lv2_prepare_sample(AudioEvent *ev, const char *sound, double duration
         phase+=step;
     }
     lv2_worker_set_control(worker,0,(float)fmax(0,fmin(2,gain)),error,sizeof(error));
+    /* Dispatch the note and its mapped controls into the plugin's atom MIDI
+       input. Effects ignore it; instruments render the requested note. The
+       engine applies the event gain separately, so velocity stays fixed and
+       CC 74 carries the resolved low-pass cutoff. */
+    int channel=ev->midi_chan>=0?(ev->midi_chan&15):0;
+    int note=ev->midi_note;
+    if (note<0) note=(int)fmax(0,fmin(127,round(69+12*log2(frequency/440))));
+    int cc=-1;
+    if (ev->dsp.enabled) {
+        double cutoff=ev->dsp.p[DSP_LPF];
+        if (cutoff>0) {
+            double t=log2(fmax(20,fmin(20000,cutoff))/20)/log2(1000);
+            cc=(int)fmax(0,fmin(127,round(t*127)));
+        }
+    }
+    int note_off=(int)fmin((double)frames-1,fmax(1,ceil(duration*SR)));
+    const unsigned char note_on[3]={(unsigned char)(0x90|channel),
+        (unsigned char)note,100};
+    const unsigned char note_off_msg[3]={(unsigned char)(0x80|channel),
+        (unsigned char)note,0};
+    const unsigned char cc_msg[3]={(unsigned char)(0xB0|channel),74,
+        (unsigned char)(cc<0?0:cc)};
     int ok=1;
     for (int at=0;at<frames && ok;at+=LV2_WORKER_FRAMES) {
         int count=frames-at<LV2_WORKER_FRAMES?frames-at:LV2_WORKER_FRAMES;
-        ok=lv2_worker_process(worker,pcm+at*2,pcm+at*2,(unsigned)count,error,sizeof(error));
+        if (at==0 && cc>=0)
+            ok=lv2_worker_send_midi_at(worker,0,cc_msg,3,error,sizeof(error));
+        if (ok && at==0)
+            ok=lv2_worker_send_midi_at(worker,0,note_on,3,error,sizeof(error));
+        if (ok && note_off>=at && note_off<at+count)
+            ok=lv2_worker_send_midi_at(worker,(uint32_t)(note_off-at),
+                note_off_msg,3,error,sizeof(error));
+        if (ok)
+            ok=lv2_worker_process(worker,pcm+at*2,pcm+at*2,(unsigned)count,
+                error,sizeof(error));
     }
     lv2_worker_stop(worker);
     if (!ok) { free(pcm); return 0; }

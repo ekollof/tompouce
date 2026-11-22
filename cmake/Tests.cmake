@@ -24,10 +24,15 @@ if(LILV_FOUND)
         "${LV2_TEST_BUNDLE}/manifest.ttl" COPYONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/gain.ttl"
         "${LV2_TEST_BUNDLE}/gain.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-synth.ttl"
+        "${LV2_TEST_BUNDLE}/midi-synth.ttl" COPYONLY)
     add_library(tompouce_lv2_test_gain MODULE tests/fixtures/lv2-test/gain.c)
     set_target_properties(tompouce_lv2_test_gain PROPERTIES
         PREFIX "" OUTPUT_NAME "gain" LIBRARY_OUTPUT_DIRECTORY "${LV2_TEST_BUNDLE}")
-    add_dependencies(test_lv2_worker tompouce_lv2_test_gain)
+    add_library(tompouce_lv2_test_midi MODULE tests/fixtures/lv2-test/midi-synth.c)
+    set_target_properties(tompouce_lv2_test_midi PROPERTIES
+        PREFIX "" OUTPUT_NAME "midi-synth" LIBRARY_OUTPUT_DIRECTORY "${LV2_TEST_BUNDLE}")
+    add_dependencies(test_lv2_worker tompouce_lv2_test_gain tompouce_lv2_test_midi)
     add_test(NAME lv2_worker_fixture COMMAND test_lv2_worker)
     set_tests_properties(lv2_worker_fixture PROPERTIES
         ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE};TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain"
@@ -360,7 +365,7 @@ if(LILV_FOUND)
         "TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain"
         "TOMPOUCE_LV2_WORKER_SANITIZE=1"
         $<TARGET_FILE:test_lv2_worker_sanitize>)
-    set(LV2_SANITIZE_DEPENDENCY tompouce_lv2_test_gain)
+    set(LV2_SANITIZE_DEPENDENCY tompouce_lv2_test_gain tompouce_lv2_test_midi)
 endif()
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_convolution_prepare_sanitize>

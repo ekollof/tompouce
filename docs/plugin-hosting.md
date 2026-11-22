@@ -165,11 +165,16 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   blocks. The engine never dlopens plugin code. `test_lv2_worker` checks the
   limits, a gain control, finite PCM and dead/missing plugin failures. Wiring
   LV2 discovery now recognises atom MIDI ports (`atom:supports midi:MidiEvent`)
-  in addition to legacy event ports, and the worker stages bounded 1–3 byte
-  note on/off and CC messages into an atom sequence for the plugin's MIDI input
-  (`lv2_worker_send_midi`). `test_lv2_worker` exercises note on/off with the
-  `midichanfilter` plugin and rejects oversized messages. Full note/CC routing
-  from the engine scheduler into a live plugin remains open.
+  in addition to legacy event ports. The worker carries up to 16 bounded 1–3
+  byte note on/off/CC messages per 512-frame block with a frame offset
+  (`lv2_worker_send_midi_at`) and writes them into an atom sequence in time
+  order. `s('lv2:<uri>')` dispatches the event's note, its duration as
+  note-off, and CC 74 from a resolved low-pass cutoff; effects without an atom
+  input ignore the events. A self-contained `urn:tompouce:test:midi-synth`
+  fixture (note frequency, velocity amplitude, CC gain) gates the worker and
+  engine paths under the normal and sanitized worker; the default gain
+  fixture's pinned PCM hash is unchanged. A live scheduler-owned plugin
+  instance for real-time mid-note CC/parameter changes remains open.
 
   Engine audio plumbing is in place: `s('lv2:<uri>')` is prepared off the audio
   callback through the worker (bounded to four seconds), and the render becomes
@@ -177,10 +182,9 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   a pattern-resolved event produces finite PCM and pins an FNV hash of the
   default gain plugin's 13,231-frame render at 44.1 kHz as the deterministic
   native reference (an env-selected plugin skips the hash). Web compare gates
-  are inapplicable because strudel.cc has no LV2 host. MIDI note/CC plumbing into a
-  live plugin remains open, as do pinned native reference gates: LV2 plugins
-  have no strudel.cc counterpart, so the web comparison harness cannot supply a
-  reference. VST3 is optional and strictly after LV2; VST2 is out.
+  are inapplicable because strudel.cc has no LV2 host. Pinned native reference
+  gates remain necessary: LV2 plugins have no strudel.cc counterpart, so the
+  web comparison harness cannot supply a reference. VST3 is optional and strictly after LV2; VST2 is out.
 
 See [TODO.md](../TODO.md) for the current state of those items and
 [audio backends](../README.md#run) for Tompouce's output selection rules.

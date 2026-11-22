@@ -31,12 +31,20 @@
 
 #define LV2_WORKER_URI_MAX 256
 #define LV2_WORKER_PORT_MAX 256
+#define LV2_WORKER_EVENT_BYTES 8
+#define LV2_WORKER_MIDI_BYTES (LV2_WORKER_MIDI_EVENTS*LV2_WORKER_EVENT_BYTES)
+
+typedef struct {
+    uint32_t offset;
+    unsigned char size;
+    unsigned char data[3];
+} Lv2MidiEvent;
 
 struct Lv2Worker {
     pid_t pid;
     int in_fd, out_fd;
-    unsigned char pending_midi[24];
-    int pending_bytes;
+    Lv2MidiEvent midi[LV2_WORKER_MIDI_EVENTS];
+    int midi_count;
 };
 
 typedef struct {
@@ -186,25 +194,39 @@ static int child_main(int in_fd, int out_fd) {
             if (!write_all(out_fd,&header,sizeof(header))) break;
             continue;
         }
-        if (header.frames>LV2_WORKER_FRAMES || header.bytes>3*8) break;
+        if (header.frames>LV2_WORKER_FRAMES ||
+            header.bytes>LV2_WORKER_MIDI_BYTES ||
+            header.bytes%LV2_WORKER_EVENT_BYTES) break;
         if (!read_all(in_fd,in,header.frames*LV2_WORKER_CHANNELS*sizeof(float))) break;
-        unsigned char message[24]={0};
-        if (header.bytes && !read_all(in_fd,message,header.bytes)) break;
+        unsigned char events[LV2_WORKER_MIDI_BYTES]={0};
+        if (header.bytes && !read_all(in_fd,events,header.bytes)) break;
         memset(out,0,header.frames*LV2_WORKER_CHANNELS*sizeof(float));
         if (has_atom_input) {
             sequence->atom.type=sequence_urid;
             sequence->atom.size=sizeof(sequence->body);
             sequence->body.unit=0;
             sequence->body.pad=0;
-            if (header.bytes) {
-                LV2_Atom_Event *event=(LV2_Atom_Event *)((unsigned char *)sequence+
-                    sizeof(LV2_Atom_Sequence));
-                event->time.frames=0;
+            size_t used=sizeof(LV2_Atom_Sequence);
+            unsigned count=header.bytes/LV2_WORKER_EVENT_BYTES;
+            for (unsigned e=0;e<count;e++) {
+                const unsigned char *wire=events+e*LV2_WORKER_EVENT_BYTES;
+                uint32_t offset=0;
+                memcpy(&offset,wire,sizeof(offset));
+                unsigned size=wire[4];
+                if (size<1 || size>3) continue;
+                uint32_t at=offset<header.frames?offset:header.frames-1;
+                size_t padded=(size+7u)&~7u;
+                size_t need=sizeof(LV2_Atom_Event)+padded;
+                if (used+need>MIDI_CAPACITY) break;
+                LV2_Atom_Event *event=(LV2_Atom_Event *)((unsigned char *)sequence+used);
+                event->time.frames=at;
                 event->body.type=midi_urid;
-                event->body.size=header.bytes;
-                memcpy(event+1,message,header.bytes);
-                sequence->atom.size+=sizeof(LV2_Atom_Event)+header.bytes;
+                event->body.size=size;
+                memcpy(event+1,wire+5,size);
+                memset((unsigned char *)(event+1)+size,0,padded-size);
+                used+=need;
             }
+            sequence->atom.size=(uint32_t)(used-sizeof(LV2_Atom));
         }
         for (unsigned i=0;i<nports;i++) if (ports[i].audio) {
             lilv_instance_connect_port(instance,ports[i].index,
@@ -302,13 +324,21 @@ int lv2_worker_process(Lv2Worker *worker, const float *input, float *output,
         if (error && error_size) snprintf(error,error_size,"invalid LV2 block");
         return 0;
     }
-    Lv2FrameHeader header={.frames=frames,.bytes=(uint32_t)worker->pending_bytes,.ok=0};
+    unsigned char wire[LV2_WORKER_MIDI_BYTES];
+    int wire_bytes=0;
+    for (int i=0;i<worker->midi_count;i++) {
+        Lv2MidiEvent *event=&worker->midi[i];
+        memcpy(wire+wire_bytes,&event->offset,sizeof(event->offset));
+        wire[wire_bytes+4]=event->size;
+        memcpy(wire+wire_bytes+5,event->data,3);
+        wire_bytes+=LV2_WORKER_EVENT_BYTES;
+    }
+    Lv2FrameHeader header={.frames=frames,.bytes=(uint32_t)wire_bytes,.ok=0};
     size_t bytes=frames*LV2_WORKER_CHANNELS*sizeof(float);
     int written=write_all(worker->in_fd,&header,sizeof(header)) &&
         write_all(worker->in_fd,input,bytes) &&
-        (worker->pending_bytes==0 || write_all(worker->in_fd,worker->pending_midi,
-            (size_t)worker->pending_bytes));
-    worker->pending_bytes=0;
+        (wire_bytes==0 || write_all(worker->in_fd,wire,(size_t)wire_bytes));
+    worker->midi_count=0;
     if (!written ||
         !read_all(worker->out_fd,&header,sizeof(header)) ||
         !header.ok || !read_all(worker->out_fd,output,bytes)) {
@@ -320,13 +350,29 @@ int lv2_worker_process(Lv2Worker *worker, const float *input, float *output,
 
 int lv2_worker_send_midi(Lv2Worker *worker, const unsigned char *message, int count,
     char *error, size_t error_size) {
+    return lv2_worker_send_midi_at(worker,0,message,count,error,error_size);
+}
+
+int lv2_worker_send_midi_at(Lv2Worker *worker, uint32_t offset,
+    const unsigned char *message, int count, char *error, size_t error_size) {
     if (error && error_size) error[0]=0;
-    if (!worker || !message || count<1 || count>3) {
+    if (!worker || !message || count<1 || count>3 || offset>=LV2_WORKER_FRAMES) {
         if (error && error_size) snprintf(error,error_size,"invalid MIDI message");
         return 0;
     }
-    memcpy(worker->pending_midi,message,(size_t)count);
-    worker->pending_bytes=count;
+    if (worker->midi_count>=LV2_WORKER_MIDI_EVENTS) {
+        if (error && error_size) snprintf(error,error_size,"MIDI event queue full");
+        return 0;
+    }
+    int at=worker->midi_count;
+    while (at>0 && worker->midi[at-1].offset>offset) {
+        worker->midi[at]=worker->midi[at-1];
+        at--;
+    }
+    Lv2MidiEvent *event=&worker->midi[at];
+    event->offset=offset; event->size=(unsigned char)count;
+    memcpy(event->data,message,(size_t)count);
+    worker->midi_count++;
     return 1;
 }
 

@@ -79,18 +79,31 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       Worker crash/missing-plugin failures are covered. `test_lv2_worker` also
       checks a pinned native PCM hash (FNV over the 13,231-frame gain render at
       44.1 kHz), the deterministic reference gate for the default plugin; an
-      env-selected plugin skips the hash. MIDI note/CC plumbing into a live
-      plugin remains open; bounded note on/off and CC message plumbing through
-      the worker's atom MIDI input is implemented and tested with
-      `midichanfilter`. Web compare gates are inapplicable because LV2 plugins
-      have no strudel.cc counterpart.
-- [ ] Audio + note/CC plumbing through the worker model with bounded buffers;
-      params/presets through LV2 state mapped to existing sliders; per-plugin
-      crash isolation must not take down or stall playback. Discovery now reads
-      bounded control-port metadata (port index, name, declared min/max/default)
-      for all safe plugins — 3155 ports across 219 plugins on this box — so
-      slider mapping has a stable reference; the live plugin path itself is
-      still not wired into the scheduler.
+      env-selected plugin skips the hash. Web compare gates are inapplicable
+      because LV2 plugins have no strudel.cc counterpart.
+- [x] Timed LV2 MIDI dispatch in the worker model. Up to 16 bounded 1-3 byte
+      note on/off/CC events are carried per 512-frame block with a frame offset
+      (offsets beyond the processed block are clamped to its last frame) and
+      inserted in time order into the plugin's atom sequence. Note/CC events
+      are staged with `lv2_worker_send_midi_at`; the existing offset-0 helper
+      remains. `s('lv2:<uri>')` now sends a note-on at the note onset, a note-off
+      at the event duration, and CC 74 derived from a resolved low-pass cutoff;
+      effects without an atom input ignore them, so the default gain fixture's
+      pinned hash is unchanged. A self-contained
+      `urn:tompouce:test:midi-synth` fixture renders a deterministic saw whose
+      frequency follows the MIDI note, amplitude follows velocity, and CC
+      scales the output, so the worker and engine paths are tested without
+      external plugins. `test_lv2_worker` covers sample-accurate offsets,
+      note-off, CC, event-queue bounds, engine note/cutoff dispatch and the
+      sanitized worker (`TOMPOUCE_LV2_WORKER_SANITIZE=1`).
+- [ ] A live plugin instance owned by the scheduler for real-time mid-note CC
+      and parameter changes (the current path renders each event off the audio
+      callback into an owned sample, with note/CC dispatched inside that
+      render); params/presets through LV2 state mapped to existing sliders;
+      per-plugin crash isolation must not take down or stall playback. Discovery
+      now reads bounded control-port metadata (port index, name, declared
+      min/max/default) for all safe plugins — 3155 ports across 219 plugins on
+      this box — so slider mapping has a stable reference.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

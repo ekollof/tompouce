@@ -5,3 +5,8 @@
     a lv2:Plugin ;
     lv2:binary <gain.so> ;
     rdfs:seeAlso <gain.ttl> .
+
+<urn:tompouce:test:midi-synth>
+    a lv2:Plugin ;
+    lv2:binary <midi-synth.so> ;
+    rdfs:seeAlso <midi-synth.ttl> .

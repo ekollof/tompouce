@@ -45,6 +45,90 @@ static void test_midi(void) {
     puts("LV2 MIDI note on/off plumbing ok");
 }
 
+static double segment_energy(const float *out, int begin, int end) {
+    double energy=0;
+    for (int i=begin;i<end;i++) energy+=fabs(out[i*2])+fabs(out[i*2+1]);
+    return energy;
+}
+
+/* Timed note/CC dispatch through the atom MIDI input: offsets split a block
+   sample-accurately, CC scales the fixture amplitude, and events are bounded. */
+static void test_midi_timing(void) {
+    char error[512]="";
+    const char *uri="urn:tompouce:test:midi-synth";
+    Lv2Worker *worker=lv2_worker_start(uri,44100,error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 MIDI timing: %s\n",error[0]?error:"unavailable"); return; }
+    float in[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS]={0};
+    float out[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
+    const unsigned char note_on[3]={0x90,57,127}, note_off[3]={0x80,57,0};
+    const unsigned char cc_zero[3]={0xB0,74,0}, cc_full[3]={0xB0,74,127};
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    assert(segment_energy(out,0,LV2_WORKER_FRAMES)==0);
+    assert(lv2_worker_send_midi_at(worker,0,note_on,3,error,sizeof(error)));
+    assert(lv2_worker_send_midi_at(worker,256,note_off,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    assert(segment_energy(out,0,256)>1);
+    assert(segment_energy(out,256,LV2_WORKER_FRAMES)==0);
+    assert(lv2_worker_send_midi_at(worker,100,note_on,3,error,sizeof(error)));
+    assert(lv2_worker_send_midi_at(worker,200,cc_zero,3,error,sizeof(error)));
+    assert(lv2_worker_send_midi_at(worker,300,cc_full,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    assert(segment_energy(out,0,100)==0);
+    assert(segment_energy(out,100,200)>1);
+    assert(segment_energy(out,200,300)==0);
+    assert(segment_energy(out,300,LV2_WORKER_FRAMES)>1);
+    assert(lv2_worker_send_midi_at(worker,0,note_off,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    assert(segment_energy(out,0,LV2_WORKER_FRAMES)==0);
+    for (int i=0;i<LV2_WORKER_MIDI_EVENTS;i++)
+        assert(lv2_worker_send_midi_at(worker,0,note_on,3,error,sizeof(error)));
+    assert(!lv2_worker_send_midi_at(worker,0,note_on,3,error,sizeof(error)));
+    assert(!lv2_worker_send_midi_at(worker,LV2_WORKER_FRAMES,note_on,3,
+        error,sizeof(error)));
+    lv2_worker_stop(worker);
+    puts("LV2 MIDI note/CC timing and bounds ok");
+}
+
+/* Engine dispatch: a note through the lv2: path reaches the instrument with
+   its pitch and mapped cutoff CC, and the note-off ends the render. */
+static void test_engine_midi(void) {
+    cJSON *value=cJSON_CreateObject();
+    cJSON_AddStringToObject(value,"s","lv2:urn:tompouce:test:midi-synth");
+    cJSON_AddNumberToObject(value,"gain",1);
+    AudioEvent ev;
+    memset(&ev,0,sizeof(ev));
+    dsp_params_init(&ev.dsp); ev.dsp.enabled=1;
+    ev.freq=220; ev.duration=.2; ev.smp=-1; ev.wt=-1; ev.smp_speed=1;
+    ev.midi_note=57;
+    int ok=js_audio_resolve_sample(&ev,value);
+    cJSON_Delete(value);
+    if (!ok) { puts("LV2 MIDI engine resolution unavailable"); return; }
+    assert(ev.smp>=0);
+    float *pcm=NULL; int frames=0, channels=0;
+    smp_get_stereo(ev.smp,&pcm,&frames,&channels);
+    assert(pcm && frames>0 && channels==2);
+    int crossings=0;
+    for (int i=1;i<4410;i++)
+        if ((pcm[(i-1)*2]<0)!=(pcm[i*2]<0)) crossings++;
+    assert(crossings>36 && crossings<50); /* 220 Hz saw over 0.1 s */
+    int silent=(int)(.21*44100);
+    assert(segment_energy(pcm,silent,frames)==0);
+
+    AudioEvent cut=ev;
+    cut.smp=-1; cut.dsp.p[DSP_LPF]=20;
+    value=cJSON_CreateObject();
+    cJSON_AddStringToObject(value,"s","lv2:urn:tompouce:test:midi-synth");
+    cJSON_AddNumberToObject(value,"gain",1);
+    ok=js_audio_resolve_sample(&cut,value);
+    cJSON_Delete(value);
+    assert(ok && cut.smp>=0);
+    float *quiet=NULL; int quiet_frames=0;
+    smp_get_stereo(cut.smp,&quiet,&quiet_frames,&channels);
+    assert(quiet && quiet_frames==frames);
+    assert(segment_energy(quiet,0,4410)==0); /* CC 74 = 0 silences the fixture */
+    printf("LV2 engine MIDI dispatch ok: %d frames, %d crossings\n",frames,crossings);
+}
+
 /* A deterministic instrument reference render: the LSP oscillator becomes an
    owned PCM buffer through the same worker protocol. Strudel.cc has no LV2
    counterpart, so this pinned hash is the reference gate for the instrument
@@ -125,7 +209,9 @@ static void test_engine_resolution(void) {
 
 int main(void) {
     test_midi();
+    test_midi_timing();
     test_engine_resolution();
+    test_engine_midi();
     test_instrument_reference();
     char error[512]="";
     Lv2Worker *worker=lv2_worker_start(plugin_uri(),44100,error,sizeof(error));

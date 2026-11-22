@@ -10,6 +10,12 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
+- [ ] Per-pattern `analyze`/`fft` controls. The terminal runtime currently
+      ignores `analyze(id)` and `fft(size)` in native events; the terminal
+      `spectrum` view uses the master-output FFT, and the Hydra page has no
+      live `a.fft` analyser source. A bounded per-analyzer tap and FFT outside
+      the audio callback are still needed before claiming this part of the
+      Strudel visual API.
 - [x] `/hydra` command: a separate loopback visualizer is now implemented and
       independent of F12 — `/hydra` / `/hydra stop` spawn a browser tab through
       the companion helper with a private token, Host/Origin checks, read-only

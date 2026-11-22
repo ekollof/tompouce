@@ -2,9 +2,9 @@
 
 ## Browse with F6
 
-F6 opens a search bar above category tabs: samples, drum-machines, synths, wavetables, user sounds, import-sounds, plus All/local-banks. Left/Right changes category while preserving the query.
+F6 opens a search bar above category tabs: samples, drum-machines, synths, wavetables, lv2 plugins, user sounds, import-sounds, plus All/local-banks. Left/Right changes category while preserving the query.
 
-Manifest arrays and pitch regions appear as one sound entry. Drum-machine components are grouped under their bank. Enter opens a bank or inserts a sound; Tab inserts a selected bank using its listed instruments. Standalone audio appears only when no loaded manifest references it. Insertion replaces the source selection and requires F5 to evaluate.
+Manifest arrays and pitch regions appear as one sound entry. Drum-machine components are grouped under their bank. Enter opens a bank or inserts a sound; Tab inserts a selected bank using its listed instruments. The **lv2 plugins** category lists the metadata-only LV2 catalog with declared control counts and `[instrument]`/`[effect]` markers. Enter inserts a quoted `s("lv2:<uri>")` snippet (with `note("c4").` for instruments) without loading plugin code. Standalone audio appears only when no loaded manifest references it. Insertion replaces the source selection and requires F5 to evaluate.
 
 ```js
 s("bd sd, hh*8").gain(0.4)

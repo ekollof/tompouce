@@ -407,6 +407,17 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         snprintf(ev->lv2_state,sizeof(ev->lv2_state),"%s",state->valuestring);
     if ((ev->lv2_param_count>0 || ev->lv2_preset[0] || ev->lv2_state[0]) &&
         ev->lv2_uri[0] && !cJSON_HasObjectItem(v,"note")) ev->control_only=1;
+    const cJSON *carla_project=cJSON_GetObjectItemCaseSensitive(v,"carlaProject");
+    const cJSON *carla_target=cJSON_GetObjectItemCaseSensitive(v,"carlaTarget");
+    if (cJSON_IsString(carla_project) && carla_project->valuestring &&
+        carla_project->valuestring[0] &&
+        strlen(carla_project->valuestring)<sizeof(ev->carla_project))
+        snprintf(ev->carla_project,sizeof(ev->carla_project),"%s",
+            carla_project->valuestring);
+    if (cJSON_IsString(carla_target) && carla_target->valuestring &&
+        strlen(carla_target->valuestring)<sizeof(ev->carla_target))
+        snprintf(ev->carla_target,sizeof(ev->carla_target),"%s",
+            carla_target->valuestring);
     int wavetable=!strncmp(sound,"wt_",3);
     if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;
     ev->waveform_gain=(!strcmp(sound,"saw") || !strcmp(sound,"sawtooth"))?dsp_periodic_gain(0):

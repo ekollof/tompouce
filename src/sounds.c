@@ -5,14 +5,32 @@
 #include "common.h"
 #include "banks.h"
 #include "gm_synth.h"
+#include "lv2_host.h"
 #include <limits.h>
+#include <pthread.h>
 #include <strings.h>
 #include <ctype.h>
 #include <cjson/cJSON.h>
 
 const char *sounds_category(int category) {
-    static const char *names[] = {"samples","drum-machines","synths","wavetables","user","import-sounds"};
+    static const char *names[] = {"samples","drum-machines","synths","wavetables","lv2 plugins","user","import-sounds"};
     return category >= 0 && category < SOUND_CATEGORIES ? names[category] : "all";
+}
+
+static Lv2Catalog *lv2_browser_catalog;
+static int lv2_browser_loaded;
+static pthread_mutex_t lv2_browser_lock=PTHREAD_MUTEX_INITIALIZER;
+
+static Lv2Catalog *lv2_browser_get(void) {
+    pthread_mutex_lock(&lv2_browser_lock);
+    if (!lv2_browser_loaded) {
+        char error[256]="";
+        lv2_browser_catalog=lv2_catalog_scan(error,sizeof(error));
+        lv2_browser_loaded=1;
+    }
+    Lv2Catalog *catalog=lv2_browser_catalog;
+    pthread_mutex_unlock(&lv2_browser_lock);
+    return catalog;
 }
 
 static int matches(const char *name, const char *query) {
@@ -67,9 +85,24 @@ int sounds_search(int category, const char *query, SoundInfo *out, int capacity)
         snprintf(rows[used].name,sizeof(rows[used].name),"wt:%s",wt_name(i));
         rows[used].category = SOUND_WAVETABLES; rows[used].pitched = 1; rows[used++].slots = 1;
     }
+    Lv2Catalog *lv2=(category<0 || category==SOUND_LV2)?lv2_browser_get():NULL;
+    if (lv2) for (int i=0;i<lv2_catalog_count(lv2) && used<LIMIT;i++) {
+        char uri[LV2_URI_MAX]="", name[LV2_NAME_MAX]="", library[LV2_URI_MAX]="";
+        int audio=0, midi=0;
+        if (!lv2_catalog_entry(lv2,i,uri,name,library,&audio,&midi)) continue;
+        if (!*name) snprintf(name,sizeof(name),"%s",uri);
+        snprintf(rows[used].name,sizeof(rows[used].name),"%s",name);
+        snprintf(rows[used].uri,sizeof(rows[used].uri),"%s",uri);
+        rows[used].category=SOUND_LV2;
+        rows[used].pitched=midi;
+        rows[used].slots=lv2_catalog_controls(lv2,i,NULL,0);
+        used++;
+    }
     qsort(rows,(size_t)used,sizeof(*rows),compare);
     int total = 0;
-    for (int i = 0; i < used; i++) if ((category < 0 || rows[i].category == category) && matches(rows[i].name,query)) {
+    for (int i = 0; i < used; i++) if ((category < 0 || rows[i].category == category) &&
+        (matches(rows[i].name,query) ||
+         (rows[i].category == SOUND_LV2 && matches(rows[i].uri,query)))) {
         if (out && total < capacity) out[total] = rows[i];
         total++;
     }
@@ -80,6 +113,21 @@ unsigned sounds_revision(void) { return websamp_revision()+user_sounds_revision(
 
 int sounds_snippet(const SoundInfo *sound, char *out, int capacity) {
     if (!sound || !out || capacity <= 0) return 0;
+    if (sound->category==SOUND_LV2 && sound->uri[0]) {
+        char uri[LV2_URI_MAX+8];
+        int un=snprintf(uri,sizeof(uri),"lv2:%s",sound->uri);
+        if (un<0 || (size_t)un>=sizeof(uri)) return 0;
+        cJSON *item = cJSON_CreateString(uri);
+        if (!item) return 0;
+        char *quoted = cJSON_PrintUnformatted(item);
+        cJSON_Delete(item);
+        if (!quoted) return 0;
+        int n=sound->pitched
+            ? snprintf(out,(size_t)capacity,"note(\"c4\").s(%s)",quoted)
+            : snprintf(out,(size_t)capacity,"s(%s)",quoted);
+        free(quoted);
+        return n>0 && n<capacity;
+    }
     cJSON *name = cJSON_CreateString(sound->name);
     if (!name) return 0;
     char *quoted = cJSON_PrintUnformatted(name); cJSON_Delete(name);
@@ -96,7 +144,32 @@ static int machine_bank(const SoundInfo *sound, char bank[64]) {
     memcpy(bank,sound->name,len); bank[len]=0; return 1;
 }
 
+static int lv2_browser_browse(const char *query, SoundBrowserRow *out, int capacity) {
+    Lv2Catalog *catalog=lv2_browser_get();
+    if (!catalog) return -1;
+    int total=0;
+    int count=lv2_catalog_count(catalog);
+    for (int i=0;i<count;i++) {
+        char uri[LV2_URI_MAX]="", name[LV2_NAME_MAX]="", library[LV2_URI_MAX]="";
+        int audio=0, midi=0;
+        if (!lv2_catalog_entry(catalog,i,uri,name,library,&audio,&midi)) continue;
+        if (!*name) snprintf(name,sizeof(name),"%s",uri);
+        if (!matches(name,query) && !matches(uri,query)) continue;
+        SoundBrowserRow row={0};
+        row.kind=SOUND_ROW_LV2;
+        snprintf(row.name,sizeof(row.name),"%s",name);
+        snprintf(row.uri,sizeof(row.uri),"%s",uri);
+        row.sound.category=SOUND_LV2;
+        row.sound.slots=lv2_catalog_controls(catalog,i,NULL,0);
+        row.sound.pitched=midi;
+        if (out && total<capacity) out[total]=row;
+        total++;
+    }
+    return total;
+}
+
 int sounds_browse(int category, const char *bank, const char *query, SoundBrowserRow *out, int capacity) {
+    if (category==SOUND_LV2) return lv2_browser_browse(query,out,capacity);
     SoundInfo *sounds=calloc(4096,sizeof(*sounds));
     if (!sounds) return -1;
     int count=sounds_search(category==SOUND_CATEGORIES?-1:category,NULL,sounds,4096);
@@ -156,6 +229,20 @@ int sounds_browse(int category, const char *bank, const char *query, SoundBrowse
 int sounds_browser_snippet(const SoundBrowserRow *row, char *out, int capacity) {
     if (!row || !out || capacity<=0 || row->kind==SOUND_ROW_BANK) return 0;
     if (row->kind==SOUND_ROW_SOUND) return sounds_snippet(&row->sound,out,capacity);
+    if (row->kind==SOUND_ROW_LV2) {
+        char sound[LV2_URI_MAX+8];
+        int sn=snprintf(sound,sizeof(sound),"lv2:%s",row->uri);
+        if (sn<0 || (size_t)sn>=sizeof(sound)) return 0;
+        cJSON *name=cJSON_CreateString(sound);
+        char *quoted=name?cJSON_PrintUnformatted(name):NULL;
+        cJSON_Delete(name);
+        if (!quoted) return 0;
+        int n=row->sound.pitched
+            ? snprintf(out,(size_t)capacity,"note(\"c4\").s(%s)",quoted)
+            : snprintf(out,(size_t)capacity,"s(%s)",quoted);
+        free(quoted);
+        return n>0 && n<capacity;
+    }
     cJSON *name=cJSON_CreateString(row->name);
     char *quoted=name?cJSON_PrintUnformatted(name):NULL; cJSON_Delete(name);
     if (!quoted) return 0;

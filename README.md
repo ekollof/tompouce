@@ -344,8 +344,10 @@ create a private silent sink, verifies the route before applying sound, and
 captures desktop/mobile layouts under `/tmp/tompouce-companion-qa`.
 
 The companion and F6 share a categorized sound catalog with sample counts,
-search, and source snippet insertion. In F6, choose **import-sounds**, type or
-paste a folder path, then press Enter; the companion offers a folder chooser.
+search, and source snippet insertion. F6's **lv2 plugins** category lists the
+metadata-only LV2 catalog with control counts and instrument/effect markers;
+Enter inserts a quoted `s("lv2:<uri>")` snippet without loading plugin code. In
+F6, choose **import-sounds**, type or paste a folder path, then press Enter; the
 WAV, MP3 and FLAC files are copied to the config directory’s
 `tompouce/sounds/` storage and appear under **user** after import and on
 future starts. Each folder becomes a sound name, with alphabetical file slots
@@ -445,7 +447,7 @@ Keys:
   sample-bank index, song/hold state, voices, queue and per-track timing.
 - `F3` — toggle vi editor mode; `:` opens commands in vi normal mode (Tab completes). Motions, operators and search are listed below.
 - `Ctrl+Space` — explicit completion for Strudel functions/methods, note/sound/scale strings; repeated Tab/Shift+Tab cycles candidates.
-- `F6` — browse samples, drum-machines, synths, wavetables, user sounds and import-sounds. The search bar sits above persistent category tabs; Left/Right changes category while retaining the query. Manifest arrays and pitch regions remain one sound entry; drum-machine components are grouped under their bank name. Enter opens a bank or inserts a sound; Tab inserts the selected bank using its listed instruments. All and local-banks include standalone audio files only when no loaded manifest references them. Custom Strudel JSON maps under the banks root are discovered at startup; known catalogs retain their existing precedence. Import-sounds accepts a folder path in its own field. Backspace with an empty query goes up a bank, then returns to All. Insertion replaces the source selection without evaluating; F5 applies it.
+- `F6` — browse samples, drum-machines, synths, wavetables, LV2 plugins, user sounds and import-sounds. The search bar sits above persistent category tabs; Left/Right changes category while retaining the query. Manifest arrays and pitch regions remain one sound entry; drum-machine components are grouped under their bank name. Enter opens a bank or inserts a sound; Tab inserts the selected bank using its listed instruments. The LV2 category lists metadata-only plugin entries with control counts and `[instrument]`/`[effect]` markers; Enter inserts a quoted `s("lv2:<uri>")` snippet (with `note("c4").` for instruments) without loading plugin code. All and local-banks include standalone audio files only when no loaded manifest references them. Custom Strudel JSON maps under the banks root are discovered at startup; known catalogs retain their existing precedence. Import-sounds accepts a folder path in its own field. Backspace with an empty query goes up a bank, then returns to All. Insertion replaces the source selection without evaluating; F5 applies it.
 - `F7` — song mode: play track buffers in sequence from track 0 (`/song [on|off|hold]`)
 - `F8` — hold current track (loop it inside song mode)
 - `F9` — track list pane (shows buffers, active highlighted)

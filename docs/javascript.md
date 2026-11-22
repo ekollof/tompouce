@@ -489,6 +489,26 @@ keeps sounding. Control, preset and state changes are applied between
 256-frame blocks. `test_live_lv2` and `test_lv2_worker` cover the metadata,
 timing, queue bounds, preset/state loading and sanitized worker.
 
+### Managed Carla projects
+
+`Pattern.carla(project, target)` manages a bounded Carla project from a pattern.
+The project is resolved under `$XDG_CONFIG_HOME/tompouce/carla` (or
+`$TOMPOUCE_CARLA_ROOT`) and the engine starts one owned process without loading
+plugin code itself. A background thread links the normal ALSA MIDI output,
+exposed by PipeWire as `Midi-Bridge:<client>:out (capture)`, to
+`<target>:events-in`; `target` defaults to the first plugin name in the project.
+Combine it with `.midi()`:
+
+```js
+note("c4 e4 g4").ccn(7).ccv(0.8).midi().carla('sf2.carxp', 'sf2synth')
+```
+
+Stopping transport or shutting down the engine terminates and reaps the owned
+processes. Startup/link retries never run in the audio callback; the first
+cycle may begin before Carla is ready. `test_carla_host` and the real
+`tests/test_managed_carla.py` cover bounds, process lifecycle, the MIDI link
+and non-silent project output.
+
 ### OSC output
 
 ```js

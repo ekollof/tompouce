@@ -10,11 +10,13 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound js_worker rational signal_wave
-        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2)
+        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2 carla_host)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
+set_tests_properties(carla_host PROPERTIES
+    ENVIRONMENT "TOMPOUCE_CARLA_TEST_HOST=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/carla-managed-sleep.sh")
 
 if(LILV_FOUND)
     set(LV2_TEST_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/tests/lv2-fixture")
@@ -131,6 +133,16 @@ foreach(name terminal_render_pty install sound_import sounds companion daemon os
 endforeach()
 set_tests_properties(tui_pty PROPERTIES LABELS "ui" RUN_SERIAL TRUE)
 set_tests_properties(terminal_render_pty PROPERTIES LABELS "ui")
+add_test(NAME managed_carla COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_managed_carla.py")
+set_tests_properties(managed_carla PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    ENVIRONMENT "${test_environment}" TIMEOUT 240 RUN_SERIAL TRUE)
+add_test(NAME lv2_browser_pty COMMAND "${CMAKE_COMMAND}" -E env
+    "TOMPOUCE_TEST_FILTER=LV2 plugin category"
+    "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tui_pty.py")
+set_tests_properties(lv2_browser_pty PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    ENVIRONMENT "${test_environment}" TIMEOUT 120 RUN_SERIAL TRUE)
 add_test(NAME live_controls_reference COMMAND node js/test-live-controls.mjs)
 add_test(NAME hydra_webgl COMMAND node scripts/hydra-webgl-qa.mjs)
 set_tests_properties(hydra_webgl PROPERTIES
@@ -302,7 +314,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance stretch convolution_prepare room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp js_worker mcp_security websamp_security javascript lv2 lv2_worker live_lv2)
+foreach(name audio audio_performance stretch convolution_prepare room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp js_worker mcp_security websamp_security javascript lv2 lv2_worker live_lv2 carla_host)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
         AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security" AND NOT name STREQUAL "stretch"
@@ -394,6 +406,9 @@ if(LILV_FOUND)
         "TOMPOUCE_LV2_WORKER_SANITIZE=1"
         $<TARGET_FILE:test_live_lv2_sanitize>)
 endif()
+set(CARLA_SANITIZE_COMMAND COMMAND "${CMAKE_COMMAND}" -E env
+    "TOMPOUCE_CARLA_TEST_HOST=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/carla-managed-sleep.sh"
+    $<TARGET_FILE:test_carla_host_sanitize>)
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_convolution_prepare_sanitize>
     COMMAND $<TARGET_FILE:test_stretch_sanitize>
@@ -413,7 +428,8 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_lv2_sanitize>
     ${LV2_SANITIZE_COMMAND}
     ${LIVE_LV2_SANITIZE_COMMAND}
-    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize test_live_lv2_sanitize ${LV2_SANITIZE_DEPENDENCY}
+    ${CARLA_SANITIZE_COMMAND}
+    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize test_live_lv2_sanitize test_carla_host_sanitize ${LV2_SANITIZE_DEPENDENCY}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

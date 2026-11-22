@@ -673,6 +673,19 @@ static void test_lv2param_control(void) {
     cJSON *state=cJSON_GetObjectItemCaseSensitive(value,"lv2state");
     assert(cJSON_IsString(state) && !strcmp(state->valuestring,"midi-state.ttl"));
     cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
+
+    const char *carla_code="note(60).midi().carla('patch.carxp','sf2probe')";
+    haps=query(carla_code,&program);
+    audio=javascript_query_audio(program,0,1,.5);
+    assert(cJSON_GetArraySize(audio)>=1);
+    value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(audio,0),"value");
+    cJSON *carla_project=cJSON_GetObjectItemCaseSensitive(value,"carlaProject");
+    cJSON *carla_target=cJSON_GetObjectItemCaseSensitive(value,"carlaTarget");
+    assert(cJSON_IsString(carla_project) &&
+        !strcmp(carla_project->valuestring,"patch.carxp"));
+    assert(cJSON_IsString(carla_target) &&
+        !strcmp(carla_target->valuestring,"sf2probe"));
+    cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
 }
 
 int main(int argc, char **argv) {

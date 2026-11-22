@@ -1,5 +1,6 @@
 /* Confined LV2 metadata discovery; no plugin is loaded or executed. */
 #include "lv2_host.h"
+#include "sounds.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -39,6 +40,27 @@ int main(void) {
     }
     assert(audio_plugins>0);
     lv2_catalog_free(catalog);
+
+    SoundBrowserRow rows[256];
+    int browser_count=sounds_browse(SOUND_LV2,"","",rows,256);
+    assert(browser_count>0);
+    int inserted=0;
+    for (int i=0;i<browser_count && i<256;i++) {
+        assert(rows[i].kind==SOUND_ROW_LV2);
+        assert(rows[i].uri[0]);
+        char snippet[1200];
+        assert(sounds_browser_snippet(&rows[i],snippet,sizeof(snippet)));
+        assert(strstr(snippet,"lv2:")!=NULL);
+        inserted++;
+    }
+    assert(inserted>0);
+    SoundInfo infos[256];
+    int info_count=sounds_search(SOUND_LV2,"",infos,256);
+    assert(info_count>0);
+    assert(infos[0].category==SOUND_LV2 && infos[0].uri[0]);
+    char info_code[512];
+    assert(sounds_snippet(&infos[0],info_code,sizeof(info_code)));
+    assert(strstr(info_code,"lv2:")!=NULL);
     printf("LV2 discovery ok: %d plugins (%d with audio ports, %d control ports)\n",
            count,audio_plugins,total_controls);
     return 0;

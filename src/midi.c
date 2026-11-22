@@ -87,6 +87,7 @@ unsigned midi_captured_all(MidiCaptured *out, unsigned capacity) {
 static snd_seq_t *seq = NULL;
 static int seq_port = -1;
 static int midi_ok = 0;
+static char midi_client[64] = "tompouce";
 static pthread_mutex_t midi_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t midi_cond = PTHREAD_COND_INITIALIZER;
 static pthread_t midi_tid;
@@ -139,6 +140,18 @@ static void *midi_worker(void *arg) {
 
 void midi_init(void) {
     if (midi_ok || midi_running) return;
+    const char *configured=getenv("TOMPOUCE_MIDI_CLIENT");
+    if (configured && *configured) {
+        size_t length=strlen(configured);
+        int safe=length>0 && length<sizeof(midi_client);
+        for (size_t i=0;safe && i<length;i++) {
+            unsigned char c=(unsigned char)configured[i];
+            if (!((c>='A' && c<='Z') || (c>='a' && c<='z') ||
+                  (c>='0' && c<='9') || c=='.' || c=='_' || c=='-')) safe=0;
+        }
+        if (safe) snprintf(midi_client,sizeof(midi_client),"%s",configured);
+        else log_console("midi: invalid TOMPOUCE_MIDI_CLIENT; using tompouce");
+    }
     /* Duplex: subscriptions made through this handle must deliver inbound
        events to our input port, which output-only handles cannot do. */
     int rc = snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0);
@@ -146,7 +159,7 @@ void midi_init(void) {
         log_console("midi: ALSA sequencer unavailable");
         seq = NULL;
     } else {
-        snd_seq_set_client_name(seq, "tompouce");
+        snd_seq_set_client_name(seq, midi_client);
         seq_port = snd_seq_create_simple_port(seq, "out",
             SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ |
             SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE,
@@ -206,6 +219,12 @@ void midi_shutdown(void) {
 }
 
 int midi_ready(void) { return midi_ok; }
+
+int midi_pw_source(char *out, size_t outlen) {
+    if (!out || outlen==0) return 0;
+    int n=snprintf(out,outlen,"Midi-Bridge:%s:out (capture)",midi_client);
+    return n>0 && (size_t)n<outlen;
+}
 
 void midi_note(int chan, int note, int vel, int dur_ms) {
     midi_note_for(chan,note,vel,fmax(50,dur_ms)/1000.0);

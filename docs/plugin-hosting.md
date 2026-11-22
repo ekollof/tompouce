@@ -150,10 +150,42 @@ reverb/delay/duck and master effects. The default bus keeps its original
 operation order and stays byte-identical: a named-target voice contributes
 nothing to it. Sources/capture remain out of scope until an input path exists.
 
+## Managed Carla from patterns
+
+`Pattern.carla(project, target)` manages a bounded Carla project directly from
+a pattern. The project name is resolved under `$TOMPOUCE_CARLA_ROOT` (falling
+back to `$XDG_CONFIG_HOME/tompouce/carla`); traversal, symlinks escaping that
+root, non-regular files and files over 512 KiB are rejected. The engine never
+loads plugin code: it starts the fixed `/usr/bin/carla -n <project>` command in
+its own process group (override with an absolute `TOMPOUCE_CARLA` for tests)
+and a background thread waits up to 20 seconds for the project node.
+
+Once the project node exists, the thread links the engine's existing ALSA MIDI
+output, exposed by PipeWire's Midi-Bridge as
+`Midi-Bridge:<client>:out (capture)`, to `<target>:events-in`. Combine the
+method with `.midi()`; notes, CC, program changes, bend, touch and NRPN then use
+the normal MIDI dispatcher with no separate protocol:
+
+```js
+note("c4 e4 g4").ccn(7).ccv(0.8).midi().carla('sf2.carxp', 'sf2synth')
+```
+
+If `target` is omitted, the first `<Name>` in the project's first `<Plugin>`
+block is used. At most four managed instances run at once; startup and link
+retries happen outside the audio callback. Stopping transport (`music_stop` or
+the UI transport key) terminates and reaps every owned process, and engine
+shutdown does the same. A failed start only reports through the console and
+leaves playback and other managed instances running.
+
+`test_carla_host` covers the project bounds, slot reuse and process lifecycle
+with an owned fake host. `tests/test_managed_carla.py` generates a real Carla
+SF2 project, verifies `carla=1/1` and the PipeWire link, captures non-silent
+project output (peak 6614, RMS 740 in the local run), then checks `carla=0/0`
+and no remaining project node after `music_stop`. The test owns its null sink,
+MIDI client, project and process cleanup.
+
 ## Planned, not implemented
 
-- A managed Carla instance driven from patterns, with project files for plugin
-  graphs and note/CC through the existing MIDI output.
 - LV2 discovery through `lilv` is implemented (`src/lv2_host.c`, `test_lv2`):
   it reads only metadata from LV2_PATH (including the user bundle dir), keeps a
   bounded catalog of plugins with audio or event ports, and refuses binaries

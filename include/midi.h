@@ -1,11 +1,15 @@
 #ifndef MIDI_H
 #define MIDI_H
+#include <stddef.h>
 
 /* ALSA sequencer MIDI out. Init is best-effort: without a sequencer
    sending below is a silent no-op (logged once). */
 void midi_init(void);
 void midi_shutdown(void);
 int midi_ready(void);
+/* PipeWire Midi-Bridge source for this engine's ALSA output, used by managed
+   external hosts. Returns 1 and fills the bounded name when available. */
+int midi_pw_source(char *out, size_t outlen);
 /* note on now, note off after dur_ms (worker thread). Thread-safe. */
 void midi_note(int chan, int note, int vel, int dur_ms);
 /* Dominant output preserves sub-millisecond web gates without the legacy

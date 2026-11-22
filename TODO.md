@@ -70,9 +70,26 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       carry dry voices only, bypassing shared effects. See
       [named output targets](docs/plugin-hosting.md#named-output-targets-out).
       Sources (capture) stay out of scope until an input path exists.
-- [ ] Drive a managed Carla instance from patterns: project files for plugin
-      graphs, notes/CC through existing MIDI output for params, instance
-      lifecycle owned by the engine without stalling playback on failure.
+- [x] Drive a managed Carla instance from patterns. `Pattern.carla(project,
+      target)` resolves a bounded `.carxp` under `$TOMPOUCE_CARLA_ROOT` /
+      `$XDG_CONFIG_HOME/tompouce/carla`, validates it without loading plugin
+      code in the engine, and starts one owned Carla process per project and
+      target. A background thread waits for the project node, links the existing
+      ALSA MIDI output exposed as `Midi-Bridge:<client>:out (capture)` to
+      `<target>:events-in`, and never stalls the audio callback. `.midi()`
+      patterns then send notes and controllers through the normal MIDI path.
+      Instances stop on transport stop and engine shutdown. `test_carla_host`
+      covers bounds, reuse and fake-process lifecycle; `test_managed_carla.py`
+      generates a real SF2 project, verifies the ready/link state, captures
+      non-silent output (peak 6614, RMS 740) and confirms `carla=1/1` becomes
+      `carla=0/0` with no node left after stop.
+- [x] Browse and select LV2 plugins in the F6 sound browser. A bounded
+      `lv2 plugins` category uses the metadata-only catalog, shows declared
+      control counts plus `[instrument]`/`[effect]` markers, and inserts a
+      quoted `s("lv2:<uri>")` snippet (with `note("c4").` for instruments)
+      without loading plugin code in the engine. The catalog is scanned lazily
+      and cached. `test_lv2` checks catalog rows and snippets; the PTY sound
+      browser test selects the MIDI fixture and verifies the inserted code.
 - [x] LV2 discovery via `lilv` (optional build dependency, auto-detected): scan
       LV2_PATH including the user dir, allowlist audio/MIDI port classes and
       refuse non-`file://` binaries, traversal and remote/executable metadata.

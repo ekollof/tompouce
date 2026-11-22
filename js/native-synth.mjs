@@ -278,4 +278,25 @@ export function installNative(core) {
       throw new Error('Invalid LV2 state');
     return this.withValue(value=>({...value,lv2state:name}));
   };
+  /**
+   * Manage a Carla project for this pattern. The project is resolved under
+   * $XDG_CONFIG_HOME/tompouce/carla (or $TOMPOUCE_CARLA_ROOT); the engine owns
+   * its startup and shutdown and links its MIDI input to the existing output.
+   * Combine with .midi() to send notes and controllers to the project.
+   * @name carla
+   * @param {string} project bounded Carla project file name
+   * @param {string} target optional project node name (defaults to the first plugin)
+   * @example
+   * note("c4 e4 g4").midi().carla('sf2.carxp', 'sf2synth')
+   */
+  core.Pattern.prototype.carla=function(project,target) {
+    if (typeof project!=='string' || !project || project.length>=240 ||
+        /[\u0000-\u001f]/.test(project))
+      throw new Error('Invalid Carla project');
+    if (target!==undefined && (typeof target!=='string' || !target ||
+        target.length>=64 || /[\u0000-\u001f]/.test(target)))
+      throw new Error('Invalid Carla target');
+    return this.withValue(value=>({...value,carlaProject:project,
+      ...(target===undefined?{}:{carlaTarget:target})}));
+  };
 }

@@ -162,8 +162,8 @@ supersaw's 100-oscillator kernel is already AVX2, so lane admission would not
 remove its main cost. Vowel, phaser, chorus and distortion are not used by
 this composition and still render scalar.
 
-The audio/reference gates and the supersaw exactness test pass; the known
-`tui_pty` vi startup case remains timing-flaky.
+The audio/reference gates and the supersaw exactness test pass; full ctest
+includes the previously timing-sensitive `tui_pty` vi startup check.
 The earlier OpenAL **zero-underrun** reading was a blind spot: it only counted
 an empty app queue. A source-state check now also counts OpenAL stopping and
 restarting while buffers are still queued. With the dense "Computer says no"

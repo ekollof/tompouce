@@ -1190,6 +1190,7 @@ static const char *const strudel_method_words[] = {
     "bypass",
     "byteBeatExpression",
     "byteBeatStartTime",
+    "carla",
     "cat",
     "ccn",
     "ccv",

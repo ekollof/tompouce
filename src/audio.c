@@ -25,6 +25,7 @@
 #include "render_block.h"
 #include "soa_voice.h"
 #include "live_lv2.h"
+#include "carla_host.h"
 #ifdef TOMPOUCE_RENDER_PROFILE
 static _Atomic unsigned long long section_voice, section_fx, section_master;
 static unsigned long long audio_cycles(void) {
@@ -1678,8 +1679,12 @@ static int oldest_full_pool_voice(void) {
 }
 
 void audio_trigger_event(AudioEvent *ev) {
-    if (ev->csound_only || ev->osc_only || ev->midi_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
+    if (ev->carla_project[0]) {
+        char error[128];
+        carla_acquire(ev->carla_project,ev->carla_target,error,sizeof(error));
+    }
+    if (ev->csound_only || ev->osc_only || ev->midi_only) return;
     if (ev->live_lv2==0 && (ev->lv2_param_count>0 || ev->lv2_preset[0] ||
         ev->lv2_state[0]) && ev->lv2_uri[0]) {
         int acquired=live_lv2_acquire(ev->lv2_uri,SR,audio_time_now(),NULL,0);
@@ -2855,6 +2860,7 @@ void audio_init(void) {
 }
 void audio_shutdown(void) {
     stop_room_worker();
+    carla_shutdown();
     midi_shutdown();
     audio_output_stop();
     silent_clock=0;
@@ -2868,7 +2874,10 @@ void audio_shutdown(void) {
 void audio_toggle_play(int on) {
     playing = on ? 1 : 0;
     if (on) { audio_peak_reset(); soa_bank_reset(); }
-    else live_lv2_all_notes_off();
+    else {
+        live_lv2_all_notes_off();
+        carla_stop_all();
+    }
 }
 int audio_is_playing(void) { return playing; }
 int audio_is_stream_active(void) {

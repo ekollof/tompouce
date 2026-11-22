@@ -121,6 +121,31 @@ static int process_sample_lane(SoaVoiceLane *lane, int sub, double *in_l,
     return 1;
 }
 
+static int process_supersaw_lane(SoaVoiceLane *lane, int sub, double time,
+                                 double *in_l, double *in_r) {
+    if (!lane->released && time>=lane->note_off_time) {
+        lane->released=1;
+        lane->release_start_level=lane->env;
+        lane->release_time=time;
+    }
+    int end=lane->released && time-lane->release_time>=lane->env_rel;
+    double env=dsp_envelope(lane->age,lane->gate,lane->env_att,
+        lane->env_dec,lane->env_sus,lane->env_rel);
+    lane->env=env;
+    double freq=dsp_frequency(lane->dsp,
+        lane->freq*(lane->stretch>0?lane->stretch:1),lane->age,lane->gate);
+    if (time+1e-10>=lane->source_begin)
+        dsp_supersaw(lane->dsp,freq);
+    else
+        lane->dsp->supersaw_l=lane->dsp->supersaw_r=0;
+    double amp=lane->amp*.3;
+    in_l[sub]=lane->dsp->supersaw_l*env*amp;
+    in_r[sub]=lane->dsp->supersaw_r*env*amp;
+    lane->age+=1.0/SR;
+    if (end) { lane->ended=1; lane->active=0; }
+    return 1;
+}
+
 static int process_synth_lane(SoaVoiceLane *lane, int sub, double time,
                               double *in_l) {
     if (!lane->released && time>=lane->note_off_time) {
@@ -177,6 +202,9 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
                 if (lane->kind==SOA_KIND_SAMPLE) {
                     ok=process_sample_lane(lane,sub,in_l,in_r);
                     if (ok && lane->channels==2) stereo=1;
+                } else if (lane->kind==SOA_KIND_SUPERSAW) {
+                    ok=process_supersaw_lane(lane,sub,times[frame],in_l,in_r);
+                    if (ok) stereo=1;
                 } else {
                     ok=process_synth_lane(lane,sub,times[frame],in_l);
                 }
@@ -195,8 +223,9 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
             for (int sub=0;sub<4;sub++) {
                 if (!(rendered&(1u<<sub))) continue;
                 int index=group*4+sub;
-                int lane_stereo=bank->lanes[index].kind==SOA_KIND_SAMPLE &&
-                    bank->lanes[index].channels==2;
+                int lane_stereo=(bank->lanes[index].kind==SOA_KIND_SAMPLE &&
+                    bank->lanes[index].channels==2) ||
+                    bank->lanes[index].kind==SOA_KIND_SUPERSAW;
                 out_l[(size_t)frame*SOA_VOICE_LANES+index]=clamp_sample(result_l[sub]);
                 out_r[(size_t)frame*SOA_VOICE_LANES+index]=
                     clamp_sample(lane_stereo?result_r[sub]:result_l[sub]);

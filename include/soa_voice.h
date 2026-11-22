@@ -16,7 +16,8 @@ enum {
     SOA_KIND_SINE,
     SOA_KIND_SAW,
     SOA_KIND_SQUARE,
-    SOA_KIND_TRI
+    SOA_KIND_TRI,
+    SOA_KIND_SUPERSAW
 };
 
 typedef struct {
@@ -39,6 +40,11 @@ typedef struct {
     double env, raw_rel;
     double note_off_time, release_time, release_start_level;
     double freq, phase, phase_inc, pw;
+    /* Supersaw keeps its 100-oscillator phase/ratio state in the voice's
+       DspState, created at allocation; the lane owns the source/envelope and
+       filter clocks and points at that state. */
+    DspState *dsp;
+    double source_begin, stretch;
     /* Single active biquad (DSP_LPF/HPF/BPF) controls. */
     int filter_type;
     double filter_cutoff, filter_q, filter_env, filter_anchor;

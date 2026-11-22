@@ -557,14 +557,18 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         sorted list, preserving slot/mix order and re-adding retirement slots.
         `test_active_voice_list` covers slot order, removal and reuse; the
         audio/sanitize and example PCM gates still pass.
-      - [ ] The remaining scalar population is supersaw (~8.8 voices/block)
-        and the procedural HH drum (~1.3). Supersaw's 100-oscillator kernel is
-        already AVX2 and would need ~1.6 KB of phase/ratio state per lane, so
-        lane admission would not reduce its main cost; the next useful step is
-        the compact active-voice list, not more per-sample effects. Vowel,
-        phaser, chorus and distortion are not used by this composition and
-        still render scalar; add lanes for them only with a matching browser
-        gate and a measured song that needs them.
+      - [x] Supersaw from-allocation SoA lanes. The lane points at the
+        voice's oscillator state created at allocation, uses the existing AVX2
+        supersaw kernel, and owns the source/envelope/filter clocks and stereo
+        biquad state. `test_soa_voice` compares the lane output exactly with
+        the scalar supersaw source/envelope path; `test_audio` verifies a
+        triggered supersaw voice is admitted and renders through its lane.
+      - [ ] The remaining scalar population is the procedural HH drum
+        (~1.3 voices/block), whose shared `rand()`/highpass state and PCM order
+        make lane admission non-equivalent without a separate reference
+        change. Vowel, phaser, chorus and distortion are not used by this
+        composition and still render scalar; add lanes for them only with a
+        matching browser gate and a measured song that needs them.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

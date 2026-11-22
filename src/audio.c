@@ -432,6 +432,7 @@ static int soa_kind_for(const Voice *v) {
         case INST_SAW: return SOA_KIND_SAW;
         case INST_SQUARE: return SOA_KIND_SQUARE;
         case INST_TRI: return SOA_KIND_TRI;
+        case INST_SUPERSAW: return SOA_KIND_SUPERSAW;
         default: return -1;
     }
 }
@@ -452,7 +453,13 @@ static int soa_bank_eligible(const Voice *v) {
     if (v->lpf_hz>0) return 0;
     int kind=soa_kind_for(v);
     if (kind<0) return 0;
-    if (kind==SOA_KIND_SAMPLE) {
+    if (kind==SOA_KIND_SUPERSAW) {
+        if (v->dsp.effects_active) {
+            if (dsp_single_filter(&v->dsp_right)!=filter_type) return 0;
+        } else if (v->dsp_right.effects_active) {
+            return 0;
+        }
+    } else if (kind==SOA_KIND_SAMPLE) {
         if (v->cut_pending || v->smpstep<0) return 0;
         if (v->dsp.control.p[DSP_LOOP]>0) return 0;
         if (v->smppos<0 || v->smplen<=0) return 0;
@@ -543,6 +550,12 @@ static void soa_lane_from_voice(SoaVoiceLane *l, Voice *v, int kind) {
         l->phase=v->phase;
         l->phase_inc=2*M_PI*l->freq/SR;
         l->pw=v->pw;
+        if (kind==SOA_KIND_SUPERSAW) {
+            l->dsp=&v->dsp;
+            l->source_begin=v->source_begin;
+            l->stretch=v->stretch_factor;
+            l->stereo_filter=1;
+        }
     }
 }
 

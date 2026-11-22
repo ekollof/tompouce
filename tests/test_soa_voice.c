@@ -250,10 +250,55 @@ static void check_group_isolation(void) {
     for (int i=0;i<4;i++) { free(want_l[i]); free(want_r[i]); }
 }
 
+/* Supersaw lanes point at the voice's from-allocation oscillator state and
+   must match the scalar source/envelope/filter order exactly. */
+static void check_supersaw(void) {
+    DspParams control; dsp_params_init(&control); control.enabled=1;
+    control.p[DSP_UNISON]=8; control.p[DSP_SPREAD]=.5;
+    control.supersaw_detune=.18;
+    DspState state; dsp_init(&state,&control);
+    dsp_supersaw_init(&state,1234);
+    DspState reference=state;
+    SoaVoiceLane lane={0};
+    lane.kind=SOA_KIND_SUPERSAW; lane.dsp=&state;
+    lane.amp=.1; lane.freq=220; lane.stretch=1; lane.source_begin=0;
+    lane.gate=1; lane.note_off_time=1;
+    lane.env_att=.005; lane.env_dec=.1; lane.env_sus=.6; lane.env_rel=.15;
+    lane.filterless=1; lane.biquad_l.b0=1; lane.biquad_r.b0=1;
+    SoaVoiceBank bank; soa_voice_bank_clear(&bank);
+    assert(soa_voice_bank_add(&bank,&lane)==0);
+    unsigned frames=32;
+    double *times=calloc(frames,sizeof(double)); assert(times);
+    make_times(times,frames);
+    double out_l[4*SOA_VOICE_LANES], out_r[4*SOA_VOICE_LANES];
+    double age=0;
+    for (unsigned at=0;at<frames;at+=4) {
+        soa_voice_bank_process(&bank,4,times+at,out_l,out_r);
+        for (unsigned j=0;j<4;j++) {
+            double freq=dsp_frequency(&reference,220,age,1);
+            dsp_supersaw(&reference,freq);
+            double env=dsp_envelope(age,1,.005,.1,.6,.15);
+            double amp=.1*.3;
+            double want_l=reference.supersaw_l*env*amp;
+            double want_r=reference.supersaw_r*env*amp;
+            if (out_l[j*SOA_VOICE_LANES]!=want_l ||
+                out_r[j*SOA_VOICE_LANES]!=want_r) {
+                fprintf(stderr,"supersaw diff frame=%u got=%.17g/%.17g want=%.17g/%.17g\n",
+                    at+j,out_l[j*SOA_VOICE_LANES],out_r[j*SOA_VOICE_LANES],
+                    want_l,want_r);
+                assert(0 && "supersaw lane mismatch");
+            }
+            age+=1.0/SR;
+        }
+    }
+    free(times);
+}
+
 int main(void) {
     check_samples();
     check_synths();
     check_group_isolation();
+    check_supersaw();
     puts("SoA voice bank exactness ok");
     return 0;
 }

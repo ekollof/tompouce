@@ -542,7 +542,35 @@ static void test_supersaw_callback(void) {
         stereo+=fabs(pcm[i*2]-pcm[i*2+1]);
     }
     assert(energy>0 && stereo>0 && voices[0].dsp.saw_phase[0]!=phase);
+    assert(voices[0].soa_active && voices[0].soa_lane>=0);
+    assert(soa_bank.lanes[voices[0].soa_lane].kind==SOA_KIND_SUPERSAW);
     memset(voices,0,sizeof(voices));
+}
+
+/* Production admission must render the same PCM as the scalar supersaw
+   path from the same trigger state. */
+static void test_supersaw_soa_equivalence(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1);
+    AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
+        .time=0,.duration=1,.att=.001,.dec=.05,.sus=.6,.rel=.01,
+        .midi_chan=-1,.midi_note=-1};
+    dsp_params_init(&event.dsp); event.dsp.enabled=1;
+    float scalar[8], lane[8];
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); audio_time=0; next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    audio_trigger_event(&event);
+    voices[0].soa_pending=0; /* scalar reference */
+    pa_callback(NULL,scalar,4,NULL,0,NULL);
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); audio_time=0; next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    event.time=0; audio_trigger_event(&event);
+    assert(voices[0].soa_pending);
+    pa_callback(NULL,lane,4,NULL,0,NULL);
+    assert(voices[0].soa_active);
+    for (int i=0;i<8;i++) assert(fabs(scalar[i]-lane[i])<1e-12);
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); audio_time=old_time; playing=old_playing; audio_set_reference_mode(0);
 }
 
 static void test_supersaw_quantum_start(void) {
@@ -1010,6 +1038,7 @@ int main(void) {
     test_supersaw_callback();
     test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
+    test_supersaw_soa_equivalence();
     test_failed_source_siblings();
     test_active_voice_list();
 

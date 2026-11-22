@@ -330,9 +330,15 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         measured max ~4.02 ms with one gap (over-3 ms: 10), slower than the
         scalar path, so the integration was reverted. The block-boundary copy
         and four-voice grouping overhead still dominate.
-      - [ ] Build the DSP lanes persistently from allocation (no block-boundary
-        copy), including LPE/LFO coefficient updates and other active filters,
-        then measure against the 128-frame deadline on the real device.
+      - [x] Build persistent LPF DSP lanes from onset with LPE/LFO coefficient
+        updates and no per-block state copy. PCM gates passed, but the
+        35-second "Computer says no" run measured 41 gaps and max ~3.33 ms, so
+        it was reverted. Lane grouping/synchronization and per-frame filter
+        updates still cost more than the scalar path.
+      - [ ] A full from-allocation SoA renderer remains required for active
+        filters beyond LPF and for the other per-sample effects; do not attempt
+        it as another incremental lane pool without replacing the allocator and
+        main voice loop.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

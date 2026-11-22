@@ -61,6 +61,8 @@ typedef struct {
     int room_params_valid, room_sample; /* -1 identifies a generated IR */
     int room_rebuild;
     unsigned room_defined; /* explicit IR speed/offset, distinct from defaults */
+    unsigned fx_room_fields; /* FX(...) supplied room/IR controls */
+    char fx_ir[128];
     double room_speed, room_begin;
     OscOutputMessage osc;
     double time;        // absolute seconds

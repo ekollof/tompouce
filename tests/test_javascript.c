@@ -698,7 +698,11 @@ static void test_fx_shared_routing(void) {
         "x=>x.delay(.2).delaytime(.125).delayfeedback(.25)"
         ".hpf(120).hpq(1.5).bpf(900).bpq(2).coarse(4).pan(.25)"
         ".shape(.4).distort(2).chorus(.3).crush(8).postgain(1.2)"
-        ".tremolo(5).phaser(1))";
+        ".tremolo(5).phaser(1)"
+        ".fmi(2).fmh(1.5).fmattack(.01).fmdecay(.1).fmsustain(.5)"
+        ".fmrelease(.2).fmenv(1).fmwave(2).fmi21(3)"
+        ".irspeed(.5).irbegin(.1).roomfade(.2).roomlp(8000).roomdim(1000)"
+        ".ir('impulse'))";
     JsProgram *program=NULL;
     cJSON *haps=query(code,&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
@@ -729,6 +733,23 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_POST]-1.2)<1e-9);
     assert(fabs(event.dsp.p[DSP_TREM]-5)<1e-9);
     assert(fabs(event.dsp.p[DSP_PHASER]-1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE]-2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+1]-1.5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+2]-.01)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+3]-.1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+4]-.5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+5]-.2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+6]-1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_FMBASE+7]-2)<1e-9);
+    assert(fabs(event.dsp.matrix[1][1]-3)<1e-9 && (event.dsp.fm_envelopes&1));
+    assert(fabs(event.room_speed-.5)<1e-9);
+    assert(fabs(event.room_begin-.1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_ROOMFADE]-.2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_ROOMLP]-8000)<1e-9);
+    assert(fabs(event.dsp.p[DSP_ROOMDIM]-1000)<1e-9);
+    assert(event.fx_room_fields==((1u<<0)|(1u<<1)|(1u<<2)|(1u<<3)|
+        (1u<<4)|(1u<<5)|(1u<<6)));
+    assert(!strcmp(event.fx_ir,"impulse"));
     assert(event.has_pan && fabs(event.pan+ .5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 

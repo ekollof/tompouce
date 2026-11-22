@@ -306,6 +306,15 @@ static int fx_arg_number(const cJSON *step, int index, double *out) {
     return 0;
 }
 
+static int fx_arg_string(const cJSON *step, int index, char *out, size_t outlen) {
+    const cJSON *args=cJSON_IsObject(step)?cJSON_GetObjectItemCaseSensitive(step,"args"):NULL;
+    const cJSON *arg=cJSON_IsArray(args)?cJSON_GetArrayItem(args,index):NULL;
+    if (!cJSON_IsString(arg) || !arg->valuestring || !*arg->valuestring ||
+        strlen(arg->valuestring)>=outlen) return 0;
+    snprintf(out,outlen,"%s",arg->valuestring);
+    return 1;
+}
+
 enum {
     FX_OP_ROOM, FX_OP_SIZE, FX_OP_DRY, FX_OP_DELAY, FX_OP_DELAYTIME,
     FX_OP_DELAYFEEDBACK,
@@ -323,6 +332,10 @@ enum {
     FX_OP_TREMOLOSHAPE, FX_OP_COMPRESSOR, FX_OP_COMPRESSORRATIO,
     FX_OP_COMPRESSORKNEE, FX_OP_COMPRESSORATTACK, FX_OP_COMPRESSORRELEASE,
     FX_OP_PCURVE,
+    FX_OP_FM_INDEX, FX_OP_FM_RATIO, FX_OP_FM_ATTACK, FX_OP_FM_DECAY,
+    FX_OP_FM_SUSTAIN, FX_OP_FM_RELEASE, FX_OP_FM_ENV, FX_OP_FM_WAVE,
+    FX_OP_FM_MATRIX, FX_OP_IR, FX_OP_IRSPEED, FX_OP_IRBEGIN,
+    FX_OP_ROOMFADE, FX_OP_ROOMLP, FX_OP_ROOMDIM,
     FX_OP_COUNT
 };
 
@@ -359,7 +372,13 @@ static const FxName fx_names[] = {
     {"compressor",FX_OP_COMPRESSOR},{"compressorRatio",FX_OP_COMPRESSORRATIO},
     {"compressorKnee",FX_OP_COMPRESSORKNEE},
     {"compressorAttack",FX_OP_COMPRESSORATTACK},
-    {"compressorRelease",FX_OP_COMPRESSORRELEASE},{"pcurve",FX_OP_PCURVE}
+    {"compressorRelease",FX_OP_COMPRESSORRELEASE},{"pcurve",FX_OP_PCURVE},
+    {"fm",FX_OP_FM_INDEX},{"fmi",FX_OP_FM_INDEX},{"fmh",FX_OP_FM_RATIO},
+    {"fmattack",FX_OP_FM_ATTACK},{"fmdecay",FX_OP_FM_DECAY},
+    {"fmsustain",FX_OP_FM_SUSTAIN},{"fmrelease",FX_OP_FM_RELEASE},
+    {"fmenv",FX_OP_FM_ENV},{"fmwave",FX_OP_FM_WAVE},
+    {"ir",FX_OP_IR},{"irspeed",FX_OP_IRSPEED},{"irbegin",FX_OP_IRBEGIN},
+    {"roomfade",FX_OP_ROOMFADE},{"roomlp",FX_OP_ROOMLP},{"roomdim",FX_OP_ROOMDIM}
 };
 
 static int fx_op(const char *name) {
@@ -367,6 +386,37 @@ static int fx_op(const char *name) {
     for (unsigned i=0;i<sizeof(fx_names)/sizeof(fx_names[0]);i++)
         if (!strcmp(name,fx_names[i].name)) return fx_names[i].op;
     return -1;
+}
+
+/* FM controls accept an optional operator suffix (1..8) and fmi matrices use
+   two digits (operator then source). Unnumbered names remain operator 1. */
+static int fx_fm_parse(const char *name, int *operation, int *operator_index,
+                       int *matrix_a, int *matrix_b) {
+    if (!name || strncmp(name,"fm",2)) return 0;
+    size_t length=strlen(name);
+    if (length==5 && !strncmp(name,"fmi",3) &&
+        name[3]>='1' && name[3]<='8' && name[4]>='0' && name[4]<='8') {
+        *operation=FX_OP_FM_MATRIX;
+        *matrix_a=name[3]-'1';
+        *matrix_b=name[4]-'0';
+        return 1;
+    }
+    const char *fields[] = {"fmi","fmh","fmattack","fmdecay","fmsustain",
+        "fmrelease","fmenv","fmwave"};
+    const int ops[] = {FX_OP_FM_INDEX,FX_OP_FM_RATIO,FX_OP_FM_ATTACK,
+        FX_OP_FM_DECAY,FX_OP_FM_SUSTAIN,FX_OP_FM_RELEASE,FX_OP_FM_ENV,
+        FX_OP_FM_WAVE};
+    for (unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);i++) {
+        size_t base=strlen(fields[i]);
+        if (length==base && !strcmp(name,fields[i])) {
+            *operation=ops[i]; *operator_index=0; return 1;
+        }
+        if (length==base+1 && !strncmp(name,fields[i],base) &&
+            name[base]>='1' && name[base]<='8') {
+            *operation=ops[i]; *operator_index=name[base]-'1'; return 1;
+        }
+    }
+    return 0;
 }
 
 static uint64_t fx_outer_mask(const cJSON *v) {
@@ -410,8 +460,18 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
             const cJSON *op = cJSON_IsObject(step)
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
+            int fm_operator=0, matrix_a=-1, matrix_b=-1;
             int operation=fx_op(op->valuestring);
-            if (operation<0 || (outer&(1ull<<(unsigned)operation))) continue;
+            if (operation<0)
+                fx_fm_parse(op->valuestring,&operation,&fm_operator,
+                    &matrix_a,&matrix_b);
+            if (operation<0 || (outer&(1ull<<(unsigned)operation)) ||
+                cJSON_HasObjectItem(v,op->valuestring)) continue;
+            if (operation==FX_OP_IR) {
+                if (fx_arg_string(step,0,ev->fx_ir,sizeof(ev->fx_ir)))
+                    ev->fx_room_fields|=1u<<6; /* keep the custom IR explicit */
+                continue;
+            }
             double value=0;
             if (!fx_arg_number(step,0,&value)) continue;
             switch (operation) {
@@ -419,7 +479,10 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=1) ev->dsp.p[DSP_ROOM]=value;
                 break;
             case FX_OP_SIZE:
-                if (value>=0 && value<=10) ev->dsp.p[DSP_SIZE]=value;
+                if (value>=0 && value<=10) {
+                    ev->dsp.p[DSP_SIZE]=value;
+                    ev->fx_room_fields|=1u<<0;
+                }
                 break;
             case FX_OP_DRY:
                 if (value>=0 && value<=1) ev->dsp.p[DSP_DRY]=value;
@@ -576,6 +639,81 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             case FX_OP_PCURVE:
                 if (value>=0 && value<=1) ev->dsp.p[DSP_PCURVE]=value;
+                break;
+            case FX_OP_IRSPEED:
+                if (value>=-8 && value<=8) {
+                    ev->room_speed=value;
+                    ev->fx_room_fields|=1u<<4;
+                }
+                break;
+            case FX_OP_IRBEGIN:
+                if (value>=0 && value<=1) {
+                    ev->room_begin=value;
+                    ev->fx_room_fields|=1u<<5;
+                }
+                break;
+            case FX_OP_ROOMFADE:
+                if (value>=0 && value<=10) {
+                    ev->dsp.p[DSP_ROOMFADE]=value;
+                    ev->fx_room_fields|=1u<<1;
+                }
+                break;
+            case FX_OP_ROOMLP:
+                if (value>=0 && value<=22050) {
+                    ev->dsp.p[DSP_ROOMLP]=value;
+                    ev->fx_room_fields|=1u<<2;
+                }
+                break;
+            case FX_OP_ROOMDIM:
+                if (value>=0 && value<=22050) {
+                    ev->dsp.p[DSP_ROOMDIM]=value;
+                    ev->fx_room_fields|=1u<<3;
+                }
+                break;
+            case FX_OP_FM_INDEX:
+                if (value>=-64 && value<=64)
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8]=value;
+                break;
+            case FX_OP_FM_RATIO:
+                if (value>=-64 && value<=64)
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+1]=value;
+                break;
+            case FX_OP_FM_ATTACK:
+                if (value>=0 && value<=30) {
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+2]=value;
+                    ev->dsp.fm_envelopes|=1u<<(unsigned)fm_operator;
+                }
+                break;
+            case FX_OP_FM_DECAY:
+                if (value>=0 && value<=30) {
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+3]=value;
+                    ev->dsp.fm_envelopes|=1u<<(unsigned)fm_operator;
+                }
+                break;
+            case FX_OP_FM_SUSTAIN:
+                if (value>=0 && value<=1) {
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+4]=value;
+                    ev->dsp.fm_envelopes|=1u<<(unsigned)fm_operator;
+                }
+                break;
+            case FX_OP_FM_RELEASE:
+                if (value>=0 && value<=30) {
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+5]=value;
+                    ev->dsp.fm_envelopes|=1u<<(unsigned)fm_operator;
+                }
+                break;
+            case FX_OP_FM_ENV:
+                if (value>=0 && value<=1)
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+6]=value;
+                break;
+            case FX_OP_FM_WAVE:
+                if (value>=0 && value<=6)
+                    ev->dsp.p[DSP_FMBASE+fm_operator*8+7]=value;
+                break;
+            case FX_OP_FM_MATRIX:
+                if (value>=-64 && value<=64 && matrix_a>=0 && matrix_a<8 &&
+                    matrix_b>=0 && matrix_b<9)
+                    ev->dsp.matrix[matrix_a][matrix_b]=value;
                 break;
             default:
                 break;
@@ -761,12 +899,16 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
     }
     const cJSON *ir = cJSON_GetObjectItemCaseSensitive(value,"ir");
     ev->room_params_valid=1; ev->room_sample=-1;
-    ev->room_speed=control(value,"irspeed",1,-8,8);
-    ev->room_begin=control(value,"irbegin",0,0,1);
-    if (ir && ev->dsp.p[DSP_ROOM]>0) {
-        if (!cJSON_IsString(ir) || !ir->valuestring[0]) return 0;
+    if (!(ev->fx_room_fields&(1u<<4)))
+        ev->room_speed=control(value,"irspeed",1,-8,8);
+    if (!(ev->fx_room_fields&(1u<<5)))
+        ev->room_begin=control(value,"irbegin",0,0,1);
+    const char *ir_name = cJSON_IsString(ir)?ir->valuestring:
+        (ev->fx_ir[0]?ev->fx_ir:NULL);
+    if (ir_name && ev->dsp.p[DSP_ROOM]>0) {
+        if (!ir_name[0]) return 0;
         char token[256];
-        int n=snprintf(token,sizeof(token),"%s:%d",ir->valuestring,
+        int n=snprintf(token,sizeof(token),"%s:%d",ir_name,
             (int)floor(control(value,"i",1,-1000000,1000000)+.5));
         if (n<0 || (size_t)n>=sizeof(token)) return 0;
         ev->room_sample=websamp_acquire(token,-1);
@@ -893,7 +1035,7 @@ static const ConvKernel *prepare_kernel_pooled(int sample, double size,
 
 static int finish_sample(AudioEvent *ev, const cJSON *value) {
     const cJSON *ir = cJSON_GetObjectItemCaseSensitive(value,"ir");
-    audio_inherit_room(ev,room_explicit_fields(value));
+    audio_inherit_room(ev,room_explicit_fields(value)|ev->fx_room_fields);
     if (ir && ev->dsp.p[DSP_ROOM] > 0) {
         if (ev->dsp.p[DSP_SIZE] == 0) ev->dsp.p[DSP_ROOM] = 0;
         else {

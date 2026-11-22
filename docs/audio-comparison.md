@@ -988,8 +988,9 @@ room tail survives source retirement. Materialized nested `FX(...)` room/delay
 and filter/pan/coarse steps now replay with outer controls taking precedence,
 and `test_javascript`/`test_audio` cover the graph-source boundary and a live
 room+filter+pan+coarse+shape+distort+chorus edit during an active delay tail.
-The replay also covers crush, postgain, phaser, tremolo and compressor controls;
-FM/IR and other rare graph-local parameters remain outside it.
+The replay also covers crush, postgain, phaser, tremolo, compressor, FM
+operator/envelope/matrix and IR/room controls; loop/partial and other rare
+graph-local parameters remain outside it.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
@@ -1175,10 +1176,11 @@ chain recorder; the field is separate from `FX` so event-comparison gates still
 see the web's `FX:[{}]`. The native renderer applies the FX chain's default
 superdough gain (0.8) per event, which is the measured difference; materialized
 shared `room`/`size`/`dry`/`delay`/`delaytime`/`delayfeedback`, filter/pan/coarse
-and the common shape/distort/chorus/postgain/phaser/tremolo/compressor steps
-now replay with outer controls taking precedence. The replay is callback-level
-and has focused event/callback tests; it is not a new web PCM gate. FM/IR and
-other rare graph-local parameters remain outside replay. The two
+the common shape/distort/chorus/postgain/phaser/tremolo/compressor steps,
+FM operator/envelope/matrix controls, and IR/room parameters now replay with
+outer controls taking precedence. The replay is callback-level and has focused
+event/callback tests; it is not a new web PCM gate. Loop/partial and other rare
+graph-local parameters remain outside replay. The two
 `fx-nested-` cases are now gated at the unchanged 0.99 correlation and 0.85–1.15
 RMS ratio: correlation 0.99999996 and ratio 1.0003. No threshold or baseline
 was changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph

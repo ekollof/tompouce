@@ -286,6 +286,43 @@ int banks_failed(void) {
     return f;
 }
 
+/* Preserve an explicitly installed directory with the compact name. */
+static int banks_has_component(const char *key) {
+    int hit = 0;
+    size_t nlen = strlen(key);
+    pthread_mutex_lock(&banks_lock);
+    for (int e = 0; e < n_entries && !hit; e++) {
+        const char *start = entries[e];
+        for (const char *q = start; ; q++) {
+            if (*q != '/' && *q != 0) continue;
+            if (*q == 0) break;
+            size_t len = (size_t)(q - start);
+            int eq = len == nlen;
+            for (size_t k = 0; eq && k < nlen; k++)
+                if (tolower((unsigned char)start[k]) != (unsigned char)key[k]) eq = 0;
+            if (eq) { hit = 1; break; }
+            start = q + 1;
+        }
+    }
+    pthread_mutex_unlock(&banks_lock);
+    return hit;
+}
+
+/* The Strudel REPL's drum-machine examples use compact TR names while the
+   installed tidal-drum-machines directories are prefixed "Roland". Resolve
+   those bounded aliases before the directory scan. */
+static const char *bank_alias(const char *key) {
+    static const struct { const char *alias, *target; } aliases[] = {
+        {"tr505","rolandtr505"}, {"tr606","rolandtr606"},
+        {"tr626","rolandtr626"}, {"tr707","rolandtr707"},
+        {"tr727","rolandtr727"}, {"tr808","rolandtr808"},
+        {"tr909","rolandtr909"}
+    };
+    for (size_t i=0;i<sizeof(aliases)/sizeof(aliases[0]);i++)
+        if (!strcmp(key,aliases[i].alias)) return aliases[i].target;
+    return key;
+}
+
 #define DIR_CACHE 32
 static struct {
     char name[64];
@@ -311,6 +348,12 @@ int banks_dir_named(const char *name, char *out, int outlen) {
         key[i] = (char)tolower(c);
     }
     key[nlen] = 0;
+    const char *canonical = bank_alias(key);
+    if (canonical != key && !banks_has_component(key)) {
+        nlen = strlen(canonical);
+        if (nlen >= sizeof(key)) return 0;
+        memcpy(key, canonical, nlen + 1);
+    }
     found[0] = 0;
     pthread_mutex_lock(&banks_lock);
     for (i = 0; i < DIR_CACHE; i++) {

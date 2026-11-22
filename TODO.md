@@ -394,9 +394,18 @@ and measured divergences are recorded in the archive.
       owned engine also loaded the real pinned starter with its installer
       header and confirmed `window.voc` stayed the setup helper, not the
       curried `register` extension.
-- [ ] Starter bank-specific sounds outside the pinned setup/helper/API
-      cases. The pinned starter's `tr909` bank example is not yet exercised
-      against installed bank manifests. See
+- [x] Starter bank-specific TR-909 example. Compact Strudel bank names
+      `tr505`–`tr808`/`tr909` resolve to the installed `RolandTR*`
+      tidal-drum-machines directories. `test_websamp` resolves `tr909` through
+      the same `bank_find_dir` path used by audio, checks the target directory,
+      and decodes `bd`, `hh`, `sd` and `cp` pieces from the installed manifest;
+      an owned engine played `s("bd hh sd hh").bank("tr909")` with decoded
+      samples (`bd` len 20547, `hh` len 6888). The starter's active
+      `s("wt_digital")` wavetable also resolves from the installed
+      uzu-wavetables catalog. The commented TR-909 example now resolves.
+- [ ] Starter samples absent from the installed manifests (for example
+      `bstab` in the pinned `roller2` helper) and other non-TR bank aliases
+      remain open. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and

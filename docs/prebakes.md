@@ -75,7 +75,9 @@ does not substitute a different sound for it.
 A setup helper defined as `window.name` keeps that toplevel meaning even when
 the same file calls `register('name', ...)` for a pattern extension. The
 pinned starter defines `window.voc` next to `register('voc')`; both call forms
-remain available.
+remain available. Its compact `.bank('tr909')` example resolves through the
+installed `RolandTR909` drum-machine directory, with `bd`, `hh`, `sd` and `cp`
+pieces checked by `test_websamp`.
 
 ## Your own files
 

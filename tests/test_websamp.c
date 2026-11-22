@@ -1,5 +1,6 @@
 #include "websamp.h"
 #include "sampler.h"
+#include "banks.h"
 #include "sound_store.h"
 #include "common.h"
 #include <curl/curl.h>
@@ -367,6 +368,25 @@ static void test_installed_catalogs(void) {
         expect(buffer && frames == 7858 && channels == 1, "TR909 slot two decodes sd02");
         expect(websamp_default_url("YamahaRM50_sd", 107, url, sizeof(url)), "full 108-slot default bank");
         expect_str(url, "https://raw.githubusercontent.com/ritchse/tidal-drum-machines/main/machines/YamahaRM50/yamaharm50-sd/SNAREDRUM_108.wav", "default banks are not truncated at 64 slots");
+
+        /* The pinned Switch Angel starter's commented TR-909 example uses the
+           compact Strudel bank name; resolve it to the installed machine
+           directory and decode the selected bass drum. */
+        banks_ensure_default();
+        for (int i = 0; i < 3000 && !banks_ready(); i++) usleep(10000);
+        expect(banks_ready(), "installed bank index ready for TR-909 alias");
+        char dir[2048];
+        expect(bank_find_dir("tr909", dir, sizeof(dir)), "TR-909 compact bank alias");
+        expect(strstr(dir, "RolandTR909") != NULL, "TR-909 alias targets the installed machine");
+        const char *pieces[] = {"bd", "hh", "sd", "cp"};
+        for (size_t i=0;i<sizeof(pieces)/sizeof(pieces[0]);i++) {
+            char token[32];
+            snprintf(token,sizeof(token),"%s:0",pieces[i]);
+            int tr_id = smp_acquire(dir, token);
+            smp_get_stereo(tr_id, &buffer, &frames, &channels);
+            expect(buffer && frames > 0 && channels >= 1,
+                "TR-909 alias decodes a drum-machine piece");
+        }
     }
 }
 

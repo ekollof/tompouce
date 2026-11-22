@@ -547,7 +547,9 @@ audio downloads lazily on first use; installed Dirt samples work offline.
 Installed `dough-samples/piano.json` and `tidal-drum-machines.json` register
 the default pitch-keyed piano and drum-machine banks too. Bare `.s('piano')`
 selects the nearest recorded pitch, and `.bank('RolandTR909')` uses manifest
-sample order. Explicit `samples()` maps take precedence. Without those
+sample order; compact Strudel names `tr505`–`tr808`/`tr909` resolve to the
+installed `RolandTR*` machine directories. Explicit `samples()` maps take
+precedence. Without those
 installed manifests, load the catalogs explicitly with `samples()` (the
 `.piano()` helper also loads its map). VCSL and mridangam use the
 installed `dough-samples/vcsl.json` and `mridangam.json`, with recordings under

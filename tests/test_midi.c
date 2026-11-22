@@ -379,11 +379,49 @@ static void test_note_off_under_load(void) {
         }
         if (offs<4) pump_realtime(128);
     }
-    for (int i=0;i<2;i++) pthread_join(threads[i],NULL);
     assert(ons==4 && offs==4);
+    /* Second phase: the same owned receiver and CPU contention, but with a
+       scheduler-generated dominant MIDI pattern instead of the direct API.
+       This covers generation, queue publication, the consumer and the MIDI
+       worker together. clip(0.04) at 120 bpm makes each fast(4) note 20 ms. */
+    event_queue_clear();
+    midi_capture_enable(1);
+    scheduler_init();
+    assert(track_load_from_code("note(64).fast(4).midi().clip(0.04)"));
+    int scheduled_ons=0,scheduled_offs=0;
+    double scheduled_start=monotonic();
+    while (scheduled_offs<4 && monotonic()-scheduled_start<8) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(receiver,&event)>=0 && event) {
+            if (event->type==SND_SEQ_EVENT_NOTEON && event->data.note.note==64)
+                scheduled_ons++;
+            else if (event->type==SND_SEQ_EVENT_NOTEOFF && event->data.note.note==64)
+                scheduled_offs++;
+        }
+        if (scheduled_offs<4) pump_realtime(128);
+    }
+    assert(scheduled_ons>=4 && scheduled_offs>=4);
+    /* The capture ring records the actual send time. Receiver reads can be
+       batched under CPU load and sanitizers, so pair capture timestamps
+       instead of comparing when the test happened to read the event. */
+    MidiCapturedNote captured_notes[512];
+    unsigned captured_count=midi_captured_notes(captured_notes,512);
+    int captured_pairs=0, have_on=0; double captured_on=0;
+    for (unsigned i=0;i<captured_count;i++) {
+        if (captured_notes[i].note!=64) continue;
+        if (captured_notes[i].on) { captured_on=captured_notes[i].at; have_on=1; }
+        else if (have_on) {
+            assert(captured_notes[i].at-captured_on>=.019);
+            assert(captured_notes[i].at-captured_on<.031);
+            captured_pairs++; have_on=0;
+        }
+    }
+    assert(captured_pairs>=4);
+    scheduler_shutdown();
+    for (int i=0;i<2;i++) pthread_join(threads[i],NULL);
     midi_capture_enable(0); snd_seq_close(receiver); midi_shutdown();
     audio_toggle_play(0); event_queue_clear();
-    puts("note-off delivery holds under CPU load");
+    puts("note-off delivery holds under CPU load for scheduler and direct sends");
 }
 
 static void test_channel_note_off_loopback(void) {

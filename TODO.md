@@ -435,15 +435,17 @@ and measured divergences are recorded in the archive.
       deployed REPL throws on its own documented strings, so this is a recorded
       superset; malformed tokens, >255 values and over-long data are rejected
       while the note still commits.
-- [ ] Measure physical-device MIDI note-off delivery timing under load. Channel
-      arrays have independent web gates; `test_note_off_under_load` now adds two
-      busy CPU threads to the owned ALSA loopback check and still requires every
-      20 ms note-off before 30 ms of audio time. USB/DIN transport and device
-      response remain unmeasured. The maintained
-      gate covers named CCs, inline maps, NRPN,
-      controller/options defaults, duplicate scalar/command sends and exact
-      note-on/off timestamp differences. Pinned numeric-string coercion drift
-      remains explicit; do not replace the runtime or historical fixtures.
+- [x] Owned MIDI note-off delivery under CPU load. `test_note_off_under_load`
+      keeps two busy CPU threads running and verifies both the direct
+      `midi_notes_for` path and a scheduler-generated
+      `note(64).fast(4).midi().clip(0.04)` pattern through an owned ALSA
+      receiver: every 20 ms note-off arrives between 19 and 31 ms of audio
+      time. This covers generation, queue publication, the consumer and the
+      MIDI note-off worker together. The maintained gate covers named CCs,
+      inline maps, NRPN, controller/options defaults, duplicate
+      scalar/command sends and exact note-on/off timestamp differences. Pinned
+      numeric-string coercion drift remains explicit; do not replace the
+      runtime or historical fixtures.
       An isolated resident daemon is available for testing through
       `--mcp-socket <path>` (0600 named Unix socket, no TCP port) with
       `scripts/tompoucectl.py` and an optional disabled-by-default systemd user
@@ -453,6 +455,9 @@ and measured divergences are recorded in the archive.
       [measured latency](docs/plugin-hosting.md#measured-midi-to-audio-latency));
       an absolute device-latency figure still needs external MIDI injection
       permissions or an in-engine capture hook.
+- [ ] Real USB/DIN MIDI transport and device response timing remain
+      unmeasured; the owned ALSA loopback cannot observe hardware or driver
+      queues. This requires a physical device and is outside the test box.
 
 Input beyond CC/note-on has been evaluated against the deployed stack:
 note-off, bend, touch and program messages do not become native CC entries.

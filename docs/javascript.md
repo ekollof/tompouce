@@ -1096,7 +1096,10 @@ and `.clip()`, converted at scheduling tempo. The default note-off offset is
 Nonnegative offsets and gates up to 24 hours are supported. Dominant MIDI
 keeps fractional milliseconds and short gates; the legacy local-plus-ALSA
 path retains its 50 ms floor. A full note-off queue rejects the new note-on
-instead of sending a note without a scheduled off.
+instead of sending a note without a scheduled off. `test_midi` measures the
+direct and scheduler-generated 20 ms note-off paths through an owned ALSA
+receiver while two CPU-load threads run; real USB/DIN transport and device
+response are not measured.
 
 `cmake --build build --target test-midi-reference-web` gates 180 cases,
 including all 128 controller names, hap values, native commits, actual send

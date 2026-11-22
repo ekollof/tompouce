@@ -309,16 +309,26 @@ and measured divergences are recorded in the archive.
       0.99999994/1.0004). Individual filter/send/pan steps are materialized but
       not replayed yet. See
       [Kabelsalat effect tails](docs/audio-comparison.md#kabelsalat-effect-tails-and-input-routing).
-- [ ] Extend shared-effect checks beyond the 24 send/orbit/fixed-IR/lifetime
+- [x] Extend shared-effect checks beyond the 24 send/orbit/fixed-IR/lifetime
       cases: two `shared-room-source-` gates cover a panned source
       (`.pan(.7)`, correlation 0.99999998) and a downward-stretched source
       (`.speed(.5)`, 0.999705) feeding the mono IR. Two `shared-room-kernel-`
       gates cover kernel-change automation (`.roomsize` and `.size` patterns),
       both at correlation 0.99999999. Two `shared-*-graph-source` gates connect
       a Kabelsalat graph source to the shared mono IR (0.999999998) and the
-      shared delay (0.9999990). Source eviction, live reconnections, general
-      nested/control-output routing beyond the graph/effect FX boundary and
-      live edits remain open. Fractional IR
+      shared delay (0.9999990).
+- [x] Shared-effect source eviction and live reconnection. `test_audio` now
+      renders a delayed source, fills the current-source pool so the source is
+      moved to a retiring graph, and verifies its shared delay samples survive.
+      A new source then reconnects to the same orbit while the tail is active;
+      the tail remains audible after the dry onset ends. Changing the orbit
+      delay time and feedback through preparation keeps the existing delay line
+      and reads it at the new offset. A second regression sends a source through
+      the fallback room network, evicts it, and verifies reverb tail energy after
+      the retiring graph has stopped. These are callback-level PCM checks, not
+      new browser captures.
+- [ ] General nested/control-output routing beyond the graph/effect FX boundary
+      and live edits remain open. Fractional IR
       rates are a measured divergence: `.irspeed(.5|.75)` with matching source
       speed gave correlations -0.78/-0.92; an interpolation attempt was
       reverted rather than tuned to the capture. See

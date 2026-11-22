@@ -1207,10 +1207,12 @@ int main(int argc, char **argv) {
         "if(a.fft[0]!==0)throw new Error('Hydra placeholder FFT');"
         "$: note(60).s('sine');$: note(64).s('triangle')", &program);
     assert(cJSON_GetArraySize(haps)==2);
-    int hydra_warnings=0;
-    for(int i=hydra_log_start;i<console_count_get();i++)
-        if(strstr(console_line(i),"Hydra visuals are unavailable")) hydra_warnings++;
-    assert(hydra_warnings==1);
+    int hydra_warnings=0, hydra_pointer=0;
+    for(int i=hydra_log_start;i<console_count_get();i++) {
+        if(strstr(console_line(i),"Hydra visual calls are ignored")) hydra_warnings++;
+        if(strstr(console_line(i),"/hydra")) hydra_pointer++;
+    }
+    assert(hydra_warnings==1 && hydra_pointer>=1);
     cJSON_Delete(haps); javascript_free(program);
     haps=query("await initHydra();osc(10).color(1,0,0).out()",&program);
     assert(cJSON_GetArraySize(haps)==0);

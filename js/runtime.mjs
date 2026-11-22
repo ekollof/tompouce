@@ -477,11 +477,12 @@ hydraPlaceholder = new Proxy(Object.create(null), {
   },
 });
 /**
- * Accept Hydra source while playing only its musical patterns. This terminal
- * placeholder installs inert source/texture chains, buffers and H(); it does
- * not render, capture audio/video, fetch resources or invoke visual callbacks.
- * Logs the missing visual support once per evaluation. Browser /hydra support
- * is a separate planned feature.
+ * Accept Hydra source while playing only its musical patterns. The terminal
+ * runtime installs inert source/texture chains, buffers and H(); it does not
+ * render, capture audio/video, fetch resources or invoke visual callbacks.
+ * Visual calls are ignored by the terminal; the separate `/hydra` browser
+ * visualizer renders the same graph surface. Logs a compatibility notice once
+ * per evaluation.
  * @name initHydra
  * @param {object} options accepted and ignored, including feedStrudel
  * @example
@@ -492,7 +493,7 @@ hydraPlaceholder = new Proxy(Object.create(null), {
 globalThis.initHydra = async (_options) => {
   if (!hydraWarned && !globalThis.__queryWorkerSilent) {
     hydraWarned = true;
-    __hostLog('Hydra visuals are unavailable: visual calls are ignored; musical patterns still play.');
+    __hostLog('Hydra visual calls are ignored by the terminal; use /hydra for the browser visualizer. Musical patterns still play.');
   }
   for (const name of ['src','osc','noise','shape','solid','voronoi','gradient'])
     globalThis[name] = hydraChain;

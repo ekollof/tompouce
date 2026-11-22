@@ -439,6 +439,107 @@ static void test_pulse_quantum_boundary(void) {
     memset(voices,0,sizeof(voices));audio_time=previous;
 }
 
+static void test_shared_delay_eviction_and_reparam(void) {
+    int orbit=N_ORBITS-2;
+    double old_dt=orbit_dt[orbit], old_fb=orbit_fb[orbit];
+    int old_created=web_delay_created[orbit];
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1);
+    memset(voices,0,sizeof(voices));
+    next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    orbits_ensure();
+    assert(ensure_orbit_delay(orbit));
+    memset(dbuf[orbit],0,ORBIT_DELAY*2*sizeof(float));
+    memset(feedback_quantum[orbit],0,256*sizeof(float));
+    orbit_dt[orbit]=64/SR; orbit_fb[orbit]=.5; web_delay_created[orbit]=1;
+
+    AudioEvent source={.time=0,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
+        .gain=.1,.duration=100/SR,.rel=0,.orbit=orbit,.delay_send=1,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    audio_trigger_event(&source);
+    float block[256];
+    pa_callback(NULL,block,100,NULL,0,NULL);
+
+    /* Fill the current-source pool, forcing the delayed source into a retiring
+       graph. Its already-connected shared delay line must remain intact. */
+    AudioEvent silent={.time=audio_time,.inst=INST_SINE,.freq=100,.smp=-1,.wt=-1,
+        .gain=0,.duration=1,.rel=0,.midi_chan=-1,.midi_note=-1};
+    for (int i=0;i<MAX_VOICES;i++) audio_trigger_event(&silent);
+    int retired=0;
+    for (int i=MAX_VOICES;i<VOICE_SLOTS;i++)
+        if (voices[i].active && voices[i].freq==440) retired=1;
+    assert(retired);
+    /* A new source reconnects to the same orbit while the shared tail is active.
+       Its dry onset ends before the measured tail window, so the retained delay
+       samples must still be present. */
+    AudioEvent reconnect={.time=audio_time,.inst=INST_SINE,.freq=220,.smp=-1,.wt=-1,
+        .gain=.1,.duration=10/SR,.rel=0,.orbit=orbit,.delay_send=0,
+        .midi_chan=-1,.midi_note=-1,.delay_prepared=1,.room_prepared=1};
+    audio_trigger_event(&reconnect);
+    pa_callback(NULL,block,128,NULL,0,NULL);
+    double tail=0;
+    for (int i=64;i<128;i++) tail+=fabs(block[i*2])+fabs(block[i*2+1]);
+    assert(tail>1e-6);
+
+    /* Reconnect the shared delay to a new read time while the old line is
+       live. Existing samples remain and are read at the new offset. */
+    AudioEvent reparam={.time=audio_time,.orbit=orbit,.delay_send=1,
+        .delay_time=128/SR,.delay_fb=.5,.midi_chan=-1,.midi_note=-1};
+    dsp_params_init(&reparam.dsp); reparam.dsp.enabled=1;
+    assert(audio_prepare_delay(&reparam));
+    pa_callback(NULL,block,1,NULL,0,NULL);
+    assert(fabs(block[0])+fabs(block[1])>1e-7);
+
+    memset(dbuf[orbit],0,ORBIT_DELAY*2*sizeof(float));
+    memset(feedback_quantum[orbit],0,256*sizeof(float));
+    orbit_dt[orbit]=old_dt; orbit_fb[orbit]=old_fb;
+    web_delay_created[orbit]=old_created;
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    audio_time=old_time; playing=old_playing;
+    audio_set_reference_mode(0);
+}
+
+static void test_shared_room_eviction(void) {
+    int orbit=N_ORBITS-3;
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1);
+    memset(voices,0,sizeof(voices));
+    next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    orbits_ensure();
+    assert(ensure_orbit_reverb(orbit));
+    memset(comb[orbit],0,2*4*16384*sizeof(float));
+    memset(allpass[orbit],0,2*2*2048*sizeof(float));
+
+    AudioEvent source={.time=0,.inst=INST_SINE,.freq=440,.smp=-1,.wt=-1,
+        .gain=.1,.duration=100/SR,.rel=0,.orbit=orbit,
+        .midi_chan=-1,.midi_note=-1,.room_prepared=1,.delay_prepared=1};
+    dsp_params_init(&source.dsp); source.dsp.enabled=1;
+    source.dsp.p[DSP_ROOM]=1; source.dsp.p[DSP_SIZE]=.5; source.dsp.p[DSP_DRY]=0;
+    audio_trigger_event(&source);
+    float block[8192];
+    pa_callback(NULL,block,100,NULL,0,NULL);
+
+    /* Evict the source into a retiring graph, then render long enough for the
+       shared fallback reverb's delays to flush. */
+    AudioEvent silent={.time=audio_time,.inst=INST_SINE,.freq=100,.smp=-1,.wt=-1,
+        .gain=0,.duration=1,.rel=0,.midi_chan=-1,.midi_note=-1};
+    for (int i=0;i<MAX_VOICES;i++) audio_trigger_event(&silent);
+    int retired=0;
+    for (int i=MAX_VOICES;i<VOICE_SLOTS;i++)
+        if (voices[i].active && voices[i].freq==440) retired=1;
+    assert(retired);
+    pa_callback(NULL,block,4096,NULL,0,NULL);
+    double tail=0;
+    for (int i=1200;i<4096;i++) tail+=fabs(block[i*2])+fabs(block[i*2+1]);
+    assert(tail>1e-8);
+
+    memset(comb[orbit],0,2*4*16384*sizeof(float));
+    memset(allpass[orbit],0,2*2*2048*sizeof(float));
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    audio_time=old_time; playing=old_playing;
+    audio_set_reference_mode(0);
+}
+
 static void test_output_volume(void) {
     assert(audio_get_output_gain()==1);
     assert(!audio_set_output_gain(NAN) && !audio_set_output_gain(INFINITY));
@@ -527,6 +628,8 @@ int main(void) {
         audio_time = 0; /* restore the timing baseline later tests assume */
     }
     test_output_volume();
+    test_shared_delay_eviction_and_reparam();
+    test_shared_room_eviction();
     /* Exercise the actual callback with opposite-polarity stereo channels.
        Averaging to mono would cancel this signal. No audio device is needed. */
     float stereo[] = {.25f,-.5f,.125f,.375f};

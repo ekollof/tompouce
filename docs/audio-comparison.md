@@ -981,9 +981,12 @@ source stereo merely because its shared reverb continues sounding.
 
 Panned/stretched/graph source connections, source eviction, live reconnections,
 kernel changes and the graph/effect FX boundary now have independent checks.
-General nested/control-output routing beyond that boundary still needs
-independent checks. Existing randomized room-switch diagnostics remain
-diagnostics.
+The eviction/reconnection checks use `test_audio`: a retired source's shared
+delay samples survive pool saturation and a same-orbit dry source; changing the
+prepared delay time keeps the line and reads it at the new offset; a fallback
+room tail survives source retirement. General nested/control-output routing
+beyond that boundary still needs independent checks. Existing randomized
+room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
 

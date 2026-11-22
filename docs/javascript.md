@@ -560,7 +560,7 @@ It enables inert Hydra source/texture chains, `s0`–`s3`/`o0`–`o3` buffers an
 `H()`, while musical branches continue to evaluate. Options such as
 `feedStrudel` and `detectAudio` are ignored; there is no visual rendering,
 audio/video capture, resource fetching or execution of visual callbacks.
-The console reports this limitation once per evaluation. The placeholder
+The console points to `/hydra` once per evaluation. The placeholder
 does not open a browser; the separate `/hydra` browser visualizer renders a
 bounded Hydra-style graph through WebGL (all built-in generators and effects,
 camera/screen/image sources, and previous-frame feedback) and falls back to the

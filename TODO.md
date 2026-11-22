@@ -335,10 +335,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         35-second "Computer says no" run measured 41 gaps and max ~3.33 ms, so
         it was reverted. Lane grouping/synchronization and per-frame filter
         updates still cost more than the scalar path.
-      - [ ] A full from-allocation SoA renderer remains required for active
-        filters beyond LPF and for the other per-sample effects; do not attempt
-        it as another incremental lane pool without replacing the allocator and
-        main voice loop.
+      - [x] From-allocation SoA voice bank (`src/soa_voice.c`): source,
+        position/step, ADSR, gate/release, LPF with LPE/LFO coefficient
+        updates, and per-lane output state. `test_soa_voice` matches the scalar
+        sample/DSP path exactly for mono/stereo and LPE/non-LPE cases.
+      - [ ] Wire the SoA voice bank into the main allocator and route order,
+        support the remaining active filters/effects, then run the full PCM
+        gates and benchmark "Computer says no" against the 128-frame deadline.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

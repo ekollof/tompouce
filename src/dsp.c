@@ -303,6 +303,24 @@ static void coefficients(DspBiquad *f, int type, double hz, double q) {
     f->a1 = -2*c/a0; f->a2 = (1-alpha)/a0;
 }
 
+void dsp_filter_coefficients(const DspParams *params, int type, double hz,
+                             DspBiquad *filter) {
+    if (!params || !filter || type<0 || type>2) return;
+    coefficients(filter,type,hz,params->p[type*7+1]);
+}
+
+int dsp_filter_only(const DspState *state) {
+    if (!state || !state->control.enabled || !state->effects_active) return 0;
+    const double *p=state->control.p;
+    if (p[DSP_LPF]<=0 || p[DSP_HPF]>0 || p[DSP_BPF]>0 || p[DSP_VOWEL]>=0 ||
+        p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 || p[DSP_CRUSH]<16 ||
+        p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 || p[DSP_TREM]>0 ||
+        p[DSP_COMP]<0 || p[DSP_PHASER]>0 || p[DSP_CHORUS]>0 ||
+        p[DSP_POST]!=1 || p[DSP_CUT]>0 || state->control.noise_mix>0 ||
+        state->control.source_noise) return 0;
+    return 1;
+}
+
 static double biquad(DspBiquad *f, double x) {
     double y = f->b0 * x + f->z1;
     f->z1 = f->b1*x - f->a1*y + f->z2;

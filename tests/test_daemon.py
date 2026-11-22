@@ -102,7 +102,11 @@ class DaemonTest(unittest.TestCase):
             self.assertIn("bpm=90", reply["result"]["content"][0]["text"])
         finally:
             second.send_signal(signal.SIGTERM)
-            second.wait(timeout=5)
+            try:
+                second.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                second.kill()
+                second.wait()
 
     def test_sigterm_removes_socket(self):
         self.start()

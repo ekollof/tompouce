@@ -579,6 +579,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       (0.76x) on this box, so it is not used by the audio path. The scalar C
       path remains; this kernel needs a block/batch layout before it can pay
       for conversion and call overhead.
+- [x] Per-voice stereo biquad candidate measured. A two-lane
+      `DspBiquad2` kernel is byte-exact against C in `test_voice_soa_dsp`
+      (including forced direct AVX2 calls); a 200,000-frame batch measured
+      **1.22x** AVX2 over C. A per-call `dsp_process_stereo_filter` wrapper
+      measured **1.15x slower** than two scalar `dsp_process` calls because of
+      state construction/call overhead, so it is not integrated. The kernel
+      needs a persistent/block layout before the per-voice path can benefit.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

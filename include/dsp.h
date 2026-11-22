@@ -108,6 +108,8 @@ void dsp_filter_coefficients(const DspParams *params, int type, double hz,
     DspBiquad *filter);
 void dsp_init(DspState *state, const DspParams *p);
 double dsp_process(DspState *state, double sample, double age, double gate);
+int dsp_process_stereo_filter(DspState *left, DspState *right,
+    double xl, double xr, double age, double gate, double *yl, double *yr);
 #ifdef TOMPOUCE_RENDER_PROFILE
 void dsp_profile_stats(unsigned long long *calls, unsigned long long *total_cycles,
                        unsigned long long *max_cycles);

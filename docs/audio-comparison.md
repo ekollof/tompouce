@@ -156,7 +156,11 @@ a **2.30-2.86 ms maximum**, no callbacks over 3 ms and **zero PipeWire gaps**.
 An earlier 53 ms outlier was not callback work: the maximum `voice_lock` wait
 stayed at 8-22 us across the same runs. Retiring a bank voice copies its
 current lane state first, and the browser retirement envelope/cut suite (62
-cases) plus the vowel impulse suite still pass. A stereo sample-interpolation AVX2 kernel was measured and rejected: it is
+cases) plus the vowel impulse suite still pass. A two-lane stereo biquad kernel is byte-exact and 1.22x faster in a
+200,000-frame batch, but the per-call per-voice wrapper is 1.15x slower than
+two scalar `dsp_process` calls, so it is not integrated. A persistent/block
+layout is needed before it can help the voice path.
+A stereo sample-interpolation AVX2 kernel was measured and rejected: it is
 byte-exact against C but 5,000,000 interpolations took 19.3 ms versus 14.7 ms
 for C on this box. The scalar sample lookup remains in the audio path.
 Supersaw voices now

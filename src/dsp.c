@@ -1,5 +1,6 @@
 #include "dsp.h"
 #include "dsp_supersaw.h"
+#include "voice_soa_dsp.h"
 #include "common.h"
 #include <float.h>
 #ifdef TOMPOUCE_RENDER_PROFILE
@@ -816,6 +817,31 @@ double dsp_process(DspState *s, double x, double age, double gate) {
     return dsp_process_impl(s,x,age,gate);
 }
 #endif
+
+int dsp_process_stereo_filter(DspState *left, DspState *right,
+    double xl, double xr, double age, double gate, double *yl, double *yr) {
+    int type=dsp_single_filter(left);
+    if (type<0 || dsp_single_filter(right)!=type) return 0;
+    const int at=type*2;
+    if ((left->tick++ &31)==0) {
+        double hz=dsp_filter_frequency(&left->control,type,age,gate);
+        coefficients(&left->filter[at],type,hz,left->control.p[type*7+1]);
+    }
+    if ((right->tick++ &31)==0) {
+        double hz=dsp_filter_frequency(&right->control,type,age,gate);
+        coefficients(&right->filter[at],type,hz,right->control.p[type*7+1]);
+    }
+    DspBiquad2 state;
+    DspBiquad pair[2]={left->filter[at],right->filter[at]};
+    dsp_biquad2_init(&state,pair);
+    double in[2]={xl,xr}, out[2];
+    dsp_biquad2_process(&state,in,out,1);
+    left->filter[at].z1=state.z1[0]; left->filter[at].z2=state.z2[0];
+    right->filter[at].z1=state.z1[1]; right->filter[at].z2=state.z2[1];
+    *yl=isfinite(out[0])?clamp(out[0],-64,64):0;
+    *yr=isfinite(out[1])?clamp(out[1],-64,64):0;
+    return 1;
+}
 
 double dsp_noise(DspState *s, int color) {
     unsigned seed = s->noise_seed;

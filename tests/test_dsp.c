@@ -24,6 +24,47 @@ static int source_event(const char *text,AudioEvent *event) {
     cJSON_Delete(hap);return result;
 }
 
+static void test_stereo_filter_path(void) {
+    DspParams params; dsp_params_init(&params); params.enabled=1;
+    params.p[DSP_LPF]=2400; params.p[DSP_LPQ]=1.2;
+    DspState base; dsp_init(&base,&params);
+    DspState ref_l=base,ref_r=base,l=base,r=base;
+    double age=0;
+    for (int i=0;i<4096;i++) {
+        double xl=sin(i*.017)*.3, xr=cos(i*.019)*.2;
+        double want_l=dsp_process(&ref_l,xl,age,1);
+        double want_r=dsp_process(&ref_r,xr,age,1);
+        double got_l,got_r;
+        assert(dsp_process_stereo_filter(&l,&r,xl,xr,age,1,&got_l,&got_r));
+        if (memcmp(&want_l,&got_l,sizeof(want_l)) || memcmp(&want_r,&got_r,sizeof(got_r))) {
+            fprintf(stderr,"stereo filter diff frame=%d got=%.17g/%.17g want=%.17g/%.17g\n",
+                i,got_l,got_r,want_l,want_r);
+            assert(0 && "stereo filter mismatch");
+        }
+        age+=1.0/SR;
+    }
+    enum { N=500000 };
+    DspState al=base,ar=base,bl=base,br=base;
+    double sink=0; volatile double keep=0;
+    struct timespec t0,t1,t2;
+    clock_gettime(CLOCK_MONOTONIC,&t0);
+    for (int i=0;i<N;i++) {
+        double xl=sin(i*.017)*.3, xr=cos(i*.019)*.2;
+        sink+=dsp_process(&al,xl,i/SR,1)+dsp_process(&ar,xr,i/SR,1);
+    }
+    clock_gettime(CLOCK_MONOTONIC,&t1);
+    for (int i=0;i<N;i++) {
+        double xl=sin(i*.017)*.3, xr=cos(i*.019)*.2,yl,yr;
+        dsp_process_stereo_filter(&bl,&br,xl,xr,i/SR,1,&yl,&yr);
+        sink+=yl+yr;
+    }
+    clock_gettime(CLOCK_MONOTONIC,&t2);
+    keep=sink; (void)keep;
+    double c=(t1.tv_sec-t0.tv_sec)*1e3+(t1.tv_nsec-t0.tv_nsec)/1e6;
+    double v=(t2.tv_sec-t1.tv_sec)*1e3+(t2.tv_nsec-t1.tv_nsec)/1e6;
+    printf("stereo filter path: scalar %.3f ms, SIMD %.3f ms (%.2fx)\n",c,v,c>0?v/c:0);
+}
+
 static void test_sample_interp(void) {
     float samples[64];
     for (int i=0;i<64;i++) samples[i]=(float)((i*37%101)-50)/37.0f;
@@ -586,5 +627,6 @@ int main(void) {
     test_source_controls();
     test_periodic_limits();
     test_sample_interp();
+    test_stereo_filter_path();
     return 0;
 }

@@ -411,7 +411,15 @@ and measured divergences are recorded in the archive.
       `bstab`/`supersaw`/`white` query names; `test_websamp` checks that
       `bstab` has no installed default and that generic `stab` exists. An
       owned engine confirmed the two oscillator voices play alongside the
-      rejected sample. Other non-TR bank aliases remain open.
+      rejected sample.
+- [x] Full drum-machine bank alias table. `src/banks.c` mirrors the pinned
+      web `tidal-drum-machines-alias.json`: compact names such as `Linn`,
+      `DMX`, `MPC60`, `SP12`, `HR16`, `D70` and `9000` resolve to their
+      installed `Akai*`, `Oberheim*`, `Alesis*`, `Roland*` or `Linn*`
+      directories. An explicitly installed directory with the compact name
+      still wins. `test_websamp` resolves `Linn`, `DMX` and `9000`, checks the
+      target directories and decodes an AkaiLinn bass drum; an owned engine
+      played `s("bd sd hh cp").bank("Linn")` with `smp=0`, no sample warning.
 - [x] Failed/slow stacked sources no longer suppress siblings. The scheduler
       previously discarded a sibling whose onset crossed while an earlier
       source prepared (a missing `bstab` lookup made this visible), and

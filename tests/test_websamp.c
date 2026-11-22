@@ -387,6 +387,22 @@ static void test_installed_catalogs(void) {
             expect(websamp_default_url("stab", 0, url, (int)sizeof(url)),
                 "generic Dirt stab is present but is not bstab");
         }
+        /* The web alias table also covers non-TR machine names. */
+        expect(bank_find_dir("Linn", dir, sizeof(dir)), "AkaiLinn compact alias");
+        expect(strstr(dir, "AkaiLinn") != NULL, "Linn alias targets AkaiLinn");
+        int linn_id = smp_acquire(dir, "bd:0");
+        smp_get_stereo(linn_id, &buffer, &frames, &channels);
+        expect(buffer && frames > 0, "Linn alias decodes a bass drum");
+        expect(bank_find_dir("DMX", dir, sizeof(dir)), "OberheimDMX compact alias");
+        expect(strstr(dir, "OberheimDMX") != NULL, "DMX alias targets OberheimDMX");
+        expect(bank_find_dir("9000", dir, sizeof(dir)), "Linn9000 numeric alias");
+        expect(strstr(dir, "Linn9000") != NULL, "9000 alias targets Linn9000");
+        const char *more_aliases[] = {"MPC60", "SP12", "HR16", "D70"};
+        const char *more_targets[] = {"AkaiMPC60", "EmuSP12", "AlesisHR16", "RolandD70"};
+        for (size_t i=0;i<sizeof(more_aliases)/sizeof(more_aliases[0]);i++) {
+            expect(bank_find_dir(more_aliases[i], dir, sizeof(dir)), "compact machine alias");
+            expect(strstr(dir, more_targets[i]) != NULL, "compact alias targets installed machine");
+        }
         const char *pieces[] = {"bd", "hh", "sd", "cp"};
         for (size_t i=0;i<sizeof(pieces)/sizeof(pieces[0]);i++) {
             char token[32];

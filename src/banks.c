@@ -308,15 +308,78 @@ static int banks_has_component(const char *key) {
     return hit;
 }
 
-/* The Strudel REPL's drum-machine examples use compact TR names while the
-   installed tidal-drum-machines directories are prefixed "Roland". Resolve
-   those bounded aliases before the directory scan. */
+/* The Strudel web REPL resolves compact drum-machine names through
+   website/public/tidal-drum-machines-alias.json. Mirror that pinned table
+   here, mapping the alias to the installed directory name. An explicitly
+   installed directory with the alias name still wins in banks_dir_named. */
 static const char *bank_alias(const char *key) {
     static const struct { const char *alias, *target; } aliases[] = {
-        {"tr505","rolandtr505"}, {"tr606","rolandtr606"},
-        {"tr626","rolandtr626"}, {"tr707","rolandtr707"},
-        {"tr727","rolandtr727"}, {"tr808","rolandtr808"},
-        {"tr909","rolandtr909"}
+        {"9000","linn9000"},
+        {"ace","rhythmace"},
+        {"circuitsdrumtracks","sequentialcircuitsdrumtracks"},
+        {"circuitstom","sequentialcircuitstom"},
+        {"compurhythm1000","rolandcompurhythm1000"},
+        {"compurhythm78","rolandcompurhythm78"},
+        {"compurhythm8000","rolandcompurhythm8000"},
+        {"concertmatemg1","moogconcertmatemg1"},
+        {"d110","rolandd110"},
+        {"d70","rolandd70"},
+        {"ddm110","korgddm110"},
+        {"ddr30","rolandddr30"},
+        {"dmx","oberheimdmx"},
+        {"dpm48","sakatadpm48"},
+        {"dr110","bossdr110"},
+        {"dr220","bossdr220"},
+        {"dr55","bossdr55"},
+        {"dr550","bossdr550"},
+        {"drumulator","emudrumulator"},
+        {"hr16","alesishr16"},
+        {"jd990","rolandjd990"},
+        {"kpr77","korgkpr77"},
+        {"kr55","korgkr55"},
+        {"krz","korgkrz"},
+        {"linn","akailinn"},
+        {"lm1","linnlm1"},
+        {"lm2","linnlm2"},
+        {"lm8953","xdrumlm8953"},
+        {"m1","korgm1"},
+        {"mc202","rolandmc202"},
+        {"mc303","rolandmc303"},
+        {"microrhythmer12","univoxmicrorhythmer12"},
+        {"minipops","korgminipops"},
+        {"mpc60","akaimpc60"},
+        {"ms404","doepferms404"},
+        {"mt32","rolandmt32"},
+        {"percysyn","ajkpercusyn"},
+        {"polaris","rhodespolaris"},
+        {"poly800","korgpoly800"},
+        {"r8","rolandr8"},
+        {"r88","soundmastersr88"},
+        {"rm50","yamaharm50"},
+        {"rx21","yamaharx21"},
+        {"rx5","yamaharx5"},
+        {"ry30","yamahary30"},
+        {"rz1","casiorz1"},
+        {"s50","rolands50"},
+        {"sds400","simmonssds400"},
+        {"sds5","simmonssds5"},
+        {"sh09","rolandsh09"},
+        {"sk1","casiosk1"},
+        {"sp12","emusp12"},
+        {"spacedrum","viscospacedrum"},
+        {"sr16","alesissr16"},
+        {"system100","rolandsystem100"},
+        {"t3","korgt3"},
+        {"tg33","yamahatg33"},
+        {"tr505","rolandtr505"},
+        {"tr606","rolandtr606"},
+        {"tr626","rolandtr626"},
+        {"tr707","rolandtr707"},
+        {"tr727","rolandtr727"},
+        {"tr808","rolandtr808"},
+        {"tr909","rolandtr909"},
+        {"vl1","casiovl1"},
+        {"xr10","akaixr10"}
     };
     for (size_t i=0;i<sizeof(aliases)/sizeof(aliases[0]);i++)
         if (!strcmp(key,aliases[i].alias)) return aliases[i].target;

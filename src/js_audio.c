@@ -316,6 +316,13 @@ enum {
     FX_OP_BPF, FX_OP_BPQ, FX_OP_BPA, FX_OP_BPD, FX_OP_BPS, FX_OP_BPR,
     FX_OP_BPE,
     FX_OP_PAN, FX_OP_COARSE, FX_OP_FTYPE,
+    FX_OP_SHAPE, FX_OP_CRUSH, FX_OP_DISTORT, FX_OP_DISTORTVOL,
+    FX_OP_DISTORTTYPE, FX_OP_POST, FX_OP_CHORUS, FX_OP_SHAPEVOL,
+    FX_OP_PHASER, FX_OP_PHASERDEPTH, FX_OP_PHASERCENTER, FX_OP_PHASERSWEEP,
+    FX_OP_TREMOLO, FX_OP_TREMOLODEPTH, FX_OP_TREMOLOSKEW, FX_OP_TREMOLOPHASE,
+    FX_OP_TREMOLOSHAPE, FX_OP_COMPRESSOR, FX_OP_COMPRESSORRATIO,
+    FX_OP_COMPRESSORKNEE, FX_OP_COMPRESSORATTACK, FX_OP_COMPRESSORRELEASE,
+    FX_OP_PCURVE,
     FX_OP_COUNT
 };
 
@@ -340,7 +347,19 @@ static const FxName fx_names[] = {
     {"bpsustain",FX_OP_BPS},{"bpr",FX_OP_BPR},{"bprelease",FX_OP_BPR},
     {"bpe",FX_OP_BPE},{"bpenv",FX_OP_BPE},
     {"pan",FX_OP_PAN},{"coarse",FX_OP_COARSE},{"ftype",FX_OP_FTYPE},
-    {"delaysync",FX_OP_DELAYTIME}
+    {"delaysync",FX_OP_DELAYTIME},
+    {"shape",FX_OP_SHAPE},{"crush",FX_OP_CRUSH},{"distort",FX_OP_DISTORT},
+    {"distortvol",FX_OP_DISTORTVOL},{"distorttype",FX_OP_DISTORTTYPE},
+    {"postgain",FX_OP_POST},{"chorus",FX_OP_CHORUS},{"shapevol",FX_OP_SHAPEVOL},
+    {"phaser",FX_OP_PHASER},{"phaserrate",FX_OP_PHASER},
+    {"phaserdepth",FX_OP_PHASERDEPTH},{"phasercenter",FX_OP_PHASERCENTER},
+    {"phasersweep",FX_OP_PHASERSWEEP},{"tremolo",FX_OP_TREMOLO},
+    {"tremolodepth",FX_OP_TREMOLODEPTH},{"tremoloskew",FX_OP_TREMOLOSKEW},
+    {"tremolophase",FX_OP_TREMOLOPHASE},{"tremoloshape",FX_OP_TREMOLOSHAPE},
+    {"compressor",FX_OP_COMPRESSOR},{"compressorRatio",FX_OP_COMPRESSORRATIO},
+    {"compressorKnee",FX_OP_COMPRESSORKNEE},
+    {"compressorAttack",FX_OP_COMPRESSORATTACK},
+    {"compressorRelease",FX_OP_COMPRESSORRELEASE},{"pcurve",FX_OP_PCURVE}
 };
 
 static int fx_op(const char *name) {
@@ -350,11 +369,11 @@ static int fx_op(const char *name) {
     return -1;
 }
 
-static unsigned fx_outer_mask(const cJSON *v) {
-    unsigned mask=0;
+static uint64_t fx_outer_mask(const cJSON *v) {
+    uint64_t mask=0;
     for (unsigned i=0;i<sizeof(fx_names)/sizeof(fx_names[0]);i++)
         if (cJSON_HasObjectItem(v,fx_names[i].name))
-            mask|=1u<<(unsigned)fx_names[i].op;
+            mask|=1ull<<(unsigned)fx_names[i].op;
     return mask;
 }
 
@@ -378,7 +397,7 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
     if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
         !cJSON_IsTrue(effect)) return;
-    unsigned outer=fx_outer_mask(v);
+    uint64_t outer=fx_outer_mask(v);
     double chain_gain = .8;
     for (int i = 0; i < count; i++) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
@@ -392,7 +411,7 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
             int operation=fx_op(op->valuestring);
-            if (operation<0 || (outer&(1u<<(unsigned)operation))) continue;
+            if (operation<0 || (outer&(1ull<<(unsigned)operation))) continue;
             double value=0;
             if (!fx_arg_number(step,0,&value)) continue;
             switch (operation) {
@@ -488,6 +507,75 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             case FX_OP_FTYPE:
                 if (value>=0 && value<=2) ev->dsp.p[DSP_FTYPE]=value;
+                break;
+            case FX_OP_SHAPE:
+                if (value>=0 && value<=.99) ev->dsp.p[DSP_SHAPE]=value;
+                break;
+            case FX_OP_CRUSH:
+                if (value>=1 && value<=24) ev->dsp.p[DSP_CRUSH]=value;
+                break;
+            case FX_OP_DISTORT:
+                if (value>=0 && value<=100) ev->dsp.p[DSP_DISTORT]=value;
+                break;
+            case FX_OP_DISTORTVOL:
+                if (value>=0 && value<=16) ev->dsp.p[DSP_DISTVOL]=value;
+                break;
+            case FX_OP_DISTORTTYPE:
+                if (value>=0 && value<=6) ev->dsp.p[DSP_DISTTYPE]=value;
+                break;
+            case FX_OP_POST:
+                if (value>=0 && value<=16) ev->dsp.p[DSP_POST]=value;
+                break;
+            case FX_OP_CHORUS:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_CHORUS]=value;
+                break;
+            case FX_OP_SHAPEVOL:
+                if (value>=0 && value<=16) ev->dsp.p[DSP_SHAPEVOL]=value;
+                break;
+            case FX_OP_PHASER:
+                if (value>=0 && value<=200) ev->dsp.p[DSP_PHASER]=value;
+                break;
+            case FX_OP_PHASERDEPTH:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_PHDEPTH]=value;
+                break;
+            case FX_OP_PHASERCENTER:
+                if (value>=20 && value<=16000) ev->dsp.p[DSP_PHCENTER]=value;
+                break;
+            case FX_OP_PHASERSWEEP:
+                if (value>=0 && value<=16000) ev->dsp.p[DSP_PHSWEEP]=value;
+                break;
+            case FX_OP_TREMOLO:
+                if (value>=0 && value<=20000) ev->dsp.p[DSP_TREM]=value;
+                break;
+            case FX_OP_TREMOLODEPTH:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_TDEPTH]=value;
+                break;
+            case FX_OP_TREMOLOSKEW:
+                if (value>=.001 && value<=.999) ev->dsp.p[DSP_TSKEW]=value;
+                break;
+            case FX_OP_TREMOLOPHASE:
+                if (value>=-64 && value<=64) ev->dsp.p[DSP_TPHASE]=value;
+                break;
+            case FX_OP_TREMOLOSHAPE:
+                if (value>=0 && value<=4) ev->dsp.p[DSP_TSHAPE]=value;
+                break;
+            case FX_OP_COMPRESSOR:
+                if (value>=-100 && value<=0) ev->dsp.p[DSP_COMP]=value;
+                break;
+            case FX_OP_COMPRESSORRATIO:
+                if (value>=1 && value<=20) ev->dsp.p[DSP_COMPRATIO]=value;
+                break;
+            case FX_OP_COMPRESSORKNEE:
+                if (value>=0 && value<=40) ev->dsp.p[DSP_COMPKNEE]=value;
+                break;
+            case FX_OP_COMPRESSORATTACK:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_COMPATT]=value;
+                break;
+            case FX_OP_COMPRESSORRELEASE:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_COMPREL]=value;
+                break;
+            case FX_OP_PCURVE:
+                if (value>=0 && value<=1) ev->dsp.p[DSP_PCURVE]=value;
                 break;
             default:
                 break;

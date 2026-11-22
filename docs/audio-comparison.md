@@ -987,8 +987,9 @@ prepared delay time keeps the line and reads it at the new offset; a fallback
 room tail survives source retirement. Materialized nested `FX(...)` room/delay
 and filter/pan/coarse steps now replay with outer controls taking precedence,
 and `test_javascript`/`test_audio` cover the graph-source boundary and a live
-room+filter+pan+coarse edit during an active delay tail. Other graph-local FX
-steps (distortion, shape, chorus and similar) remain outside this replay.
+room+filter+pan+coarse+shape+distort+chorus edit during an active delay tail.
+The replay also covers crush, postgain, phaser, tremolo and compressor controls;
+FM/IR and other rare graph-local parameters remain outside it.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
@@ -1173,11 +1174,11 @@ each closure into bounded `_fxSteps` (at most 8 chains, 32 steps each) using a
 chain recorder; the field is separate from `FX` so event-comparison gates still
 see the web's `FX:[{}]`. The native renderer applies the FX chain's default
 superdough gain (0.8) per event, which is the measured difference; materialized
-shared `room`/`size`/`dry`/`delay`/`delaytime`/`delayfeedback` and
-filter/pan/coarse steps now replay with outer controls taking precedence. The
-filter replay is callback-level and has focused event/callback tests; it is not
-a new web PCM gate. Other graph-local steps (distortion, shape, chorus and
-similar) remain outside replay. The two
+shared `room`/`size`/`dry`/`delay`/`delaytime`/`delayfeedback`, filter/pan/coarse
+and the common shape/distort/chorus/postgain/phaser/tremolo/compressor steps
+now replay with outer controls taking precedence. The replay is callback-level
+and has focused event/callback tests; it is not a new web PCM gate. FM/IR and
+other rare graph-local parameters remain outside replay. The two
 `fx-nested-` cases are now gated at the unchanged 0.99 correlation and 0.85–1.15
 RMS ratio: correlation 0.99999996 and ratio 1.0003. No threshold or baseline
 was changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph

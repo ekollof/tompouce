@@ -333,16 +333,18 @@ and measured divergences are recorded in the archive.
 - [x] Nested FX shared/filter/pan routing and live edits. Materialized
       `_fxSteps` now replay bounded `room`, `size`/`roomsize`, `dry`, `delay`,
       `delaytime`, `delayfeedback`, `lpf`/`lpa`/`lpd`/`lps`/`lpr`/`lpenv`/`lpq`,
-      the corresponding high-pass and band-pass controls, `pan`, `coarse` and
-      `ftype` into the event. Outer controls win because the web applies them
+      the corresponding high-pass and band-pass controls, `pan`, `coarse`,
+      `ftype`, `shape`, `crush`, `distort`, `distortvol`, `distorttype`,
+      `postgain`, `chorus`, `shapevol`, `phaser` and its rate/depth/center/sweep,
+      `tremolo` and its depth/skew/phase/shape, and the compressor/pcurve
+      controls into the event. Outer controls win because the web applies them
       after `FX(...)`; a `K()` graph source still skips the whole chain.
       `test_javascript` checks nested routing, outer precedence and the graph
       boundary; `test_audio` triggers a delayed FX source, renders its shared
-      tail, then starts a live room+filter+pan+coarse edit on the same orbit and
-      verifies the delay tail remains audible. Other graph-local FX steps
-      (distortion, shape, chorus and similar) remain outside this replay.
-- [ ] Other nested/control-output FX steps beyond shared sends, filters, pan,
-      coarse and live edits remain open. Fractional IR
+      tail, then starts a live room+filter+pan+coarse+shape+distort+chorus edit
+      on the same orbit and verifies the delay tail remains audible.
+- [ ] Rare nested/control-output FX controls not covered by the event replay
+      (FM/IR and other graph-local parameters) remain open. Fractional IR
       rates are a measured divergence: `.irspeed(.5|.75)` with matching source
       speed gave correlations -0.78/-0.92; an interpolation attempt was
       reverted rather than tuned to the capture. See

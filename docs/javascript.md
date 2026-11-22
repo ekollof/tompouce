@@ -462,9 +462,10 @@ natural sample endings do not move them. The source ADSR's minimum release is
 separate: `.release(0).fxr(.005)` still fades over five milliseconds after the
 hap end, while a naturally ending sample can leave a much later delay tail.
 General nested `FX(...)` chains remain outside the PCM comparison matrix, but
-their materialized shared `room`/`delay`, filter, pan and coarse steps are
-replayed with outer controls taking precedence; other steps remain outside
-this coverage. The graph/effect
+their materialized shared `room`/`delay`, filter, pan, coarse, shape, distort,
+chorus, postgain, phaser, tremolo and compressor steps are replayed with outer
+controls taking precedence; FM/IR and other rare graph-local steps remain
+outside this coverage. The graph/effect
 boundary is covered: a `K()` source does not receive the chain's default gain,
 while `audioin()` worklet effects and ordinary sources do.
 

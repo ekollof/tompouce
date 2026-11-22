@@ -696,7 +696,9 @@ static void test_fx_shared_routing(void) {
         "note(60).s('sine').FX(x=>x.room(.3).size(4).dry(.6)"
         ".lpf(800).lpq(2).lpa(.02).lpd(.1).lps(.5).lpr(.2).lpenv(3),"
         "x=>x.delay(.2).delaytime(.125).delayfeedback(.25)"
-        ".hpf(120).hpq(1.5).bpf(900).bpq(2).coarse(4).pan(.25))";
+        ".hpf(120).hpq(1.5).bpf(900).bpq(2).coarse(4).pan(.25)"
+        ".shape(.4).distort(2).chorus(.3).crush(8).postgain(1.2)"
+        ".tremolo(5).phaser(1))";
     JsProgram *program=NULL;
     cJSON *haps=query(code,&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
@@ -720,6 +722,13 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_BPF]-900)<1e-9);
     assert(fabs(event.dsp.p[DSP_BPQ]-2)<1e-9);
     assert(fabs(event.dsp.p[DSP_COARSE]-4)<1e-9);
+    assert(fabs(event.dsp.p[DSP_SHAPE]-.4)<1e-9);
+    assert(fabs(event.dsp.p[DSP_DISTORT]-2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_CHORUS]-.3)<1e-9);
+    assert(fabs(event.dsp.p[DSP_CRUSH]-8)<1e-9);
+    assert(fabs(event.dsp.p[DSP_POST]-1.2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_TREM]-5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_PHASER]-1)<1e-9);
     assert(event.has_pan && fabs(event.pan+ .5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
@@ -727,8 +736,12 @@ static void test_fx_shared_routing(void) {
         "note(60).s('sine').room(.8).size(6).dry(.4)"
         ".delay(.4).delaytime(.5).delayfeedback(.9)"
         ".lpf(600).hpf(300).bpf(700).coarse(8).pan(.75)"
+        ".shape(.6).distort(1.5).chorus(.7).crush(4).postgain(1)"
+        ".tremolo(3).phaser(2)"
         ".FX(x=>x.room(.3).size(4).dry(.6)"
         ".lpf(800).hpf(120).bpf(900).coarse(4).pan(.25)"
+        ".shape(.4).distort(2).chorus(.3).crush(8).postgain(1.2)"
+        ".tremolo(5).phaser(1)"
         ".delay(.2).delaytime(.125).delayfeedback(.25))";
     haps=query(outer,&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
@@ -743,6 +756,13 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_HPF]-300)<1e-9);
     assert(fabs(event.dsp.p[DSP_BPF]-700)<1e-9);
     assert(fabs(event.dsp.p[DSP_COARSE]-8)<1e-9);
+    assert(fabs(event.dsp.p[DSP_SHAPE]-.6)<1e-9);
+    assert(fabs(event.dsp.p[DSP_DISTORT]-1.5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_CHORUS]-.7)<1e-9);
+    assert(fabs(event.dsp.p[DSP_CRUSH]-4)<1e-9);
+    assert(fabs(event.dsp.p[DSP_POST]-1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_TREM]-3)<1e-9);
+    assert(fabs(event.dsp.p[DSP_PHASER]-2)<1e-9);
     assert(event.has_pan && fabs(event.pan-.5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
@@ -752,11 +772,15 @@ static void test_fx_shared_routing(void) {
         "\"_fxSteps\":[{\"steps\":[{\"op\":\"room\",\"args\":[0.3]},"
         "{\"op\":\"lpf\",\"args\":[800]},{\"op\":\"hpf\",\"args\":[120]},"
         "{\"op\":\"bpf\",\"args\":[900]},{\"op\":\"coarse\",\"args\":[4]},"
-        "{\"op\":\"pan\",\"args\":[0.25]},{\"op\":\"delay\",\"args\":[0.2]}]}]}}");
+        "{\"op\":\"pan\",\"args\":[0.25]},{\"op\":\"shape\",\"args\":[0.4]},"
+        "{\"op\":\"distort\",\"args\":[2]},{\"op\":\"chorus\",\"args\":[0.3]},"
+        "{\"op\":\"delay\",\"args\":[0.2]}]}]}}");
     assert(graph && js_audio_event(graph,0,1,&event));
     assert(event.dsp.p[DSP_ROOM]==0 && event.delay_send==0);
     assert(event.dsp.p[DSP_LPF]==0 && event.dsp.p[DSP_HPF]==0 &&
-        event.dsp.p[DSP_BPF]==0 && event.dsp.p[DSP_COARSE]==1 && !event.has_pan);
+        event.dsp.p[DSP_BPF]==0 && event.dsp.p[DSP_COARSE]==1 &&
+        event.dsp.p[DSP_SHAPE]==0 && event.dsp.p[DSP_DISTORT]==0 &&
+        event.dsp.p[DSP_CHORUS]==0 && !event.has_pan);
     cJSON_Delete(graph);
     puts("nested FX shared/filter/pan routing and outer-control precedence ok");
 }

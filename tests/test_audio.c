@@ -576,7 +576,8 @@ static void test_shared_fx_routing_and_live_edit(void) {
         "\"gain\":0.1,\"orbit\":9,\"_fxSteps\":[{\"steps\":["
         "{\"op\":\"room\",\"args\":[0.4]},{\"op\":\"size\",\"args\":[3]},"
         "{\"op\":\"lpf\",\"args\":[500]},{\"op\":\"pan\",\"args\":[0.2]},"
-        "{\"op\":\"coarse\",\"args\":[3]}]}]}}");
+        "{\"op\":\"coarse\",\"args\":[3]},{\"op\":\"shape\",\"args\":[0.4]},"
+        "{\"op\":\"distort\",\"args\":[2]},{\"op\":\"chorus\",\"args\":[0.3]}]}]}}");
     assert(room);
     AudioEvent second;
     assert(js_audio_event(room,0,1,&second));
@@ -584,6 +585,9 @@ static void test_shared_fx_routing_and_live_edit(void) {
     assert(fabs(second.dsp.p[DSP_LPF]-500)<1e-9);
     assert(second.has_pan && fabs(second.pan+.6)<1e-9);
     assert(fabs(second.dsp.p[DSP_COARSE]-3)<1e-9);
+    assert(fabs(second.dsp.p[DSP_SHAPE]-.4)<1e-9);
+    assert(fabs(second.dsp.p[DSP_DISTORT]-2)<1e-9);
+    assert(fabs(second.dsp.p[DSP_CHORUS]-.3)<1e-9);
     audio_trigger_event(&second);
     pa_callback(NULL,block,256,NULL,0,NULL);
     double energy=0;

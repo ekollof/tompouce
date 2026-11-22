@@ -15,10 +15,6 @@ typedef struct {
 #define VOICE_SOA_DSP_HAVE_AVX2 0
 #endif
 
-typedef struct {
-    double b0[2], b1[2], b2[2], a1[2], a2[2], z1[2], z2[2];
-} DspBiquad2;
-
 void dsp_biquad2_init(DspBiquad2 *dst, const DspBiquad source[2]);
 void dsp_biquad2_process(DspBiquad2 *state, const double *input,
     double *output, unsigned frames);

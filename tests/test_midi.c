@@ -1025,6 +1025,149 @@ static void test_midi_extras_delivery(void) {
     puts("midi extras delivery: captured parameters, framing, order, bounds ok");
 }
 
+/* The pinned Switch Angel external-device helper path: its `voc` register
+   extension and `window.voc` helper send CC 34 through `.midi('tout')`.
+   The native output has one broadcast port, so the named port is accepted
+   for source compatibility and reaches every subscribed ALSA destination. */
+static void switchangel_fixture(char *path, size_t size) {
+    const char *root=getenv("XDG_CONFIG_HOME"); assert(root && *root);
+    char config[512];
+    assert(snprintf(config,sizeof(config),"%s/tompouce",root)>0);
+    (void)mkdir(config,0700);
+    assert(snprintf(path,size,"%s/prebake.strudel",config)>0);
+    FILE *file=fopen(path,"wb"); assert(file);
+    const char *source=
+        "window.key_to_cc_value_for_autotune=function(key){\n"
+        " const m=new Map([['f#',0],['g',.1],['g#',.2],['a',.3],['a#',.4],\n"
+        "  ['b',.45],['c',.5],['c#',.6],['d',.7],['d#',.8],['e',.9],['f',.97]]);\n"
+        " const k=String(key).toLowerCase();\n"
+        " return m.has(k)?m.get(k):0;\n"
+        "};\n"
+        "window.toMajorKey=function(input){\n"
+        " const N=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];\n"
+        " const off={major:0,minor:3,phrygian:3,locrian:1,pentatonic:0};\n"
+        " const [root,scale='major']=Array.isArray(input)?input:[input,'major'];\n"
+        " const i=N.indexOf(String(root).toUpperCase())??0;\n"
+        " return N[(i+(off[String(scale).toLowerCase()]??0))%12];\n"
+        "};\n"
+        "window.voc=(key)=>{\n"
+        " key=reify(key??window.SCALE);\n"
+        " const value=key.withValue(v=>{\n"
+        "  v=[v].flat(); const major=window.toMajorKey(v);\n"
+        "  return window.key_to_cc_value_for_autotune(major);\n"
+        " });\n"
+        " return s('white').gain(0).ccn(34).ccv(value).midi('tout');\n"
+        "};\n"
+        "register('voc',(key,x)=>x.ccn(34)\n"
+        " .ccv(window.key_to_cc_value_for_autotune(key)).midi('tout'));\n";
+    assert(fwrite(source,1,strlen(source),file)==strlen(source));
+    assert(fclose(file)==0);
+}
+
+/* Owned ALSA receiver subscribed to this process's single output port. */
+static int switchangel_receiver(snd_seq_t **receiver, int *rport) {
+    if (snd_seq_open(receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)<0) return 0;
+    snd_seq_set_client_name(*receiver,"tompouce-switchangel-qa");
+    *rport=snd_seq_create_simple_port(*receiver,"owned receiver",
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+    if (*rport<0) return 0;
+    int sender=-1,sender_port=-1;
+    snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client,-1);
+    while (snd_seq_query_next_client(*receiver,client)>=0) {
+        if (snd_seq_client_info_get_pid(client)!=(int)getpid() ||
+            strcmp(snd_seq_client_info_get_name(client),"tompouce")) continue;
+        snd_seq_port_info_t *info; snd_seq_port_info_alloca(&info);
+        snd_seq_port_info_set_client(info,snd_seq_client_info_get_client(client));
+        snd_seq_port_info_set_port(info,-1);
+        while (snd_seq_query_next_port(*receiver,info)>=0)
+            if (!strcmp(snd_seq_port_info_get_name(info),"out")) {
+                sender=snd_seq_client_info_get_client(client);
+                sender_port=snd_seq_port_info_get_port(info);
+            }
+    }
+    return sender>=0 && snd_seq_connect_from(*receiver,*rport,sender,sender_port)>=0;
+}
+
+static void test_switchangel_external_device(void) {
+    midi_init();
+    if (!midi_ready()) { puts("SKIP Switch Angel external device: no ALSA sequencer"); return; }
+    char path[900];
+    switchangel_fixture(path,sizeof(path));
+    snd_seq_t *receiver=NULL; int rport=-1;
+    int connected=switchangel_receiver(&receiver,&rport);
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    assert(prep_pool_start(0,0));
+    MidiExtra extras[8];
+    midi_capture_enable(1);
+
+    /* Register extension: note + CC, then a pitch-less CC-only hap. */
+    assert(track_load_from_code("note(60).s('sine').voc('g')"));
+    schedule_loaded(1);
+    assert(collect_extras(extras,8)==1);
+    assert(extras[0].note==60 && extras[0].has_cc && extras[0].cc==34 && extras[0].ccv==13);
+    event_queue_clear();
+    assert(track_load_from_code("voc('f#')"));
+    schedule_loaded(1);
+    assert(collect_extras(extras,8)==1);
+    assert(extras[0].note<0 && extras[0].has_cc && extras[0].cc==34 && extras[0].ccv==0);
+    event_queue_clear();
+
+    /* window.voc uses the prebake's reify/withValue path and window.SCALE. */
+    assert(track_load_from_code("window.SCALE='c';voc()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras,8)==1);
+    assert(extras[0].note<0 && extras[0].has_cc && extras[0].cc==34 && extras[0].ccv==64);
+    event_queue_clear();
+    assert(track_load_from_code("window.SCALE='a';voc()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras,8)==1);
+    assert(extras[0].cc==34 && extras[0].ccv==38);
+    event_queue_clear();
+
+    /* The accepted port name reaches the owned ALSA receiver. */
+    MidiCaptured seen[32];
+    if (connected) {
+        event_queue_clear();
+        audio_toggle_play(1);
+        assert(track_load_from_code("note(64).s('sine').voc('g')"));
+        schedule_loaded(1);
+        scheduler_init();
+        int got_cc=0, got_note=0;
+        double deadline=monotonic()+5;
+        while ((!got_cc || !got_note) && monotonic()<deadline) {
+            pump_realtime(128);
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receiver,&event)>=0 && event) {
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==34 && event->data.control.value==13)
+                    got_cc=1;
+                if (event->type==SND_SEQ_EVENT_NOTEON && event->data.note.note==64)
+                    got_note=1;
+            }
+        }
+        unsigned total=midi_captured_all(seen,32);
+        int captured=0;
+        for (unsigned i=0;i<total;i++)
+            if (seen[i].kind==MIDI_CAP_CC && seen[i].d1==34 && seen[i].d2==13)
+                captured=1;
+        assert(got_cc && got_note && captured);
+        scheduler_shutdown();
+        audio_toggle_play(0);
+    } else {
+        puts("SKIP Switch Angel receiver: owned output not connectable");
+    }
+    event_queue_clear();
+    midi_capture_enable(0);
+    if (receiver) snd_seq_close(receiver);
+    audio_toggle_play(0);
+    unlink(path);
+    char config[512]; const char *root=getenv("XDG_CONFIG_HOME");
+    assert(root && snprintf(config,sizeof(config),"%s/tompouce",root)>0);
+    rmdir(config);
+    puts("Switch Angel external device: CC 34 routing and owned ALSA delivery ok");
+}
+
 #ifdef __SANITIZE_ADDRESS__
 /* ALSA keeps per-handle internals past snd_seq_close; suppress only those,
    never test-code allocations. */
@@ -1332,6 +1475,7 @@ int main(int argc, char **argv) {
     test_midi_restore_loopback();
     test_midi_extras_commit();
     test_midi_extras_delivery();
+    test_switchangel_external_device();
     test_short_gate_and_bounds();
     test_channel_note_off_loopback();
     test_note_off_under_load();

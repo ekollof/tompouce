@@ -381,15 +381,22 @@ and measured divergences are recorded in the archive.
       the combined Csound stream are intentionally not attributed per pattern,
       and terminal geometry/raster is checked against the web renderer without
       claiming browser-pixel parity.
-- [ ] Finish Switch Angel integration checks beyond the 81 setup/helper/API
-      cases and selected audio gates: `test_oneshot_grid` now covers the pinned
-      helper's grid gating with a local confined fixture (eight first-cycle
-      haps over a four-cycle query); `test_switchangel_fx` also checks a
-      pinned-style FX helper attaches its stage to the query event, and
-      `test_switchangel_humanize` checks its deterministic onset/velocity bounds,
-      and `test_switchangel_bmod` checks a pinned-style helper attaches a bus
-      modulation entry to the query event. Bank-specific sounds and external
-      devices remain open. See
+- [x] Switch Angel external-device integration. The pinned `voc` register
+      extension and `window.voc` helper now keep distinct toplevel meanings
+      (an explicit setup name is not overwritten by a same-named `register`).
+      `test_midi` loads a confined fixture of the pinned CC 34 helpers,
+      checks note+CC and pitch-less CC-only events, verifies the helper's
+      key mapping (`f#` 0, `g` 13, `c` 64, `a` 38), and delivers note/CC 34
+      through an owned ALSA receiver while
+      the native single output broadcasts `.midi('tout')` to subscribers.
+      Earlier `test_oneshot_grid`, `test_switchangel_fx`,
+      `test_switchangel_humanize` and `test_switchangel_bmod` remain. An
+      owned engine also loaded the real pinned starter with its installer
+      header and confirmed `window.voc` stayed the setup helper, not the
+      curried `register` extension.
+- [ ] Starter bank-specific sounds outside the pinned setup/helper/API
+      cases. The pinned starter's `tr909` bank example is not yet exercised
+      against installed bank manifests. See
       [prebake support](docs/prebakes.md) for the supported startup/file contract.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and

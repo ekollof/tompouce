@@ -211,6 +211,23 @@ static void test_prebake(void) {
     assert(haps && cJSON_GetArraySize(haps)==4);
     assert(!cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"locations")));
     cJSON_Delete(haps);
+    /* A setup helper defined on window keeps its toplevel meaning even when
+       register() publishes a same-named pattern extension. Switch Angel's
+       window.voc and register('voc') pair depends on this. */
+    write_module(path,
+        "window.preChoice=()=>note(65);\n"
+        "register('preChoice',pat=>pat.gain(.5));\n");
+    JsProgram *choice=NULL;
+    haps=query("preChoice()",&choice);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==65);
+    cJSON_Delete(haps); javascript_free(choice);
+    haps=query("note(60).preChoice()",&choice);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(haps,0),"value"),"gain")->valuedouble==.5);
+    cJSON_Delete(haps); javascript_free(choice);
     /* Editing the file does not mutate an accepted runtime. Reevaluation
        reads the replacement and uses a fresh set of globals/prototypes. */
     write_module(path,"window.preLead=()=>note(72); window.preCount=(window.preCount??0)+1;");

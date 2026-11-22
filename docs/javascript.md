@@ -1053,7 +1053,8 @@ CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 3 id and 256 data bytes framed F0..F7) and transport `midicmd`
 (`clock`/`midiClock`/`start`/`stop`/`continue`, plus `progNum`/`sysex`
 array forms) all send through ALSA. `midiport` values are accepted and
-broadcast to ALSA subscribers. A hap at cycle zero additionally sends
+broadcast to the engine's single ALSA output port and its subscribers; named
+port selection is not exposed. A hap at cycle zero additionally sends
 transport start, as on the web. Sends run in web order (note, program,
 sysex, CC, NRPN, bend, touch, cycle-zero start, transport/command); a rejected extra
 drops itself and every later extra for that hap with a console warning,

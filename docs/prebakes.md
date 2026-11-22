@@ -65,9 +65,17 @@ Native `TextEncoder` supplies UTF-8 encoding, including Unicode replacement
 and `encodeInto`; it supplies no DOM APIs. The public
 `getFrequencyFromValue` pitch helper follows the web's note/frequency fallbacks.
 This does not establish compatibility for every helper: browser DOM controls,
-external MIDI devices, unavailable samples/synths and effect APIs such as
-`bmod`/`FX` still require their own support. Calling an unavailable API retains
-its error; the native profile does not substitute a different sound for it.
+unavailable samples/synths and bank-specific examples still require their own
+support. External MIDI is covered for the starter's `voc` path: the native
+engine broadcasts `.midi('tout')` (and any other accepted `midiport`) to ALSA
+subscribers, and `test_midi` delivers its note and CC 34 through an owned
+receiver. Calling an unavailable API retains its error; the native profile
+does not substitute a different sound for it.
+
+A setup helper defined as `window.name` keeps that toplevel meaning even when
+the same file calls `register('name', ...)` for a pattern extension. The
+pinned starter defines `window.voc` next to `register('voc')`; both call forms
+remain available.
 
 ## Your own files
 

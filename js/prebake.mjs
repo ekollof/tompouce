@@ -18,7 +18,13 @@ export function installPrebakes(core,transpiler) {
   log=message=>globalThis.__hostLog(message);
   globalThis.window=globalThis;
   globalThis.register=(name,...args)=>{
-    const helper=core.register(name,...args); globalThis[name]=helper; return helper;
+    const helper=core.register(name,...args);
+    /* Keep an explicit setup helper (Switch Angel defines window.voc before
+       register('voc', ...)) reachable as a toplevel name, matching the
+       browser where register publishes through strudelScope. */
+    if(typeof name!=='string' || !Object.prototype.hasOwnProperty.call(globalThis,name))
+      globalThis[name]=helper;
+    return helper;
   };
   globalThis.setGainCurve=fn=>{
     if(typeof fn!=='function')throw new TypeError('setGainCurve requires a function');

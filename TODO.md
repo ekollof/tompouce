@@ -325,9 +325,14 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         with exact C/AVX2 paths, non-finite reset and `test_voice_soa_dsp`.
         Microbenchmark: ~0.42 ms AVX2 vs ~0.84 ms C for 100k frames over four
         lanes (about 2x).
-      - [ ] Integrate the primitive with source, ADSR, gate and route lanes in
-        the voice pool, then measure "Computer says no" against the 128-frame
-        deadline on the real device.
+      - [x] Integrate the biquad with source, ADSR, gate and route lanes in a
+        four-voice block path. PCM gates passed, but "Computer says no"
+        measured max ~4.02 ms with one gap (over-3 ms: 10), slower than the
+        scalar path, so the integration was reverted. The block-boundary copy
+        and four-voice grouping overhead still dominate.
+      - [ ] Build the DSP lanes persistently from allocation (no block-boundary
+        copy), including LPE/LFO coefficient updates and other active filters,
+        then measure against the 128-frame deadline on the real device.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

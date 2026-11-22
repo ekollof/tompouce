@@ -3,18 +3,43 @@
 <title>Tompouce Hydra</title>
 <style nonce="EDITOR_STYLE_NONCE">
  html,body{margin:0;height:100%;background:#090b12;color:#d7dbe8;font:13px system-ui,sans-serif;overflow:hidden}
- canvas{display:block;width:100vw;height:100vh}
- #hud{position:fixed;top:8px;left:10px;padding:4px 8px;background:#101525aa;border:1px solid #2a3350;border-radius:6px}
+ canvas{position:absolute;inset:0;display:block;width:100vw;height:100vh}
+ #hud{position:fixed;top:8px;left:10px;padding:4px 8px;background:#101525aa;border:1px solid #2a3350;border-radius:6px;z-index:2}
 </style></head><body>
+<canvas id="scope" width="960" height="540"></canvas>
 <canvas id="stage" width="960" height="540"></canvas>
 <div id="hud">waiting for engine analysis…</div>
 <script nonce="EDITOR_STYLE_NONCE" src="/hydra.js"></script>
 <script nonce="EDITOR_STYLE_NONCE">
 const token = 'COMPANION_TOKEN';
 const stage = document.getElementById('stage');
-const ctx = stage.getContext('2d');
+const scopeCanvas = document.getElementById('scope');
+const ctx = scopeCanvas.getContext('2d');
 const hud = document.getElementById('hud');
 let phase = 0, last = null, sourceGeneration = null;
+function showScope(on) {
+  stage.style.display = on ? 'none' : 'block';
+  scopeCanvas.style.display = on ? 'block' : 'none';
+}
+function drawScope(samples) {
+  const width = scopeCanvas.width, height = scopeCanvas.height;
+  ctx.fillStyle = '#090b12'; ctx.fillRect(0,0,width,height);
+  let energy = 0;
+  for (const value of samples) energy += Math.abs(value);
+  energy = samples.length ? energy / samples.length : 0;
+  phase += 0.01 + Math.min(0.06, energy * 0.4);
+  ctx.strokeStyle = `hsl(${(phase*40)%360} 80% 65%)`; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i=0;i<samples.length;i++) {
+    const x = samples.length>1 ? i/(samples.length-1)*width : 0;
+    const y = height/2 - samples[i]*height*0.85;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = '#2a3350'; ctx.beginPath();
+  ctx.moveTo(0,height/2); ctx.lineTo(width,height/2); ctx.stroke();
+  return energy;
+}
 async function poll() {
   try {
     const reply = await fetch('/api/tool', {method:'POST',
@@ -35,32 +60,24 @@ async function poll() {
       }
     }
   } catch (error) { /* keep the last frame on a dropped poll */ }
-  const width = stage.width, height = stage.height;
-  ctx.fillStyle = '#090b12'; ctx.fillRect(0,0,width,height);
-  if (globalThis.__hydraOutput && typeof __hydraOutput._paint === 'function') {
-    __hydraOutput._paint(ctx, width, height, last);
-    hud.textContent = 'hydra: custom graph · ' + (last && last.bpm ? last.bpm.toFixed(1) + ' bpm' : 'waiting');
+  if (globalThis.__hydraOutput && typeof __hydraOutput._render === 'function') {
+    showScope(false);
+    try {
+      __hydraOutput._render(last && last.scope ? last.scope : [], performance.now());
+      hud.textContent = 'hydra: WebGL graph · ' + (last && last.bpm ? last.bpm.toFixed(1) + ' bpm' : 'waiting');
+    } catch (error) {
+      showScope(true);
+      hud.textContent = 'hydra: ' + (error && error.message ? error.message : 'render error');
+    }
     setTimeout(poll, 125);
     return;
   }
+  showScope(true);
   const samples = last && last.scope ? last.scope : [];
-  let energy = 0;
-  for (const value of samples) energy += Math.abs(value);
-  energy = samples.length ? energy / samples.length : 0;
-  phase += 0.01 + Math.min(0.06, energy * 0.4);
-  ctx.strokeStyle = `hsl(${(phase*40)%360} 80% 65%)`; ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let i=0;i<samples.length;i++) {
-    const x = i/(samples.length-1)*width;
-    const y = height/2 - samples[i]*height*0.85;
-    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  }
-  ctx.stroke();
-  ctx.strokeStyle = '#2a3350'; ctx.beginPath();
-  ctx.moveTo(0,height/2); ctx.lineTo(width,height/2); ctx.stroke();
+  const energy = drawScope(samples);
   hud.textContent = last
     ? `hydra: ${last.playing ? 'playing' : 'stopped'} · ${last.bpm.toFixed(1)} bpm · rms ${energy.toFixed(3)} · ${samples.length} samples`
-    : 'waiting for engine analysis…';
+    : (globalThis.Hydra && Hydra.error ? 'hydra: ' + Hydra.error : 'waiting for engine analysis…');
   setTimeout(poll, 125); // bounded to 8 Hz
 }
 poll();

@@ -524,7 +524,10 @@ It enables inert Hydra source/texture chains, `s0`–`s3`/`o0`–`o3` buffers an
 `feedStrudel` and `detectAudio` are ignored; there is no visual rendering,
 audio/video capture, resource fetching or execution of visual callbacks.
 The console reports this limitation once per evaluation. The placeholder
-does not open a browser; the planned `/hydra` browser visualizer is separate.
+does not open a browser; the separate `/hydra` browser visualizer renders a
+bounded Hydra-style graph through WebGL (GLSL generators/effects and a
+ping-pong framebuffer pool) and falls back to the 2D audio scope when no graph
+is set. `hydra_webgl` exercises that backend in headless Chromium.
 
 ## Pitch compensation and convolution
 

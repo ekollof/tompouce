@@ -15,12 +15,20 @@ verification, installation and upstream terminal constraints.
       the companion helper with a private token, Host/Origin checks, one
       read-only `music_audio_scope` MCP tool (bounded 16–192 samples, polled at
       8 Hz) and a parent-pid session guard. `tests/test_companion.py` covers the
-      tool allowlist and auth. A bounded Hydra-style function layer
-      (`web/hydra.js`: `osc`/`shape`/`solid`/`noise`/`src` with `rotate`,
-      `scale`, `repeatX/Y`, `color`, `out`) is served and checked. Still open:
-      full WebGL Hydra compatibility. The scope tool now includes the accepted
-      source's `generation`, and the page drops stale frames when it changes.
-      Full WebGL compatibility remains open.
+      tool allowlist and auth. `web/hydra.js` now renders through WebGL: GLSL
+      generators (`osc`, `shape`, `solid`, `noise`, `voronoi`, `gradient`,
+      `src`) and effects (`rotate`, `scale`, `repeat`, `repeatX/Y`, `kaleid`,
+      `pixelate`, `posterize`, `color`, `colorama`, `hue`, `saturate`,
+      `brightness`, `contrast`, `invert`, `luma`, `modulate`, `blend`, `add`,
+      `sub`, `mult`, `diff`, `layer`) chain through a bounded pool of
+      ping-pong framebuffers. `src` reads the audio scope texture. The page
+      switches from its 2D fallback to the WebGL stage only while a custom
+      graph is set. `hydra_webgl` is a headless Chromium smoke test for
+      generator output, effect chains, binary effects, the scope source and the
+      real page's WebGL switch. The scope tool includes the accepted source's
+      `generation`, and the page drops stale frames when it changes. Remaining:
+      upstream hydra-synth API beyond this bounded layer (camera/screen
+      sources, feedback and the full function set).
 
 ## Plugin hosting
 

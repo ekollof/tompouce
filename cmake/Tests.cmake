@@ -79,6 +79,14 @@ target_link_libraries(test_render_block PRIVATE tompouce_core)
 add_test(NAME render_block COMMAND test_render_block)
 set_tests_properties(render_block PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=auto" TIMEOUT 60)
 
+add_executable(test_voice_soa_dsp EXCLUDE_FROM_ALL tests/test_voice_soa_dsp.c)
+set_target_properties(test_voice_soa_dsp PROPERTIES EXCLUDE_FROM_ALL FALSE
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+target_compile_options(test_voice_soa_dsp PRIVATE -UNDEBUG -O3 -ffp-contract=off -funroll-loops)
+target_link_libraries(test_voice_soa_dsp PRIVATE tompouce_core)
+add_test(NAME voice_soa_dsp COMMAND test_voice_soa_dsp)
+set_tests_properties(voice_soa_dsp PROPERTIES ENVIRONMENT "TOMPOUCE_SIMD=auto" TIMEOUT 60)
+
 add_custom_target(test-simd-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=c $<TARGET_FILE:test_convolution_simd_sanitize>
     COMMAND "${CMAKE_COMMAND}" -E env TOMPOUCE_SIMD=sse2 $<TARGET_FILE:test_convolution_simd_sanitize>

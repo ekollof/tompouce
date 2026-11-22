@@ -321,8 +321,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         (max ~4.19 ms, one gap), so it was reverted. Sample-only SoA is
         exhausted; the next attempt must include the DSP low-pass/biquad and
         envelope work in the same lanes.
-      - [ ] Add SoA low-pass/biquad and envelope lanes for the DSP hot path,
-        then measure against the 128-frame deadline on the real device.
+      - [x] Four-lane low-pass/biquad SoA primitive (`src/voice_soa_dsp.c`)
+        with exact C/AVX2 paths, non-finite reset and `test_voice_soa_dsp`.
+        Microbenchmark: ~0.42 ms AVX2 vs ~0.84 ms C for 100k frames over four
+        lanes (about 2x).
+      - [ ] Integrate the primitive with source, ADSR, gate and route lanes in
+        the voice pool, then measure "Computer says no" against the 128-frame
+        deadline on the real device.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

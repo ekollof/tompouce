@@ -40,12 +40,20 @@ typedef struct {
     unsigned char data[3];
 } Lv2MidiEvent;
 
+typedef struct {
+    uint32_t index;
+    float min, max, value;
+    char name[LV2_WORKER_CONTROL_NAME];
+} Lv2ControlWire;
+
 struct Lv2Worker {
     pid_t pid;
     int in_fd, out_fd;
     Lv2MidiEvent midi[LV2_WORKER_MIDI_EVENTS];
     int midi_count;
     uint32_t caps;
+    int control_count;
+    Lv2ControlWire controls[LV2_WORKER_CONTROLS_MAX];
 };
 
 typedef struct {
@@ -80,8 +88,9 @@ static int write_all(int fd, const void *data, size_t size) {
 #if TOMPOUCE_HAVE_LV2
 typedef struct {
     uint32_t index;
-    int audio, atom, input, output;
+    int audio, atom, input, output, control;
     float value;
+    char name[LV2_WORKER_CONTROL_NAME];
 } Lv2PortInfo;
 
 #define LV2_URI_TABLE 512
@@ -144,16 +153,23 @@ static int child_main(int in_fd, int out_fd) {
     LilvNode *input=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#InputPort");
     LilvNode *output=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#OutputPort");
     LilvNode *default_node=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#default");
+    LilvNode *minimum=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#minimum");
+    LilvNode *maximum=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#maximum");
+    LilvNode *control_class=lilv_new_uri(world,"http://lv2plug.in/ns/lv2core#ControlPort");
     LilvNode *atom_port=lilv_new_uri(world,LV2_ATOM__AtomPort);
     LilvNode *midi_event=lilv_new_uri(world,LV2_MIDI__MidiEvent);
     Lv2PortInfo ports[LV2_WORKER_PORT_MAX];
+    Lv2ControlWire control_wire[LV2_WORKER_CONTROLS_MAX];
+    int control_count=0;
     unsigned nports=lilv_plugin_get_num_ports(plugin);
     if (nports>LV2_WORKER_PORT_MAX) nports=LV2_WORKER_PORT_MAX;
     for (unsigned i=0;i<nports;i++) {
         const LilvPort *port=lilv_plugin_get_port_by_index(plugin,i);
         ports[i].index=i;
         ports[i].audio=ports[i].atom=ports[i].input=ports[i].output=0;
+        ports[i].control=0;
         ports[i].value=0;
+        ports[i].name[0]=0;
         if (!port) continue;
         ports[i].audio=lilv_port_is_a(plugin,port,audio);
         ports[i].atom=lilv_port_is_a(plugin,port,atom_port);
@@ -165,6 +181,32 @@ static int child_main(int in_fd, int out_fd) {
         if (first && lilv_node_is_float(first)) ports[i].value=lilv_node_as_float(first);
         else if (first && lilv_node_is_int(first)) ports[i].value=lilv_node_as_int(first);
         lilv_nodes_free(defaults);
+        if (ports[i].input && control_class &&
+            lilv_port_is_a(plugin,port,control_class) &&
+            control_count<LV2_WORKER_CONTROLS_MAX) {
+            ports[i].control=1;
+            LilvNode *name_node=lilv_port_get_name(plugin,port);
+            if (name_node) {
+                const char *text=lilv_node_as_string(name_node);
+                if (text) snprintf(ports[i].name,sizeof(ports[i].name),"%s",text);
+                lilv_node_free(name_node);
+            }
+            LilvNodes *low=minimum?lilv_port_get_value(plugin,port,minimum):NULL;
+            LilvNodes *high=maximum?lilv_port_get_value(plugin,port,maximum):NULL;
+            LilvNode *low_node=low?lilv_nodes_get_first(low):NULL;
+            LilvNode *high_node=high?lilv_nodes_get_first(high):NULL;
+            Lv2ControlWire *wire=&control_wire[control_count++];
+            wire->index=i;
+            wire->min=low_node && lilv_node_is_float(low_node)?lilv_node_as_float(low_node):0.0f;
+            wire->max=high_node && lilv_node_is_float(high_node)?lilv_node_as_float(high_node):1.0f;
+            wire->value=ports[i].value;
+            snprintf(wire->name,sizeof(wire->name),"%s",ports[i].name);
+            lilv_nodes_free(low); lilv_nodes_free(high);
+            if (!isfinite(wire->min) || !isfinite(wire->max) || wire->max<wire->min) {
+                control_count--;
+                ports[i].control=0;
+            }
+        }
         lilv_instance_connect_port(instance,i,&ports[i].value);
     }
     if (!audio || !input || !output || !default_node || !atom_port || !midi_event) return 1;
@@ -189,7 +231,11 @@ static int child_main(int in_fd, int out_fd) {
     lilv_instance_activate(instance);
     Lv2FrameHeader ok={.caps=(uint32_t)((has_atom_input?1u:0u)|
         (has_audio_input?2u:0u)|(has_audio_output?4u:0u)),.ok=1};
-    if (!write_all(out_fd,&ok,sizeof(ok))) return 1;
+    uint32_t wire_count=(uint32_t)control_count;
+    if (!write_all(out_fd,&ok,sizeof(ok)) ||
+        !write_all(out_fd,&wire_count,sizeof(wire_count)) ||
+        (control_count && !write_all(out_fd,control_wire,
+            (size_t)control_count*sizeof(control_wire[0])))) return 1;
     float *in=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
     float *out=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
     if (!in || !out) { free(in); free(out); return 1; }
@@ -250,6 +296,7 @@ static int child_main(int in_fd, int out_fd) {
     free(in); free(out); free(atom_storage);
     lilv_node_free(midi_event); lilv_node_free(atom_port);
     lilv_instance_free(instance);
+    lilv_node_free(control_class); lilv_node_free(maximum); lilv_node_free(minimum);
     lilv_node_free(default_node); lilv_node_free(output);
     lilv_node_free(input); lilv_node_free(audio);
     lilv_node_free(node); lilv_world_free(world);
@@ -313,11 +360,21 @@ Lv2Worker *lv2_worker_start(const char *plugin_uri, double sample_rate,
         write_all(to_child[1],&sample_rate,sizeof(sample_rate)) &&
         write_all(to_child[1],plugin_uri,uri_length);
     Lv2FrameHeader header;
-    if (ok && read_all(from_child[0],&header,sizeof(header)) && header.ok) {
+    uint32_t control_count=0;
+    int control_ok=ok && read_all(from_child[0],&header,sizeof(header)) && header.ok &&
+        read_all(from_child[0],&control_count,sizeof(control_count)) &&
+        control_count<=LV2_WORKER_CONTROLS_MAX;
+    Lv2ControlWire controls[LV2_WORKER_CONTROLS_MAX];
+    if (control_ok && control_count &&
+        !read_all(from_child[0],controls,(size_t)control_count*sizeof(controls[0])))
+        control_ok=0;
+    if (control_ok) {
         Lv2Worker *worker=calloc(1,sizeof(*worker));
         if (worker) {
             worker->pid=pid; worker->in_fd=to_child[1]; worker->out_fd=from_child[0];
             worker->caps=header.caps;
+            worker->control_count=(int)control_count;
+            memcpy(worker->controls,controls,(size_t)control_count*sizeof(controls[0]));
             return worker;
         }
     }
@@ -419,4 +476,19 @@ pid_t lv2_worker_pid(const Lv2Worker *worker) { return worker?worker->pid:-1; }
 int lv2_worker_has_midi(const Lv2Worker *worker) { return worker && (worker->caps&1u); }
 int lv2_worker_is_instrument(const Lv2Worker *worker) {
     return worker && (worker->caps&1u) && !(worker->caps&2u) && (worker->caps&4u);
+}
+int lv2_worker_control_count(const Lv2Worker *worker) {
+    return worker?worker->control_count:0;
+}
+int lv2_worker_control(const Lv2Worker *worker, int index, uint32_t *port,
+                       char name[LV2_WORKER_CONTROL_NAME], float *min,
+                       float *max, float *value) {
+    if (!worker || index<0 || index>=worker->control_count) return 0;
+    const Lv2ControlWire *control=&worker->controls[index];
+    if (port) *port=control->index;
+    if (name) snprintf(name,LV2_WORKER_CONTROL_NAME,"%s",control->name);
+    if (min) *min=control->min;
+    if (max) *max=control->max;
+    if (value) *value=control->value;
+    return 1;
 }

@@ -1717,6 +1717,7 @@ static const char *const strudel_method_words[] = {
     "lpsync",
     "lrate",
     "lsize",
+    "lv2param",
     "markcss",
     "mask",
     "maskAll",

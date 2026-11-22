@@ -385,6 +385,20 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
     apply_fx_steps(ev,v);
     const char *sound = text_control(v,"s");
+    if (!strncmp(sound,"lv2:",4))
+        snprintf(ev->lv2_uri,sizeof(ev->lv2_uri),"%s",sound+4);
+    for (const cJSON *item=v->child; item && ev->lv2_param_count<AUDIO_LV2_PARAMS_MAX;
+         item=item->next) {
+        if (!item->string || strncmp(item->string,"lv2param_",9) ||
+            !cJSON_IsNumber(item) || !isfinite(item->valuedouble)) continue;
+        const char *name=item->string+9;
+        if (!*name || strlen(name)>=sizeof(ev->lv2_params[0].name)) continue;
+        AudioLv2Param *param=&ev->lv2_params[ev->lv2_param_count++];
+        snprintf(param->name,sizeof(param->name),"%s",name);
+        param->value=(float)item->valuedouble;
+    }
+    if (ev->lv2_param_count>0 && ev->lv2_uri[0] && !cJSON_HasObjectItem(v,"note"))
+        ev->control_only=1;
     int wavetable=!strncmp(sound,"wt_",3);
     if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;
     ev->waveform_gain=(!strcmp(sound,"saw") || !strcmp(sound,"sawtooth"))?dsp_periodic_gain(0):

@@ -38,5 +38,11 @@ pid_t lv2_worker_pid(const Lv2Worker *worker);
 int lv2_worker_has_midi(const Lv2Worker *worker);
 /* True for a MIDI instrument: atom MIDI input and no audio input. */
 int lv2_worker_is_instrument(const Lv2Worker *worker);
+/* Bounded input control-port metadata captured at startup. */
+#define LV2_WORKER_CONTROLS_MAX 16
+#define LV2_WORKER_CONTROL_NAME 64
+int lv2_worker_control_count(const Lv2Worker *worker);
+int lv2_worker_control(const Lv2Worker *worker, int index, uint32_t *port,
+    char name[LV2_WORKER_CONTROL_NAME], float *min, float *max, float *value);
 
 #endif

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -118,6 +119,28 @@ static void test_engine_midi(void) {
     printf("LV2 engine MIDI dispatch uses live slot %d\n",ev.live_lv2-1);
 }
 
+/* Bounded control-port metadata is captured at startup and can be addressed
+   by port index; the MIDI fixture declares Gain at port 2. */
+static void test_control_metadata(void) {
+    char error[512]="";
+    Lv2Worker *worker=lv2_worker_start("urn:tompouce:test:midi-synth",44100,
+        error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 control metadata: %s\n",error[0]?error:"unavailable"); return; }
+    assert(lv2_worker_control_count(worker)>=1);
+    int found=0;
+    for (int i=0;i<lv2_worker_control_count(worker);i++) {
+        uint32_t port=0; char name[64]=""; float min=0,max=0,value=0;
+        assert(lv2_worker_control(worker,i,&port,name,&min,&max,&value));
+        if (!strcasecmp(name,"Gain")) {
+            found=1;
+            assert(port==2 && min==0 && max==1 && value==1);
+        }
+    }
+    assert(found);
+    lv2_worker_stop(worker);
+    puts("LV2 control metadata ok");
+}
+
 /* A deterministic instrument reference render: the LSP oscillator becomes an
    owned PCM buffer through the same worker protocol. Strudel.cc has no LV2
    counterpart, so this pinned hash is the reference gate for the instrument
@@ -199,6 +222,7 @@ static void test_engine_resolution(void) {
 int main(void) {
     test_midi();
     test_midi_timing();
+    test_control_metadata();
     test_engine_resolution();
     test_engine_midi();
     test_instrument_reference();

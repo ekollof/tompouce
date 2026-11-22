@@ -188,9 +188,20 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   playback stops, and a dead worker or full queue only yields silence.
   `test_live_lv2` and its sanitized build cover the ring, timed note/CC, queue
   bounds and shutdown; a headless engine run reported `voices=0` and peak
-  0.504, and cutoff 20 (CC 74=0) silenced the fixture. Mid-note
-  parameter/preset changes through LV2 state mapped to existing sliders remain
-  open.
+  0.504, and cutoff 20 (CC 74=0) silenced the fixture.
+
+  Control-port changes are live. Startup captures bounded input control
+  metadata (port index, display name, declared min/max/default). A pattern can
+  attach `Pattern.lv2param(name, value)` with a number, slider or any pattern;
+  names match case-insensitively and values are clamped to the declared range.
+  The render thread applies queued values with `lv2_worker_set_control` before
+  the next 256-frame block, so a parameter can change while a note is held. A
+  parameter pattern without a note becomes a control-only event and does not
+  retrigger the instrument. `test_live_lv2` covers the metadata, a mid-note Gain
+  change and the bounded control queue under the sanitized worker. A headless
+  engine run measured a long note's scope RMS 0.291/peak 0.502, and with
+  `.lv2param('Gain', .25)` RMS 0.071/peak 0.126, with `voices=0` and no gaps.
+  LV2 state/preset files remain open.
 
   For effects and plugins without a MIDI input, the offline path is in place:
   `s('lv2:<uri>')` is prepared off the audio callback through the worker

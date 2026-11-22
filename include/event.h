@@ -41,6 +41,12 @@ typedef struct {
 
 typedef struct StretchBuffer StretchBuffer;
 
+#define AUDIO_LV2_PARAMS_MAX 8
+typedef struct {
+    char name[64];
+    float value;
+} AudioLv2Param;
+
 typedef struct {
     unsigned generation; /* 0 = legacy; JS generation must match the queue */
     unsigned scope_mask; /* visualization call sites attached to this pattern */
@@ -63,6 +69,9 @@ typedef struct {
     int wt;             // wavetable index when inst == INST_WT, else -1
     int smp;            // sample id when track has bank, else -1
     int live_lv2;       // 0 = none, otherwise scheduler-owned live slot + 1
+    char lv2_uri[256];
+    int lv2_param_count;
+    AudioLv2Param lv2_params[AUDIO_LV2_PARAMS_MAX];
     double att;         // attack seconds, -1 = default
     double rel;         // release seconds, -1 = default
     double fx_release;  /* optional downstream effect cleanup extension */

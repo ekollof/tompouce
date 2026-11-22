@@ -19,6 +19,12 @@ int live_lv2_acquire(const char *uri, double sample_rate, double now,
 int live_lv2_note(int slot, double at, double duration, int channel, int note,
     int velocity, int cc, int cc_value);
 int live_lv2_cc(int slot, double at, int channel, int control, int value);
+/* Queue a named LV2 control-port value at `at`; bounded metadata clamps it. */
+int live_lv2_control(int slot, double at, const char *name, float value);
+/* Inspect the bounded control-port metadata copied at acquisition. */
+int live_lv2_parameter_count(int slot);
+int live_lv2_parameter_info(int slot, int index, char name[64], float *min,
+    float *max, float *value);
 /* Queue MIDI all-notes-off on every channel (scheduler thread only). */
 void live_lv2_all_notes_off(void);
 /* Add available stereo frames to left/right; missing frames are left
@@ -27,5 +33,7 @@ void live_lv2_mix(float *left, float *right, unsigned frames);
 /* Stop every worker/thread and release slots. Never call from the callback. */
 void live_lv2_shutdown(void);
 unsigned long long live_lv2_underruns(void);
+/* Next audio time the render thread will produce, in seconds. */
+double live_lv2_time(int slot);
 
 #endif

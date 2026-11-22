@@ -472,6 +472,18 @@ per node and 262,144 total samples per voice. Native voice state is allocated
 before taking the voice lock and has a shared 64 MiB budget. Neither preparation,
 allocation, cache eviction nor JavaScript execution occurs in the callback.
 
+### Live LV2 instruments
+
+`s('lv2:<uri>')` uses a scheduler-owned live instance when the plugin reports
+MIDI input and no audio input; effects keep the offline path. The instance runs
+in a confined worker with a bounded render thread, stereo ring and note/CC
+queue. `Pattern.lv2param(name, value)` sets an input control port by its display
+name (case-insensitive, clamped to the declared range) and accepts a number,
+slider or pattern. Without a note the event only changes parameters, so a
+separate long note keeps sounding. Control changes are applied between
+256-frame blocks. `test_live_lv2` and `test_lv2_worker` cover the metadata,
+timing, queue bounds and sanitized worker; LV2 state/preset files remain open.
+
 ### OSC output
 
 ```js

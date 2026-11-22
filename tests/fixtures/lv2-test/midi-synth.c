@@ -11,6 +11,7 @@
 
 typedef struct {
     const LV2_Atom_Sequence *events;
+    const float *gain;
     float *out;
     double rate;
     double phase, frequency, amplitude, cc;
@@ -31,11 +32,13 @@ static void connect_port(LV2_Handle handle, uint32_t port, void *data) {
     if (!synth) return;
     if (port==0) synth->events=data;
     else if (port==1) synth->out=data;
+    else if (port==2) synth->gain=data;
 }
 
 static void generate(TestMidiSynth *synth, uint32_t begin, uint32_t end) {
     double phase=synth->phase;
     double scale=synth->active?synth->amplitude*synth->cc:0;
+    if (synth->gain) scale*=*synth->gain;
     for (uint32_t i=begin;i<end;i++) {
         double sample=(2*phase-1)*scale;
         if (synth->out) synth->out[i*2]=synth->out[i*2+1]=(float)sample;

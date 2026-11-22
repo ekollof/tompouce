@@ -1,10 +1,12 @@
-/* Scheduler-owned live LV2 instrument: bounded thread, ring and note/CC
-   queue. The self-contained MIDI fixture is loaded from LV2_PATH. */
+/* Scheduler-owned live LV2 instrument: bounded thread, ring, note/CC queue
+   and control-port updates. The self-contained MIDI fixture is loaded from
+   LV2_PATH. */
 #include "live_lv2.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 static double mix_energy(unsigned frames) {
@@ -17,6 +19,7 @@ static double mix_energy(unsigned frames) {
         live_lv2_mix(left,right,count);
         for (unsigned i=0;i<count;i++)
             energy+=fabs(left[i])+fabs(right[i]);
+        usleep(1000); /* let the render thread refill its bounded ring */
     }
     return energy;
 }
@@ -29,23 +32,56 @@ int main(void) {
         printf("SKIP live LV2: %s\n",error[0]?error:"unavailable");
         return 0;
     }
+    assert(live_lv2_parameter_count(slot)>=1);
+    int gain_index=-1;
+    for (int i=0;i<live_lv2_parameter_count(slot);i++) {
+        char name[64]=""; float min=0,max=0,value=0;
+        assert(live_lv2_parameter_info(slot,i,name,&min,&max,&value));
+        if (!strcasecmp(name,"Gain")) {
+            gain_index=i;
+            assert(min==0 && max==1 && value==1);
+        }
+    }
+    assert(gain_index>=0);
     usleep(80000);
     assert(mix_energy(2048)<1e-6); /* silence before any note */
 
-    assert(live_lv2_note(slot,0,.15,0,57,127,-1,0));
-    usleep(50000);
-    assert(mix_energy(44100/4)>1);
+    double now=live_lv2_time(slot)+.02;
+    assert(live_lv2_note(slot,now,.15,0,57,127,-1,0));
+    usleep(80000);
+    double first_energy=mix_energy(44100/4);
+    assert(first_energy>1);
 
     /* The note-off lands at 0.15 s; after draining the ring the instrument is
        silent again. */
     assert(mix_energy(44100/2)<1e-6);
 
+    /* A long note keeps sounding while a named control changes mid-note. */
+    now=live_lv2_time(slot)+.02;
+    assert(live_lv2_note(slot,now,.6,0,57,127,-1,0));
+    usleep(80000);
+    double full=mix_energy(44100/5);
+    assert(full>10);
+    assert(live_lv2_control(slot,live_lv2_time(slot),"Gain",.25f));
+    usleep(30000);
+    mix_energy(44100/10); /* transition through the ring target */
+    double quiet=mix_energy(44100/10);
+    assert(quiet>0 && quiet<full*.6);
+    assert(live_lv2_control(slot,live_lv2_time(slot),"Gain",1.0f));
+    usleep(30000);
+    mix_energy(44100/10);
+    double loud=mix_energy(44100/10);
+    assert(loud>quiet*2);
+    mix_energy(44100/2);
+
     /* CC 74 = 0 before note-on silences the fixture; CC 74 = 127 restores it. */
-    assert(live_lv2_note(slot,0,.1,0,57,127,74,0));
-    usleep(50000);
+    now=live_lv2_time(slot)+.02;
+    assert(live_lv2_note(slot,now,.1,0,57,127,74,0));
+    usleep(80000);
     assert(mix_energy(22050)<1e-6);
-    assert(live_lv2_note(slot,0,.1,0,57,127,74,127));
-    usleep(50000);
+    now=live_lv2_time(slot)+.02;
+    assert(live_lv2_note(slot,now,.1,0,57,127,74,127));
+    usleep(80000);
     assert(mix_energy(22050)>1);
     assert(mix_energy(44100/2)<1e-6);
 
@@ -58,7 +94,9 @@ int main(void) {
     assert(!live_lv2_note(slot,-1,.1,0,60,100,-1,0));
     assert(!live_lv2_note(slot,0,.1,16,60,100,-1,0));
     assert(!live_lv2_cc(slot,0,0,128,0));
+    assert(!live_lv2_control(slot,0,"NoSuchParameter",1));
+    assert(!live_lv2_control(-1,0,"Gain",1));
     live_lv2_shutdown();
-    puts("live LV2 instrument ring, note/CC queue and silence after note-off ok");
+    puts("live LV2 ring, note/CC, mid-note controls and bounded queues ok");
     return 0;
 }

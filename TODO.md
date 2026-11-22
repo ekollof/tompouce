@@ -117,13 +117,26 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       the sanitized worker passes with `TOMPOUCE_LV2_WORKER_SANITIZE=1`. A
       headless engine run measured `voices=0` and peak 0.504 for the fixture,
       and cutoff 20 (CC 74=0) silenced it.
-- [ ] Mid-note parameter/preset changes through LV2 state mapped to existing
+- [x] Mid-note LV2 control-port changes. The worker captures bounded input
+      control metadata (port index, display name, declared min/max/default) at
+      startup; `live_lv2_control` resolves names case-insensitively, clamps to
+      the declared range and queues timed updates for the render thread, which
+      applies them with `lv2_worker_set_control` before the next block.
+      `Pattern.lv2param(name, value)` attaches the value to the event (a
+      slider or any pattern works); a pattern with no note becomes a
+      control-only event, so a separate long note keeps sounding while the
+      parameter changes. `test_live_lv2` covers the metadata, a mid-note Gain
+      change and the bounded control queue under the sanitized worker;
+      `test_lv2_worker` checks the worker metadata. A headless engine run
+      measured a long note's scope RMS 0.291 and peak 0.502, and with
+      `.lv2param('Gain', .25)` RMS 0.071 and peak 0.126, with `voices=0` and no
+      gaps.
+- [ ] LV2 state/preset files (not just control-port values) mapped to existing
       sliders. Live slots persist for the session (bounded at eight), receive
       all-notes-off when playback stops, and rely on the render thread for
       best-effort latency; per-plugin crash isolation must not take down or
-      stall playback. Discovery now reads bounded control-port metadata (port
-      index, name, declared min/max/default) for all safe plugins — 3155 ports
-      across 219 plugins on this box — so slider mapping has a stable reference.
+      stall playback. Discovery reads control-port metadata for all safe
+      plugins — 3155 ports across 219 plugins on this box.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

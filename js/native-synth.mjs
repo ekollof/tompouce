@@ -227,4 +227,24 @@ export function installNative(core) {
     if (!inputs.length) return this.fmap(value=>({...value,workletSrc:code,workletInputs:[]}));
     return original.call(this,code,...inputs);
   };
+  /**
+   * Set a named LV2 control-port value on a live instrument. The name is
+   * matched case-insensitively against the plugin's bounded control metadata;
+   * the value is clamped to its declared range. Without a note this emits a
+   * control-only event, so a separate long note keeps sounding while the
+   * parameter changes.
+   * @name lv2param
+   * @param {string} name control-port display name, at most 64 characters
+   * @param {number | Pattern} value
+   * @example
+   * s('lv2:urn:example:synth').lv2param('Gain', slider(.5, 0, 1))
+   */
+  core.Pattern.prototype.lv2param=function(name,value) {
+    if (typeof name!=='string' || !name || name.length>64 ||
+        /[\u0000-\u001f]/.test(name))
+      throw new Error('Invalid LV2 parameter name');
+    const key='lv2param_'+name;
+    return this.withValue(value=>(parameter)=>({...value,[key]:parameter}))
+      .appLeft(core.reify(value));
+  };
 }

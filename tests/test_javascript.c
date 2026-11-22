@@ -645,6 +645,18 @@ static void test_tutorial(void) {
     puts("All 22 tutorial starters/answers query five cycles without warnings; control timing, periodic transforms and transposition verified");
 }
 
+static void test_lv2param_control(void) {
+    const char *code="const g=slider(0.25,0,1); note(57).s('lv2:urn:tompouce:test:midi-synth').lv2param('Gain',g)";
+    JsProgram *program;
+    cJSON *haps=query(code,&program);
+    cJSON *audio=javascript_query_audio(program,0,1,.5);
+    assert(cJSON_GetArraySize(audio)>=1);
+    cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(audio,0),"value");
+    cJSON *gain=cJSON_GetObjectItemCaseSensitive(value,"lv2param_Gain");
+    assert(cJSON_IsNumber(gain) && fabs(gain->valuedouble-.25)<1e-9);
+    cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
+}
+
 int main(int argc, char **argv) {
     if ((argc==4 || argc==5) && !strcmp(argv[1],"--prebake-reference")) {
         int cycles=1;
@@ -693,6 +705,7 @@ int main(int argc, char **argv) {
     test_switchangel_fx();
     test_switchangel_humanize();
     test_switchangel_bmod();
+    test_lv2param_control();
     JsProgram *program;
     cJSON *midi_haps = query("import {csoundm} from '@strudel/csound'; note(60.5).csoundm(1.25)",&program);
     const cJSON *midi_value = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(midi_haps,0),"value");

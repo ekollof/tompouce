@@ -317,10 +317,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       - [ ] Move sample source/envelope and per-voice DSP work into the block
         path; routing alone does not reduce the hot render cost. Two trials
         were reverted: four-frame lookahead of individual sample voices (max
-        ~4.4 ms, two gaps) and a four-voice SoA sample pass with AoS
-        gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks). The next attempt
-        needs a native SoA `Voice` layout with filters/envelopes operating on
-        lanes directly; grouping AoS voices is not enough.
+        ~4.4 ms, two gaps), a four-voice SoA sample pass with AoS
+        gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks), and a
+        block-boundary native SoA copy of four sample voices (max ~4.18 ms, one
+        gap). All were reverted. The next attempt needs the entire voice/DSP
+        state to live in SoA arrays from allocation through retirement; copying
+        AoS voices into lanes at a block boundary is still not enough.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

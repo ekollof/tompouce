@@ -176,6 +176,56 @@ static void test_presets(void) {
     puts("LV2 preset loading and control mapping ok");
 }
 
+/* Render one note and return its absolute stereo energy. */
+static double note_energy(Lv2Worker *worker) {
+    float in[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS]={0};
+    float out[LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS];
+    const unsigned char on[3]={0x90,57,127};
+    char error[256]="";
+    assert(lv2_worker_send_midi(worker,on,3,error,sizeof(error)));
+    assert(lv2_worker_process(worker,in,out,LV2_WORKER_FRAMES,error,sizeof(error)));
+    double energy=0;
+    for (int i=0;i<LV2_WORKER_FRAMES*2;i++) energy+=fabs(out[i]);
+    return energy;
+}
+
+/* A state file restores arbitrary plugin properties through the LV2 state
+   interface and maps declared control-port values to the worker cache. */
+static void test_states(void) {
+    if (!getenv("TOMPOUCE_LV2_STATE")) {
+        puts("SKIP LV2 state files: TOMPOUCE_LV2_STATE is unset");
+        return;
+    }
+    char error[512]="";
+    Lv2Worker *worker=lv2_worker_start("urn:tompouce:test:midi-synth",44100,
+        error,sizeof(error));
+    if (!worker) { printf("SKIP LV2 state files: %s\n",error[0]?error:"unavailable"); return; }
+    double full=note_energy(worker);
+    assert(full>1);
+    assert(lv2_worker_load_state(worker,"midi-state-property.ttl",
+        error,sizeof(error)));
+    double property=note_energy(worker);
+    assert(property>0 && property<full*.4);
+    assert(lv2_worker_load_state(worker,"midi-state.ttl",error,sizeof(error)));
+    int found=0; float gain=0;
+    for (int i=0;i<lv2_worker_control_count(worker);i++) {
+        char name[64]=""; float min=0,max=0,value=0;
+        assert(lv2_worker_control(worker,i,NULL,name,&min,&max,&value));
+        if (!strcasecmp(name,"Gain")) { found=1; gain=value; }
+    }
+    assert(found && fabs(gain-.5)<1e-6);
+    double quiet=note_energy(worker);
+    assert(quiet>0 && quiet<property*.7);
+    assert(!lv2_worker_load_state(worker,"midi-state-wrong.ttl",error,sizeof(error)));
+    assert(!lv2_worker_load_state(worker,"../midi-state.ttl",error,sizeof(error)));
+    assert(!lv2_worker_load_state(worker,"missing.ttl",error,sizeof(error)));
+    /* A rejected request still drains its reply; the next command works. */
+    assert(lv2_worker_load_state(worker,"midi-state-property.ttl",
+        error,sizeof(error)));
+    lv2_worker_stop(worker);
+    puts("LV2 state-file restore and control mapping ok");
+}
+
 /* A deterministic instrument reference render: the LSP oscillator becomes an
    owned PCM buffer through the same worker protocol. Strudel.cc has no LV2
    counterpart, so this pinned hash is the reference gate for the instrument
@@ -259,6 +309,7 @@ int main(void) {
     test_midi_timing();
     test_control_metadata();
     test_presets();
+    test_states();
     test_engine_resolution();
     test_engine_midi();
     test_instrument_reference();

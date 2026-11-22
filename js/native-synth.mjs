@@ -262,4 +262,20 @@ export function installNative(core) {
       throw new Error('Invalid LV2 preset');
     return this.withValue(value=>({...value,lv2preset:name}));
   };
+  /**
+   * Load an LV2 state file on a live instrument. The file is resolved under
+   * $XDG_CONFIG_HOME/tompouce/lv2-state (or $TOMPOUCE_LV2_STATE) and restored
+   * inside the confined worker; declared control ports update the mapped
+   * sliders. Without a note this emits a control-only event.
+   * @name lv2state
+   * @param {string} name relative state file name, at most 239 characters
+   * @example
+   * s('lv2:urn:example:synth').lv2state('my-patch.ttl')
+   */
+  core.Pattern.prototype.lv2state=function(name) {
+    if (typeof name!=='string' || !name || name.length>=240 ||
+        /[\u0000-\u001f]/.test(name))
+      throw new Error('Invalid LV2 state');
+    return this.withValue(value=>({...value,lv2state:name}));
+  };
 }

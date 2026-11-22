@@ -1,0 +1,16 @@
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+@prefix state: <http://lv2plug.in/ns/ext/state#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix tompouce: <urn:tompouce:test:state#> .
+
+<urn:tompouce:test:midi-synth#state-loud>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:midi-synth> ;
+    lv2:port [
+        lv2:symbol "gain" ;
+        pset:value 1.0
+    ] ;
+    state:state [
+        tompouce:gain "1.0"^^xsd:float
+    ] .

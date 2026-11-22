@@ -71,6 +71,7 @@ typedef struct {
     int live_lv2;       // 0 = none, otherwise scheduler-owned live slot + 1
     char lv2_uri[256];
     char lv2_preset[128];
+    char lv2_state[240];
     int lv2_param_count;
     AudioLv2Param lv2_params[AUDIO_LV2_PARAMS_MAX];
     double att;         // attack seconds, -1 = default

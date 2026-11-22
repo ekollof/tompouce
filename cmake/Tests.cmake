@@ -19,7 +19,9 @@ target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 if(LILV_FOUND)
     set(LV2_TEST_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/tests/lv2-fixture")
     set(LV2_TEST_BUNDLE "${LV2_TEST_FIXTURE}/tompouce-test.lv2")
+    set(LV2_TEST_STATE "${CMAKE_CURRENT_BINARY_DIR}/tests/lv2-state")
     file(MAKE_DIRECTORY "${LV2_TEST_BUNDLE}")
+    file(MAKE_DIRECTORY "${LV2_TEST_STATE}")
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/manifest.ttl"
         "${LV2_TEST_BUNDLE}/manifest.ttl" COPYONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/gain.ttl"
@@ -28,6 +30,14 @@ if(LILV_FOUND)
         "${LV2_TEST_BUNDLE}/midi-synth.ttl" COPYONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-preset.ttl"
         "${LV2_TEST_BUNDLE}/midi-preset.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-state.ttl"
+        "${LV2_TEST_STATE}/midi-state.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-state-loud.ttl"
+        "${LV2_TEST_STATE}/midi-state-loud.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-state-property.ttl"
+        "${LV2_TEST_STATE}/midi-state-property.ttl" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lv2-test/midi-state-wrong.ttl"
+        "${LV2_TEST_STATE}/midi-state-wrong.ttl" COPYONLY)
     add_library(tompouce_lv2_test_gain MODULE tests/fixtures/lv2-test/gain.c)
     set_target_properties(tompouce_lv2_test_gain PROPERTIES
         PREFIX "" OUTPUT_NAME "gain" LIBRARY_OUTPUT_DIRECTORY "${LV2_TEST_BUNDLE}")
@@ -37,10 +47,10 @@ if(LILV_FOUND)
     add_dependencies(test_lv2_worker tompouce_lv2_test_gain tompouce_lv2_test_midi)
     add_test(NAME lv2_worker_fixture COMMAND test_lv2_worker)
     set_tests_properties(lv2_worker_fixture PROPERTIES
-        ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE};TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain"
+        ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE};TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain;TOMPOUCE_LV2_STATE=${LV2_TEST_STATE}"
         TIMEOUT 120)
     set_tests_properties(live_lv2 PROPERTIES
-        ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE}" TIMEOUT 120)
+        ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE};TOMPOUCE_LV2_STATE=${LV2_TEST_STATE}" TIMEOUT 120)
     add_dependencies(test_live_lv2 tompouce_lv2_test_midi)
 endif()
 
@@ -374,11 +384,13 @@ if(LILV_FOUND)
     set(LV2_SANITIZE_COMMAND COMMAND "${CMAKE_COMMAND}" -E env
         "LV2_PATH=${LV2_TEST_FIXTURE}"
         "TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain"
+        "TOMPOUCE_LV2_STATE=${LV2_TEST_STATE}"
         "TOMPOUCE_LV2_WORKER_SANITIZE=1"
         $<TARGET_FILE:test_lv2_worker_sanitize>)
     set(LV2_SANITIZE_DEPENDENCY tompouce_lv2_test_gain tompouce_lv2_test_midi)
     set(LIVE_LV2_SANITIZE_COMMAND COMMAND "${CMAKE_COMMAND}" -E env
         "LV2_PATH=${LV2_TEST_FIXTURE}"
+        "TOMPOUCE_LV2_STATE=${LV2_TEST_STATE}"
         "TOMPOUCE_LV2_WORKER_SANITIZE=1"
         $<TARGET_FILE:test_live_lv2_sanitize>)
 endif()

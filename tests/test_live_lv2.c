@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
@@ -90,6 +91,34 @@ int main(void) {
     assert(!live_lv2_preset(slot,0,""));
     mix_energy(44100);
     assert(live_lv2_control(slot,live_lv2_time(slot),"Gain",1.0f));
+
+    /* State files restore plugin properties and port values while a note is
+       held; a property-only state still changes the sound. */
+    if (getenv("TOMPOUCE_LV2_STATE")) {
+        now=live_lv2_time(slot)+.02;
+        assert(live_lv2_note(slot,now,2.0,0,57,127,-1,0));
+        usleep(80000);
+        double state_full=mix_energy(44100/5);
+        assert(state_full>10);
+        assert(live_lv2_state(slot,live_lv2_time(slot),"midi-state-property.ttl"));
+        usleep(30000);
+        mix_energy(44100/10);
+        double state_property=mix_energy(44100/10);
+        assert(state_property>0 && state_property<state_full*.4);
+        assert(live_lv2_state(slot,live_lv2_time(slot),"midi-state.ttl"));
+        usleep(30000);
+        mix_energy(44100/10);
+        double state_quiet=mix_energy(44100/10);
+        assert(state_quiet>0 && state_quiet<state_property*.7);
+        assert(live_lv2_state(slot,live_lv2_time(slot),"midi-state-loud.ttl"));
+        usleep(30000);
+        mix_energy(44100/10);
+        double state_loud=mix_energy(44100/10);
+        assert(state_loud>state_property*2);
+        assert(!live_lv2_state(-1,0,"midi-state.ttl"));
+        assert(!live_lv2_state(slot,0,""));
+        mix_energy(44100*3/2);
+    }
 
     /* CC 74 = 0 before note-on silences the fixture; CC 74 = 127 restores it. */
     now=live_lv2_time(slot)+.02;

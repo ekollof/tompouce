@@ -140,12 +140,24 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       change; `test_live_lv2` changes a preset mid-note under the sanitized
       worker. A headless engine run measured RMS 0.294 for a long note and 0.074
       with `.lv2preset('Quiet')`, with `voices=0`.
-- [ ] Arbitrary LV2 state files and plugin-specific state (not declared control
-      ports) mapped to existing sliders. Live slots persist for the session
-      (bounded at eight), receive all-notes-off when playback stops, and rely on
-      the render thread for best-effort latency; per-plugin crash isolation must
-      not take down or stall playback. Discovery reads control-port metadata for
-      all safe plugins — 3155 ports across 219 plugins on this box.
+- [x] Arbitrary LV2 state-file restore with control mapping. `Pattern.lv2state`
+      resolves a bounded relative path under `$XDG_CONFIG_HOME/tompouce/lv2-state`
+      (or `$TOMPOUCE_LV2_STATE`), rejects traversal and symlinks escaping that
+      root, and limits regular files to 256 KiB. The confined worker parses the
+      file with `lilv_state_new_from_file`, verifies `lv2:appliesTo`, restores
+      plugin `state:state` properties through `lilv_state_restore`, and maps
+      declared `lv2:port` values to the cached control metadata and sliders.
+      A property-only fixture state changes the sound without any port value; a
+      combined state also updates Gain. `test_lv2_worker` covers properties,
+      port mapping, wrong-plugin, traversal and missing-file rejection;
+      `test_live_lv2` applies states mid-note under the sanitized worker. A
+      headless engine run measured scope RMS 0.035 for the combined state and
+      0.074 for the property-only state, with `voices=0` and no gaps. Live slots
+      persist for the session (bounded at eight), receive all-notes-off when
+      playback stops, and rely on the render thread for best-effort latency;
+      per-plugin crash isolation does not take down playback. Discovery reads
+      control-port metadata for all safe plugins — 3155 ports across 219 plugins
+      on this box.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

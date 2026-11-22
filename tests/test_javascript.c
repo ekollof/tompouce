@@ -664,6 +664,15 @@ static void test_lv2param_control(void) {
     cJSON *preset=cJSON_GetObjectItemCaseSensitive(value,"lv2preset");
     assert(cJSON_IsString(preset) && !strcmp(preset->valuestring,"Quiet"));
     cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
+
+    const char *state_code="s('lv2:urn:tompouce:test:midi-synth').lv2state('midi-state.ttl')";
+    haps=query(state_code,&program);
+    audio=javascript_query_audio(program,0,1,.5);
+    assert(cJSON_GetArraySize(audio)>=1);
+    value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(audio,0),"value");
+    cJSON *state=cJSON_GetObjectItemCaseSensitive(value,"lv2state");
+    assert(cJSON_IsString(state) && !strcmp(state->valuestring,"midi-state.ttl"));
+    cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
 }
 
 int main(int argc, char **argv) {

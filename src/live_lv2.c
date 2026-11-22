@@ -39,6 +39,11 @@ typedef struct {
     char name[128];
 } LivePreset;
 #define LIVE_PRESETS 8
+typedef struct {
+    double at;
+    char name[LV2_WORKER_STATE_NAME];
+} LiveState;
+#define LIVE_STATES 8
 
 typedef struct {
     char uri[LIVE_URI_MAX+1];
@@ -58,6 +63,8 @@ typedef struct {
     int control_event_count;
     LivePreset presets[LIVE_PRESETS];
     int preset_count;
+    LiveState states[LIVE_STATES];
+    int state_count;
 } LiveSlot;
 
 static LiveSlot slots[LIVE_LV2_SLOTS];
@@ -80,6 +87,22 @@ static void event_insert_sorted(LiveEvent *events, int count, LiveEvent event) {
     events[at]=event;
 }
 
+/* Copy the worker's control metadata into the slot. The caller holds
+   queue_lock so parameter inspection and queued updates see one snapshot. */
+static void refresh_controls(LiveSlot *slot) {
+    for (int c=0;c<slot->control_count;c++) {
+        uint32_t port=0; char name[LV2_WORKER_CONTROL_NAME]="";
+        float min=0,max=0,value=0;
+        if (lv2_worker_control(slot->worker,c,&port,name,&min,&max,&value)) {
+            slot->controls[c].port=port;
+            slot->controls[c].min=min;
+            slot->controls[c].max=max;
+            slot->controls[c].value=value;
+            snprintf(slot->controls[c].name,sizeof(slot->controls[c].name),"%s",name);
+        }
+    }
+}
+
 static void *live_thread(void *argument) {
     LiveSlot *slot=argument;
     float input[LIVE_BLOCK*LV2_WORKER_CHANNELS]={0};
@@ -95,6 +118,8 @@ static void *live_thread(void *argument) {
             continue;
         }
         double now=slot->start_time+(double)atomic_load_explicit(&slot->rendered,memory_order_relaxed)/slot->rate;
+        LiveState due_states[4];
+        int due_states_count=0, keep_states=0;
         LivePreset due_presets[4];
         int due_presets_count=0, keep_presets=0;
         LiveControlEvent due_controls[16];
@@ -102,6 +127,13 @@ static void *live_thread(void *argument) {
         LiveEvent due[LV2_WORKER_MIDI_EVENTS];
         int due_count=0, keep=0;
         pthread_mutex_lock(&queue_lock);
+        for (int i=0;i<slot->state_count;i++) {
+            LiveState state=slot->states[i];
+            if (state.at<=now+block_seconds && due_states_count<4)
+                due_states[due_states_count++]=state;
+            else slot->states[keep_states++]=state;
+        }
+        slot->state_count=keep_states;
         for (int i=0;i<slot->preset_count;i++) {
             LivePreset preset=slot->presets[i];
             if (preset.at<=now+block_seconds && due_presets_count<4)
@@ -124,23 +156,21 @@ static void *live_thread(void *argument) {
         }
         slot->event_count=keep;
         pthread_mutex_unlock(&queue_lock);
+        for (int i=0;i<due_states_count;i++) {
+            char state_error[256];
+            if (lv2_worker_load_state(slot->worker,due_states[i].name,
+                state_error,sizeof(state_error))) {
+                pthread_mutex_lock(&queue_lock);
+                refresh_controls(slot);
+                pthread_mutex_unlock(&queue_lock);
+            }
+        }
         for (int i=0;i<due_presets_count;i++) {
             char preset_error[256];
             if (lv2_worker_load_preset(slot->worker,due_presets[i].name,
                 preset_error,sizeof(preset_error))) {
                 pthread_mutex_lock(&queue_lock);
-                for (int c=0;c<slot->control_count;c++) {
-                    uint32_t port=0; char name[LV2_WORKER_CONTROL_NAME]="";
-                    float min=0,max=0,value=0;
-                    if (lv2_worker_control(slot->worker,c,&port,name,&min,&max,&value)) {
-                        slot->controls[c].port=port;
-                        slot->controls[c].min=min;
-                        slot->controls[c].max=max;
-                        slot->controls[c].value=value;
-                        snprintf(slot->controls[c].name,
-                            sizeof(slot->controls[c].name),"%s",name);
-                    }
-                }
+                refresh_controls(slot);
                 pthread_mutex_unlock(&queue_lock);
             }
         }
@@ -229,6 +259,9 @@ int live_lv2_acquire(const char *uri, double sample_rate, double now,
     atomic_store(&target->read_index,0);
     atomic_store(&target->write_index,0);
     target->event_count=0;
+    target->control_event_count=0;
+    target->preset_count=0;
+    target->state_count=0;
     target->control_count=lv2_worker_control_count(worker);
     if (target->control_count>LV2_WORKER_CONTROLS_MAX)
         target->control_count=LV2_WORKER_CONTROLS_MAX;
@@ -361,6 +394,22 @@ int live_lv2_preset(int slot, double at, const char *preset) {
     return 1;
 }
 
+int live_lv2_state(int slot, double at, const char *state) {
+    if (slot<0 || slot>=LIVE_LV2_SLOTS || !isfinite(at) || !state || !*state ||
+        strlen(state)>=LV2_WORKER_STATE_NAME) return 0;
+    pthread_mutex_lock(&queue_lock);
+    LiveSlot *target=&slots[slot];
+    if (!target->worker || target->state_count>=LIVE_STATES) {
+        pthread_mutex_unlock(&queue_lock);
+        return 0;
+    }
+    LiveState *event=&target->states[target->state_count++];
+    event->at=at;
+    snprintf(event->name,sizeof(event->name),"%s",state);
+    pthread_mutex_unlock(&queue_lock);
+    return 1;
+}
+
 int live_lv2_cc(int slot, double at, int channel, int control, int value) {
     if (slot<0 || slot>=LIVE_LV2_SLOTS || !isfinite(at) || channel<0 ||
         channel>15 || control<0 || control>127 || value<0 || value>127) return 0;
@@ -442,6 +491,7 @@ void live_lv2_shutdown(void) {
         slot->control_event_count=0;
         slot->control_count=0;
         slot->preset_count=0;
+        slot->state_count=0;
         slot->uri[0]=0;
     }
     pthread_mutex_unlock(&registry_lock);

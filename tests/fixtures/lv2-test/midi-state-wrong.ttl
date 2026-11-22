@@ -1,0 +1,12 @@
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix pset: <http://lv2plug.in/ns/ext/presets#> .
+@prefix state: <http://lv2plug.in/ns/ext/state#> .
+
+<urn:tompouce:test:gain#state-wrong>
+    a pset:Preset ;
+    lv2:appliesTo <urn:tompouce:test:gain> ;
+    lv2:port [
+        lv2:symbol "gain" ;
+        pset:value 0.5
+    ] ;
+    state:state [] .

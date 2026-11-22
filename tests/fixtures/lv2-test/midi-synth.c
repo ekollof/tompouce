@@ -5,6 +5,8 @@
 #include <lv2/atom/atom.h>
 #include <lv2/atom/util.h>
 #include <lv2/midi/midi.h>
+#include <lv2/state/state.h>
+#include <lv2/urid/urid.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,17 +15,25 @@ typedef struct {
     const LV2_Atom_Sequence *events;
     const float *gain;
     float *out;
+    const LV2_URID_Map *map;
     double rate;
     double phase, frequency, amplitude, cc;
+    float state_gain;
     int active;
 } TestMidiSynth;
 
 static LV2_Handle instantiate(const LV2_Descriptor *descriptor, double rate,
                               const char *bundle_path,
                               const LV2_Feature *const *features) {
-    (void)descriptor; (void)bundle_path; (void)features;
+    (void)descriptor; (void)bundle_path;
     TestMidiSynth *synth=calloc(1,sizeof(TestMidiSynth));
-    if (synth) { synth->rate=rate; synth->cc=1; }
+    if (!synth) return NULL;
+    synth->rate=rate;
+    synth->cc=1;
+    synth->state_gain=1;
+    for (int i=0;features && features[i];i++)
+        if (!strcmp(features[i]->URI,LV2_URID__map))
+            synth->map=features[i]->data;
     return synth;
 }
 
@@ -38,6 +48,7 @@ static void connect_port(LV2_Handle handle, uint32_t port, void *data) {
 static void generate(TestMidiSynth *synth, uint32_t begin, uint32_t end) {
     double phase=synth->phase;
     double scale=synth->active?synth->amplitude*synth->cc:0;
+    scale*=synth->state_gain;
     if (synth->gain) scale*=*synth->gain;
     for (uint32_t i=begin;i<end;i++) {
         double sample=(2*phase-1)*scale;
@@ -84,6 +95,54 @@ static void run(LV2_Handle handle, uint32_t sample_count) {
     if (at<sample_count) generate(synth,at,sample_count);
 }
 
+static LV2_State_Status save_state(LV2_Handle handle,
+                                   LV2_State_Store_Function store,
+                                   LV2_State_Handle state, uint32_t flags,
+                                   const LV2_Feature *const *features) {
+    (void)flags; (void)features;
+    TestMidiSynth *synth=handle;
+    if (!synth || !synth->map) return LV2_STATE_ERR_NO_FEATURE;
+    uint32_t key=synth->map->map(synth->map->handle,
+        "urn:tompouce:test:state#gain");
+    uint32_t type=synth->map->map(synth->map->handle,LV2_ATOM__Float);
+    if (!key || !type) return LV2_STATE_ERR_NO_SPACE;
+    return store(state,key,&synth->state_gain,sizeof(synth->state_gain),type,
+        LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE);
+}
+
+static LV2_State_Status restore_state(LV2_Handle handle,
+                                      LV2_State_Retrieve_Function retrieve,
+                                      LV2_State_Handle state, uint32_t flags,
+                                      const LV2_Feature *const *features) {
+    (void)flags; (void)features;
+    TestMidiSynth *synth=handle;
+    if (!synth || !synth->map) return LV2_STATE_ERR_NO_FEATURE;
+    uint32_t key=synth->map->map(synth->map->handle,
+        "urn:tompouce:test:state#gain");
+    uint32_t float_type=synth->map->map(synth->map->handle,LV2_ATOM__Float);
+    uint32_t double_type=synth->map->map(synth->map->handle,LV2_ATOM__Double);
+    size_t size=0; uint32_t type=0, prop_flags=0;
+    const void *value=retrieve(state,key,&size,&type,&prop_flags);
+    if (!value) return LV2_STATE_SUCCESS;
+    if (size==sizeof(float) && type==float_type) {
+        memcpy(&synth->state_gain,value,sizeof(float));
+    } else if (size==sizeof(double) && type==double_type) {
+        double number; memcpy(&number,value,sizeof(double));
+        synth->state_gain=(float)number;
+    } else {
+        return LV2_STATE_ERR_BAD_TYPE;
+    }
+    if (!(synth->state_gain>=0 && synth->state_gain<=4))
+        synth->state_gain=1;
+    return LV2_STATE_SUCCESS;
+}
+
+static const LV2_State_Interface state_interface={save_state,restore_state};
+
+static const void *extension_data(const char *uri) {
+    return !strcmp(uri,LV2_STATE__interface)?&state_interface:NULL;
+}
+
 static void cleanup(LV2_Handle handle) { free(handle); }
 
 static const LV2_Descriptor descriptor={
@@ -94,7 +153,7 @@ static const LV2_Descriptor descriptor={
     run,
     NULL,
     cleanup,
-    NULL
+    extension_data
 };
 
 LV2_SYMBOL_EXPORT const LV2_Descriptor *lv2_descriptor(uint32_t index) {

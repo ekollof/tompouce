@@ -481,11 +481,13 @@ queue. `Pattern.lv2param(name, value)` sets an input control port by its display
 name (case-insensitive, clamped to the declared range) and accepts a number,
 slider or pattern. `Pattern.lv2preset(name)` loads an installed preset by URI
 or display label and applies its declared control-port values without
-retriggering. Without a note either method only changes parameters, so a
-separate long note keeps sounding. Control and preset changes are applied
-between 256-frame blocks; arbitrary LV2 state files and plugin-specific state
-are not accepted. `test_live_lv2` and `test_lv2_worker` cover the metadata,
-timing, queue bounds, preset loading and sanitized worker.
+retriggering. `Pattern.lv2state(name)` loads an LV2 state file from
+`$XDG_CONFIG_HOME/tompouce/lv2-state` (or `$TOMPOUCE_LV2_STATE`), restores its
+plugin properties and maps declared control-port values to the same sliders.
+Without a note these methods only change parameters, so a separate long note
+keeps sounding. Control, preset and state changes are applied between
+256-frame blocks. `test_live_lv2` and `test_lv2_worker` cover the metadata,
+timing, queue bounds, preset/state loading and sanitized worker.
 
 ### OSC output
 

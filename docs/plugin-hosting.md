@@ -212,8 +212,25 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   note is held. A headless engine run measured a long note's scope RMS 0.294,
   and with `.lv2preset('Quiet')` RMS 0.074, with `voices=0`. Preset data must be
   declared in the bundle manifest (type, `lv2:appliesTo`, `rdfs:seeAlso`) because
-  lilv does not discover unrelated preset resources. Arbitrary LV2 state files
-  and plugin-specific state remain open.
+  lilv does not discover unrelated preset resources.
+
+  Arbitrary LV2 state files load through the same confined worker.
+  `Pattern.lv2state(name)` resolves a relative ASCII path under
+  `$XDG_CONFIG_HOME/tompouce/lv2-state` (or `$TOMPOUCE_LV2_STATE`), rejects
+  traversal and symlinks escaping that root, and bounds regular files to
+  256 KiB. The child parses the file with `lilv_state_new_from_file`, checks
+  that it applies to the hosted plugin, and calls `lilv_state_restore` so
+  plugin-specific `state:state` properties are restored inside the worker.
+  Declared `lv2:port` values are mapped to the existing control sliders with
+  the same type, range and clamping rules as `.lv2param`; unknown ports and
+  non-control values stay opaque plugin state. A property-only state file still
+  changes the sound, and `.lv2state` without a note is control-only. The fixture
+  implements `LV2_State_Interface` (`urn:tompouce:test:state#gain`) so
+  `test_lv2_worker` and `test_live_lv2` cover arbitrary properties, control-port
+  mapping, wrong-plugin and traversal rejection, and the sanitized worker. A
+  headless engine run measured RMS 0.074 for a property-only state and 0.035
+  for a state with both a property and a Gain value, with `voices=0` and no
+  gaps.
 
   For effects and plugins without a MIDI input, the offline path is in place:
   `s('lv2:<uri>')` is prepared off the audio callback through the worker

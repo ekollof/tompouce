@@ -48,5 +48,12 @@ int lv2_worker_control(const Lv2Worker *worker, int index, uint32_t *port,
    control-port values. The worker reports updated controls back. */
 int lv2_worker_load_preset(Lv2Worker *worker, const char *preset,
     char *error, size_t error_size);
+/* Load an LV2 state file from the confined state root
+   ($TOMPOUCE_LV2_STATE, else $XDG_CONFIG_HOME/tompouce/lv2-state), restore the
+   plugin properties and declared control-port values, and report updated
+   controls back. `name` is a relative ASCII path within that root. */
+#define LV2_WORKER_STATE_NAME 240
+int lv2_worker_load_state(Lv2Worker *worker, const char *name,
+    char *error, size_t error_size);
 
 #endif

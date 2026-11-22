@@ -13,6 +13,7 @@
 #include <lv2/atom/util.h>
 #include <lv2/midi/midi.h>
 #include <lv2/presets/presets.h>
+#include <lv2/state/state.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -50,6 +51,7 @@ typedef struct {
 } Lv2ControlWire;
 #define LV2_WORKER_PRESET 0xFFFFFFFFu
 #define LV2_WORKER_PRESET_MAX 128
+#define LV2_WORKER_STATE 0xFFFFFFFEu
 
 struct Lv2Worker {
     pid_t pid;
@@ -93,7 +95,7 @@ static int write_all(int fd, const void *data, size_t size) {
 #if TOMPOUCE_HAVE_LV2
 typedef struct {
     uint32_t index;
-    int audio, atom, input, output, control;
+    int audio, atom, input, output, control, input_control;
     float value, min, max;
     char name[LV2_WORKER_CONTROL_NAME];
     char symbol[LV2_WORKER_CONTROL_NAME];
@@ -171,7 +173,7 @@ static int apply_preset(LilvWorld *world, const LilvPlugin *plugin,
                 float parsed=lilv_node_is_float(value)?lilv_node_as_float(value):
                     (float)lilv_node_as_int(value);
                 for (unsigned pi=0;pi<nports;pi++) {
-                    if (!ports[pi].control || strcmp(ports[pi].symbol,name)) continue;
+                    if (!ports[pi].input_control || strcmp(ports[pi].symbol,name)) continue;
                     if (parsed<ports[pi].min) parsed=ports[pi].min;
                     if (parsed>ports[pi].max) parsed=ports[pi].max;
                     ports[pi].value=parsed;
@@ -192,6 +194,151 @@ static int apply_preset(LilvWorld *world, const LilvPlugin *plugin,
     }
     if (related) lilv_nodes_free(related);
     lilv_node_free(preset_type); lilv_node_free(label_pred); lilv_node_free(name_pred);
+    return ok;
+}
+
+static int state_name_safe(const char *name) {
+    if (!name || !*name || strlen(name)>=LV2_WORKER_STATE_NAME) return 0;
+    const char *component=name;
+    for (const char *p=name;;p++) {
+        unsigned char c=(unsigned char)*p;
+        if (c=='/' || c==0) {
+            size_t length=(size_t)(p-component);
+            if (length==0 || (length==1 && component[0]=='.') ||
+                (length==2 && component[0]=='.' && component[1]=='.')) return 0;
+            if (c==0) break;
+            component=p+1;
+        } else if (!((c>='A' && c<='Z') || (c>='a' && c<='z') ||
+                     (c>='0' && c<='9') || c=='.' || c=='_' || c=='-')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* State files live in a dedicated root. The resolved path must remain inside
+   that root after symlink resolution; traversal components are rejected above. */
+static int state_file_path(const char *name, char *out, size_t outlen) {
+    if (!state_name_safe(name)) return 0;
+    char base[2048];
+    const char *root=getenv("TOMPOUCE_LV2_STATE");
+    const char *config=getenv("XDG_CONFIG_HOME");
+    const char *home=getenv("HOME");
+    if (root && *root) {
+        if (strlen(root)>=sizeof(base)) return 0;
+        snprintf(base,sizeof(base),"%s",root);
+    } else if (config && *config) {
+        if (snprintf(base,sizeof(base),"%s/tompouce/lv2-state",config)>=(int)sizeof(base))
+            return 0;
+    } else if (home && *home) {
+        if (snprintf(base,sizeof(base),"%s/.config/tompouce/lv2-state",home)>=(int)sizeof(base))
+            return 0;
+    } else {
+        return 0;
+    }
+    char candidate[4096], resolved[4096], real_root[4096];
+    if (snprintf(candidate,sizeof(candidate),"%s/%s",base,name)>=(int)sizeof(candidate) ||
+        !realpath(base,real_root) || !realpath(candidate,resolved)) return 0;
+    size_t prefix=strlen(real_root);
+    if (strncmp(resolved,real_root,prefix) ||
+        (resolved[prefix]!='/' && resolved[prefix]!=0)) return 0;
+    struct stat st;
+    if (stat(resolved,&st) || !(S_ISREG(st.st_mode) || S_ISDIR(st.st_mode))) return 0;
+    if (S_ISREG(st.st_mode)) {
+        if (st.st_size<0 || st.st_size>256*1024) return 0;
+    } else {
+        char manifest[4096];
+        int length=snprintf(manifest,sizeof(manifest),"%s/manifest.ttl",resolved);
+        if (length<0 || (size_t)length>=sizeof(manifest) ||
+            stat(manifest,&st) || !S_ISREG(st.st_mode) ||
+            st.st_size<0 || st.st_size>256*1024) return 0;
+    }
+    if (strlen(resolved)>=outlen) return 0;
+    snprintf(out,outlen,"%s",resolved);
+    return 1;
+}
+
+typedef struct {
+    Lv2PortInfo *ports;
+    unsigned nports;
+    Lv2ControlWire *controls;
+    int control_count;
+    Lv2ControlWire *updates;
+    int update_count;
+    uint32_t float_type, int_type, bool_type, double_type, long_type;
+} StateRestore;
+
+/* Port values from a state file are mapped to the same bounded control metadata
+   as live parameter changes; unknown types and unadvertised ports are ignored. */
+static void state_port_value(const char *symbol, void *handle, const void *value,
+                             uint32_t size, uint32_t type) {
+    StateRestore *restore=handle;
+    if (!restore || !symbol || !value) return;
+    double parsed=0;
+    if (size==4 && type==restore->float_type) {
+        float number; memcpy(&number,value,sizeof(number)); parsed=number;
+    } else if (size==4 && (type==restore->int_type || type==restore->bool_type)) {
+        int32_t number; memcpy(&number,value,sizeof(number)); parsed=number;
+    } else if (size==8 && type==restore->double_type) {
+        double number; memcpy(&number,value,sizeof(number)); parsed=number;
+    } else if (size==8 && type==restore->long_type) {
+        int64_t number; memcpy(&number,value,sizeof(number)); parsed=(double)number;
+    } else {
+        return;
+    }
+    if (!isfinite(parsed)) return;
+    for (unsigned pi=0;pi<restore->nports;pi++) {
+        if (!restore->ports[pi].input_control ||
+            strcmp(restore->ports[pi].symbol,symbol)) continue;
+        float number=(float)parsed;
+        if (number<restore->ports[pi].min) number=restore->ports[pi].min;
+        if (number>restore->ports[pi].max) number=restore->ports[pi].max;
+        restore->ports[pi].value=number;
+        for (int ci=0;ci<restore->control_count;ci++) {
+            if (restore->controls[ci].index!=pi) continue;
+            restore->controls[ci].value=number;
+            int existing=-1;
+            for (int u=0;u<restore->update_count;u++)
+                if (restore->updates[u].index==pi) { existing=u; break; }
+            if (existing>=0) restore->updates[existing].value=number;
+            else if (restore->update_count<LV2_WORKER_CONTROLS_MAX) {
+                restore->updates[restore->update_count++]=restore->controls[ci];
+            }
+            break;
+        }
+        break;
+    }
+}
+
+static int apply_state(LilvWorld *world, const LilvPlugin *plugin,
+                       LilvInstance *instance, LV2_URID_Map *map,
+                       Lv2PortInfo *ports, unsigned nports,
+                       Lv2ControlWire *controls, int control_count,
+                       const char *name, Lv2ControlWire *updates,
+                       int *update_count) {
+    *update_count=0;
+    char path[4096];
+    if (!state_file_path(name,path,sizeof(path))) return 0;
+    LilvState *state=lilv_state_new_from_file(world,map,NULL,path);
+    if (!state) return 0;
+    const LilvNode *state_plugin=lilv_state_get_plugin_uri(state);
+    const LilvNode *plugin_uri=lilv_plugin_get_uri(plugin);
+    int ok=state_plugin && plugin_uri && lilv_node_is_uri(state_plugin) &&
+        lilv_node_is_uri(plugin_uri) &&
+        !strcmp(lilv_node_as_uri(state_plugin),lilv_node_as_uri(plugin_uri));
+    if (ok) {
+        StateRestore restore={.ports=ports,.nports=nports,
+            .controls=controls,.control_count=control_count,
+            .updates=updates,.update_count=0};
+        restore.float_type=map->map(map->handle,LV2_ATOM__Float);
+        restore.int_type=map->map(map->handle,LV2_ATOM__Int);
+        restore.bool_type=map->map(map->handle,LV2_ATOM__Bool);
+        restore.double_type=map->map(map->handle,LV2_ATOM__Double);
+        restore.long_type=map->map(map->handle,LV2_ATOM__Long);
+        lilv_state_restore(state,instance,state_port_value,&restore,0,NULL);
+        *update_count=restore.update_count;
+    }
+    lilv_state_free(state);
     return ok;
 }
 
@@ -252,6 +399,7 @@ static int child_main(int in_fd, int out_fd) {
         ports[i].index=i;
         ports[i].audio=ports[i].atom=ports[i].input=ports[i].output=0;
         ports[i].control=0;
+        ports[i].input_control=0;
         ports[i].value=0;
         ports[i].min=0;
         ports[i].max=1;
@@ -269,15 +417,8 @@ static int child_main(int in_fd, int out_fd) {
         else if (first && lilv_node_is_int(first)) ports[i].value=lilv_node_as_int(first);
         lilv_nodes_free(defaults);
         if (ports[i].input && control_class &&
-            lilv_port_is_a(plugin,port,control_class) &&
-            control_count<LV2_WORKER_CONTROLS_MAX) {
-            ports[i].control=1;
-            LilvNode *name_node=lilv_port_get_name(plugin,port);
-            if (name_node) {
-                const char *text=lilv_node_as_string(name_node);
-                if (text) snprintf(ports[i].name,sizeof(ports[i].name),"%s",text);
-                lilv_node_free(name_node);
-            }
+            lilv_port_is_a(plugin,port,control_class)) {
+            ports[i].input_control=1;
             const LilvNode *symbol_node=lilv_port_get_symbol(plugin,port);
             if (symbol_node) {
                 const char *text=lilv_node_as_string(symbol_node);
@@ -287,18 +428,30 @@ static int child_main(int in_fd, int out_fd) {
             LilvNodes *high=maximum?lilv_port_get_value(plugin,port,maximum):NULL;
             LilvNode *low_node=low?lilv_nodes_get_first(low):NULL;
             LilvNode *high_node=high?lilv_nodes_get_first(high):NULL;
-            Lv2ControlWire *wire=&control_wire[control_count++];
-            wire->index=i;
-            wire->min=low_node && lilv_node_is_float(low_node)?lilv_node_as_float(low_node):0.0f;
-            wire->max=high_node && lilv_node_is_float(high_node)?lilv_node_as_float(high_node):1.0f;
-            wire->value=ports[i].value;
-            snprintf(wire->name,sizeof(wire->name),"%s",ports[i].name);
-            snprintf(wire->symbol,sizeof(wire->symbol),"%s",ports[i].symbol);
-            ports[i].min=wire->min; ports[i].max=wire->max;
+            float min=low_node && lilv_node_is_float(low_node)?lilv_node_as_float(low_node):0.0f;
+            float max=high_node && lilv_node_is_float(high_node)?lilv_node_as_float(high_node):1.0f;
             lilv_nodes_free(low); lilv_nodes_free(high);
-            if (!isfinite(wire->min) || !isfinite(wire->max) || wire->max<wire->min) {
-                control_count--;
-                ports[i].control=0;
+            ports[i].min=isfinite(min) && isfinite(max) && max>=min?min:0;
+            ports[i].max=isfinite(min) && isfinite(max) && max>=min?max:1;
+            if (control_count<LV2_WORKER_CONTROLS_MAX) {
+                ports[i].control=1;
+                LilvNode *name_node=lilv_port_get_name(plugin,port);
+                if (name_node) {
+                    const char *text=lilv_node_as_string(name_node);
+                    if (text) snprintf(ports[i].name,sizeof(ports[i].name),"%s",text);
+                    lilv_node_free(name_node);
+                }
+                Lv2ControlWire *wire=&control_wire[control_count++];
+                wire->index=i;
+                wire->min=min;
+                wire->max=max;
+                wire->value=ports[i].value;
+                snprintf(wire->name,sizeof(wire->name),"%s",ports[i].name);
+                snprintf(wire->symbol,sizeof(wire->symbol),"%s",ports[i].symbol);
+                if (!isfinite(wire->min) || !isfinite(wire->max) || wire->max<wire->min) {
+                    control_count--;
+                    ports[i].control=0;
+                }
             }
         }
         lilv_instance_connect_port(instance,i,&ports[i].value);
@@ -336,6 +489,22 @@ static int child_main(int in_fd, int out_fd) {
     for (;;) {
         Lv2FrameHeader header;
         if (!read_all(in_fd,&header,sizeof(header))) break;
+        if (header.frames==LV2_WORKER_STATE) {
+            if (header.bytes==0 || header.bytes>=LV2_WORKER_STATE_NAME) break;
+            char request[LV2_WORKER_STATE_NAME]={0};
+            if (!read_all(in_fd,request,header.bytes)) break;
+            Lv2ControlWire updates[LV2_WORKER_CONTROLS_MAX];
+            int update_count=0;
+            int state_ok=apply_state(world,plugin,instance,&urid_map,ports,nports,
+                control_wire,control_count,request,updates,&update_count);
+            Lv2FrameHeader reply={.frames=0,.bytes=0,.caps=0,.ok=state_ok};
+            uint32_t update_wire=(uint32_t)update_count;
+            if (!write_all(out_fd,&reply,sizeof(reply)) ||
+                !write_all(out_fd,&update_wire,sizeof(update_wire)) ||
+                (update_count && !write_all(out_fd,updates,
+                    (size_t)update_count*sizeof(updates[0])))) break;
+            continue;
+        }
         if (header.frames==LV2_WORKER_PRESET) {
             if (header.bytes==0 || header.bytes>LV2_WORKER_PRESET_MAX) break;
             char request[LV2_WORKER_PRESET_MAX+1]={0};
@@ -618,6 +787,43 @@ int lv2_worker_load_preset(Lv2Worker *worker, const char *preset,
     }
     if (!header.ok) {
         if (error && error_size) snprintf(error,error_size,"LV2 preset rejected");
+        return 0;
+    }
+    for (uint32_t u=0;u<count;u++)
+        for (int i=0;i<worker->control_count;i++)
+            if (worker->controls[i].index==updates[u].index) {
+                worker->controls[i]=updates[u];
+                break;
+            }
+    return 1;
+}
+
+int lv2_worker_load_state(Lv2Worker *worker, const char *name,
+                          char *error, size_t error_size) {
+    if (error && error_size) error[0]=0;
+    size_t length=name?strlen(name):0;
+    if (!worker || !name || length==0 || length>=LV2_WORKER_STATE_NAME) {
+        if (error && error_size) snprintf(error,error_size,"invalid LV2 state name");
+        return 0;
+    }
+    Lv2FrameHeader header={.frames=LV2_WORKER_STATE,.bytes=(uint32_t)length,.ok=0};
+    if (!write_all(worker->in_fd,&header,sizeof(header)) ||
+        !write_all(worker->in_fd,name,length) ||
+        !read_all(worker->out_fd,&header,sizeof(header))) {
+        if (error && error_size) snprintf(error,error_size,"LV2 state request failed");
+        return 0;
+    }
+    uint32_t count=0;
+    Lv2ControlWire updates[LV2_WORKER_CONTROLS_MAX];
+    if (!read_all(worker->out_fd,&count,sizeof(count)) ||
+        count>LV2_WORKER_CONTROLS_MAX ||
+        (count && !read_all(worker->out_fd,updates,
+            (size_t)count*sizeof(updates[0])))) {
+        if (error && error_size) snprintf(error,error_size,"LV2 state response failed");
+        return 0;
+    }
+    if (!header.ok) {
+        if (error && error_size) snprintf(error,error_size,"LV2 state rejected");
         return 0;
     }
     for (uint32_t u=0;u<count;u++)

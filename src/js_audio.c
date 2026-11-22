@@ -401,8 +401,12 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     if (cJSON_IsString(preset) && preset->valuestring && preset->valuestring[0] &&
         strlen(preset->valuestring)<sizeof(ev->lv2_preset))
         snprintf(ev->lv2_preset,sizeof(ev->lv2_preset),"%s",preset->valuestring);
-    if ((ev->lv2_param_count>0 || ev->lv2_preset[0]) && ev->lv2_uri[0] &&
-        !cJSON_HasObjectItem(v,"note")) ev->control_only=1;
+    const cJSON *state=cJSON_GetObjectItemCaseSensitive(v,"lv2state");
+    if (cJSON_IsString(state) && state->valuestring && state->valuestring[0] &&
+        strlen(state->valuestring)<sizeof(ev->lv2_state))
+        snprintf(ev->lv2_state,sizeof(ev->lv2_state),"%s",state->valuestring);
+    if ((ev->lv2_param_count>0 || ev->lv2_preset[0] || ev->lv2_state[0]) &&
+        ev->lv2_uri[0] && !cJSON_HasObjectItem(v,"note")) ev->control_only=1;
     int wavetable=!strncmp(sound,"wt_",3);
     if (wavetable && !cJSON_HasObjectItem(v,"loop")) ev->dsp.p[DSP_LOOP]=1;
     ev->waveform_gain=(!strcmp(sound,"saw") || !strcmp(sound,"sawtooth"))?dsp_periodic_gain(0):

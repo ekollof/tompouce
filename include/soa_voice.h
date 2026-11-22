@@ -7,7 +7,7 @@
    per-sample state once, at the first block boundary after its onset; the lane
    then owns source position, envelope, oscillator phase, LPF coefficients and
    state, and routing constants until the voice ends. */
-#define SOA_VOICE_LANES 96
+#define SOA_VOICE_LANES 128
 #define SOA_VOICE_GROUPS (SOA_VOICE_LANES/4)
 #define SOA_VOICE_FRAMES 4
 
@@ -39,8 +39,10 @@ typedef struct {
     double env, raw_rel;
     double note_off_time, release_time, release_start_level;
     double freq, phase, phase_inc, pw;
-    /* Low-pass controls (DSP_LPF..DSP_LPR and DSP_ANCHOR). */
-    double lpf, lpq, lpe, lanchor, lpa, lpd, lps, lpr;
+    /* Single active biquad (DSP_LPF/HPF/BPF) controls. */
+    int filter_type;
+    double filter_cutoff, filter_q, filter_env, filter_anchor;
+    double filter_a, filter_d, filter_s, filter_r;
     unsigned tick;
     unsigned rendered; /* per-frame output mask, reset each process call */
     int released, ended, active, filterless;

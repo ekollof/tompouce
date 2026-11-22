@@ -16,11 +16,23 @@ static void make_times(double *times, unsigned frames) {
     for (unsigned i=0;i<frames;i++) times[i]=i/SR;
 }
 
-static void fill_filter(SoaVoiceLane *lane, const DspParams *control) {
-    lane->lpf=control->p[DSP_LPF]; lane->lpq=control->p[DSP_LPQ];
-    lane->lpe=control->p[DSP_LPE]; lane->lanchor=control->p[DSP_ANCHOR];
-    lane->lpa=control->p[DSP_LPA]; lane->lpd=control->p[DSP_LPD];
-    lane->lps=control->p[DSP_LPS]; lane->lpr=control->p[DSP_LPR];
+static int fill_filter(SoaVoiceLane *lane, const DspParams *control) {
+    int type=-1;
+    for (int t=0;t<3;t++) if (control->p[t*7]>0) { type=t; break; }
+    if (type<0) {
+        lane->filterless=1;
+        memset(&lane->biquad_l,0,sizeof(lane->biquad_l));
+        memset(&lane->biquad_r,0,sizeof(lane->biquad_r));
+        lane->biquad_l.b0=1; lane->biquad_r.b0=1;
+        return -1;
+    }
+    int base=type*7;
+    lane->filter_type=type;
+    lane->filter_cutoff=control->p[base]; lane->filter_q=control->p[base+1];
+    lane->filter_env=control->p[base+2]; lane->filter_anchor=control->p[DSP_ANCHOR];
+    lane->filter_a=control->p[base+3]; lane->filter_d=control->p[base+4];
+    lane->filter_s=control->p[base+5]; lane->filter_r=control->p[base+6];
+    return type;
 }
 
 static void scalar_sample(const DspParams *control, const float *pcm,
@@ -109,10 +121,12 @@ static SoaVoiceLane synth_lane(const DspParams *control, int kind, double amp,
 static void check_samples(void) {
     const double lpes[]={0,12};
     unsigned frames=TEST_FRAMES;
-    for (int case_index=0;case_index<4;case_index++) {
-        int channels=case_index&1, lpe=case_index>>1;
+    for (int case_index=0;case_index<12;case_index++) {
+        int channels=case_index&1, lpe=(case_index>>1)&1;
+        int type=case_index>>2;
         DspParams control; dsp_params_init(&control); control.enabled=1;
-        control.p[DSP_LPF]=1200; control.p[DSP_LPQ]=2; control.p[DSP_LPE]=lpes[lpe];
+        control.p[type*7]=type==2?1800:1200;
+        control.p[type*7+1]=2; control.p[type*7+2]=lpes[lpe];
         float *pcm=malloc(frames*2*sizeof(float)); assert(pcm);
         for (unsigned i=0;i<frames*2;i++) pcm[i]=(float)random_value();
         double *want_l=calloc(frames,sizeof(double));
@@ -133,10 +147,10 @@ static void check_samples(void) {
             for (unsigned j=0;j<4;j++) {
                 if (out_l[j*SOA_VOICE_LANES]!=want_l[at+j] ||
                     out_r[j*SOA_VOICE_LANES]!=want_r[at+j]) {
-                    fprintf(stderr,"sample diff ch=%d lpe=%d frame=%u got=%.17g/%.17g want=%.17g/%.17g\n",
-                        channels,lpe,at+j,out_l[j*SOA_VOICE_LANES],
+                    fprintf(stderr,"sample diff type=%d ch=%d lpe=%d frame=%u got=%.17g/%.17g want=%.17g/%.17g\n",
+                        type,channels,lpe,at+j,out_l[j*SOA_VOICE_LANES],
                         out_r[j*SOA_VOICE_LANES],want_l[at+j],want_r[at+j]);
-                    return;
+                    assert(0 && "sample lane mismatch");
                 }
             }
         }
@@ -149,9 +163,13 @@ static void check_synths(void) {
     unsigned frames=TEST_FRAMES;
     double *times=calloc(frames,sizeof(double)); assert(times);
     make_times(times,frames);
-    for (unsigned k=0;k<sizeof(kinds)/sizeof(*kinds);k++) {
+    for (unsigned case_index=0;case_index<16;case_index++) {
+        int k=case_index%4, type=case_index/4; /* type 3 = no DSP effect */
         DspParams control; dsp_params_init(&control); control.enabled=1;
-        control.p[DSP_LPF]=1800; control.p[DSP_LPQ]=1; control.p[DSP_LPE]=7;
+        if (type<3) {
+            control.p[type*7]=type==2?2400:1800;
+            control.p[type*7+1]=1; control.p[type*7+2]=7;
+        }
         double *want=calloc(frames,sizeof(double)); assert(want);
         scalar_synth(&control,kinds[k],.15,.9,220,.4,0,.4,.002,.08,.6,.005,
             0,(int)frames,times,want);

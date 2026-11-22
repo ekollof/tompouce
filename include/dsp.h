@@ -99,9 +99,11 @@ double dsp_filter_frequency(const DspParams *params, int type, double age, doubl
 double dsp_filter_frequency_values(double cutoff, double depth, double anchor,
     double attack, double decay, double sustain, double release,
     double age, double gate);
-/* Low-pass coefficients for a cached cutoff/Q pair. */
-void dsp_lowpass_q(DspBiquad *filter, double hz, double q);
-int dsp_filter_only(const DspState *state);
+/* Coefficients for a cached cutoff/Q pair and biquad type. */
+void dsp_filter_q(DspBiquad *filter, int type, double hz, double q);
+/* Returns the single active filter type (0 low-pass, 1 high-pass, 2 band-pass)
+   when no other per-sample effect can change the signal, else -1. */
+int dsp_single_filter(const DspState *state);
 void dsp_filter_coefficients(const DspParams *params, int type, double hz,
     DspBiquad *filter);
 void dsp_init(DspState *state, const DspParams *p);

@@ -407,9 +407,13 @@ static int soa_bank_eligible(const Voice *v) {
     if (!v->active || v->retiring || v->stretch_buffer) return 0;
     if (native_synth_effect(v->native_program)) return 0;
     if (!v->dsp.control.enabled) return 0;
-    if (v->dsp.effects_active && !dsp_filter_only(&v->dsp)) return 0;
-    if (!v->dsp.effects_active &&
-        (v->dsp.control.noise_mix>0 || v->dsp.control.source_noise)) return 0;
+    int filter_type=-1;
+    if (v->dsp.effects_active) {
+        filter_type=dsp_single_filter(&v->dsp);
+        if (filter_type<0) return 0;
+    } else if (v->dsp.control.noise_mix>0 || v->dsp.control.source_noise) {
+        return 0;
+    }
     if (v->out_target || v->graph_end>v->graph_fade_start) return 0;
     if (v->dsp.pitch_active || v->dsp.fm_active) return 0;
     if (v->lpf_hz>0) return 0;
@@ -419,7 +423,13 @@ static int soa_bank_eligible(const Voice *v) {
         if (v->cut_pending || v->smpstep<0) return 0;
         if (v->dsp.control.p[DSP_LOOP]>0) return 0;
         if (v->smppos<0 || v->smplen<=0) return 0;
-        if (v->smp_channels==2 && !dsp_filter_only(&v->dsp_right)) return 0;
+        if (v->smp_channels==2) {
+            if (v->dsp.effects_active) {
+                if (dsp_single_filter(&v->dsp_right)!=filter_type) return 0;
+            } else if (v->dsp_right.effects_active) {
+                return 0;
+            }
+        }
     } else if (v->lfo_tgt!=0) return 0;
     return 1;
 }
@@ -480,8 +490,16 @@ static void soa_lane_from_voice(SoaVoiceLane *l, Voice *v, int kind) {
         memset(&l->biquad_r,0,sizeof(l->biquad_r));
         l->biquad_l.b0=1; l->biquad_r.b0=1;
     } else {
-        l->biquad_l=v->dsp.filter[0];
-        l->biquad_r=v->dsp_right.filter[0];
+        l->filter_type=dsp_single_filter(&v->dsp);
+        int at=l->filter_type*2;
+        l->biquad_l=v->dsp.filter[at];
+        l->biquad_r=v->dsp_right.filter[at];
+        const double *p=v->dsp.control.p;
+        int base=l->filter_type*7;
+        l->filter_cutoff=p[base]; l->filter_q=p[base+1];
+        l->filter_env=p[base+2]; l->filter_anchor=p[DSP_ANCHOR];
+        l->filter_a=p[base+3]; l->filter_d=p[base+4];
+        l->filter_s=p[base+5]; l->filter_r=p[base+6];
     }
     if (kind==SOA_KIND_SAMPLE) {
         l->buf=v->smpbuf; l->channels=v->smp_channels; l->smplen=v->smplen;
@@ -493,10 +511,6 @@ static void soa_lane_from_voice(SoaVoiceLane *l, Voice *v, int kind) {
         l->phase_inc=2*M_PI*l->freq/SR;
         l->pw=v->pw;
     }
-    const double *p=v->dsp.control.p;
-    l->lpf=p[DSP_LPF]; l->lpq=p[DSP_LPQ]; l->lpe=p[DSP_LPE];
-    l->lanchor=p[DSP_ANCHOR]; l->lpa=p[DSP_LPA]; l->lpd=p[DSP_LPD];
-    l->lps=p[DSP_LPS]; l->lpr=p[DSP_LPR];
 }
 
 /* Lanes start at four-frame block boundaries, so the scalar path has advanced
@@ -550,21 +564,22 @@ static void soa_bank_sync_one(Voice *v) {
     v->env=l->env; v->released=l->released; v->dsp.tick=l->tick;
     v->release_time=l->release_time;
     v->release_start_level=l->release_start_level;
-    v->dsp.filter[0].b0=soa_bank.filter_l[group].b0[sub];
-    v->dsp.filter[0].b1=soa_bank.filter_l[group].b1[sub];
-    v->dsp.filter[0].b2=soa_bank.filter_l[group].b2[sub];
-    v->dsp.filter[0].a1=soa_bank.filter_l[group].a1[sub];
-    v->dsp.filter[0].a2=soa_bank.filter_l[group].a2[sub];
-    v->dsp.filter[0].z1=soa_bank.filter_l[group].z1[sub];
-    v->dsp.filter[0].z2=soa_bank.filter_l[group].z2[sub];
+    int at=l->filter_type*2;
+    v->dsp.filter[at].b0=soa_bank.filter_l[group].b0[sub];
+    v->dsp.filter[at].b1=soa_bank.filter_l[group].b1[sub];
+    v->dsp.filter[at].b2=soa_bank.filter_l[group].b2[sub];
+    v->dsp.filter[at].a1=soa_bank.filter_l[group].a1[sub];
+    v->dsp.filter[at].a2=soa_bank.filter_l[group].a2[sub];
+    v->dsp.filter[at].z1=soa_bank.filter_l[group].z1[sub];
+    v->dsp.filter[at].z2=soa_bank.filter_l[group].z2[sub];
     if (l->stereo_filter) {
-        v->dsp_right.filter[0].b0=soa_bank.filter_r[group].b0[sub];
-        v->dsp_right.filter[0].b1=soa_bank.filter_r[group].b1[sub];
-        v->dsp_right.filter[0].b2=soa_bank.filter_r[group].b2[sub];
-        v->dsp_right.filter[0].a1=soa_bank.filter_r[group].a1[sub];
-        v->dsp_right.filter[0].a2=soa_bank.filter_r[group].a2[sub];
-        v->dsp_right.filter[0].z1=soa_bank.filter_r[group].z1[sub];
-        v->dsp_right.filter[0].z2=soa_bank.filter_r[group].z2[sub];
+        v->dsp_right.filter[at].b0=soa_bank.filter_r[group].b0[sub];
+        v->dsp_right.filter[at].b1=soa_bank.filter_r[group].b1[sub];
+        v->dsp_right.filter[at].b2=soa_bank.filter_r[group].b2[sub];
+        v->dsp_right.filter[at].a1=soa_bank.filter_r[group].a1[sub];
+        v->dsp_right.filter[at].a2=soa_bank.filter_r[group].a2[sub];
+        v->dsp_right.filter[at].z1=soa_bank.filter_r[group].z1[sub];
+        v->dsp_right.filter[at].z2=soa_bank.filter_r[group].z2[sub];
     }
 }
 

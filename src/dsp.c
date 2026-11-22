@@ -316,22 +316,24 @@ void dsp_filter_coefficients(const DspParams *params, int type, double hz,
     coefficients(filter,type,hz,params->p[type*7+1]);
 }
 
-void dsp_lowpass_q(DspBiquad *filter, double hz, double q) {
-    if (!filter) return;
-    coefficients(filter,0,hz,q);
+void dsp_filter_q(DspBiquad *filter, int type, double hz, double q) {
+    if (!filter || type<0 || type>2) return;
+    coefficients(filter,type,hz,q);
 }
 
-int dsp_filter_only(const DspState *state) {
-    if (!state || !state->control.enabled || !state->effects_active) return 0;
+int dsp_single_filter(const DspState *state) {
+    if (!state || !state->control.enabled || !state->effects_active) return -1;
     const double *p=state->control.p;
-    if (p[DSP_LPF]<=0 || p[DSP_HPF]>0 || p[DSP_BPF]>0 || p[DSP_VOWEL]>=0 ||
-        p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 || p[DSP_CRUSH]<16 ||
-        p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 || p[DSP_TREM]>0 ||
-        p[DSP_COMP]<0 || p[DSP_PHASER]>0 || p[DSP_CHORUS]>0 ||
-        p[DSP_POST]!=1 || p[DSP_CUT]>0 || p[DSP_LPRATE]>0 ||
-        p[DSP_PWRATE]>0 || state->control.noise_mix>0 ||
-        state->control.source_noise) return 0;
-    return 1;
+    int type=-1, active=0;
+    for (int i=0;i<3;i++) if (p[i*7]>0) { type=i; active++; }
+    if (active!=1) return -1;
+    if (p[DSP_VOWEL]>=0 || p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 ||
+        p[DSP_CRUSH]<16 || p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 ||
+        p[DSP_TREM]>0 || p[DSP_COMP]<0 || p[DSP_PHASER]>0 ||
+        p[DSP_CHORUS]>0 || p[DSP_POST]!=1 || p[DSP_CUT]>0 ||
+        p[DSP_LPRATE+type*6]>0 || p[DSP_PWRATE]>0 ||
+        state->control.noise_mix>0 || state->control.source_noise) return -1;
+    return type;
 }
 
 static double biquad(DspBiquad *f, double x) {

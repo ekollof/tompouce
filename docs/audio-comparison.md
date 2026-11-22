@@ -143,19 +143,24 @@ experiments were reverted; see `TODO.md` for their measurements.
 The from-allocation SoA bank now owns most of this composition. Qualifying
 sample and sine/saw/square/triangle voices copy a compact lane once, at the
 next four-frame block boundary after onset, and the lane then owns source
-position, ADSR, oscillator phase, low-pass state (including LPE/LFO coefficient
-updates) and routing constants. Voices with no active DSP use an identity
-biquad, which reproduces the scalar bypass and clamp exactly. Pattern scopes
-are accumulated from the staged routing taps, so scope voices no longer disable
-block staging. On the 128-frame PipeWire stress run about **75 lanes per block**
-are active; repeated 35-second runs measure **~1.24-1.30 ms average** callback
-render with a **2.4-2.95 ms maximum**, no callbacks over 3 ms and **zero PipeWire
-gaps** in 9 of the last 10 runs. The single 53 ms outlier was not callback work:
-the maximum `voice_lock` wait stayed at 8-22 us across the same runs. Retiring a
-bank voice copies its current lane state first, and the browser retirement
-envelope/cut suite (62 cases) plus the vowel impulse suite still pass. Band/high
-pass, vowel, phaser, chorus, distortion, supersaw and native sources remain
-scalar and account for the residual tail near the 2.9 ms deadline.
+position, ADSR, oscillator phase, the single active biquad (low-, high- or
+band-pass, including LPE/LFO coefficient updates) and routing constants.
+Voices with no active DSP use an identity biquad, which reproduces the scalar
+bypass and clamp exactly. Pattern scopes are accumulated from the staged
+routing taps, so scope voices no longer disable block staging. The bank is
+sized to the full primary pool (128 lanes), so dense passages no longer deny
+qualifying voices. On the 128-frame PipeWire stress run about **86 lanes per
+block** are active and no primary triangle or sample voice remains scalar;
+repeated 35-second runs measure **~1.19-1.20 ms average** callback render with
+a **2.30-2.86 ms maximum**, no callbacks over 3 ms and **zero PipeWire gaps**.
+An earlier 53 ms outlier was not callback work: the maximum `voice_lock` wait
+stayed at 8-22 us across the same runs. Retiring a bank voice copies its
+current lane state first, and the browser retirement envelope/cut suite (62
+cases) plus the vowel impulse suite still pass. The remaining scalar
+population is supersaw (~8.8 voices/block) and the procedural HH drum (~1.3);
+supersaw's 100-oscillator kernel is already AVX2, so lane admission would not
+remove its main cost. Vowel, phaser, chorus and distortion are not used by
+this composition and still render scalar.
 
 The audio/reference gates and the supersaw exactness test pass; the known
 `tui_pty` vi startup case remains timing-flaky.

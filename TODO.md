@@ -346,17 +346,24 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         the scalar loop routes a lane at its own slot position (or stages it
         through `render_block`), preserving mixing order and pattern-scope taps.
         Retirement copies current lane state before eviction.
-      - [x] "Computer says no" on PipeWire 128-frame quanta: roughly 75 lanes
-        per block now cover the source/envelope/filter/routing hot path.
-        Repeated 35-second runs measure average render ~1.24-1.30 ms, maximum
-        2.4-2.95 ms, zero callbacks over 3 ms and zero gaps in 9 of the last 10
-        runs. One 53 ms outlier occurred while lock waits stayed at 8-22 us, so
-        it was an external stall rather than callback work. The 128-frame
-        deadline is met with roughly 15% headroom on the maximum.
-      - [ ] Extend lanes to the remaining per-sample effects (band/high-pass,
-        vowel, phaser, chorus, distortion) and to supersaw/native sources, then
-        revisit the compact active-voice list. Those paths are still scalar and
-        account for the residual tail near the 2.9 ms deadline.
+      - [x] "Computer says no" on PipeWire 128-frame quanta. The bank covers
+        low-, high- and band-pass voices plus the no-filter clamp path, and is
+        sized to the whole primary pool (128 lanes) so no qualifying voice is
+        denied at peaks. Roughly **86 lanes per block** now cover the
+        source/envelope/filter/routing hot path; no primary triangle or sample
+        voice remains scalar. Repeated 35-second runs measure average render
+        **~1.19-1.20 ms**, maximum **2.30-2.86 ms**, zero callbacks over 3 ms
+        and zero gaps. One earlier 53 ms outlier occurred while lock waits
+        stayed at 8-22 us, so it was an external stall rather than callback
+        work.
+      - [ ] The remaining scalar population is supersaw (~8.8 voices/block)
+        and the procedural HH drum (~1.3). Supersaw's 100-oscillator kernel is
+        already AVX2 and would need ~1.6 KB of phase/ratio state per lane, so
+        lane admission would not reduce its main cost; the next useful step is
+        the compact active-voice list, not more per-sample effects. Vowel,
+        phaser, chorus and distortion are not used by this composition and
+        still render scalar; add lanes for them only with a matching browser
+        gate and a measured song that needs them.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

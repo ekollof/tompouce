@@ -13,8 +13,9 @@ void soa_voice_bank_clear(SoaVoiceBank *bank) {
 
 double soa_voice_filter_frequency(const SoaVoiceLane *lane, double age) {
     if (!lane) return 0;
-    return dsp_filter_frequency_values(lane->lpf,lane->lpe,lane->lanchor,
-        lane->lpa,lane->lpd,lane->lps,lane->lpr,age,lane->gate);
+    return dsp_filter_frequency_values(lane->filter_cutoff,lane->filter_env,
+        lane->filter_anchor,lane->filter_a,lane->filter_d,lane->filter_s,
+        lane->filter_r,age,lane->gate);
 }
 
 static void store_filter(DspBiquad4 *dst, int lane, const DspBiquad *f) {
@@ -73,7 +74,8 @@ static void update_coefficients(SoaVoiceBank *bank, int group, int sub,
                                 const SoaVoiceLane *lane, double age) {
     if (lane->filterless) return;
     DspBiquad filter;
-    dsp_lowpass_q(&filter,soa_voice_filter_frequency(lane,age),lane->lpq);
+    dsp_filter_q(&filter,lane->filter_type,
+        soa_voice_filter_frequency(lane,age),lane->filter_q);
     bank->filter_l[group].b0[sub]=filter.b0;
     bank->filter_l[group].b1[sub]=filter.b1;
     bank->filter_l[group].b2[sub]=filter.b2;

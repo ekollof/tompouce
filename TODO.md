@@ -412,6 +412,10 @@ and measured divergences are recorded in the archive.
       `bstab` has no installed default and that generic `stab` exists. An
       owned engine confirmed the two oscillator voices play alongside the
       rejected sample. Other non-TR bank aliases remain open.
+- [ ] A failed source in the first stacked scheduling batch can delay its
+      sibling haps by one window. `roller2`'s missing `bstab` exposes this
+      before `supersaw`/`white` start; investigate the publication/commit loop
+      without relaxing the missing-sample error.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and
       can be reloaded on later evaluations (explicit persistence). Traversal,

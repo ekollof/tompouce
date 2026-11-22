@@ -349,11 +349,13 @@ static void test_performance_tail(void) {
     cJSON_Delete(hap);
     audio_toggle_play(1);
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
+    active_voice_reset();
     orbits_ensure(); orbit_dt[N_ORBITS-1]=32/SR; orbit_fb[N_ORBITS-1]=0;
     assert(ensure_orbit_delay(N_ORBITS-1)); /* white-box voice setup */
     float impulse[2]={1,1};
     Voice *voice=&voices[0]; memset(voice,0,sizeof(*voice));
-    voice->active=1; voice->orbit=N_ORBITS-1; voice->smpbuf=impulse; voice->smplen=1;
+    voice->active=1; active_voice_add(0);
+    voice->orbit=N_ORBITS-1; voice->smpbuf=impulse; voice->smplen=1;
     voice->smp_channels=1; voice->smpstep=1; voice->smp_end=1;
     voice->amp=.5; voice->delay_send=1; voice->note_off_time=voice->gate_end=10;
     float before[16]; pa_callback(NULL,before,8,NULL,0,NULL);
@@ -370,11 +372,13 @@ static void test_performance_tail(void) {
 static void test_disabled_delay_keeps_tail(void) {
     audio_time=0; audio_toggle_play(1); event_queue_clear();
     for (int i=0;i<MAX_VOICES;i++) voices[i].active=0;
+    active_voice_reset();
     orbits_ensure(); orbit_dt[10]=32/SR; orbit_fb[10]=.5;
     assert(ensure_orbit_delay(10)); /* white-box voice setup */
     float impulse[2]={1,1},output[256];
     Voice *voice=&voices[0]; memset(voice,0,sizeof(*voice));
-    voice->active=1; voice->orbit=10; voice->smpbuf=impulse; voice->smplen=1;
+    voice->active=1; active_voice_add(0);
+    voice->orbit=10; voice->smpbuf=impulse; voice->smplen=1;
     voice->smp_channels=1; voice->smpstep=1; voice->smp_end=1;
     voice->amp=.5; voice->delay_send=1; voice->note_off_time=voice->gate_end=10;
     pa_callback(NULL,output,8,NULL,0,NULL);

@@ -302,19 +302,25 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Render and SIMD performance
 
-- [x] Close the incremental block/SoA investigation. The tested four-frame
-      routing/send kernel (`src/render_block.c`) and the PCM-exact block
-      callback split/staged route remain in the tree; routing-only staging is
-      neutral, so the installed best build relies on the scalar/SSE2 voice path
-      plus supersaw SIMD and Release LTO. Three sample-voice block trials were
-      measured, were PCM-exact, and were reverted: four-frame lookahead of
-      individual sample voices (max ~4.4 ms, two gaps), a four-voice SoA sample
-      pass with AoS gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks), and a
-      block-boundary native SoA copy (max ~4.18 ms, one gap). A further SoA
-      attempt must move the entire voice/DSP/filter/envelope state into SoA
-      arrays from allocation through retirement; it is a separate renderer
-      project, not an incremental optimization. Keep the existing scalar
-      fallback and `test_render_block` as the reference for that work.
+- [ ] Full from-allocation SoA renderer. Target CPU-heavy songs such as
+      "Computer says no" staying inside the 128-frame PipeWire deadline without
+      xruns. Move voice source, envelope, filter, gate and route state into SoA
+      arrays at allocation and retire them from those arrays; do not copy AoS
+      voices into lanes at a block boundary.
+      - [x] Four-frame routing/send kernel (`src/render_block.c`) with exact C
+        and AVX2 paths and `test_render_block`.
+      - [x] PCM-exact block callback split/staged route. Routing-only staging is
+        neutral, so it is infrastructure rather than a speedup.
+      - [x] Close the incremental AoS-grouping trials: four-frame lookahead
+        (max ~4.4 ms, two gaps), four-voice AoS gather/scatter (max ~3.55 ms,
+        13 over-3-ms callbacks), and block-boundary native SoA copy (max
+        ~4.18 ms, one gap). All were PCM-exact and slower.
+      - [ ] Persistent SoA sample pool admitted at `voice_onset`, not recopied
+        each block. Keep lane state across staged blocks; sync from the owner
+        only after a non-staged block or a new onset. Preserve voice-slot route
+        order, scalar fallback and PCM gates.
+      - [ ] Add SoA low-pass/biquad and envelope lanes for the DSP hot path,
+        then measure against the 128-frame deadline on the real device.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

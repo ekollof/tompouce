@@ -240,8 +240,9 @@ and measured divergences are recorded in the archive.
       gates cover kernel-change automation (`.roomsize` and `.size` patterns),
       both at correlation 0.99999999. Two `shared-*-graph-source` gates connect
       a Kabelsalat graph source to the shared mono IR (0.999999998) and the
-      shared delay (0.9999990). Source eviction, live reconnections,
-      nested/control-output routing and live edits remain open. Fractional IR
+      shared delay (0.9999990). Source eviction, live reconnections, general
+      nested/control-output routing beyond the graph/effect FX boundary and
+      live edits remain open. Fractional IR
       rates are a measured divergence: `.irspeed(.5|.75)` with matching source
       speed gave correlations -0.78/-0.92; an interpolation attempt was
       reverted rather than tuned to the capture. See

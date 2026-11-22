@@ -980,8 +980,10 @@ the bounded fallback. An `fxr` extension does not keep a disconnected sample
 source stereo merely because its shared reverb continues sounding.
 
 Panned/stretched/graph source connections, source eviction, live reconnections,
-kernel changes and nested/control-output routing still need independent checks.
-Existing randomized room-switch diagnostics remain diagnostics.
+kernel changes and the graph/effect FX boundary now have independent checks.
+General nested/control-output routing beyond that boundary still needs
+independent checks. Existing randomized room-switch diagnostics remain
+diagnostics.
 
 ## Long generated rooms
 

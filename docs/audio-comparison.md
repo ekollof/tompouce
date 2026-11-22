@@ -944,8 +944,11 @@ downward-stretched source (`.speed(.5)`) feeding the mono IR. Both pass at lag
 zero: correlation 0.99999998 and 0.999705, RMS ratios 0.9931 and 1.0111.
 Two `shared-room-kernel-` gates extend this to kernel-change automation via
 `.roomsize(".3 .8 .3")` and `.size(".2 .6 .2")`: correlations 0.99999999 and
-0.99999999, RMS ratios 0.9930 for both, with the same unchanged thresholds. A
-fractional **IR** rate is a separate, unresolved divergence. Adding
+0.99999999, RMS ratios 0.9930 for both, with the same unchanged thresholds. Two
+further `shared-*-graph-source` gates connect a Kabelsalat graph source to the
+shared mono IR and to the shared delay: correlations 0.999999998 and 0.9999990,
+RMS ratios 0.9930 and 1.0007. A fractional **IR** rate is a separate,
+unresolved divergence. Adding
 `.irspeed(.5)` or `.irspeed(.75)` together with the matching source speed gave
 correlations -0.78 and -0.92 with the same windows and thresholds; an initial
 attempt at linear interpolation in the IR kernel changed the result only

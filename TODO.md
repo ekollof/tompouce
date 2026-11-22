@@ -227,14 +227,15 @@ and measured divergences are recorded in the archive.
       the native renderer applies the web chain's default 0.8 gain. Individual
       filter/send/pan steps are materialized but not replayed yet. See
       [Kabelsalat effect tails](docs/audio-comparison.md#kabelsalat-effect-tails-and-input-routing).
-- [ ] Extend shared-effect checks beyond the 22 send/orbit/fixed-IR/lifetime
-      cases: two new `shared-room-source-` gates cover a panned source
+- [ ] Extend shared-effect checks beyond the 24 send/orbit/fixed-IR/lifetime
+      cases: two `shared-room-source-` gates cover a panned source
       (`.pan(.7)`, correlation 0.99999998) and a downward-stretched source
       (`.speed(.5)`, 0.999705) feeding the mono IR. Two `shared-room-kernel-`
       gates cover kernel-change automation (`.roomsize` and `.size` patterns),
-      both at correlation 0.99999999. Graph source connections, source eviction,
-      live reconnections, nested/control-output routing and live edits remain
-      open. Fractional IR
+      both at correlation 0.99999999. Two `shared-*-graph-source` gates connect
+      a Kabelsalat graph source to the shared mono IR (0.999999998) and the
+      shared delay (0.9999990). Source eviction, live reconnections,
+      nested/control-output routing and live edits remain open. Fractional IR
       rates are a measured divergence: `.irspeed(.5|.75)` with matching source
       speed gave correlations -0.78/-0.92; an interpolation attempt was
       reverted rather than tuned to the capture. See

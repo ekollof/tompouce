@@ -150,6 +150,9 @@ try {
       ['kernel-size',`.size(".2 .6 .2")`],
     ].map(([name,controls])=>({name:`shared-room-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
       code:`s('stretch_fixture').fast(3).gain(.3).clip(.05)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
+    {name:'shared-room-graph-source',sound:'sine',fixture:true,fixtureIR:'mono_fixture',
+      code:`note(69).s('sine').gain(.4).clip(.05).K(sine(sFreq).mul(.2).out()).ir('mono_fixture').room(1).dry(0)`,
+      cycles:1,cps:.5,window:2,correlation:.99},
     ...[
       ['send-toggle',`note("c4*3").delay("1 0 1").delaytime(.075).delayfeedback(.7)`],
       ['feedback-zero',`note("c4*3").delay(1).delaytime(.075).delayfeedback(".7 0 .4")`],
@@ -160,6 +163,9 @@ try {
       ['stack-order',`stack(note("c4*2").delaytime(.05),note("c5").late(.25).delaytime(.1)).delay(1).delayfeedback(.7)`],
       ['fractional',`note("c4*3").delay(1).delaytime(".05 .075 .1").delayfeedback(".5 .7 .4").late(.137)`],
     ].map(([name,pattern])=>({name:`shared-delay-${name}`,sound:'sine',code:`${pattern}.s('sine')${name==='gain-zero'?'':'.gain(.5)'}.clip(.05).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
+    {name:'shared-delay-graph-source',sound:'sine',
+      code:`note(69).s('sine').gain(.4).clip(.05).K(sine(sFreq).mul(.2).out()).delay(.5).delaytime(.075).delayfeedback(.5).dry(0)`,
+      cycles:1,cps:.5,window:2,correlation:.99},
     ...[
       ['baseline',''],
       ['release',`.penv(7).patt(.02).pdec(.1).psus(.3).panchor(0).prel(.2).release(.3)`],

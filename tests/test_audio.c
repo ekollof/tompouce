@@ -540,6 +540,63 @@ static void test_shared_room_eviction(void) {
     audio_set_reference_mode(0);
 }
 
+static void test_shared_fx_routing_and_live_edit(void) {
+    int orbit=9;
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1);
+    memset(voices,0,sizeof(voices));
+    next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    orbits_ensure();
+    double old_dt=orbit_dt[orbit], old_fb=orbit_fb[orbit];
+    int old_created=web_delay_created[orbit];
+    assert(ensure_orbit_delay(orbit));
+    memset(dbuf[orbit],0,ORBIT_DELAY*2*sizeof(float));
+    memset(feedback_quantum[orbit],0,256*sizeof(float));
+    web_delay_created[orbit]=1;
+    orbit_dt[orbit]=.001; orbit_fb[orbit]=.5;
+
+    cJSON *delay=cJSON_Parse(
+        "{\"begin\":0,\"end\":0.5,\"value\":{\"note\":60,\"s\":\"sine\","
+        "\"gain\":0.1,\"orbit\":9,\"_fxSteps\":[{\"steps\":["
+        "{\"op\":\"delay\",\"args\":[1]},"
+        "{\"op\":\"delaytime\",\"args\":[0.001]},"
+        "{\"op\":\"delayfeedback\",\"args\":[0.5]}]}]}}");
+    assert(delay);
+    AudioEvent first;
+    assert(js_audio_event(delay,0,1,&first));
+    assert(fabs(first.delay_send-1)<1e-9 && fabs(first.delay_time-.001)<1e-9);
+    audio_trigger_event(&first);
+    float block[512];
+    pa_callback(NULL,block,128,NULL,0,NULL);
+
+    /* A live edit selects the room route on the same orbit. The existing
+       shared delay line must remain connected while the new event starts. */
+    cJSON *room=cJSON_Parse(
+        "{\"begin\":0,\"end\":0.5,\"value\":{\"note\":64,\"s\":\"sine\","
+        "\"gain\":0.1,\"orbit\":9,\"_fxSteps\":[{\"steps\":["
+        "{\"op\":\"room\",\"args\":[0.4]},{\"op\":\"size\",\"args\":[3]}]}]}}");
+    assert(room);
+    AudioEvent second;
+    assert(js_audio_event(room,0,1,&second));
+    assert(fabs(second.dsp.p[DSP_ROOM]-.4)<1e-9);
+    audio_trigger_event(&second);
+    pa_callback(NULL,block,256,NULL,0,NULL);
+    double energy=0;
+    for(int i=0;i<256;i++) energy+=fabs(block[i*2])+fabs(block[i*2+1]);
+    assert(energy>1e-6);
+
+    memset(dbuf[orbit],0,ORBIT_DELAY*2*sizeof(float));
+    memset(feedback_quantum[orbit],0,256*sizeof(float));
+    if (comb[orbit]) memset(comb[orbit],0,2*4*16384*sizeof(float));
+    if (allpass[orbit]) memset(allpass[orbit],0,2*2*2048*sizeof(float));
+    orbit_dt[orbit]=old_dt; orbit_fb[orbit]=old_fb;
+    web_delay_created[orbit]=old_created;
+    memset(voices,0,sizeof(voices)); next_voice_onset=HUGE_VAL;
+    audio_time=old_time; playing=old_playing;
+    audio_set_reference_mode(0);
+    cJSON_Delete(delay); cJSON_Delete(room);
+}
+
 static void test_output_volume(void) {
     assert(audio_get_output_gain()==1);
     assert(!audio_set_output_gain(NAN) && !audio_set_output_gain(INFINITY));
@@ -630,6 +687,7 @@ int main(void) {
     test_output_volume();
     test_shared_delay_eviction_and_reparam();
     test_shared_room_eviction();
+    test_shared_fx_routing_and_live_edit();
     /* Exercise the actual callback with opposite-polarity stereo channels.
        Averaging to mono would cancel this signal. No audio device is needed. */
     float stereo[] = {.25f,-.5f,.125f,.375f};

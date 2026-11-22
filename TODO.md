@@ -327,8 +327,18 @@ and measured divergences are recorded in the archive.
       the fallback room network, evicts it, and verifies reverb tail energy after
       the retiring graph has stopped. These are callback-level PCM checks, not
       new browser captures.
-- [ ] General nested/control-output routing beyond the graph/effect FX boundary
-      and live edits remain open. Fractional IR
+- [x] Nested FX shared room/delay routing and live edits. Materialized
+      `_fxSteps` now replay bounded `room`, `size`/`roomsize`, `dry`, `delay`,
+      `delaytime` and `delayfeedback` steps into the event's shared sends;
+      outer controls win because the web applies them after `FX(...)`. A
+      `K()` graph source still skips the whole chain. `test_javascript` checks
+      nested room+delay routing, outer precedence and the graph boundary;
+      `test_audio` triggers a delayed FX source, renders its shared tail, then
+      starts a live room-route edit on the same orbit and verifies the delay
+      tail remains audible. Other FX steps (filters, pan, coarse and other
+      graph-local effects) remain outside this shared-send replay.
+- [ ] Other nested/control-output FX steps and live edits beyond shared
+      room/delay remain open. Fractional IR
       rates are a measured divergence: `.irspeed(.5|.75)` with matching source
       speed gave correlations -0.78/-0.92; an interpolation attempt was
       reverted rather than tuned to the capture. See

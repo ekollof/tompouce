@@ -65,7 +65,7 @@ def main():
             self.send_header("Content-Length", str(len(content)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", f"default-src 'self'; style-src 'self' 'nonce-{style_nonce}'; frame-ancestors 'none'; object-src 'none'")
+            self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self' 'nonce-{style_nonce}'; style-src 'self' 'nonce-{style_nonce}'; frame-ancestors 'none'; object-src 'none'")
             self.end_headers()
             self.wfile.write(content)
 

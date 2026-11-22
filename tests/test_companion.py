@@ -79,6 +79,14 @@ class HydraTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             self.post("/api/tool", "music_audio_scope", origin="http://evil.example")
 
+    def test_inline_page_script_is_allowed(self):
+        html = urllib.request.urlopen(self.url).read().decode()
+        nonce = re.search(r'<style nonce="([^"]+)"', html).group(1)
+        with urllib.request.urlopen(self.url) as response:
+            csp = response.headers["Content-Security-Policy"]
+        assert f"script-src 'self' 'nonce-{nonce}'" in csp
+        assert "script-src" in csp and "'unsafe-inline'" not in csp
+
 
 class CompanionTest(unittest.TestCase):
     @classmethod

@@ -688,6 +688,53 @@ static void test_lv2param_control(void) {
     cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
 }
 
+/* Materialized FX(...) closures can route shared room/delay sends. Outer
+   controls are applied after FX in the web, so they must win; K() graph sources
+   remain outside the scale/gain boundary. */
+static void test_fx_shared_routing(void) {
+    const char *code =
+        "note(60).s('sine').FX(x=>x.room(.3).size(4).dry(.6),"
+        "x=>x.delay(.2).delaytime(.125).delayfeedback(.25))";
+    JsProgram *program=NULL;
+    cJSON *haps=query(code,&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    AudioEvent event;
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.dsp.p[DSP_ROOM]-.3)<1e-9);
+    assert(fabs(event.dsp.p[DSP_SIZE]-4)<1e-9);
+    assert(fabs(event.dsp.p[DSP_DRY]-.6)<1e-9);
+    assert(fabs(event.delay_send-.2)<1e-9);
+    assert(fabs(event.delay_time-.125)<1e-9);
+    assert(fabs(event.delay_fb-.25)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    const char *outer =
+        "note(60).s('sine').room(.8).size(6).dry(.4)"
+        ".delay(.4).delaytime(.5).delayfeedback(.9)"
+        ".FX(x=>x.room(.3).size(4).dry(.6)"
+        ".delay(.2).delaytime(.125).delayfeedback(.25))";
+    haps=query(outer,&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.dsp.p[DSP_ROOM]-.8)<1e-9);
+    assert(fabs(event.dsp.p[DSP_SIZE]-6)<1e-9);
+    assert(fabs(event.dsp.p[DSP_DRY]-.4)<1e-9);
+    assert(fabs(event.delay_send-.4)<1e-9);
+    assert(fabs(event.delay_time-.5)<1e-9);
+    assert(fabs(event.delay_fb-.9)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    cJSON *graph=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"s\":\"sine\","
+        "\"_nativeProgram\":{\"kind\":\"graph\",\"effect\":false},"
+        "\"_fxSteps\":[{\"steps\":[{\"op\":\"room\",\"args\":[0.3]},"
+        "{\"op\":\"delay\",\"args\":[0.2]}]}]}}");
+    assert(graph && js_audio_event(graph,0,1,&event));
+    assert(event.dsp.p[DSP_ROOM]==0 && event.delay_send==0);
+    cJSON_Delete(graph);
+    puts("nested FX shared routing and outer-control precedence ok");
+}
+
 int main(int argc, char **argv) {
     if ((argc==4 || argc==5) && !strcmp(argv[1],"--prebake-reference")) {
         int cycles=1;
@@ -1220,6 +1267,7 @@ int main(int argc, char **argv) {
     haps=query("await initHydra();src(s0)",&program);
     assert(cJSON_GetArraySize(haps)==0);
     cJSON_Delete(haps); javascript_free(program);
+    test_fx_shared_routing();
     puts("JavaScript/Strudel runtime ok");
     return 0;
 }

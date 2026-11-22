@@ -289,8 +289,28 @@ static int lv2_prepare_sample(AudioEvent *ev, const char *sound, double duration
     return ev->smp>=0;
 }
 
+static int fx_arg_number(const cJSON *step, int index, double *out) {
+    const cJSON *args=cJSON_IsObject(step)?cJSON_GetObjectItemCaseSensitive(step,"args"):NULL;
+    const cJSON *arg=cJSON_IsArray(args)?cJSON_GetArrayItem(args,index):NULL;
+    if (cJSON_IsNumber(arg) && isfinite(arg->valuedouble)) {
+        *out=arg->valuedouble; return 1;
+    }
+    if (cJSON_IsString(arg) && arg->valuestring && *arg->valuestring &&
+        strlen(arg->valuestring)<64) {
+        char *end=NULL;
+        double value=strtod(arg->valuestring,&end);
+        if (end && end!=arg->valuestring && !*end && isfinite(value)) {
+            *out=value; return 1;
+        }
+    }
+    return 0;
+}
+
 /* Apply query-time materialized FX(...) steps. The web invokes each closure
-   per event; those chains start from superdough's default gain of 0.8. */
+   per event; those chains start from superdough's default gain of 0.8.
+   Shared room/delay sends are replayed here; outer controls win because the
+   deployed chain applies them after FX(...). Filter/pan steps still wait for
+   their own PCM gates. */
 static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
     if (!cJSON_IsArray(chains)) return;
@@ -306,6 +326,13 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
     if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
         !cJSON_IsTrue(effect)) return;
+    int outer_room=cJSON_HasObjectItem(v,"room");
+    int outer_size=cJSON_HasObjectItem(v,"size") || cJSON_HasObjectItem(v,"roomsize");
+    int outer_dry=cJSON_HasObjectItem(v,"dry");
+    int outer_delay=cJSON_HasObjectItem(v,"delay");
+    int outer_delaytime=cJSON_HasObjectItem(v,"delaytime") ||
+        cJSON_HasObjectItem(v,"delaysync");
+    int outer_delayfb=cJSON_HasObjectItem(v,"delayfeedback");
     double chain_gain = .8;
     for (int i = 0; i < count; i++) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
@@ -319,13 +346,28 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
             const char *name = op->valuestring;
-            /* No step is replayed yet. The web's FX chain contributes its
-               default superdough gain (0.8) regardless of an inner .gain()
-               call, which the comparison confirms; other steps need their own
-               gates before the renderer can apply them safely. */
-            (void)name;
+            double value=0;
+            if (!strcmp(name,"room") && !outer_room && fx_arg_number(step,0,&value) &&
+                value>=0 && value<=1)
+                ev->dsp.p[DSP_ROOM]=value;
+            else if ((!strcmp(name,"size") || !strcmp(name,"roomsize")) &&
+                !outer_size && fx_arg_number(step,0,&value) && value>=0 && value<=10)
+                ev->dsp.p[DSP_SIZE]=value;
+            else if (!strcmp(name,"dry") && !outer_dry &&
+                fx_arg_number(step,0,&value) && value>=0 && value<=1)
+                ev->dsp.p[DSP_DRY]=value;
+            else if (!strcmp(name,"delay") && !outer_delay &&
+                fx_arg_number(step,0,&value) && value>=0 && value<=1)
+                ev->delay_send=value;
+            else if (!strcmp(name,"delaytime") && !outer_delaytime &&
+                fx_arg_number(step,0,&value) && value>=0 && value<=1)
+                ev->delay_time=value;
+            else if (!strcmp(name,"delayfeedback") && !outer_delayfb &&
+                fx_arg_number(step,0,&value) && value>=0 && value<=.98)
+                ev->delay_fb=value;
         }
     }
+    if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
     ev->gain *= chain_gain;
 }
 

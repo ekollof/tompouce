@@ -156,11 +156,15 @@ a **2.30-2.86 ms maximum**, no callbacks over 3 ms and **zero PipeWire gaps**.
 An earlier 53 ms outlier was not callback work: the maximum `voice_lock` wait
 stayed at 8-22 us across the same runs. Retiring a bank voice copies its
 current lane state first, and the browser retirement envelope/cut suite (62
-cases) plus the vowel impulse suite still pass. The remaining scalar
-population is supersaw (~8.8 voices/block) and the procedural HH drum (~1.3);
-supersaw's 100-oscillator kernel is already AVX2, so lane admission would not
-remove its main cost. Vowel, phaser, chorus and distortion are not used by
-this composition and still render scalar.
+cases) plus the vowel impulse suite still pass. Supersaw voices now
+use from-allocation lanes that point at the voice's oscillator state and reuse
+the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the
+lane. The procedural HH drum (~1.3 voices/block) remains scalar after a
+measurement: its callback costs ~4.85 us per voice per 256 frames, or about
+0.1 us per four-frame block at that density, while lane admission would have
+to preserve a shared `rand()`/high-pass stream in slot order. Vowel, phaser,
+chorus and distortion are not used by this composition and still render
+scalar.
 
 The audio/reference gates and the supersaw exactness test pass; full ctest
 includes the previously timing-sensitive `tui_pty` vi startup check.

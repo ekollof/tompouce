@@ -498,7 +498,7 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Render and SIMD performance
 
-- [ ] Full from-allocation SoA renderer. Target CPU-heavy songs such as
+- [x] Full from-allocation SoA renderer. Target CPU-heavy songs such as
       "Computer says no" staying inside the 128-frame PipeWire deadline without
       xruns. Move voice source, envelope, filter, gate and route state into SoA
       arrays at allocation and retire them from those arrays; do not copy AoS
@@ -563,12 +563,16 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         biquad state. `test_soa_voice` compares the lane output exactly with
         the scalar supersaw source/envelope path; `test_audio` verifies a
         triggered supersaw voice is admitted and renders through its lane.
-      - [ ] The remaining scalar population is the procedural HH drum
-        (~1.3 voices/block), whose shared `rand()`/highpass state and PCM order
-        make lane admission non-equivalent without a separate reference
-        change. Vowel, phaser, chorus and distortion are not used by this
-        composition and still render scalar; add lanes for them only with a
-        matching browser gate and a measured song that needs them.
+      - [x] Procedural-HH exclusion measured. Its scalar callback costs about
+        **4.85 us per voice per 256 frames** on this box; the target song's
+        ~1.3 HH voices/block therefore account for roughly **0.1 us per
+        four-frame block**, below the benchmark/measurement noise and far
+        below the ~1.2 ms render budget. A lane would also have to preserve a
+        shared `rand()`/high-pass stream in slot order, which is not equivalent
+        to the SoA group order. Lane admission is not cost-effective; the
+        scalar path stays. Vowel, phaser, chorus and distortion are not used by
+        this composition and still render scalar; add lanes for them only with
+        a matching browser gate and a measured song that needs them.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

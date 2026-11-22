@@ -5,6 +5,7 @@
 #include "scheduler.h"
 #include "prep_pool.h"
 #include <unistd.h>
+#include <time.h>
 
 static int sample_fixture(void) {
     /* Eight stereo PCM16 frames with opposite channel polarities. */
@@ -549,6 +550,32 @@ static void test_supersaw_callback(void) {
 
 /* Production admission must render the same PCM as the scalar supersaw
    path from the same trigger state. */
+static double bench_hh_callback(int voices_requested) {
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); audio_time=0; next_voice_onset=HUGE_VAL; voice_onset_serial=0;
+    AudioEvent hh={.inst=INST_HH,.smp=-1,.wt=-1,.freq=0,.gain=.1,
+        .time=0,.duration=1,.rel=.01,.midi_chan=-1,.midi_note=-1};
+    for (int i=0;i<voices_requested;i++) audio_trigger_event(&hh);
+    float out[512];
+    struct timespec a,b; assert(!clock_gettime(CLOCK_MONOTONIC,&a));
+    pa_callback(NULL,out,256,NULL,0,NULL);
+    assert(!clock_gettime(CLOCK_MONOTONIC,&b));
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear();
+    return (b.tv_sec-a.tv_sec)*1e6+(b.tv_nsec-a.tv_nsec)/1e3;
+}
+
+/* Procedural HH keeps a shared rand()/high-pass stream in slot order. A lane
+   cannot preserve that stream without changing PCM, so measure its actual
+   share before considering a separate reference design. */
+static void bench_procedural_hh(void) {
+    int old=playing; playing=1; audio_set_reference_mode(1);
+    double one=bench_hh_callback(1), many=bench_hh_callback(64);
+    printf("HH scalar callback 256 frames: 1 voice %.1f us, 64 voices %.1f us (%.2f us/voice)\n",
+        one,many,(many-one)/63);
+    playing=old; audio_set_reference_mode(0);
+}
+
 static void test_supersaw_soa_equivalence(void) {
     double old_time=audio_time; int old_playing=playing;
     playing=1; audio_set_reference_mode(1);
@@ -1039,6 +1066,7 @@ int main(void) {
     test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
     test_supersaw_soa_equivalence();
+    bench_procedural_hh();
     test_failed_source_siblings();
     test_active_voice_list();
 

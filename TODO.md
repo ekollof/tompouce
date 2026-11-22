@@ -573,6 +573,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         scalar path stays. Vowel, phaser, chorus and distortion are not used by
         this composition and still render scalar; add lanes for them only with
         a matching browser gate and a measured song that needs them.
+- [x] Stereo sample-interpolation AVX2 candidate measured. The kernel is
+      byte-exact against C in `test_dsp` (including forced direct AVX2 calls),
+      but 5,000,000 interpolations measured **14.7 ms C vs 19.3 ms AVX2**
+      (0.76x) on this box, so it is not used by the audio path. The scalar C
+      path remains; this kernel needs a block/batch layout before it can pay
+      for conversion and call overhead.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

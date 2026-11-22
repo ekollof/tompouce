@@ -156,7 +156,10 @@ a **2.30-2.86 ms maximum**, no callbacks over 3 ms and **zero PipeWire gaps**.
 An earlier 53 ms outlier was not callback work: the maximum `voice_lock` wait
 stayed at 8-22 us across the same runs. Retiring a bank voice copies its
 current lane state first, and the browser retirement envelope/cut suite (62
-cases) plus the vowel impulse suite still pass. Supersaw voices now
+cases) plus the vowel impulse suite still pass. A stereo sample-interpolation AVX2 kernel was measured and rejected: it is
+byte-exact against C but 5,000,000 interpolations took 19.3 ms versus 14.7 ms
+for C on this box. The scalar sample lookup remains in the audio path.
+Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the
 lane. The procedural HH drum (~1.3 voices/block) remains scalar after a

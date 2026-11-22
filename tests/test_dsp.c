@@ -1,4 +1,5 @@
 #include "dsp.h"
+#include "sample_interp.h"
 #include "js_audio.h"
 #include "audio.h"
 #include "track.h"
@@ -9,6 +10,9 @@
 #include <dirent.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
 
 static int source_event(const char *text,AudioEvent *event) {
     cJSON *hap=cJSON_CreateObject(); assert(hap);
@@ -18,6 +22,43 @@ static int source_event(const char *text,AudioEvent *event) {
     int result=js_audio_event(hap,0,1,event);
     if (result) result=js_audio_resolve_sample(event,value);
     cJSON_Delete(hap);return result;
+}
+
+static void test_sample_interp(void) {
+    float samples[64];
+    for (int i=0;i<64;i++) samples[i]=(float)((i*37%101)-50)/37.0f;
+    const double positions[]={0,.01,.25,.5,1.5,7.125,31.0,31.75,63.999};
+    for (size_t i=0;i<sizeof(positions)/sizeof(positions[0]);i++) {
+        double cl,cr,al,ar;
+        sample_interp2_c(samples,32,positions[i],&cl,&cr);
+        sample_interp2(samples,32,positions[i],&al,&ar);
+        assert(memcmp(&cl,&al,sizeof(cl))==0 && memcmp(&cr,&ar,sizeof(cr))==0);
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_cpu_init();
+        if (__builtin_cpu_supports("avx2")) {
+            double xl,xr;
+            sample_interp2_avx2(samples,32,positions[i],&xl,&xr);
+            assert(memcmp(&cl,&xl,sizeof(cl))==0 && memcmp(&cr,&xr,sizeof(cr))==0);
+        }
+#endif
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        enum { N=5000000 };
+        double l=0,r=0; volatile double sink=0;
+        struct timespec t0,t1,t2;
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) { sample_interp2_c(samples,32,(i%31000)/1000.0,&l,&r); sink+=l+r; }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) { sample_interp2_avx2(samples,32,(i%31000)/1000.0,&l,&r); sink+=l+r; }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double c=(t1.tv_sec-t0.tv_sec)*1e3+(t1.tv_nsec-t0.tv_nsec)/1e6;
+        double v=(t2.tv_sec-t1.tv_sec)*1e3+(t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("stereo sample interp: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",c,v,v>0?c/v:0);
+    }
+#endif
 }
 
 static void test_source_controls(void) {
@@ -544,5 +585,6 @@ int main(void) {
     test_supersaw();
     test_source_controls();
     test_periodic_limits();
+    test_sample_interp();
     return 0;
 }

@@ -1615,11 +1615,6 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
 static void commit_source_hap(JsProgram *program, const HapPlan *plan,
                               AudioPrepJob *job, unsigned generation) {
     const cJSON *value=cJSON_GetObjectItemCaseSensitive(plan->hap,"value");
-    if (plan->time+1/SR<audio_time_now()) {
-        prep_profile_event(PREP_LATE_SOURCE,plan->time,audio_time_now());
-        discard_prep_job(job);
-        return;
-    }
     if (!job) {
         schedule_source_eviction(plan->time,0,generation);
         javascript_warn_control(program,"sound (preparation allocation failed)");
@@ -1755,8 +1750,11 @@ int js_audio_schedule_clock(JsProgram *program, JsAudioClock *clock,
                     const cJSON *value=cJSON_GetObjectItemCaseSensitive(plans[i].hap,"value");
                     int due=plans[i].time+1/SR>=audio_time_now();
                     if (!due) prep_profile_event(PREP_LATE_SOURCE,plans[i].time,audio_time_now());
-                    int accepted=due &&
-                        schedule_local_ducks(value,plans[i].time,generation);
+                    /* A slow earlier source (including a failed lookup) must
+                       not drop this sibling. Skip late duck timers, but still
+                       let commit_source_hap start the note immediately when
+                       its original duration has not elapsed. */
+                    int accepted=!due || schedule_local_ducks(value,plans[i].time,generation);
                     int current=generation==event_queue_generation();
                     int committed=event_queue_publish_finish(plan_owned,current);
                     if (!current || !committed) ok=0;

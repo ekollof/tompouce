@@ -3,6 +3,7 @@
 #include "../src/audio.c"
 #include "js_audio.h"
 #include "scheduler.h"
+#include "prep_pool.h"
 #include <unistd.h>
 
 static int sample_fixture(void) {
@@ -431,6 +432,39 @@ static void test_analysers(void) {
     memset(voices,0,sizeof(voices));
     memset(analyser_generation,0,sizeof(analyser_generation));
     next_voice_onset = HUGE_VAL;
+}
+
+/* A slow missing sample must not discard later stacked sources whose onsets
+   cross during its preparation. This observer simulates that delay. */
+static void slow_missing_prep(const AudioEvent *event) {
+    if (event && !strcmp(event->token,"nosuchsample"))
+        audio_time=event->time+.05;
+}
+
+/* A missing sample in a stack must not suppress its sibling oscillators.
+   This exercises the scheduler's preparation/commit path directly. */
+static void test_failed_source_siblings(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    assert(prep_pool_start(0,0));
+    event_queue_clear();
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile(
+        "s(\"nosuchsample,sine,triangle\").gain(.1)",120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    unsigned generation=event_queue_generation();
+    js_audio_set_prep_observer(slow_missing_prep);
+    assert(js_audio_schedule(program,0,0,generation));
+    js_audio_set_prep_observer(NULL);
+    /* The failed sample leaves an eviction event; both sibling oscillators
+       must still be queued, starting at the delayed preparation time. */
+    assert(event_queue_depth()==3);
+    event_queue_clear();
+    memset(voices,0,sizeof(voices));
+    javascript_free(program);
+    prep_pool_stop();
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
 static void test_live_scope_attachment(void) {
@@ -946,6 +980,7 @@ int main(void) {
     test_supersaw_callback();
     test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
+    test_failed_source_siblings();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");
     return 0;

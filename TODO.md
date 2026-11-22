@@ -412,10 +412,16 @@ and measured divergences are recorded in the archive.
       `bstab` has no installed default and that generic `stab` exists. An
       owned engine confirmed the two oscillator voices play alongside the
       rejected sample. Other non-TR bank aliases remain open.
-- [ ] A failed source in the first stacked scheduling batch can delay its
-      sibling haps by one window. `roller2`'s missing `bstab` exposes this
-      before `supersaw`/`white` start; investigate the publication/commit loop
-      without relaxing the missing-sample error.
+- [x] Failed/slow stacked sources no longer suppress siblings. The scheduler
+      previously discarded a sibling whose onset crossed while an earlier
+      source prepared (a missing `bstab` lookup made this visible), and
+      `commit_source_hap` also dropped late jobs before its late-onset path.
+      Late siblings now skip duck timers but commit immediately, preserving
+      their original end time; ended notes are still skipped. `test_audio`
+      simulates the preparation delay with a prep observer and requires the
+      failed sample plus both sibling oscillators to queue; an owned engine
+      started `roller2`'s `supersaw`/`white` voices as soon as the missing
+      sample lookup returned.
 - [x] Extend MIDI maps beyond inline per-program definitions: `await midimaps('name')`
       loads a bounded, confined JSON manifest from the user's config store and
       can be reloaded on later evaluations (explicit persistence). Traversal,

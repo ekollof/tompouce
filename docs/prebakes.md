@@ -69,7 +69,8 @@ unavailable samples/synths and other bank-specific examples still require
 their own support. The pinned `roller2` helper's `bstab` sample is not part of
 the public installed manifests; the native profile keeps the name and rejects
 that hap with the normal sample-unavailable warning instead of substituting
-the unrelated `stab` bank. Its `supersaw` and `white` voices still play. External MIDI is covered for the starter's `voc` path: the native
+the unrelated `stab` bank. Its `supersaw` and `white` voices start as soon as
+preparation of the missing hap completes. External MIDI is covered for the starter's `voc` path: the native
 engine broadcasts `.midi('tout')` (and any other accepted `midiport`) to ALSA
 subscribers, and `test_midi` delivers its note and CC 34 through an owned
 receiver. Calling an unavailable API retains its error; the native profile

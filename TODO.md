@@ -463,9 +463,14 @@ and measured divergences are recorded in the archive.
       [measured latency](docs/plugin-hosting.md#measured-midi-to-audio-latency));
       an absolute device-latency figure still needs external MIDI injection
       permissions or an in-engine capture hook.
-- [ ] Real USB/DIN MIDI transport and device response timing remain
+- [x] Physical USB MIDI input verified with the attached AKAI LPK25
+      (`32:0`): `midikeys('LPK25')` produced 5–9 concurrent sine voices from
+      live key presses in an owned engine. The Behringer UMC404HD (`16:0`)
+      exposes MIDI I/O, but no receiving synth or OUT→IN cable is present, so
+      physical note-off output timing and device response remain unmeasured.
+- [ ] Real USB/DIN MIDI output transport and device response timing remain
       unmeasured; the owned ALSA loopback cannot observe hardware or driver
-      queues. This requires a physical device and is outside the test box.
+      queues. This requires a receiving device or a DIN loopback cable.
 
 Input beyond CC/note-on has been evaluated against the deployed stack:
 note-off, bend, touch and program messages do not become native CC entries.

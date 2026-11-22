@@ -65,8 +65,12 @@ async function fetchCode(generation) {
     sourcePanel.textContent = text.length > 16000 ? text.slice(0,16000) + '\n…' : text;
     sourcePanel.style.display = text ? 'block' : 'none';
     codeError = null;
+    globalThis.__hydraCodeError = null;
     try { await evaluateVisualCode(text); }
-    catch (error) { codeError = error && error.message ? error.message : String(error); }
+    catch (error) {
+      codeError = error && error.message ? error.message : String(error);
+      globalThis.__hydraCodeError = codeError;
+    }
   } catch (error) { /* analysis can continue if the read-only code call fails */ }
 }
 function showScope(on) {

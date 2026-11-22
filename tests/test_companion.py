@@ -86,6 +86,7 @@ class HydraTest(unittest.TestCase):
             csp = response.headers["Content-Security-Policy"]
         assert f"script-src 'self' 'nonce-{nonce}'" in csp
         assert "script-src" in csp and "'unsafe-inline'" not in csp
+        assert "'unsafe-eval'" in csp
 
 
 class CompanionTest(unittest.TestCase):

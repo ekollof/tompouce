@@ -17,13 +17,22 @@ const realPage = (await fs.readFile(path.resolve('web/hydra.html'), 'utf8'))
 const scope = Array.from({length:192}, (_, i) => Math.sin(i * .19) * .7);
 const scopeReply = JSON.stringify({result:{content:[{type:'text',
   text:JSON.stringify({scope,bpm:120,playing:1,generation:1})}]}});
+const pageCode = 'await initHydra({feedStrudel:1});\n' +
+  'osc(6).color(1,.5,.2).out();\n' +
+  '$: note("c4 e4").s("sine").gain(.1)';
+const codeReply = JSON.stringify({result:{content:[{type:'text',text:pageCode}]}});
 
 const server = http.createServer(async (request, response) => {
   try {
     if (request.url === '/api/tool') {
-      request.resume();
-      response.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
-      response.end(scopeReply);
+      let body = '';
+      request.on('data', chunk => { body += chunk; });
+      request.on('end', () => {
+        let name = '';
+        try { name = JSON.parse(body).name; } catch (error) {}
+        response.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
+        response.end(name === 'music_get_code' ? codeReply : scopeReply);
+      });
       return;
     }
     if (request.url === '/' || request.url === '/index.html') {
@@ -230,12 +239,12 @@ try {
     }));
   }
 
-  /* The real page must switch from the 2D scope fallback to the WebGL stage
-     and render a user graph after its analysis poll. */
+  /* The real page must read the source, evaluate its Hydra calls, switch from
+     the 2D scope fallback to WebGL, and show the code overlay. */
   await browser.page(url + 'page');
   await browser.until('window.Hydra && Hydra.ready === true', 10000);
-  await browser.evaluate('osc(6).color(1,.5,.2).rotate(.2).out(); true');
-  await browser.until('document.getElementById("hud").textContent.indexOf("WebGL graph") >= 0', 5000);
+  await browser.until('document.getElementById("hud").textContent.indexOf("WebGL graph") >= 0', 10000);
+  await browser.until('document.getElementById("source").textContent.indexOf("osc(6)") >= 0', 5000);
   const pageResult = await browser.evaluate(`(() => {
     const gl = __hydraGL, canvas = document.getElementById('stage');
     const data = new Uint8Array(canvas.width*canvas.height*4);
@@ -247,10 +256,11 @@ try {
       if (value>max) max=value;
     }
     return {min,max,display:getComputedStyle(canvas).display,
-      hud:document.getElementById('hud').textContent,error:gl.getError()};
+      hud:document.getElementById('hud').textContent,
+      source:document.getElementById('source').textContent,error:gl.getError()};
   })()`);
   if (pageResult.display === 'none' || pageResult.max <= pageResult.min ||
-      pageResult.error !== 0) {
+      pageResult.error !== 0 || !pageResult.source.includes('osc(6)')) {
     failures++;
     console.error('page', pageResult);
   }
@@ -259,7 +269,7 @@ try {
     console.error(`hydra WebGL smoke failed: ${failures} case(s)`);
     process.exitCode = 1;
   } else {
-    console.log('hydra WebGL generators, full effects, feedback, camera/screen/image sources and page scope source ok');
+    console.log('hydra WebGL generators, full effects, feedback, camera/screen/image sources, page source graph and code overlay ok');
   }
 } catch (error) {
   if (/WebGL unavailable/.test(String(error))) {

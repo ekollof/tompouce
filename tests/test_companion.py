@@ -69,7 +69,7 @@ class HydraTest(unittest.TestCase):
         reply = json.loads(self.post("/api/tool", "music_audio_scope").read())
         assert "scope" in reply["result"]["content"][0]["text"]
         assert self.calls == ["music_audio_scope"]
-        for name in ("music_get_code", "music_evaluate"):
+        for name in ("music_evaluate",):
             with self.assertRaises(urllib.error.HTTPError):
                 self.post("/api/tool", name)
         with self.assertRaises(urllib.error.HTTPError):

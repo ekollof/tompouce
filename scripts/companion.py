@@ -39,8 +39,8 @@ def main():
              "music_set_bpm", "music_set_code"}
     tools.update({"music_sounds", "music_reload_sounds"})
     if args.hydra:
-        # The visualizer gets a single bounded read-only analysis tool.
-        tools = {"music_audio_scope"}
+        # The visualizer gets bounded read-only analysis and source access.
+        tools = {"music_audio_scope", "music_get_code"}
 
     def call_mcp(name, arguments):
         message = {"jsonrpc": "2.0", "id": 1, "auth": mcp_token, "method": "tools/call",

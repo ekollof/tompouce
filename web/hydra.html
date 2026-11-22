@@ -5,10 +5,12 @@
  html,body{margin:0;height:100%;background:#090b12;color:#d7dbe8;font:13px system-ui,sans-serif;overflow:hidden}
  canvas{position:absolute;inset:0;display:block;width:100vw;height:100vh}
  #hud{position:fixed;top:8px;left:10px;padding:4px 8px;background:#101525aa;border:1px solid #2a3350;border-radius:6px;z-index:2}
+ #source{position:fixed;left:10px;right:10px;bottom:10px;max-height:32vh;overflow:hidden;white-space:pre-wrap;font:12px/1.35 ui-monospace,monospace;color:#cbd5e1;background:#101525cc;border:1px solid #2a3350;border-radius:6px;padding:6px 8px;z-index:3;pointer-events:none}
 </style></head><body>
 <canvas id="scope" width="960" height="540"></canvas>
 <canvas id="stage" width="960" height="540"></canvas>
 <div id="hud">waiting for engine analysis…</div>
+<pre id="source"></pre>
 <script nonce="EDITOR_STYLE_NONCE" src="/hydra.js"></script>
 <script nonce="EDITOR_STYLE_NONCE">
 const token = 'COMPANION_TOKEN';
@@ -16,7 +18,57 @@ const stage = document.getElementById('stage');
 const scopeCanvas = document.getElementById('scope');
 const ctx = scopeCanvas.getContext('2d');
 const hud = document.getElementById('hud');
+const sourcePanel = document.getElementById('source');
 let phase = 0, last = null, sourceGeneration = null;
+let loadedCode = null, codeGeneration = null, codeError = null;
+const musicStub = new Proxy(function(){ return musicStub; }, {
+  get(target, property) {
+    if (property === Symbol.toPrimitive) return () => 0;
+    if (property === 'then' || typeof property === 'symbol') return undefined;
+    return musicStub;
+  },
+});
+const visualBase = Object.create(null);
+visualBase.initHydra = async () => visualBase;
+visualBase.H = () => 0;
+visualBase.hush = () => globalThis.Hydra && globalThis.Hydra.hush ? globalThis.Hydra.hush() : undefined;
+visualBase.setResolution = (width,height) => globalThis.Hydra && Hydra.setResolution ? Hydra.setResolution(width,height) : undefined;
+visualBase.render = () => undefined;
+visualBase.setFunction = () => undefined;
+const visualScope = new Proxy(visualBase, {
+  has: () => true,
+  get(target, property) {
+    if (typeof property === 'symbol' || property === 'then') return undefined;
+    if (Object.prototype.hasOwnProperty.call(target, property)) return target[property];
+    if (property in globalThis) return globalThis[property];
+    return musicStub;
+  },
+});
+async function evaluateVisualCode(code) {
+  const cleaned = String(code).replace(/(^|\n)[ \t]*\$:/g, '$1;');
+  const runner = new Function('scope',
+    'with(scope){return (async()=>{' + cleaned + '\n})()}');
+  await runner(visualScope);
+}
+async function fetchCode(generation) {
+  if (loadedCode !== null && generation === codeGeneration) return;
+  codeGeneration = generation;
+  try {
+    const reply = await fetch('/api/tool', {method:'POST',
+      headers:{'Content-Type':'application/json','X-Companion-Token':token},
+      body:JSON.stringify({name:'music_get_code',arguments:{}})});
+    if (!reply.ok) return;
+    const payload = await reply.json();
+    const text = payload.result && payload.result.content && payload.result.content[0] && payload.result.content[0].text;
+    if (typeof text !== 'string' || text.length > 65536) return;
+    loadedCode = text;
+    sourcePanel.textContent = text.length > 16000 ? text.slice(0,16000) + '\n…' : text;
+    sourcePanel.style.display = text ? 'block' : 'none';
+    codeError = null;
+    try { await evaluateVisualCode(text); }
+    catch (error) { codeError = error && error.message ? error.message : String(error); }
+  } catch (error) { /* analysis can continue if the read-only code call fails */ }
+}
 function showScope(on) {
   stage.style.display = on ? 'none' : 'block';
   scopeCanvas.style.display = on ? 'block' : 'none';
@@ -57,6 +109,7 @@ async function poll() {
           sourceGeneration = data.generation;
         }
         last = data;
+        await fetchCode(typeof data.generation === 'number' ? data.generation : null);
       }
     }
   } catch (error) { /* keep the last frame on a dropped poll */ }
@@ -77,7 +130,8 @@ async function poll() {
   const energy = drawScope(samples);
   hud.textContent = last
     ? `hydra: ${last.playing ? 'playing' : 'stopped'} · ${last.bpm.toFixed(1)} bpm · rms ${energy.toFixed(3)} · ${samples.length} samples`
-    : (globalThis.Hydra && Hydra.error ? 'hydra: ' + Hydra.error : 'waiting for engine analysis…');
+    : (codeError ? 'hydra code: ' + codeError
+      : globalThis.Hydra && Hydra.error ? 'hydra: ' + Hydra.error : 'waiting for engine analysis…');
   setTimeout(poll, 125); // bounded to 8 Hz
 }
 poll();

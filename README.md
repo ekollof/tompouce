@@ -322,13 +322,15 @@ loopback-only; audio stays native. Standalone launching via
 `python3 scripts/companion.py --open` remains available.
 
 `/hydra` opens a separate loopback visualizer tab (`/hydra stop` closes it),
-independent of F12. It uses the same authenticated loopback helper with a
-single read-only `music_audio_scope` tool (bounded waveform plus BPM/playing
-state, polled at 8 Hz); it has no control access to the engine and exits with
-its parent. It renders the audio scope by default and accepts a bounded
-Hydra-style WebGL graph: generators, the full built-in effect set, `prev`
-feedback, and `s0`–`s3` camera/screen/image sources. Custom `setFunction` GLSL
-and patchbay streams remain outside this bounded backend.
+independent of F12. It uses the same authenticated loopback helper with
+read-only `music_audio_scope` and `music_get_code` tools (bounded waveform plus
+BPM/playing state, polled at 8 Hz; source read when its generation changes); it
+has no control access to the engine and exits with its parent. It renders the
+audio scope by default, evaluates the visual calls in the current source with
+inert music stubs, renders a bounded Hydra-style WebGL graph (generators, the
+full built-in effect set, `prev` feedback, and `s0`–`s3` camera/screen/image
+sources), and overlays the source text. Custom `setFunction` GLSL and patchbay
+streams remain outside this bounded backend.
 
 Native ZzFX (`s('z_sine')` and related sounds), bytebeat (`s('bytebeat').bbexpr('t')`)
 and Kabelsalat graphs (`note(60).K(sine(sFreq).mul(.1).out())`) run without a browser.

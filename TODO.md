@@ -12,10 +12,10 @@ verification, installation and upstream terminal constraints.
 
 - [x] `/hydra` command: a separate loopback visualizer is now implemented and
       independent of F12 — `/hydra` / `/hydra stop` spawn a browser tab through
-      the companion helper with a private token, Host/Origin checks, one
-      read-only `music_audio_scope` MCP tool (bounded 16–192 samples, polled at
-      8 Hz) and a parent-pid session guard. `tests/test_companion.py` covers the
-      tool allowlist and auth. `web/hydra.js` renders through WebGL: generators
+      the companion helper with a private token, Host/Origin checks, read-only
+      `music_audio_scope` and `music_get_code` MCP tools (bounded 16–192 samples,
+      polled at 8 Hz) and a parent-pid session guard. `tests/test_companion.py`
+      covers the tool allowlist and auth. `web/hydra.js` renders through WebGL: generators
       (`osc`, `shape`, `solid`, `noise`, `voronoi`, `gradient`, `src`, `prev`),
       coordinate and color effects (`rotate`, `scale`, `pixelate`, `posterize`,
       `shift`, `repeat`, `repeatX/Y`, `kaleid`, `scroll`, `scrollX/Y`,
@@ -30,9 +30,12 @@ verification, installation and upstream terminal constraints.
       switches from its 2D fallback to the WebGL stage only while a custom
       graph is set. `hydra_webgl` is a headless Chromium smoke test for
       generator output, the full effect set, feedback, owned canvas-backed
-      camera/screen stubs, image sources, resolution changes and the real page
-      switch. The scope tool includes the accepted source's `generation`, and
-      the page drops stale frames when it changes. Custom `setFunction` GLSL and
+      camera/screen stubs, image sources, resolution changes, source-driven
+      graph switching and the code overlay. The scope tool includes the
+      accepted source's `generation`, and
+      the page drops stale frames when it changes. The page reads source
+      through `music_get_code`, evaluates visual calls with inert musical
+      stubs, and overlays the code. Custom `setFunction` GLSL and
       patchbay stream names stay outside the bounded backend.
 
 ## Plugin hosting

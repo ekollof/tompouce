@@ -547,6 +547,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
         and zero gaps. One earlier 53 ms outlier occurred while lock waits
         stayed at 8-22 us, so it was an external stall rather than callback
         work.
+      - [x] Compact sorted active-voice list. The callback, onset dispatch,
+        SoA admission and staged-route loops now visit only active slots via a
+        sorted list, preserving slot/mix order and re-adding retirement slots.
+        `test_active_voice_list` covers slot order, removal and reuse; the
+        audio/sanitize and example PCM gates still pass.
       - [ ] The remaining scalar population is supersaw (~8.8 voices/block)
         and the procedural HH drum (~1.3). Supersaw's 100-oscillator kernel is
         already AVX2 and would need ~1.6 KB of phase/ratio state per lane, so

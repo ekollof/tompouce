@@ -467,6 +467,36 @@ static void test_failed_source_siblings(void) {
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
+/* The compact render list must stay sorted by voice slot, because slot order
+   fixes the floating-point mixing order, and must drop/re-add slots on
+   retirement and reuse. */
+static void test_active_voice_list(void) {
+    int old_playing=playing;
+    playing=1; audio_set_reference_mode(1);
+    memset(voices,0,sizeof(voices));
+    active_voice_reset();
+    assert(active_count==0);
+    AudioEvent event={.inst=INST_SINE,.smp=-1,.wt=-1,.freq=440,.gain=.01,
+        .time=audio_time,.duration=1,.rel=.01,.midi_chan=-1,.midi_note=-1};
+    for (int i=0;i<4;i++) audio_trigger_event(&event);
+    assert(active_count==4);
+    for (unsigned i=0;i<active_count;i++) assert(active_slots[i]==(int)i);
+    voices[1].active=0;
+    active_voice_compact();
+    assert(active_count==3);
+    assert(active_slots[0]==0 && active_slots[1]==2 && active_slots[2]==3);
+    assert(!active_listed[1]);
+    audio_trigger_event(&event);
+    assert(active_count==4);
+    for (unsigned i=0;i<active_count;i++) assert(active_slots[i]==(int)i);
+    for (int i=0;i<VOICE_SLOTS;i++) voices[i].active=0;
+    active_voice_compact();
+    assert(active_count==0);
+    memset(voices,0,sizeof(voices));
+    active_voice_reset();
+    audio_set_reference_mode(0); playing=old_playing;
+}
+
 static void test_live_scope_attachment(void) {
     const char *code="stack(note(60).s('sine').gain(.1),note(72).s('sine').gain(.2))";
     const char *editor="stack(note(60).s('sine').gain(.1)._scope(),note(72).s('sine').gain(.2))";
@@ -868,7 +898,7 @@ int main(void) {
     orbit_dt[4] = 32 / SR; orbit_fb[4] = 0;
     assert(ensure_orbit_delay(4)); /* white-box voice setup bypasses triggering */
     float impulse[2] = {1,1};
-    voices[0].active = 1; voices[0].orbit = 4;
+    voices[0].active = 1; active_voice_add(0); voices[0].orbit = 4;
     voices[0].smpbuf = impulse; voices[0].smplen = 1; voices[0].smp_channels = 1;
     voices[0].smpstep = 1; voices[0].smp_end = 1; voices[0].amp = .5;
     voices[0].delay_send = 1; voices[0].note_off_time = 10; voices[0].gate_end = 10;
@@ -879,7 +909,7 @@ int main(void) {
 
     memset(voices,0,sizeof(voices));
     DspParams held; dsp_params_init(&held); held.enabled = 1;
-    voices[1].active = 1; voices[1].orbit = 2; voices[1].inst = INST_SINE;
+    voices[1].active = 1; active_voice_add(1); voices[1].orbit = 2; voices[1].inst = INST_SINE;
     voices[1].phase = M_PI/2; voices[1].amp = 1; voices[1].vsus = 1;
     voices[1].note_off_time = 10; voices[1].gate_end = 10; voices[1].age = 1;
     dsp_init(&voices[1].dsp,&held);
@@ -981,6 +1011,7 @@ int main(void) {
     test_supersaw_quantum_start();
     test_pulse_quantum_boundary();
     test_failed_source_siblings();
+    test_active_voice_list();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");
     return 0;

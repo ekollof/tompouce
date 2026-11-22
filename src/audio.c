@@ -378,6 +378,37 @@ static int silent_clock;
    Moving a Voice transfers its prepared references; the callback never frees. */
 enum { VOICE_SLOTS = MAX_VOICES*2 };
 static Voice voices[VOICE_SLOTS];
+/* Sorted active-slot list. Scanning this instead of the whole 256-slot pool
+   keeps the per-frame renderer proportional to sounding voices while
+   preserving slot order and therefore mixing order. */
+static int active_slots[VOICE_SLOTS];
+static unsigned char active_listed[VOICE_SLOTS];
+static unsigned active_count;
+
+static void active_voice_reset(void) {
+    active_count=0;
+    memset(active_listed,0,sizeof(active_listed));
+}
+static void active_voice_add(int slot) {
+    if (slot<0 || slot>=VOICE_SLOTS || active_listed[slot]) return;
+    unsigned pos=active_count;
+    while (pos>0 && active_slots[pos-1]>slot) {
+        active_slots[pos]=active_slots[pos-1];
+        pos--;
+    }
+    active_slots[pos]=slot;
+    active_listed[slot]=1;
+    active_count++;
+}
+static void active_voice_compact(void) {
+    unsigned write=0;
+    for (unsigned i=0;i<active_count;i++) {
+        int slot=active_slots[i];
+        if (voices[slot].active) active_slots[write++]=slot;
+        else active_listed[slot]=0;
+    }
+    active_count=write;
+}
 /* Four-frame routing staging. Only used while voice_lock is held and the
    block contains no pending onsets, scope voices or named targets. */
 static int block_staging, block_lock_held;
@@ -518,9 +549,10 @@ static void soa_lane_from_voice(SoaVoiceLane *l, Voice *v, int kind) {
 /* Lanes start at four-frame block boundaries, so the scalar path has advanced
    the owner through the previous block and no state is copied per block. */
 static void soa_bank_admit_pending(void) {
-    for (int i=0;i<VOICE_SLOTS;i++) {
+    for (unsigned ai=0;ai<active_count;ai++) {
+        int i=active_slots[ai];
         Voice *v=&voices[i];
-        if (!v->soa_pending || v->soa_active) continue;
+        if (!v->active || !v->soa_pending || v->soa_active) continue;
         v->soa_pending=0;
         if (!soa_bank_eligible(v)) continue;
         SoaVoiceLane lane;
@@ -1209,7 +1241,8 @@ static void dispatch_voice_onsets(void) {
     if (next_voice_onset>audio_time+1e-10) return;
     int due[VOICE_SLOTS], count=0;
     next_voice_onset=HUGE_VAL;
-    for (int i=0;i<VOICE_SLOTS;i++) {
+    for (unsigned ai=0;ai<active_count;ai++) {
+        int i=active_slots[ai];
         Voice *v=&voices[i];
         if (!v->active || !v->onset_pending) continue;
         if (v->start_time>audio_time+1e-10) { next_voice_onset=fmin(next_voice_onset,v->start_time); continue; }
@@ -1277,6 +1310,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         ev->stretch_buffer || native_synth_effect(ev->native_synth))) dsp_init(&v->dsp_right,&ev->dsp);
     v->dsp.noise_seed ^= (unsigned)fmod(audio_time*SR,4294967295.0) + (unsigned)(v-voices)*97u;
     v->active = 1;
+    active_voice_add((int)(v-voices));
     v->native_program=ev->native_synth;
     v->inst = ev->is_drum ? ev->inst : ev->inst;
     // if drum token, map
@@ -1682,6 +1716,7 @@ static VoiceResources retire_voice_locked(int chosen, double incoming_time) {
        stays with the source slot until trigger_voice releases it. */
     voice->soa_active=0; voice->soa_lane=-1; voice->soa_pending=0;
     voice->retiring=1;
+    active_voice_add(slot);
     voice->retire_end=incoming_time+.25;
     voice->retire_anchor=audio_time; voice->retire_level=1;
     if (!voice->sampled_source && !native_synth_enveloped(voice->native_program)) {
@@ -2211,14 +2246,16 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         if (render_active) {
             pthread_mutex_lock(&voice_lock);
             block_lock_held=1;
+            active_voice_compact();
             soa_bank_admit_pending();
             if (count==RENDER_BLOCK_FRAMES) {
                 double last=frame_times[count-1];
                 if (next_voice_onset>last+1e-10) {
                     int stage=1;
-                    for (int v=0;v<VOICE_SLOTS && stage;v++)
-                        if (voices[v].active && voices[v].out_target)
-                            stage=0;
+                    for (unsigned ai=0;ai<active_count && stage;ai++) {
+                        int slot=active_slots[ai];
+                        if (voices[slot].active && voices[slot].out_target) stage=0;
+                    }
                     if (stage) {
                         block_staging=1;
                         memset(block_staged,0,sizeof(block_staged));
@@ -2248,7 +2285,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             if (!block_lock_held) pthread_mutex_lock(&voice_lock);
             double dt = 1.0/SR;
             dispatch_voice_onsets();
-            for (int v = 0; v < VOICE_SLOTS; v++) {
+            for (unsigned ai = 0; ai < active_count; ai++) {
+                int v = active_slots[ai];
                 Voice *V = &voices[v];
                 if (!V->active) {
                     if (V->stretch_buffer) { stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; }
@@ -2683,7 +2721,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             memset(frame_scope,0,sizeof(frame_scope));
             double frame_analyser[RENDER_BLOCK_FRAMES][N_ANALYSERS];
             memset(frame_analyser,0,sizeof(frame_analyser));
-            for (int slot=0;slot<VOICE_SLOTS;slot++) {
+            for (unsigned ai=0;ai<active_count;ai++) {
+                int slot=active_slots[ai];
                 unsigned mask=0;
                 for (unsigned j=0;j<RENDER_BLOCK_FRAMES;j++)
                     if (block_staged[slot][j]) mask|=1u<<j;
@@ -2905,6 +2944,7 @@ void audio_init(void) {
 #endif
     midi_init();
     memset(voices, 0, sizeof(voices));
+    active_voice_reset();
     retirement_overflow=0;
     pending_duck_count=0; pending_duck_serial=0;
     duck_error_count=0; duck_error_overflow=0;

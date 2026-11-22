@@ -173,12 +173,29 @@ nothing to it. Sources/capture remain out of scope until an input path exists.
   input ignore the events. A self-contained `urn:tompouce:test:midi-synth`
   fixture (note frequency, velocity amplitude, CC gain) gates the worker and
   engine paths under the normal and sanitized worker; the default gain
-  fixture's pinned PCM hash is unchanged. A live scheduler-owned plugin
-  instance for real-time mid-note CC/parameter changes remains open.
+  fixture's pinned PCM hash is unchanged.
 
-  Engine audio plumbing is in place: `s('lv2:<uri>')` is prepared off the audio
-  callback through the worker (bounded to four seconds), and the render becomes
-  an owned playback sample via `smp_store_owned`. `test_lv2_worker` checks that
+  Scheduler-owned live instruments are in place (`src/live_lv2.c`). When a
+  plugin reports an atom MIDI input and no audio input, `s('lv2:<uri>')`
+  acquires one bounded live slot (at most eight per session) instead of
+  rendering a sample. The slot owns the confined worker, a render thread and a
+  stereo sample ring. `audio_trigger_event` queues note-on, CC 74 from the
+  resolved low-pass cutoff and note-off at the event duration at absolute audio
+  times. The render thread drains at most 16 events per 256-frame block, keeps
+  the ring near 768 frames, and never runs in the audio callback. The callback
+  mixes available ring samples into the master bus and never blocks, allocates
+  or performs IPC. Slots persist for the session, receive all-notes-off when
+  playback stops, and a dead worker or full queue only yields silence.
+  `test_live_lv2` and its sanitized build cover the ring, timed note/CC, queue
+  bounds and shutdown; a headless engine run reported `voices=0` and peak
+  0.504, and cutoff 20 (CC 74=0) silenced the fixture. Mid-note
+  parameter/preset changes through LV2 state mapped to existing sliders remain
+  open.
+
+  For effects and plugins without a MIDI input, the offline path is in place:
+  `s('lv2:<uri>')` is prepared off the audio callback through the worker
+  (bounded to four seconds), and the render becomes an owned playback sample
+  via `smp_store_owned`. `test_lv2_worker` checks that
   a pattern-resolved event produces finite PCM and pins an FNV hash of the
   default gain plugin's 13,231-frame render at 44.1 kHz as the deterministic
   native reference (an env-selected plugin skips the hash). Web compare gates

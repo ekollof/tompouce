@@ -34,5 +34,9 @@ int lv2_worker_send_midi_at(Lv2Worker *worker, uint32_t offset,
     const unsigned char *bytes, int count, char *error, size_t error_size);
 void lv2_worker_stop(Lv2Worker *worker);
 pid_t lv2_worker_pid(const Lv2Worker *worker);
+/* True when the plugin exposes an atom MIDI input (an instrument). */
+int lv2_worker_has_midi(const Lv2Worker *worker);
+/* True for a MIDI instrument: atom MIDI input and no audio input. */
+int lv2_worker_is_instrument(const Lv2Worker *worker);
 
 #endif

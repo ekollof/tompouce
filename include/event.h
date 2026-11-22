@@ -62,6 +62,7 @@ typedef struct {
     int inst;           // for note tracks
     int wt;             // wavetable index when inst == INST_WT, else -1
     int smp;            // sample id when track has bank, else -1
+    int live_lv2;       // 0 = none, otherwise scheduler-owned live slot + 1
     double att;         // attack seconds, -1 = default
     double rel;         // release seconds, -1 = default
     double fx_release;  /* optional downstream effect cleanup extension */

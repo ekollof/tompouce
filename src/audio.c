@@ -24,6 +24,7 @@
 #include "convolution_mix.h"
 #include "render_block.h"
 #include "soa_voice.h"
+#include "live_lv2.h"
 #ifdef TOMPOUCE_RENDER_PROFILE
 static _Atomic unsigned long long section_voice, section_fx, section_master;
 static unsigned long long audio_cycles(void) {
@@ -1679,6 +1680,28 @@ static int oldest_full_pool_voice(void) {
 void audio_trigger_event(AudioEvent *ev) {
     if (ev->csound_only || ev->osc_only || ev->midi_only) return;
     if (!playing && !atomic_load(&reference_mode)) return;
+    if (ev->live_lv2 > 0) {
+        if (ev->gain <= 0) return;
+        int slot=ev->live_lv2-1;
+        int channel=ev->midi_chan>=0?(ev->midi_chan&15):0;
+        int note=ev->midi_note;
+        if (note<0) {
+            double frequency=ev->freq>0?ev->freq:440;
+            note=(int)fmax(0,fmin(127,round(69+12*log2(frequency/440))));
+        }
+        int velocity=(int)fmax(1,fmin(127,round(ev->gain*127)));
+        int cc=-1;
+        if (ev->dsp.enabled) {
+            double cutoff=ev->dsp.p[DSP_LPF];
+            if (cutoff>0) {
+                double t=log2(fmax(20,fmin(20000,cutoff))/20)/log2(1000);
+                cc=(int)fmax(0,fmin(127,round(t*127)));
+            }
+        }
+        double duration=ev->duration>0?ev->duration:0.25;
+        live_lv2_note(slot,ev->time,duration,channel,note,velocity,cc,cc);
+        return;
+    }
     if (ev->eviction_only) {
         VoiceResources previous={0};
         pthread_mutex_lock(&voice_lock);
@@ -2102,6 +2125,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
     const double output_gain=audio_get_output_gain();
     VoiceMix frame_mixes[RENDER_BLOCK_FRAMES][N_ORBITS];
     double frame_cs_l[RENDER_BLOCK_FRAMES], frame_cs_r[RENDER_BLOCK_FRAMES];
+    float frame_live_l[RENDER_BLOCK_FRAMES], frame_live_r[RENDER_BLOCK_FRAMES];
     double frame_duck_g[RENDER_BLOCK_FRAMES][N_ORBITS];
     double frame_times[RENDER_BLOCK_FRAMES];
     for (unsigned long base=0; base<frameCount; ) {
@@ -2627,6 +2651,17 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             pthread_mutex_unlock(&voice_lock);
             block_lock_held=0;
         }
+        for (unsigned j=0;j<count;j++) {
+            frame_live_l[j]=0;
+            frame_live_r[j]=0;
+        }
+        live_lv2_mix(frame_live_l,frame_live_r,(unsigned)count);
+        if (!render_active) {
+            for (unsigned j=0;j<count;j++) {
+                frame_live_l[j]=0;
+                frame_live_r[j]=0;
+            }
+        }
         for (unsigned long j=0;j<count;j++) {
         audio_time=frame_times[j];
         VoiceMix *mixes=frame_mixes[j];
@@ -2646,8 +2681,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         atomic_fetch_add(&section_fx,audio_cycles()-c_fx);
         unsigned long long c_master=audio_cycles();
 #endif
-        L += cs_l;
-        R += cs_r;
+        L += cs_l + frame_live_l[j];
+        R += cs_r + frame_live_r[j];
         /* ---- master fx chain (all params plain doubles, lock-free) ---- */
         {
             int fx_on = fx_drive > 0.001 || fx_cutoff < 0.999 ||
@@ -2783,6 +2818,7 @@ static void render_output(float *output, unsigned long frames) {
 }
 
 void audio_init(void) {
+    live_lv2_shutdown();
     convolution_simd_init();
     wt_init();
 #ifdef __linux__
@@ -2821,6 +2857,7 @@ void audio_shutdown(void) {
 void audio_toggle_play(int on) {
     playing = on ? 1 : 0;
     if (on) { audio_peak_reset(); soa_bank_reset(); }
+    else live_lv2_all_notes_off();
 }
 int audio_is_playing(void) { return playing; }
 int audio_is_stream_active(void) {

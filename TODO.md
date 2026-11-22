@@ -104,14 +104,26 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       external plugins. `test_lv2_worker` covers sample-accurate offsets,
       note-off, CC, event-queue bounds, engine note/cutoff dispatch and the
       sanitized worker (`TOMPOUCE_LV2_WORKER_SANITIZE=1`).
-- [ ] A live plugin instance owned by the scheduler for real-time mid-note CC
-      and parameter changes (the current path renders each event off the audio
-      callback into an owned sample, with note/CC dispatched inside that
-      render); params/presets through LV2 state mapped to existing sliders;
-      per-plugin crash isolation must not take down or stall playback. Discovery
-      now reads bounded control-port metadata (port index, name, declared
-      min/max/default) for all safe plugins — 3155 ports across 219 plugins on
-      this box — so slider mapping has a stable reference.
+- [x] Scheduler-owned live LV2 instruments (`src/live_lv2.c`). `s('lv2:<uri>')`
+      starts one confined worker and bounded render thread per instrument URI
+      (at most eight, never reused) when the plugin reports atom MIDI input and
+      no audio input. Note-on, CC 74 from the resolved low-pass cutoff, and
+      note-off at the event duration are queued at absolute audio times; the
+      render thread sends them and fills a bounded stereo sample ring. The
+      audio callback only reads the ring into the master bus, with no IPC or
+      allocation. The offline owned-sample path remains for effects and plugins
+      without MIDI. `test_live_lv2` covers the ring, note/CC timing, silence
+      after note-off, the bounded event queue, invalid arguments and shutdown;
+      the sanitized worker passes with `TOMPOUCE_LV2_WORKER_SANITIZE=1`. A
+      headless engine run measured `voices=0` and peak 0.504 for the fixture,
+      and cutoff 20 (CC 74=0) silenced it.
+- [ ] Mid-note parameter/preset changes through LV2 state mapped to existing
+      sliders. Live slots persist for the session (bounded at eight), receive
+      all-notes-off when playback stops, and rely on the render thread for
+      best-effort latency; per-plugin crash isolation must not take down or
+      stall playback. Discovery now reads bounded control-port metadata (port
+      index, name, declared min/max/default) for all safe plugins — 3155 ports
+      across 219 plugins on this box — so slider mapping has a stable reference.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

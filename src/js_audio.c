@@ -3,6 +3,7 @@
 #include "audio.h"
 #include "audio_output.h"
 #include "lv2_worker.h"
+#include "live_lv2.h"
 #include "scheduler.h"
 #include "sampler.h"
 #include "websamp.h"
@@ -513,6 +514,10 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
         }
     }
     if (ev->smp < 0 && !*bank && !strncmp(sound,"lv2:",4)) {
+        /* A MIDI instrument is hosted live for the scheduler; effects and
+           plugins without a MIDI input keep the bounded offline render. */
+        int live=live_lv2_acquire(sound+4,SR,audio_time_now(),NULL,0);
+        if (live>=0) { ev->live_lv2=live+1; return 1; }
         double lv2_gain=control(value,"gain",1,0,2);
         lv2_prepare_sample(ev,sound,ev->duration,lv2_gain);
     }
@@ -611,7 +616,9 @@ static int finish_sample(AudioEvent *ev, const cJSON *value) {
 }
 
 int js_audio_resolve_sample(AudioEvent *event, const cJSON *value) {
-    return resolve_sample_source(event,value) && finish_sample(event,value);
+    if (!resolve_sample_source(event,value)) return 0;
+    if (event->live_lv2>0) return 1;
+    return finish_sample(event,value);
 }
 
 int js_audio_schedule(JsProgram *program, double cycle_start, int cycle_index, unsigned generation) {

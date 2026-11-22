@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound js_worker rational signal_wave
-        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker)
+        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
@@ -37,6 +37,9 @@ if(LILV_FOUND)
     set_tests_properties(lv2_worker_fixture PROPERTIES
         ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE};TOMPOUCE_LV2_TEST_PLUGIN=urn:tompouce:test:gain"
         TIMEOUT 120)
+    set_tests_properties(live_lv2 PROPERTIES
+        ENVIRONMENT "LV2_PATH=${LV2_TEST_FIXTURE}" TIMEOUT 120)
+    add_dependencies(test_live_lv2 tompouce_lv2_test_midi)
 endif()
 
 # Instrument both preparation implementations (included by the fixture),
@@ -287,7 +290,7 @@ add_custom_target(test-audio-backends
     DEPENDS tompouce test_audio_output probe_audio_output probe_audio_portaudio
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
-foreach(name audio audio_performance stretch convolution_prepare room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp js_worker mcp_security websamp_security javascript lv2 lv2_worker)
+foreach(name audio audio_performance stretch convolution_prepare room duck_onset native_synth dsp editor terminal_render live_sliders csound midi gm_webaudiofont websamp js_worker mcp_security websamp_security javascript lv2 lv2_worker live_lv2)
     set(sources tests/test_${name}.c)
     if(NOT name STREQUAL "editor" AND NOT name STREQUAL "terminal_render" AND NOT name STREQUAL "csound"
         AND NOT name STREQUAL "mcp_security" AND NOT name STREQUAL "websamp_security" AND NOT name STREQUAL "stretch"
@@ -323,6 +326,9 @@ foreach(name audio audio_performance stretch convolution_prepare room duck_onset
     endif()
     if(name STREQUAL "lv2_worker")
         list(APPEND sources src/lv2_host.c src/lv2_worker.c)
+    endif()
+    if(name STREQUAL "live_lv2")
+        list(APPEND sources src/live_lv2.c src/lv2_worker.c)
     endif()
     add_executable(test_${name}_sanitize EXCLUDE_FROM_ALL ${sources})
     set_target_properties(test_${name}_sanitize PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
@@ -369,6 +375,10 @@ if(LILV_FOUND)
         "TOMPOUCE_LV2_WORKER_SANITIZE=1"
         $<TARGET_FILE:test_lv2_worker_sanitize>)
     set(LV2_SANITIZE_DEPENDENCY tompouce_lv2_test_gain tompouce_lv2_test_midi)
+    set(LIVE_LV2_SANITIZE_COMMAND COMMAND "${CMAKE_COMMAND}" -E env
+        "LV2_PATH=${LV2_TEST_FIXTURE}"
+        "TOMPOUCE_LV2_WORKER_SANITIZE=1"
+        $<TARGET_FILE:test_live_lv2_sanitize>)
 endif()
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_convolution_prepare_sanitize>
@@ -388,7 +398,8 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_js_worker_sanitize>
     COMMAND $<TARGET_FILE:test_lv2_sanitize>
     ${LV2_SANITIZE_COMMAND}
-    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize ${LV2_SANITIZE_DEPENDENCY}
+    ${LIVE_LV2_SANITIZE_COMMAND}
+    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize test_live_lv2_sanitize ${LV2_SANITIZE_DEPENDENCY}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

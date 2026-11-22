@@ -1,6 +1,7 @@
 /* Confined LV2 worker: plugin code runs in a child, PCM is bounded. */
 #include "lv2_worker.h"
 #include "js_audio.h"
+#include "live_lv2.h"
 #include "sampler.h"
 #include <cjson/cJSON.h>
 #include <assert.h>
@@ -103,30 +104,18 @@ static void test_engine_midi(void) {
     int ok=js_audio_resolve_sample(&ev,value);
     cJSON_Delete(value);
     if (!ok) { puts("LV2 MIDI engine resolution unavailable"); return; }
-    assert(ev.smp>=0);
-    float *pcm=NULL; int frames=0, channels=0;
-    smp_get_stereo(ev.smp,&pcm,&frames,&channels);
-    assert(pcm && frames>0 && channels==2);
-    int crossings=0;
-    for (int i=1;i<4410;i++)
-        if ((pcm[(i-1)*2]<0)!=(pcm[i*2]<0)) crossings++;
-    assert(crossings>36 && crossings<50); /* 220 Hz saw over 0.1 s */
-    int silent=(int)(.21*44100);
-    assert(segment_energy(pcm,silent,frames)==0);
+    assert(ev.live_lv2>0);
+    assert(ev.smp<0);
 
-    AudioEvent cut=ev;
-    cut.smp=-1; cut.dsp.p[DSP_LPF]=20;
+    AudioEvent second=ev;
+    second.live_lv2=0; second.smp=-1; second.dsp.p[DSP_LPF]=20;
     value=cJSON_CreateObject();
     cJSON_AddStringToObject(value,"s","lv2:urn:tompouce:test:midi-synth");
     cJSON_AddNumberToObject(value,"gain",1);
-    ok=js_audio_resolve_sample(&cut,value);
+    ok=js_audio_resolve_sample(&second,value);
     cJSON_Delete(value);
-    assert(ok && cut.smp>=0);
-    float *quiet=NULL; int quiet_frames=0;
-    smp_get_stereo(cut.smp,&quiet,&quiet_frames,&channels);
-    assert(quiet && quiet_frames==frames);
-    assert(segment_energy(quiet,0,4410)==0); /* CC 74 = 0 silences the fixture */
-    printf("LV2 engine MIDI dispatch ok: %d frames, %d crossings\n",frames,crossings);
+    assert(ok && second.live_lv2==ev.live_lv2 && second.smp<0);
+    printf("LV2 engine MIDI dispatch uses live slot %d\n",ev.live_lv2-1);
 }
 
 /* A deterministic instrument reference render: the LSP oscillator becomes an
@@ -213,6 +202,7 @@ int main(void) {
     test_engine_resolution();
     test_engine_midi();
     test_instrument_reference();
+    live_lv2_shutdown();
     char error[512]="";
     Lv2Worker *worker=lv2_worker_start(plugin_uri(),44100,error,sizeof(error));
     if (!worker) {

@@ -45,11 +45,13 @@ struct Lv2Worker {
     int in_fd, out_fd;
     Lv2MidiEvent midi[LV2_WORKER_MIDI_EVENTS];
     int midi_count;
+    uint32_t caps;
 };
 
 typedef struct {
     uint32_t frames;
     uint32_t bytes;
+    uint32_t caps; /* startup: 1 atom MIDI input, 2 audio input, 4 audio output */
     int ok;
 } Lv2FrameHeader;
 
@@ -166,23 +168,31 @@ static int child_main(int in_fd, int out_fd) {
         lilv_instance_connect_port(instance,i,&ports[i].value);
     }
     if (!audio || !input || !output || !default_node || !atom_port || !midi_event) return 1;
-    lilv_instance_activate(instance);
-    Lv2FrameHeader ok={0,0,1};
-    if (!write_all(out_fd,&ok,sizeof(ok))) return 1;
-    float *in=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
-    float *out=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
-    if (!in || !out) { free(in); free(out); return 1; }
     /* One bounded atom sequence for MIDI input, shared by any atom ports. */
     enum { MIDI_CAPACITY=4096 };
     unsigned char *atom_storage=calloc(1,MIDI_CAPACITY);
     LV2_Atom_Sequence *sequence=(LV2_Atom_Sequence *)atom_storage;
+    if (!sequence) return 1;
     LV2_URID midi_urid=lv2_map_uri(&map_state,LV2_MIDI__MidiEvent);
     LV2_URID sequence_urid=lv2_map_uri(&map_state,LV2_ATOM__Sequence);
-    int has_atom_input=0;
-    for (unsigned i=0;i<nports;i++) if (ports[i].atom && ports[i].input) {
-        has_atom_input=1;
-        lilv_instance_connect_port(instance,ports[i].index,sequence);
+    int has_atom_input=0, has_audio_input=0, has_audio_output=0;
+    for (unsigned i=0;i<nports;i++) {
+        if (ports[i].atom && ports[i].input) {
+            has_atom_input=1;
+            lilv_instance_connect_port(instance,ports[i].index,sequence);
+        }
+        if (ports[i].audio) {
+            if (ports[i].input) has_audio_input=1;
+            if (ports[i].output) has_audio_output=1;
+        }
     }
+    lilv_instance_activate(instance);
+    Lv2FrameHeader ok={.caps=(uint32_t)((has_atom_input?1u:0u)|
+        (has_audio_input?2u:0u)|(has_audio_output?4u:0u)),.ok=1};
+    if (!write_all(out_fd,&ok,sizeof(ok))) return 1;
+    float *in=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
+    float *out=malloc(LV2_WORKER_FRAMES*LV2_WORKER_CHANNELS*sizeof(float));
+    if (!in || !out) { free(in); free(out); return 1; }
     for (;;) {
         Lv2FrameHeader header;
         if (!read_all(in_fd,&header,sizeof(header))) break;
@@ -190,7 +200,7 @@ static int child_main(int in_fd, int out_fd) {
             uint32_t port=0; float value=0;
             if (!read_all(in_fd,&port,sizeof(port)) || !read_all(in_fd,&value,sizeof(value))) break;
             if (port<nports && !ports[port].audio) ports[port].value=value;
-            header.ok=1; header.bytes=0;
+            header.ok=1; header.bytes=0; header.caps=0;
             if (!write_all(out_fd,&header,sizeof(header))) break;
             continue;
         }
@@ -233,7 +243,7 @@ static int child_main(int in_fd, int out_fd) {
                 ports[i].input?in:(ports[i].output?out:NULL));
         }
         lilv_instance_run(instance,header.frames);
-        header.ok=1; header.bytes=0;
+        header.ok=1; header.bytes=0; header.caps=0;
         if (!write_all(out_fd,&header,sizeof(header)) ||
             !write_all(out_fd,out,header.frames*LV2_WORKER_CHANNELS*sizeof(float))) break;
     }
@@ -307,6 +317,7 @@ Lv2Worker *lv2_worker_start(const char *plugin_uri, double sample_rate,
         Lv2Worker *worker=calloc(1,sizeof(*worker));
         if (worker) {
             worker->pid=pid; worker->in_fd=to_child[1]; worker->out_fd=from_child[0];
+            worker->caps=header.caps;
             return worker;
         }
     }
@@ -405,3 +416,7 @@ void lv2_worker_stop(Lv2Worker *worker) {
 }
 
 pid_t lv2_worker_pid(const Lv2Worker *worker) { return worker?worker->pid:-1; }
+int lv2_worker_has_midi(const Lv2Worker *worker) { return worker && (worker->caps&1u); }
+int lv2_worker_is_instrument(const Lv2Worker *worker) {
+    return worker && (worker->caps&1u) && !(worker->caps&2u) && (worker->caps&4u);
+}

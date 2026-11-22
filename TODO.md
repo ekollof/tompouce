@@ -10,25 +10,30 @@ verification, installation and upstream terminal constraints.
 
 ## Visual performance
 
-- [ ] `/hydra` command: a separate loopback visualizer is now implemented and
+- [x] `/hydra` command: a separate loopback visualizer is now implemented and
       independent of F12 — `/hydra` / `/hydra stop` spawn a browser tab through
       the companion helper with a private token, Host/Origin checks, one
       read-only `music_audio_scope` MCP tool (bounded 16–192 samples, polled at
       8 Hz) and a parent-pid session guard. `tests/test_companion.py` covers the
-      tool allowlist and auth. `web/hydra.js` now renders through WebGL: GLSL
-      generators (`osc`, `shape`, `solid`, `noise`, `voronoi`, `gradient`,
-      `src`) and effects (`rotate`, `scale`, `repeat`, `repeatX/Y`, `kaleid`,
-      `pixelate`, `posterize`, `color`, `colorama`, `hue`, `saturate`,
-      `brightness`, `contrast`, `invert`, `luma`, `modulate`, `blend`, `add`,
-      `sub`, `mult`, `diff`, `layer`) chain through a bounded pool of
-      ping-pong framebuffers. `src` reads the audio scope texture. The page
+      tool allowlist and auth. `web/hydra.js` renders through WebGL: generators
+      (`osc`, `shape`, `solid`, `noise`, `voronoi`, `gradient`, `src`, `prev`),
+      coordinate and color effects (`rotate`, `scale`, `pixelate`, `posterize`,
+      `shift`, `repeat`, `repeatX/Y`, `kaleid`, `scroll`, `scrollX/Y`,
+      `invert`, `contrast`, `brightness`, `luma`, `thresh`, `color`, `saturate`,
+      `hue`, `colorama`, `r/g/b/a`, `sum`), binary and coordinate modulators
+      (`modulate`, `modulateRepeat/X/Y`, `modulateKaleid`, `modulateScrollX/Y`,
+      `modulateScale`, `modulatePixelate`, `modulateRotate`, `modulateHue`,
+      `blend`, `add`, `sub`, `mult`, `diff`, `layer`, `mask`) through a bounded
+      ping-pong pool with previous-frame feedback. `s0`–`s3` support bounded
+      camera/screen streams, images, videos and MediaStreams; `src` keeps the
+      audio scope path; `setResolution` and `hush` are available. The page
       switches from its 2D fallback to the WebGL stage only while a custom
       graph is set. `hydra_webgl` is a headless Chromium smoke test for
-      generator output, effect chains, binary effects, the scope source and the
-      real page's WebGL switch. The scope tool includes the accepted source's
-      `generation`, and the page drops stale frames when it changes. Remaining:
-      upstream hydra-synth API beyond this bounded layer (camera/screen
-      sources, feedback and the full function set).
+      generator output, the full effect set, feedback, owned canvas-backed
+      camera/screen stubs, image sources, resolution changes and the real page
+      switch. The scope tool includes the accepted source's `generation`, and
+      the page drops stale frames when it changes. Custom `setFunction` GLSL and
+      patchbay stream names stay outside the bounded backend.
 
 ## Plugin hosting
 

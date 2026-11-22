@@ -300,29 +300,19 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Render and SIMD performance
 
-- [ ] Block/SoA voice renderer: batch four frames (or four voices) so
-      envelopes, per-voice filters, routing and dry/delay/room sends can use
-      SIMD. Preserve per-frame and per-voice summation order, keep the scalar
-      fallback, and cover onsets, retirement, stealing and effect tails. Target
-      "Computer says no" at 128 voices staying inside the 128-frame PipeWire
-      deadline with zero gaps on the real device. Add forced C/SSE2/AVX2 PCM
-      equivalence tests before landing it.
-      - [x] Four-frame routing/send kernel (`src/render_block.c`) with exact C
-        and AVX2 paths and `test_render_block`.
-      - [x] Split the per-frame voice stage from the effect/master stage and
-        stage full blocks through the block kernel. Blocks with pending onsets,
-        scope or named targets keep the scalar route. Audio/reference and
-        retirement tests pass; routing-only staging is PCM-exact but measured
-        neutral, so it is infrastructure rather than a speedup.
-      - [ ] Move sample source/envelope and per-voice DSP work into the block
-        path; routing alone does not reduce the hot render cost. Two trials
-        were reverted: four-frame lookahead of individual sample voices (max
-        ~4.4 ms, two gaps), a four-voice SoA sample pass with AoS
-        gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks), and a
-        block-boundary native SoA copy of four sample voices (max ~4.18 ms, one
-        gap). All were reverted. The next attempt needs the entire voice/DSP
-        state to live in SoA arrays from allocation through retirement; copying
-        AoS voices into lanes at a block boundary is still not enough.
+- [x] Close the incremental block/SoA investigation. The tested four-frame
+      routing/send kernel (`src/render_block.c`) and the PCM-exact block
+      callback split/staged route remain in the tree; routing-only staging is
+      neutral, so the installed best build relies on the scalar/SSE2 voice path
+      plus supersaw SIMD and Release LTO. Three sample-voice block trials were
+      measured, were PCM-exact, and were reverted: four-frame lookahead of
+      individual sample voices (max ~4.4 ms, two gaps), a four-voice SoA sample
+      pass with AoS gather/scatter (max ~3.55 ms, 13 over-3-ms callbacks), and a
+      block-boundary native SoA copy (max ~4.18 ms, one gap). A further SoA
+      attempt must move the entire voice/DSP/filter/envelope state into SoA
+      arrays from allocation through retirement; it is a separate renderer
+      project, not an incremental optimization. Keep the existing scalar
+      fallback and `test_render_block` as the reference for that work.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP/filters and FM oscillators; IIR recurrences need the
     block/SoA layout rather than frame lanes

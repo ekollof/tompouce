@@ -273,14 +273,16 @@ static int pitch_key_midi(const char *name, int *out) {
     if (!name || !name[0] || !out) return 0;
     char n = (char)tolower((unsigned char)name[0]);
     int semi;
-    if (n == 'c') semi = 0;
-    else if (n == 'd') semi = 2;
-    else if (n == 'e') semi = 4;
-    else if (n == 'f') semi = 5;
-    else if (n == 'g') semi = 7;
-    else if (n == 'a') semi = 9;
-    else if (n == 'b') semi = 11;
-    else return 0;
+    switch (n) {
+    case 'c': semi = 0; break;
+    case 'd': semi = 2; break;
+    case 'e': semi = 4; break;
+    case 'f': semi = 5; break;
+    case 'g': semi = 7; break;
+    case 'a': semi = 9; break;
+    case 'b': semi = 11; break;
+    default: return 0;
+    }
     const char *p = name + 1;
     while (*p == '#' || *p == 's' || *p == 'b' || *p == 'f') {
         semi += (*p == '#' || *p == 's') ? 1 : -1;

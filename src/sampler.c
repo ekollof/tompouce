@@ -568,11 +568,15 @@ int smp_acquire(const char *bankdir, const char *token) {
         snprintf(t, sizeof(t), "%.15s", name);
         for (char *p = t; *p; p++) *p = (char)tolower((unsigned char)*p);
         int slot = -1;
-        if (strcmp(t, "bd") == 0) slot = 0;
-        else if (strcmp(t, "sd") == 0 || strcmp(t, "sn") == 0) slot = 1;
-        else if (strcmp(t, "hh") == 0 || strcmp(t, "hat") == 0) slot = 2;
-        else if (strcmp(t, "cp") == 0 || strcmp(t, "clap") == 0) slot = 3;
-        else if (strcmp(t, "tom") == 0) slot = 4;
+        static const struct { const char *name; int slot; } drum_slots[] = {
+            {"bd",0}, {"sd",1}, {"sn",1}, {"hh",2}, {"hat",2},
+            {"cp",3}, {"clap",3}, {"tom",4}
+        };
+        for (unsigned i=0;i<sizeof(drum_slots)/sizeof(drum_slots[0]);i++)
+            if (!strcmp(t,drum_slots[i].name)) {
+                slot=drum_slots[i].slot;
+                break;
+            }
         if (slot >= 0) {
             int ix = (slot+sample_n)%bc->nfiles;
             if (ix < 0) ix += bc->nfiles;

@@ -781,10 +781,10 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       far: `audio.c` note parsing, drum token/instrument dispatch, LFO
       wave/target, oscillator DSP selection, the pattern distortion
       variant/table dispatch, the `tui.c` search-mode key dispatch, the `tui.c`
-      `/command` table/switch, and `mcp.c` tool plus `music_track` action
-      table/switch dispatch. Remaining large dispatches include `tui.c`
-      palette handling, `websamp.c`, `js_audio.c`, `dsp.c`, `sampler.c` and
-      `midi.c`.
+      `/command` table/switch, `mcp.c` tool plus `music_track` action
+      table/switch dispatch, the `dsp.c` FM shape selection, and the
+      `sampler.c` drum slot plus `websamp.c` note-name tables. Remaining large
+      dispatches include `tui.c` palette handling, `js_audio.c` and `midi.c`.
 
 ## Terminal blockers awaiting upstream
 

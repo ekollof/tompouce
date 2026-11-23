@@ -620,12 +620,22 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
                     if (frequency>nyquist) frequency=nyquist;
                     else if (frequency<-nyquist) frequency=-nyquist;
                     double phase=s->fm_phase[i],wave=sin(phase);
-                    if (shape==1) wave=dsp_oscillator(2,phase,frequency,.5);
-                    else if (shape==2) wave=dsp_oscillator(1,phase,frequency,.5);
-                    else if (shape==3) wave=dsp_oscillator(0,phase,frequency,.5);
-                    else if (shape<4 || shape>6) {
-                        float gain=dsp_oscillator_nyquist_gain(frequency);
-                        if (gain!=1.f) wave*=gain;
+                    switch (shape) {
+                    case 1:
+                        wave=dsp_oscillator(2,phase,frequency,.5);
+                        break;
+                    case 2:
+                        wave=dsp_oscillator(1,phase,frequency,.5);
+                        break;
+                    case 3:
+                        wave=dsp_oscillator(0,phase,frequency,.5);
+                        break;
+                    default:
+                        if (shape<4 || shape>6) {
+                            float gain=dsp_oscillator_nyquist_gain(frequency);
+                            if (gain!=1.f) wave*=gain;
+                        }
+                        break;
                     }
                     head[i][frame]=(float)wave;
                     s->fm_phase[i]=fmod(phase+2*M_PI*frequency/SR,2*M_PI);
@@ -648,10 +658,19 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
                 if (frequency>nyquist) frequency=nyquist;
                 else if (frequency<-nyquist) frequency=-nyquist;
                 double phase=s->fm_phase[i],wave=sin(phase);
-                if (shape==1) wave=dsp_oscillator(2,phase,frequency,.5);
-                else if (shape==2) wave=dsp_oscillator(1,phase,frequency,.5);
-                else if (shape==3) wave=dsp_oscillator(0,phase,frequency,.5);
-                else if (shape>=4 && shape<=6) {
+                switch (shape) {
+                case 1:
+                    wave=dsp_oscillator(2,phase,frequency,.5);
+                    break;
+                case 2:
+                    wave=dsp_oscillator(1,phase,frequency,.5);
+                    break;
+                case 3:
+                    wave=dsp_oscillator(0,phase,frequency,.5);
+                    break;
+                case 4:
+                case 5:
+                case 6: {
                     const float *buffer=s->control.fm_noise[shape-4];
                     double pos=s->fm_noise_pos[i];
                     unsigned a=(unsigned)pos;
@@ -662,9 +681,13 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
                     pos+=1;
                     if (pos>=88200) pos-=88200;
                     s->fm_noise_pos[i]=pos;
-                } else {
+                    break;
+                }
+                default: {
                     float gain=dsp_oscillator_nyquist_gain(frequency);
                     if (gain!=1.f) wave*=gain;
+                    break;
+                }
                 }
                 double env_age=age+frame/SR;
                 /* BufferSource output retains the complete onset quantum.

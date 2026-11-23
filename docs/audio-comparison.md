@@ -198,6 +198,12 @@ scalar. It is byte-exact against C in both directions; 2,000
 forward+inverse pairs measured 45.8-47.5 ms versus 60.2-61.5 ms for C
 (1.29-1.34x). The forward real transform remains scalar, and stretch PCM gates
 pass.
+The visualizer FFT now precomputes its per-length twiddles once and shares
+them between C and AVX2 butterflies. 500 4096-point transforms measured
+126.6-128.3 ms for the old per-butterfly `sin`/`cos` loop, 15.6-16.5 ms for
+the table-driven C path, and 11.0-11.5 ms for AVX2 (about 11.3x versus the old
+loop and 1.4x versus table C). Output is byte-exact against the legacy loop
+order, and the audio callback remains FFT-free.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

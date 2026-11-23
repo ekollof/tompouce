@@ -1,4 +1,5 @@
 #include "terminal_graphics.h"
+#include "visual_fft.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -40,17 +41,7 @@ void terminal_graphics_fft(const float *samples, int count, double rate, float b
         double w=.5-.5*cos(TAU*i/(n-1)); sum+=w;
         re[i]=isfinite(samples[i])?samples[i]*w:0;
     }
-    for (int i=1,j=0;i<n;i++) {
-        int bit=n>>1; for (;j&bit;bit>>=1) j^=bit; j^=bit;
-        if (i<j) { double a=re[i]; re[i]=re[j]; re[j]=a; }
-    }
-    for (int len=2;len<=n;len*=2) for (int start=0;start<n;start+=len)
-        for (int j=0;j<len/2;j++) {
-            double a=-TAU*j/len, c=cos(a), s=sin(a);
-            int u=start+j,v=u+len/2;
-            double r=c*re[v]-s*imaginary[v], q=s*re[v]+c*imaginary[v];
-            re[v]=re[u]-r; imaginary[v]=imaginary[u]-q; re[u]+=r; imaginary[u]+=q;
-        }
+    visual_fft(re,imaginary,n);
     double high=fmin(20000,rate/2), range=log(high/20);
     if (sum<=0 || range<=0) return;
     for (int i=1;i<=n/2;i++) re[i]=2*hypot(re[i],imaginary[i])/sum;

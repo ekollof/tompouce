@@ -671,6 +671,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       forward+inverse pairs measured **60.2-61.5 ms C vs 45.8-47.5 ms AVX2
       (1.29-1.34x)**. Production `fft()` uses it and the stretch PCM gates
       pass.
+- [x] Visualizer FFT kernel. `src/visual_fft_simd.c` precomputes the
+      per-length twiddles once with `pthread_once` and shares them between the
+      C and AVX2 butterflies; stages of length 8 and up are vectorized. 500
+      4096-point transforms measured **126.6-128.3 ms legacy (sin/cos per
+      butterfly), 15.6-16.5 ms table C, 11.0-11.5 ms AVX2** (about 11.3x
+      versus legacy and 1.4x versus table C), byte-exact against the legacy
+      loop order.
 - [x] Persistent per-voice stereo filter. The byte-exact two-lane
       `DspBiquad2` kernel now keeps coefficients and state in the voice
       instead of rebuilding them per sample. `test_voice_soa_dsp` compares C
@@ -693,9 +700,9 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
     measured and rejected at 0.96-0.97x, while the interleaved stereo delay
     layout won 1.35-1.38x and its SSE2 lane was neutral. Feedback state stays
     per lane, and the convolution reverb is already SIMD
-  - forward real FFT and visualizer FFT only if preparation or UI becomes the
-    bottleneck; the complex stretch FFT is now vectorized and the audio
-    callback stays FFT-free
+  - forward real stretch FFT only if preparation becomes the bottleneck; the
+    visualizer FFT is now precomputed and vectorized, and the audio callback
+    stays FFT-free
 - [x] `TOMPOUCE_SIMD` runtime policy audited. Production kernels use per-kernel
       `target("avx2,no-fma")` attributes with the C fallback; the only
       `-mavx2` build is the `EXCLUDE_FROM_ALL` benchmark translation unit.

@@ -5,6 +5,7 @@
 #include "reverb_simd.h"
 #include "delay_simd.h"
 #include "stretch_fft_simd.h"
+#include "visual_fft.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
 #include "audio.h"
@@ -548,6 +549,87 @@ static void test_stretch_fft(void) {
             (t2.tv_nsec-t1.tv_nsec)/1e6;
         printf("2048-point FFT pairs: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
             c_ms,v_ms,v_ms>0?c_ms/v_ms:0);
+    }
+#endif
+}
+
+static void visual_fft_legacy(double *re, double *imag, int n) {
+    for (int i=1,j=0;i<n;i++) {
+        int bit=n>>1;
+        for (;j&bit;bit>>=1) j^=bit;
+        j^=bit;
+        if (i<j) { double value=re[i]; re[i]=re[j]; re[j]=value; }
+    }
+    for (int length=2;length<=n;length*=2)
+        for (int start=0;start<n;start+=length)
+            for (int j=0;j<length/2;j++) {
+                double angle=-6.2831853071795864769*j/length;
+                double c=cos(angle), s=sin(angle);
+                int u=start+j, v=u+length/2;
+                double r=c*re[v]-s*imag[v];
+                double q=s*re[v]+c*imag[v];
+                re[v]=re[u]-r;
+                imag[v]=imag[u]-q;
+                re[u]+=r;
+                imag[u]+=q;
+            }
+}
+
+static void test_visual_fft(void) {
+#if defined(__x86_64__) || defined(__i386__)
+    enum { SIZE=4096, N=500 };
+    static double legacy_re[SIZE], legacy_im[SIZE];
+    static double c_re[SIZE], c_im[SIZE];
+    static double v_re[SIZE], v_im[SIZE];
+    unsigned state=0xd1b54a35u;
+    for (int iteration=0;iteration<20;iteration++) {
+        for (int i=0;i<SIZE;i++) {
+            state=state*1664525u+1013904223u;
+            legacy_re[i]=c_re[i]=v_re[i]=(int)(state>>8)/16777216.0-.5;
+            legacy_im[i]=c_im[i]=v_im[i]=0;
+        }
+        visual_fft_legacy(legacy_re,legacy_im,SIZE);
+        visual_fft_c(c_re,c_im,SIZE);
+        visual_fft_avx2(v_re,v_im,SIZE);
+        assert(memcmp(legacy_re,c_re,sizeof(legacy_re))==0);
+        assert(memcmp(legacy_im,c_im,sizeof(legacy_im))==0);
+        assert(memcmp(legacy_re,v_re,sizeof(legacy_re))==0);
+        assert(memcmp(legacy_im,v_im,sizeof(legacy_im))==0);
+    }
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        volatile double sink=0;
+        struct timespec t0,t1,t2,t3;
+        for (int i=0;i<SIZE;i++) {
+            state=state*1664525u+1013904223u;
+            legacy_re[i]=c_re[i]=v_re[i]=(int)(state>>8)/16777216.0-.5;
+            legacy_im[i]=c_im[i]=v_im[i]=0;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            visual_fft_legacy(legacy_re,legacy_im,SIZE);
+            sink+=legacy_re[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            visual_fft_c(c_re,c_im,SIZE);
+            sink+=c_re[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        for (int i=0;i<N;i++) {
+            visual_fft_avx2(v_re,v_im,SIZE);
+            sink+=v_re[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t3);
+        (void)sink;
+        double legacy_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double c_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        double v_ms=(t3.tv_sec-t2.tv_sec)*1e3+
+            (t3.tv_nsec-t2.tv_nsec)/1e6;
+        printf("visual 4096 FFT: legacy %.3f ms, table C %.3f ms, "
+            "AVX2 %.3f ms\n",legacy_ms,c_ms,v_ms);
     }
 #endif
 }
@@ -1121,6 +1203,7 @@ int main(void) {
     test_comb4();
     test_delay2();
     test_stretch_fft();
+    test_visual_fft();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

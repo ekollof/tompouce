@@ -398,10 +398,10 @@ and measured divergences are recorded in the archive.
       (`fx-overlap-source-delay` 0.9999996/1.0005).
 - [x] Pattern FX room send. FX room presence selects a mono-left room
       feed plus the source R/L ratio, and the ratio is held through the room
-      tail. `fx-overlap-source-room` measures 0.9999994/0.9938 and
-      `test_fx_room_routing` covers the routing/ratio. The pan .75 variant
-      matches waveform at 0.9999991 but remains a level diagnostic (0.538
-      RMS).
+      tail. The source-pan feed gain is fitted at 1.423 center, 1.86 at half
+      pan and 2.012 at full pan. `fx-overlap-source-room` measures
+      0.9999994/0.9938, `fx-overlap-source-room-pan` 0.9999991/1.00056, and
+      `test_fx_room_routing` covers routing, ratio and pan gain.
 - [ ] Distort/chorus and remaining source controls. Source distort and chorus
       remain ungated (`fx-source-distort`/`fx-source-chorus` diagnostics).
       ADSR, speed, note/sample/bank and string-valued controls remain outside.

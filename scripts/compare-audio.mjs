@@ -218,7 +218,7 @@ try {
     {name:'fx-overlap-source-shape',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).shape(.6).FX(shape(.3))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-overlap-source-delay',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).delay(.8).delaytime(.1).delayfeedback(.5).dry(0).FX(delay(.3))`,cycles:1,cps:.5,window:1.2,correlation:.99},
     {name:'fx-overlap-source-room',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).clip(.05).ir('mono_fixture').room(.8).dry(0).FX(room(.3))`,cycles:1,cps:.5,window:2,correlation:.99},
-    {name:'fx-overlap-source-room-pan',sound:'mono_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('mono_fixture').gain(.03).clip(.05).pan(.75).ir('mono_fixture').room(.8).dry(0).FX(room(.3))`,cycles:1,cps:.5,window:2,correlation:null},
+    {name:'fx-overlap-source-room-pan',sound:'mono_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('mono_fixture').gain(.03).clip(.05).pan(.75).ir('mono_fixture').room(.8).dry(0).FX(room(.3))`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'fx-source-distort',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).distort(2)`,cycles:1,cps:.5,window:.6,correlation:null},
     {name:'fx-source-chorus',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).chorus(.7)`,cycles:1,cps:.5,window:.6,correlation:null},
     {name:'fx-graph-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out()).FX(x=>x.lpf(200))`,cycles:1,cps:.5,window:.6,correlation:.99},

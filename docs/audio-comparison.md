@@ -1006,11 +1006,11 @@ the site; both have parity gates. Pattern shape is a post-source waveshaper
 pattern delay/IR sends are ignored, leaving source sends in force
 (`fx-overlap-source-delay` 0.9999996/1.0005). FX room presence selects a
 mono-left room feed plus the source R/L ratio and holds that ratio through the
-tail; `fx-overlap-source-room` now measures 0.9999994/0.9938 and
-`test_fx_room_routing` covers the routing/ratio. The pan .75 variant still
-differs in level (0.9999991 correlation, 0.538 RMS ratio) and stays
-diagnostic. Source distort/chorus remain ungated; the remaining controls above
-are still outside.
+tail; the feed gain is 1.423 center, 1.86 at half pan and 2.012 at full pan.
+`fx-overlap-source-room` measures 0.9999994/0.9938,
+`fx-overlap-source-room-pan` 0.9999991/1.00056, and `test_fx_room_routing`
+covers routing, ratio and pan gain. Source distort/chorus remain ungated; the
+remaining controls above are still outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

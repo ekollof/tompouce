@@ -587,6 +587,14 @@ static void test_fx_room_routing(void) {
     route_voice(&normal,1,-2,&mix);
     assert(!mix.fx_room && fabs(mix.room_l-.8)<1e-12 &&
         fabs(mix.room_r+1.6)<1e-12);
+    Voice panned={0};
+    panned.has_pan=1;
+    panned.pan=0;
+    assert(fabs(fx_room_gain(&panned)-1.423)<1e-12);
+    panned.pan=.5;
+    assert(fabs(fx_room_gain(&panned)-1.86)<1e-12);
+    panned.pan=1;
+    assert(fabs(fx_room_gain(&panned)-2.012)<1e-12);
 }
 
 static void test_supersaw_callback(void) {

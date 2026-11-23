@@ -1971,13 +1971,20 @@ static void target_add(int target, double l, double r) {
 }
 
 /* Pattern FX room sends a mono left feed plus the source channel ratio. The
-   deployed player's right room return follows that ratio rather than running
-   an independent stereo convolution. */
+   deployed player scales that feed with the source pan; measured factors are
+   1.423 at center, 1.86 at half pan and 2.012 at full pan. */
+static double fx_room_gain(const Voice *v) {
+    if (!v->has_pan) return 1;
+    double p=fabs(v->pan);
+    if (p>1) p=1;
+    return 1.423 + 1.159*p - .57*p*p;
+}
+
 static void mix_fx_room(VoiceMix *mix, double l, double r, double room,
-                        double room_size) {
-    double left=l*room;
+                        double room_size, double gain) {
+    double left=l*room*gain;
     mix->fx_room_l += left;
-    mix->fx_room_r += r*room;
+    mix->fx_room_r += r*room*gain;
     mix->fx_room=1;
     if (room>0) mix->room_size=room_size;
     double weight=fabs(left);
@@ -2067,7 +2074,8 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     if (v->route_dsp) {
         double room=v->route_room;
         if (v->fx_room_present && room > 0) {
-            mix_fx_room(mix,base_l,base_r,room,v->route_room_size);
+            mix_fx_room(mix,base_l,base_r,room,v->route_room_size,
+                fx_room_gain(v));
         } else {
             mix->room_l += base_l*room; mix->room_r += base_r*room;
             if (room > 0) mix->room_size=v->route_room_size;
@@ -2132,7 +2140,8 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
             if (v->fx_room_present && room > 0) {
                 double pair[2];
                 _mm_storeu_pd(pair,base);
-                mix_fx_room(mix,pair[0],pair[1],room,v->route_room_size);
+                mix_fx_room(mix,pair[0],pair[1],room,v->route_room_size,
+                    fx_room_gain(v));
             } else {
                 _mm_storeu_pd(&mix->room_l,
                     _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
@@ -2166,7 +2175,8 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     if (v->route_dsp) {
         double room = v->route_room;
         if (v->fx_room_present && room > 0) {
-            mix_fx_room(mix,l*left,r*right,room,v->route_room_size);
+            mix_fx_room(mix,l*left,r*right,room,v->route_room_size,
+                fx_room_gain(v));
         } else {
             mix->room_l += l*left*room; mix->room_r += r*right*room;
             if (room > 0) mix->room_size = v->route_room_size;

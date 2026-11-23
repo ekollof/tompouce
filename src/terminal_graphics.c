@@ -190,7 +190,6 @@ void terminal_graphics_scope(TerminalImage *im, const float *samples, int n) {
         }
         for (int y = low; y <= high; y++) {
             pixel(im,x,y,110,235,170,255);
-            pixel(im,x,y+1,110,235,170,100);
         }
         previous = last;
     }

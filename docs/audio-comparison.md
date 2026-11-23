@@ -571,12 +571,12 @@ ratio** at the unchanged thresholds. The cutoff path remains unsupported
 `clamp(pow((tri(phase) + dcoffset) * depth, curve), min, max)` on a begin-gated
 worklet phase. The measured cutoff event is exactly `rate=.5`, `depth=1000`,
 `dcoffset=-.5`, `min=-480`, `max=23500`, triangle shape, `begin=0`, `time=0`.
-Native's filter-LFO arithmetic reproduces that waveform, but its 32-sample
-biquad coefficient updates do not track the browser's audio-rate
-`BiquadFilterNode` through the resulting 20–1000 Hz sweep; the mapped
-diagnostic reaches only 0.682. Matching cutoff needs a worklet-equivalent
-sample-rate filter/LFO path, not a threshold change. Cutoff and other non-gain
-targets keep their static value and log one
+Native's filter-LFO arithmetic reproduces that waveform and these parameters
+exactly. Forcing per-sample biquad coefficient updates still leaves the mapped
+diagnostic at 0.682 (static 0.4448), so the residual is the deployed graph's
+own onset/filter behavior rather than the LFO update rate. Matching cutoff
+needs a graph-equivalent sample-rate filter/onset path, not a threshold change.
+Cutoff and other non-gain targets keep their static value and log one
 `LFO modulation is implemented only for gain` warning. Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.

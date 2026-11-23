@@ -416,10 +416,11 @@ and measured divergences are recorded in the archive.
       keep their static value and log one
       `LFO modulation is implemented only for gain` warning; the cutoff
       diagnostic stays ungated at 0.44477. The exact worklet parameters
-      (`depth=1000`, `dc=-.5`, `min=-480`, `max=23500`, triangle, 0.5 Hz) and
-      the native filter's 32-sample coefficient-update limit are recorded in
-      the comparison doc; the mapped sweep reaches only 0.682. Matching cutoff
-      needs a sample-rate filter/LFO path, not a threshold change.
+      (`depth=1000`, `dc=-.5`, `min=-480`, `max=23500`, triangle, 0.5 Hz) match
+      the native filter-LFO arithmetic; forcing per-sample coefficient updates
+      still leaves the mapped sweep at 0.682, so the residual is the deployed
+      graph's onset/filter behavior. Matching cutoff needs a graph-equivalent
+      sample-rate filter/onset path, not a threshold change.
       Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and

@@ -3,6 +3,7 @@
 #include "envelope_simd.h"
 #include "oscillator_simd.h"
 #include "reverb_simd.h"
+#include "delay_simd.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
 #include "audio.h"
@@ -365,6 +366,130 @@ static void test_comb4(void) {
             c_ms,v_ms,v_ms>0?c_ms/v_ms:0);
     }
 #endif
+#endif
+}
+
+static void delay2_separate_c(float *line, float *quantum, unsigned write,
+    unsigned read, unsigned previous, unsigned feedback_pos, int interpolate,
+    float fraction, double input_l, double input_r, double feedback,
+    double *out_l, double *out_r) {
+    enum { LEN=16384 };
+    float *q=quantum+2*feedback_pos;
+    if (interpolate) {
+        line[write]=(float)(input_l+q[0]);
+        line[LEN+write]=(float)(input_r+q[1]);
+    }
+    float l=line[read], r=line[LEN+read];
+    if (interpolate) {
+        float keep=1.0f-fraction;
+        l=l*keep+line[previous]*fraction;
+        r=r*keep+line[LEN+previous]*fraction;
+        q[0]=(float)(l*feedback);
+        q[1]=(float)(r*feedback);
+    } else {
+        q[0]=q[1]=0;
+        line[write]=(float)(input_l+l*feedback);
+        line[LEN+write]=(float)(input_r+r*feedback);
+    }
+    *out_l=l; *out_r=r;
+}
+
+static void test_delay2(void) {
+#if defined(__SSE2__)
+    enum { LEN=16384, N=1000000 };
+    static float line_c[2*LEN], line_v[2*LEN], line_s[2*LEN];
+    static float quantum_c[256], quantum_v[256], quantum_s[256];
+    unsigned state=0x165667b1u;
+    for (int i=0;i<2*LEN;i++) {
+        state=state*1664525u+1013904223u;
+        line_c[i]=line_v[i]=(float)((int)(state>>8)/16777216.0-.5);
+    }
+    for (int i=0;i<LEN;i++) {
+        line_s[i]=line_c[2*i];
+        line_s[LEN+i]=line_c[2*i+1];
+    }
+    for (int i=0;i<256;i++) {
+        state=state*1664525u+1013904223u;
+        quantum_c[i]=quantum_v[i]=quantum_s[i]=
+            (float)((int)(state>>8)/16777216.0-.5);
+    }
+    unsigned write=0, feedback_pos=0;
+    const unsigned dl=64;
+    double c_l,c_r,v_l,v_r,s_l,s_r;
+    for (int mode=0;mode<2;mode++) {
+        for (int iteration=0;iteration<5000;iteration++) {
+            unsigned read=(write+LEN-dl)%LEN;
+            unsigned previous=read?read-1:LEN-1;
+            dsp_delay2_c(line_c,quantum_c,write,read,previous,feedback_pos,
+                mode,.3,.03125,-.015625,.5,&c_l,&c_r);
+            dsp_delay2_sse2(line_v,quantum_v,write,read,previous,feedback_pos,
+                mode,.3,.03125,-.015625,.5,&v_l,&v_r);
+            delay2_separate_c(line_s,quantum_s,write,read,previous,
+                feedback_pos,mode,.3,.03125,-.015625,.5,&s_l,&s_r);
+            assert(memcmp(&line_c[2*write],&line_v[2*write],
+                2*sizeof(float))==0);
+            assert(memcmp(quantum_c+2*feedback_pos,
+                quantum_v+2*feedback_pos,2*sizeof(float))==0);
+            assert(memcmp(&c_l,&v_l,sizeof(c_l))==0);
+            assert(memcmp(&c_r,&v_r,sizeof(c_r))==0);
+            assert(memcmp(&line_c[2*write],&line_s[write],
+                sizeof(float))==0);
+            assert(memcmp(&line_c[2*write+1],&line_s[LEN+write],
+                sizeof(float))==0);
+            assert(memcmp(quantum_c+2*feedback_pos,
+                quantum_s+2*feedback_pos,2*sizeof(float))==0);
+            assert(memcmp(&c_l,&s_l,sizeof(c_l))==0);
+            assert(memcmp(&c_r,&s_r,sizeof(c_r))==0);
+            if (++write>=LEN) write=0;
+            feedback_pos=(feedback_pos+1)&127;
+        }
+        assert(memcmp(line_c,line_v,sizeof(line_c))==0);
+        assert(memcmp(quantum_c,quantum_v,sizeof(quantum_c))==0);
+    }
+    {
+        volatile double sink=0;
+        struct timespec t0,t1,t2,t3;
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            unsigned read=(write+LEN-dl)%LEN;
+            unsigned previous=read?read-1:LEN-1;
+            delay2_separate_c(line_s,quantum_s,write,read,previous,
+                feedback_pos,1,.3,.03125,-.015625,.5,&s_l,&s_r);
+            sink+=s_l+s_r;
+            if (++write>=LEN) write=0;
+            feedback_pos=(feedback_pos+1)&127;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            unsigned read=(write+LEN-dl)%LEN;
+            unsigned previous=read?read-1:LEN-1;
+            dsp_delay2_c(line_c,quantum_c,write,read,previous,feedback_pos,
+                1,.3,.03125,-.015625,.5,&c_l,&c_r);
+            sink+=c_l+c_r;
+            if (++write>=LEN) write=0;
+            feedback_pos=(feedback_pos+1)&127;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        for (int i=0;i<N;i++) {
+            unsigned read=(write+LEN-dl)%LEN;
+            unsigned previous=read?read-1:LEN-1;
+            dsp_delay2_sse2(line_v,quantum_v,write,read,previous,feedback_pos,
+                1,.3,.03125,-.015625,.5,&v_l,&v_r);
+            sink+=v_l+v_r;
+            if (++write>=LEN) write=0;
+            feedback_pos=(feedback_pos+1)&127;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t3);
+        (void)sink;
+        double s_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double c_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        double v_ms=(t3.tv_sec-t2.tv_sec)*1e3+
+            (t3.tv_nsec-t2.tv_nsec)/1e6;
+        printf("stereo delay: separate C %.3f ms, interleaved C %.3f ms, "
+            "SSE2 %.3f ms\n",s_ms,c_ms,v_ms);
+    }
 #endif
 }
 
@@ -935,6 +1060,7 @@ int main(void) {
     test_saw4();
     test_square4();
     test_comb4();
+    test_delay2();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

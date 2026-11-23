@@ -24,6 +24,7 @@
 #include "convolution_mix.h"
 #include "render_block.h"
 #include "soa_voice.h"
+#include "delay_simd.h"
 #include "live_lv2.h"
 #include "carla_host.h"
 #ifdef TOMPOUCE_RENDER_PROFILE
@@ -2269,10 +2270,12 @@ static int voice_has_effect_tail(const Voice *v) {
 static int ensure_orbit_delay(int orbit) {
     if (orbit < 0 || orbit >= N_ORBITS) return 0;
     if (!dbuf[orbit]) {
+        /* Interleaved L/R frames: frame i is [2*i], [2*i+1]. */
         dbuf[orbit] = calloc(2*ORBIT_DELAY,sizeof(*dbuf[orbit]));
         if (!dbuf[orbit]) return 0;
     }
     if (!feedback_quantum[orbit]) {
+        /* Interleaved L/R feedback slots for the 128-frame quantum ring. */
         feedback_quantum[orbit] = calloc(2*128,sizeof(*feedback_quantum[orbit]));
         if (!feedback_quantum[orbit]) return 0;
     }
@@ -2398,26 +2401,15 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     if (dl < (web_delay_created[orbit]?0:1)) dl = web_delay_created[orbit]?0:1;
     if (dl >= ORBIT_DELAY) dl = ORBIT_DELAY - 1;
     unsigned fp=feedback_pos[orbit];
-    if (web_delay_created[orbit]) {
-        dbuf[orbit][dpos[orbit]]=(float)(mix->delay_l+feedback_quantum[orbit][fp]);
-        dbuf[orbit][ORBIT_DELAY+dpos[orbit]]=(float)(mix->delay_r+feedback_quantum[orbit][128+fp]);
-    }
     int rp = dpos[orbit] - dl;
     if (rp < 0) rp += ORBIT_DELAY;
-    float de_l = dbuf[orbit][rp], de_r = dbuf[orbit][ORBIT_DELAY+rp];
-    if (web_delay_created[orbit]) {
-        float fraction=(float)(frames-dl);
-        int previous=rp?rp-1:ORBIT_DELAY-1;
-        de_l=de_l*(1-fraction)+dbuf[orbit][previous]*fraction;
-        de_r=de_r*(1-fraction)+dbuf[orbit][ORBIT_DELAY+previous]*fraction;
-    }
-    feedback_quantum[orbit][fp]=web_delay_created[orbit]?(float)(de_l*fb):0;
-    feedback_quantum[orbit][128+fp]=web_delay_created[orbit]?(float)(de_r*fb):0;
+    int previous=rp?rp-1:ORBIT_DELAY-1;
+    float fraction=(float)(frames-dl);
+    double de_l=0, de_r=0;
+    dsp_delay2(dbuf[orbit],feedback_quantum[orbit],(unsigned)dpos[orbit],
+        (unsigned)rp,(unsigned)previous,fp,web_delay_created[orbit],
+        fraction,mix->delay_l,mix->delay_r,fb,&de_l,&de_r);
     feedback_pos[orbit]=(fp+1)&127;
-    if (!web_delay_created[orbit]) {
-        dbuf[orbit][dpos[orbit]] = (float)(mix->delay_l + de_l*fb);
-        dbuf[orbit][ORBIT_DELAY+dpos[orbit]] = (float)(mix->delay_r + de_r*fb);
-    }
     if (++dpos[orbit] >= ORBIT_DELAY) dpos[orbit] = 0;
     mix->left += de_l;
     mix->right += de_r;

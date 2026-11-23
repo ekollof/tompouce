@@ -657,6 +657,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       **88.2-88.6 ms C vs 91.3-92.3 ms AVX2 (0.96-0.97x)**, so it is not
       integrated. The scalar `tanh` call and four independent line addresses
       dominate; the convolution kernel remains the SIMD room path.
+- [x] Stereo shared-delay layout and SIMD candidate. The delay line and
+      feedback quantum are now interleaved L/R, and `src/delay_simd.c` carries
+      a byte-exact C kernel plus an SSE2 candidate. Over 1,000,000 frames the
+      old separate-plane scalar path measured **3.66-3.75 ms**, interleaved C
+      **2.72-2.75 ms (1.35-1.38x)**, and SSE2 **2.71-2.79 ms (neutral versus
+      interleaved C)**, so production uses the C kernel. Forced C/SSE2
+      comparisons and the delay PCM gates pass.
 - [x] Persistent per-voice stereo filter. The byte-exact two-lane
       `DspBiquad2` kernel now keeps coefficients and state in the voice
       instead of rebuilding them per sample. `test_voice_soa_dsp` compares C
@@ -676,8 +683,9 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
   - four-frame routing/mix and sample interpolation; the current two-lane SSE2
     route and paired source interpolation were only incremental or neutral
   - stereo delay and independent reverb combs; the four-comb fallback was
-    measured and rejected at 0.97x, feedback state stays per lane, and the
-    convolution reverb is already SIMD
+    measured and rejected at 0.96-0.97x, while the interleaved stereo delay
+    layout won 1.35-1.38x and its SSE2 lane was neutral. Feedback state stays
+    per lane, and the convolution reverb is already SIMD
   - stretch/FFT and visualizer FFT only if preparation or UI becomes the
     bottleneck; the audio callback stays FFT-free
 - [x] `TOMPOUCE_SIMD` runtime policy audited. Production kernels use per-kernel

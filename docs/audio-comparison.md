@@ -186,6 +186,11 @@ byte-exact against the scalar comb loop, but 2,000,000 frames took
 91.3-92.3 ms versus 88.2-88.6 ms for C (0.96-0.97x). Scalar `tanh` and four
 independent line addresses dominate; the convolution kernel remains the SIMD
 room path.
+The stereo shared-delay line now interleaves left and right with the feedback
+quantum. A two-lane SSE2 kernel is byte-exact but neutral against the
+interleaved C path (2.71-2.79 ms versus 2.72-2.75 ms over 1,000,000 frames),
+so production uses C; the layout itself cut the old separate-plane scalar
+path from 3.66-3.75 ms to 2.72-2.75 ms (1.35-1.38x). Delay PCM gates pass.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

@@ -586,8 +586,12 @@ effectively passing the source before its LFO connection settles. A true
 50 ms filter bypass with zero state was also rejected: full window 0.6215,
 steady 0.99962. A 50 ms dry-to-wet crossfade was likewise rejected: full
 0.6590, steady 0.99977. A tap on the deployed graph confirms the LFO control
-signal is the expected `-480..500` triangle. Other non-gain/cutoff targets
-keep their static value and log one
+signal is the expected `-480..500` triangle. The connection trace shows the
+LFO `AudioParam` connected last at time 0; the first filter quanta are
+RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the ninth quantum, which is
+a filter transient rather than the source. A one-quantum base hold improves
+the full correlation to 0.8336 but overshoots (RMS 2.52, peak 1.0) and is
+rejected. Other non-gain/cutoff targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
 versus static PCM. Filter-specific

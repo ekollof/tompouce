@@ -430,9 +430,13 @@ and measured divergences are recorded in the archive.
       RMS 0.2039 and peak 0.39985 while the native scalar filter at the LFO
       minimum is nearly silent; the deployed filter passes the source before
       its LFO connection settles. A 50 ms dry-to-wet crossfade was rejected
-      too: full 0.6590, steady 0.99977. The onset is a more complex
-      graph/filter connection response. Other targets keep their static value
-      and log
+      too: full 0.6590, steady 0.99977. The connection trace shows the LFO
+      `AudioParam` connected last at time 0; the first filter quanta are
+      RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the ninth quantum,
+      which is a filter transient rather than the source. A one-quantum base
+      hold improves full correlation to 0.8336 but overshoots (RMS 2.52, peak
+      1.0) and is rejected. The onset is a more complex graph/filter connection
+      response. Other targets keep their static value and log
       one `LFO modulation is implemented only for gain and cutoff` warning.
       `test_audio` locks the cutoff mapping, SoA bypass and dynamic-vs-static
       PCM. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and

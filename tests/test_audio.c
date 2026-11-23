@@ -564,6 +564,31 @@ static void test_pattern_fx_chain_pcm(void) {
     audio_set_reference_mode(old_reference);
 }
 
+static void test_fx_room_routing(void) {
+    Voice fx={0}, normal={0};
+    fx.active=normal.active=1;
+    fx.route_cached=normal.route_cached=1;
+    fx.route_dsp=normal.route_dsp=1;
+    fx.route_room=normal.route_room=.8;
+    fx.route_room_size=normal.route_room_size=3;
+    fx.route_ll=normal.route_ll=1;
+    fx.route_rr=normal.route_rr=1;
+    fx.route_side_one=normal.route_side_one=1;
+    fx.route_left=normal.route_left=1;
+    fx.route_right=normal.route_right=1;
+    fx.route_dry=normal.route_dry=0;
+    fx.fx_room_present=1;
+    VoiceMix mix={0};
+    route_voice(&fx,1,-2,&mix);
+    assert(mix.fx_room && mix.room_l==0 && mix.room_r==0);
+    assert(fabs(mix.fx_room_l-.8)<1e-12);
+    assert(fabs(mix.fx_room_ratio+2)<1e-12);
+    mix=(VoiceMix){0};
+    route_voice(&normal,1,-2,&mix);
+    assert(!mix.fx_room && fabs(mix.room_l-.8)<1e-12 &&
+        fabs(mix.room_r+1.6)<1e-12);
+}
+
 static void test_supersaw_callback(void) {
     memset(voices,0,sizeof(voices)); playing=1;
     AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
@@ -1177,6 +1202,7 @@ int main(void) {
     test_analysers();
     test_live_scope_attachment();
     test_pattern_fx_chain_pcm();
+    test_fx_room_routing();
     test_supersaw_callback();
     test_stereo_filter_playback();
     bench_stereo_filter_callback();

@@ -156,6 +156,7 @@ typedef struct {
     double lfo_depth;
     DspParams dsp;
     int fx_stage_count;
+    int fx_room_present;
     AudioFxStage fx_stages[AUDIO_FX_STAGES_MAX];
 } AudioEvent;
 

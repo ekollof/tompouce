@@ -1004,12 +1004,13 @@ operator/envelope/matrix, IR/room and canonical numeric DSP controls. Pattern
 the site; both have parity gates. Pattern shape is a post-source waveshaper
 (`fx-pattern-shape` 0.99978/0.932, `fx-overlap-source-shape` 0.99979/0.943);
 pattern delay/IR sends are ignored, leaving source sends in force
-(`fx-overlap-source-delay` 0.9999996/1.0005). FX room only affects a source
-with room; its value is ignored, and stereo sources gain a right-channel
-component proportional to the source R/L ratio while mono sources do not.
-That needs a separate stereophonic room-send model and remains a diagnostic
-(`fx-overlap-source-room`). Source distort/chorus remain ungated; the
-remaining controls above are still outside.
+(`fx-overlap-source-delay` 0.9999996/1.0005). FX room presence selects a
+mono-left room feed plus the source R/L ratio and holds that ratio through the
+tail; `fx-overlap-source-room` now measures 0.9999994/0.9938 and
+`test_fx_room_routing` covers the routing/ratio. The pan .75 variant still
+differs in level (0.9999991 correlation, 0.538 RMS ratio) and stays
+diagnostic. Source distort/chorus remain ungated; the remaining controls above
+are still outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

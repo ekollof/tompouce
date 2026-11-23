@@ -471,9 +471,9 @@ that default gain, so native ignores their recorded steps. Pattern `partials`
 arrays flatten to a numeric control and FX loop windows are ignored by the
 site; parity gates cover both. Pattern shape is a post-source waveshaper;
 pattern delay/IR sends are ignored, leaving source sends in force. FX room
-only affects a source with room, ignores its value, and adds a right-channel
-component for stereo sources; modeling it needs a separate stereophonic
-room-send path, so it remains diagnostic. Source distort/chorus remain
+presence feeds a mono-left room send with the source R/L ratio held through
+the tail; `fx-overlap-source-room` passes at 0.9999994/0.9938, while the
+panned variant remains a level diagnostic. Source distort/chorus remain
 ungated. ADSR/speed/note/sample/bank/string controls remain outside. The
 graph/effect boundary is covered: a `K()` source does not receive the chain's
 default gain, while `audioin()` worklet effects and ordinary sources do.

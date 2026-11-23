@@ -1484,6 +1484,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     }
     prepare_stereo_filter(v);
     v->fx_stage_count=ev->fx_stage_count;
+    v->fx_room_present=ev->fx_room_present;
     if (v->fx_stage_count>AUDIO_FX_STAGES_MAX) v->fx_stage_count=AUDIO_FX_STAGES_MAX;
     if (v->fx_stage_count>0) {
         memcpy(v->fx_stages,ev->fx_stages,
@@ -1954,6 +1955,8 @@ void audio_trigger_event(AudioEvent *ev) {
 
 typedef struct {
     double left, right, delay_l, delay_r, room_l, room_r, room_size;
+    double fx_room_l, fx_room_r, fx_room_ratio, fx_room_weight;
+    int fx_room;
 } VoiceMix;
 
 /* Named-target dry taps. The default bus keeps its exact operation order;
@@ -1964,6 +1967,27 @@ float *out_target_buffers[AUDIO_OUTPUT_NAMED_MAX+1];
 static void target_add(int target, double l, double r) {
     if (target>0 && target<=AUDIO_OUTPUT_NAMED_MAX) {
         target_dry_l[target]+=l; target_dry_r[target]+=r;
+    }
+}
+
+/* Pattern FX room sends a mono left feed plus the source channel ratio. The
+   deployed player's right room return follows that ratio rather than running
+   an independent stereo convolution. */
+static void mix_fx_room(VoiceMix *mix, double l, double r, double room,
+                        double room_size) {
+    double left=l*room;
+    mix->fx_room_l += left;
+    mix->fx_room_r += r*room;
+    mix->fx_room=1;
+    if (room>0) mix->room_size=room_size;
+    double weight=fabs(left);
+    if (weight>0) {
+        double ratio=l!=0?r/l:0;
+        if (mix->fx_room_weight>0)
+            mix->fx_room_ratio=(mix->fx_room_ratio*mix->fx_room_weight+
+                ratio*weight)/(mix->fx_room_weight+weight);
+        else mix->fx_room_ratio=ratio;
+        mix->fx_room_weight+=weight;
     }
 }
 
@@ -2042,8 +2066,12 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     mix->delay_r += base_r*v->route_delay;
     if (v->route_dsp) {
         double room=v->route_room;
-        mix->room_l += base_l*room; mix->room_r += base_r*room;
-        if (room > 0) mix->room_size=v->route_room_size;
+        if (v->fx_room_present && room > 0) {
+            mix_fx_room(mix,base_l,base_r,room,v->route_room_size);
+        } else {
+            mix->room_l += base_l*room; mix->room_r += base_r*room;
+            if (room > 0) mix->room_size=v->route_room_size;
+        }
     }
 }
 
@@ -2101,9 +2129,15 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         if (v->route_dsp) {
             double room=v->route_room;
             __m128d roomed=_mm_mul_pd(base,_mm_set1_pd(room));
-            _mm_storeu_pd(&mix->room_l,
-                _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
-            if (room > 0) mix->room_size=v->route_room_size;
+            if (v->fx_room_present && room > 0) {
+                double pair[2];
+                _mm_storeu_pd(pair,base);
+                mix_fx_room(mix,pair[0],pair[1],room,v->route_room_size);
+            } else {
+                _mm_storeu_pd(&mix->room_l,
+                    _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
+                if (room > 0) mix->room_size=v->route_room_size;
+            }
         }
         return;
     }
@@ -2131,8 +2165,12 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     mix->delay_r += r*right*v->route_delay;
     if (v->route_dsp) {
         double room = v->route_room;
-        mix->room_l += l*left*room; mix->room_r += r*right*room;
-        if (room > 0) mix->room_size = v->route_room_size;
+        if (v->fx_room_present && room > 0) {
+            mix_fx_room(mix,l*left,r*right,room,v->route_room_size);
+        } else {
+            mix->room_l += l*left*room; mix->room_r += r*right*room;
+            if (room > 0) mix->room_size = v->route_room_size;
+        }
     }
 }
 #ifdef TOMPOUCE_RENDER_PROFILE
@@ -2222,6 +2260,8 @@ static int ensure_orbit_reverb(int orbit) {
 static void native_reverb(int orbit, VoiceMix *mix) {
     static unsigned pos[N_ORBITS], ap_pos[N_ORBITS];
     static double size[N_ORBITS];
+    static int fx_mode[N_ORBITS];
+    static double fx_ratio[N_ORBITS];
     const int lengths[] = {1116,1188,1277,1356};
     if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
     unsigned long long revision=atomic_load(&ir_revision[orbit]);
@@ -2240,8 +2280,24 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     const ConvKernel *kernel=convolvers[orbit].kernel;
     if (kernel) {
         double left, right;
-        int stereo=kernel->channels!=1 || native_synth_quantum_time(audio_time)<room_stereo_until[orbit];
-        convolution_process_input(&convolvers[orbit],mix->room_l,mix->room_r,stereo,&left,&right);
+        int stereo=kernel->channels!=1 ||
+            native_synth_quantum_time(audio_time)<room_stereo_until[orbit];
+        if (mix->fx_room) {
+            fx_mode[orbit]=1;
+            fx_ratio[orbit]=mix->fx_room_weight>0?mix->fx_room_ratio:1;
+        } else if (mix->room_l!=0 || mix->room_r!=0) {
+            fx_mode[orbit]=0;
+        }
+        if (fx_mode[orbit]) {
+            double input=mix->fx_room?mix->fx_room_l:0;
+            convolution_process_input(&convolvers[orbit],input,0,0,&left,&right);
+            right=left*fx_ratio[orbit];
+            if (!mix->fx_room && convolvers[orbit].remaining==0)
+                fx_mode[orbit]=0;
+        } else {
+            convolution_process_input(&convolvers[orbit],mix->room_l,
+                mix->room_r,stereo,&left,&right);
+        }
         mix->left += left; mix->right += right;
         return;
     }
@@ -2399,7 +2455,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     for (unsigned ai=0;ai<active_count && stage;ai++) {
                         int slot=active_slots[ai];
                         if (voices[slot].active &&
-                            (voices[slot].out_target || voices[slot].fx_stage_count>0))
+                            (voices[slot].out_target ||
+                             voices[slot].fx_stage_count>0 ||
+                             voices[slot].fx_room_present))
                             stage=0;
                     }
                     if (stage) {

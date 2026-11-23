@@ -58,7 +58,9 @@ cmake --build --preset default --parallel 4
 in each test process so assertion failures do not write systemd-coredump
 journal entries that trigger Omarchy's crash watcher. `ulimit -c 0` alone
 still produces metadata-only crash entries. Run the full suite serially;
-`tui_pty` and `hydra_webgl` can flake under `--parallel`.
+`tui_pty` and `hydra_webgl` can flake under `--parallel`. Do not run the full
+suite for small changes; use focused tests and reserve it for milestones or
+invasive/cross-cutting changes.
 
 Run `./build/tompouce` for the UI or `./build/tompouce --mcp` for newline-delimited
 JSON-RPC on stdio. `--mcp --ui` uses `/dev/tty`; `--mcp-port PORT` enables the

@@ -17,6 +17,7 @@ typedef struct Voice {
     DspBiquad2 stereo_filter;
     int fx_stage_count;
     int route_fx_stereo;
+    int fx_room_present;
     AudioFxStage fx_stages[AUDIO_FX_STAGES_MAX];
     DspBiquad fx_filters[2][AUDIO_FX_STAGES_MAX];
     int active;

@@ -902,6 +902,13 @@ static void test_fx_shared_routing(void) {
         fabs(event.fx_stages[1].a-.5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(60).s('sine').room(.8).dry(0).FX(room(.3))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.fx_room_present==1);
+    assert(fabs(event.dsp.p[DSP_ROOM]-.8)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("note(60).s('sine').FX(shape(.3))",&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));

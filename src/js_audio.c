@@ -494,7 +494,9 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
             const char *name=op->valuestring;
             if (!pattern && cJSON_HasObjectItem(v,name)) continue;
             /* The deployed renderer ignores shared-send and room/IR controls
-               inside FX patterns; source controls remain in force. */
+               inside FX patterns; source controls remain in force. Presence
+               of an FX room request still selects its stereophonic send. */
+            if (pattern && !strcmp(name,"room")) ev->fx_room_present=1;
             if (pattern && (!strcmp(name,"room") || !strcmp(name,"size") ||
                 !strcmp(name,"roomsize") || !strcmp(name,"dry") ||
                 !strcmp(name,"delay") || !strcmp(name,"delaytime") ||

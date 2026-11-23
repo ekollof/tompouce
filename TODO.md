@@ -398,23 +398,28 @@ and measured divergences are recorded in the archive.
       the browser's low-level IR-speed path, not source width or the IR kernel.
       The 1.8 s active window now passes at correlation **0.99029** and RMS
       ratio **1.12166** with the unchanged 0.99/0.85-1.15 thresholds; 1.9 s
-      falls to 0.98975, bounding the near-silent tail to roughly the last
-      0.2 s. The full 2 s window stays diagnostic at 0.9893. Shorter 0.6/1.0 s
-      windows were worse (0.9814/0.9889).
+      falls to 0.98975. The full 2 s window stays diagnostic at
+      0.98935/1.12449 (RMS inside). Per-100 ms windows localize the residue to
+      the near-silent IR-speed edges: 0-0.5 s 0.966-0.989 at RMS 1.24-1.13,
+      0.5-1.6 s 0.989-0.997 at 1.08-1.13, and 1.7-2.0 s 0.944-0.986 at
+      1.30-1.32. The absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so
+      only correlation misses, by 0.00065; modeling the browser's phase-vocoder
+      IR edge envelope is the remaining work. Shorter 0.6/1.0 s windows were
+      worse (0.9814/0.9889).
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
       unchanged 0.99/0.85-1.15 thresholds. Unseeded multi-room sequences remain
       diagnostic because of the browser's incidental chain-ID draw.
-- [x] Deterministic first-room fractional switch gate. The full
+- [x] Deterministic fractional switch gates. The full
       `pcm-onset-fractional-roomswitch` window stays diagnostic because the
-      eager renderer zeros each clipped hap's convolver tail and later rooms
-      draw unseeded random impulse responses. A separate 0.35 s
-      `pcm-onset-fractional-roomswitch-first` case now gates the first room at
-      correlation **0.99935** and RMS ratio **0.98384** with the unchanged
-      thresholds. The remaining residual spans the capture rather than a tail:
-      1.8/1.9/1.95 s windows measure 0.98961/0.98955/0.98954 and the full 2 s
-      window 0.98954, all below the gate.
+      eager renderer hard-zeros each clipped hap's convolver tail and later
+      rooms draw unseeded random impulse responses. Separate 0.35 s cases now
+      gate the first room at **0.99935/0.98384** and the second room
+      (windowStart 1.137 s) at **0.99556/1.01511** with the unchanged
+      thresholds. In the full window the browser is exactly zero from
+      0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3;
+      the 2 s diagnostic at 0.98954 is that capture bound, not a site tail.
 - [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
       triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,

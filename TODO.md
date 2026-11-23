@@ -420,12 +420,14 @@ and measured divergences are recorded in the archive.
       source values in force. `fx-pattern-note`, `-n`, `-s`, `-bank` and
       `-ftype-string` pass at 0.9990+; `test_javascript` checks the source
       frequency, token and filter type stay unchanged.
-- [ ] Remaining FX string algorithm control. `distorttype('fold')` in a
-      pattern still differs in level (0.99969 correlation, 1.336 RMS ratio),
-      so it stays diagnostic. Callable argument replay is intentionally absent
-      because the current site ignores it; revisit if that changes. Very long
-      modulation uses a bounded conservative connection deadline; distinguish
-      these limits from established PCM parity. See
+- [x] FX `distorttype('fold')` string. A pattern distort stage now carries an
+      algorithm variant, and fold uses the deployed folding curve with its
+      measured gain. `fx-pattern-distorttype-string` measures
+      0.99999999/1.00065 and `test_fx_distort_fold` pins the native curve.
+      Callable argument replay remains intentionally absent because the
+      current site ignores it; revisit if that changes. Very long modulation
+      uses a bounded conservative connection deadline; distinguish these
+      limits from established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)
@@ -631,6 +633,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       (0.76x) on this box, so it is not used by the audio path. The scalar C
       path remains; this kernel needs a block/batch layout before it can pay
       for conversion and call overhead.
+- [x] Four-lane ADSR AVX2 candidate measured. `src/envelope_simd.c` is
+      byte-exact against four scalar `dsp_envelope` calls in `test_dsp`
+      (including forced direct AVX2 calls), but 2,000,000 groups measured
+      **7.686 ms C vs 41.063 ms AVX2 (0.19x)**, so it is not integrated. The
+      branchy per-lane envelope arithmetic is faster scalar.
 - [x] Persistent per-voice stereo filter. The byte-exact two-lane
       `DspBiquad2` kernel now keeps coefficients and state in the voice
       instead of rebuilding them per sample. `test_voice_soa_dsp` compares C

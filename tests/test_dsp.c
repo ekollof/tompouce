@@ -1,5 +1,6 @@
 #include "dsp.h"
 #include "sample_interp.h"
+#include "envelope_simd.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
 #include "audio.h"
@@ -127,6 +128,73 @@ static void test_parameter_lookup(void) {
     assert(!dsp_parameter_lookup("not-a-control",&index,&minimum,&maximum));
     assert(!dsp_parameter_lookup(NULL,&index,&minimum,&maximum));
 }
+
+static void test_envelope4(void) {
+    double age[4], gate[4], attack[4], decay[4], sustain[4], release[4];
+    double scalar[4], lane[4];
+    unsigned state=0x12345678u;
+    for (int iteration=0;iteration<10000;iteration++) {
+        for (int i=0;i<4;i++) {
+            state=state*1664525u+1013904223u;
+            age[i]=(state>>8)/16777216.0*2.0;
+            state=state*1664525u+1013904223u;
+            gate[i]=(state>>8)/16777216.0*1.5;
+            state=state*1664525u+1013904223u;
+            attack[i]=(state>>16)/65536.0*.3;
+            state=state*1664525u+1013904223u;
+            decay[i]=(state>>16)/65536.0*.3;
+            state=state*1664525u+1013904223u;
+            sustain[i]=(state>>8)/16777216.0;
+            state=state*1664525u+1013904223u;
+            release[i]=(state>>16)/65536.0*.5;
+        }
+        dsp_envelope4_c(age,gate,attack,decay,sustain,release,scalar);
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_cpu_init();
+        if (__builtin_cpu_supports("avx2")) {
+            dsp_envelope4_avx2(age,gate,attack,decay,sustain,release,lane);
+            for (int i=0;i<4;i++)
+                assert(memcmp(&scalar[i],&lane[i],sizeof(scalar[i]))==0);
+        }
+#else
+        (void)lane;
+#endif
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        enum { N=2000000 };
+        volatile double sink=0;
+        struct timespec t0,t1,t2;
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            double sum=0;
+            for (int lane_index=0;lane_index<4;lane_index++)
+                sum+=dsp_envelope((i&1023)/44100.0,.01,.002,.05,.6,.05);
+            sink+=sum;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            double a[4]={(i&1023)/44100.0,(i&1023)/44100.0,
+                (i&1023)/44100.0,(i&1023)/44100.0};
+            double g[4]={.01,.01,.01,.01}, at[4]={.002,.002,.002,.002};
+            double de[4]={.05,.05,.05,.05}, su[4]={.6,.6,.6,.6};
+            double re[4]={.05,.05,.05,.05}, out[4];
+            dsp_envelope4_avx2(a,g,at,de,su,re,out);
+            sink+=out[0]+out[1]+out[2]+out[3];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double scalar_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double lane_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("four-lane envelope: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
+            scalar_ms,lane_ms,lane_ms>0?scalar_ms/lane_ms:0);
+    }
+#endif
+}
+
 
 static void test_sample_interp(void) {
     float samples[64];
@@ -691,6 +759,7 @@ int main(void) {
     test_periodic_limits();
     test_parameter_lookup();
     test_distortion_site_formula();
+    test_envelope4();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

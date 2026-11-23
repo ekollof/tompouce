@@ -597,6 +597,24 @@ static void test_fx_room_routing(void) {
     assert(fabs(fx_room_gain(&panned)-2.012)<1e-12);
 }
 
+static void test_fx_distort_fold(void) {
+    Voice voice={0};
+    voice.active=1;
+    voice.route_cached=1;
+    voice.route_ll=voice.route_rr=1;
+    voice.route_side_one=1;
+    voice.route_dry=1;
+    voice.route_left=voice.route_right=1;
+    voice.fx_stage_count=1;
+    voice.fx_stages[0]=(AudioFxStage){AUDIO_FX_DISTORT,1,1,1};
+    VoiceMix mix={0};
+    route_voice(&voice,.096,.096,&mix);
+    double n=(1+.5*1)*.096;
+    double folded=1-fabs(fmod(n+1,4)-2);
+    assert(fabs(mix.left-folded*1.24)<1e-12);
+    assert(fabs(mix.right-folded*1.24)<1e-12);
+}
+
 static void test_supersaw_callback(void) {
     memset(voices,0,sizeof(voices)); playing=1;
     AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
@@ -1211,6 +1229,7 @@ int main(void) {
     test_live_scope_attachment();
     test_pattern_fx_chain_pcm();
     test_fx_room_routing();
+    test_fx_distort_fold();
     test_supersaw_callback();
     test_stereo_filter_playback();
     bench_stereo_filter_callback();

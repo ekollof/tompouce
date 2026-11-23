@@ -2037,10 +2037,30 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
             left_in=(1+k)*left_in/(1+k*fabs(left_in))*volume;
             right_in=(1+k)*right_in/(1+k*fabs(right_in))*volume;
         } else if (stage->type==AUDIO_FX_DISTORT) {
-            double shape=expm1(fmax(0,fmin(100,stage->a)));
+            double drive=fmax(0,fmin(100,stage->a));
             double volume=fmax(.001,fmin(1,stage->b));
-            left_in=((1+shape)*left_in/(1+shape*fabs(left_in)))*volume;
-            right_in=((1+shape)*right_in/(1+shape*fabs(right_in)))*volume;
+            if (stage->variant==1) {
+                double n=(1+.5*drive)*left_in;
+                double a=fmod(n+1,4); if (a<0) a+=4;
+                left_in=(1-fabs(a-2))*volume*1.24;
+                n=(1+.5*drive)*right_in;
+                a=fmod(n+1,4); if (a<0) a+=4;
+                right_in=(1-fabs(a-2))*volume*1.24;
+            } else if (stage->variant==2) {
+                left_in=fmax(-1,fmin(1,(1+drive)*left_in))*volume;
+                right_in=fmax(-1,fmin(1,(1+drive)*right_in))*volume;
+            } else if (stage->variant==3) {
+                double n=(1+.5*drive)*left_in;
+                double a=fmod(n+1,4); if (a<0) a+=4;
+                left_in=sin(M_PI/2*(1-fabs(a-2)))*volume;
+                n=(1+.5*drive)*right_in;
+                a=fmod(n+1,4); if (a<0) a+=4;
+                right_in=sin(M_PI/2*(1-fabs(a-2)))*volume;
+            } else {
+                double shape=expm1(drive);
+                left_in=((1+shape)*left_in/(1+shape*fabs(left_in)))*volume;
+                right_in=((1+shape)*right_in/(1+shape*fabs(right_in)))*volume;
+            }
         }
     }
     double ll=v->route_ll, lr=v->route_lr;

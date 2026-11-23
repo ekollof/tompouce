@@ -168,6 +168,10 @@ and `avx2` runs pass the audio gates.
 A stereo sample-interpolation AVX2 kernel was measured and rejected: it is
 byte-exact against C but 5,000,000 interpolations took 19.3 ms versus 14.7 ms
 for C on this box. The scalar sample lookup remains in the audio path.
+A four-lane ADSR AVX2 kernel (`src/envelope_simd.c`) was also measured and
+rejected: it is byte-exact against four scalar `dsp_envelope` calls, but
+2,000,000 groups took 41.1 ms versus 7.69 ms for C (0.19x). The branchy
+per-lane envelope path stays scalar.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the
@@ -1019,8 +1023,9 @@ are ignored by the deployed player; `fx-pattern-adsr`,
 pass at 0.9999997+ and leave source values in force. Pattern `note`, `n`,
 `s`, `bank` and string `ftype` are also ignored (`fx-pattern-note`, `-n`,
 `-s`, `-bank`, `-ftype-string`), leaving the source frequency, token and
-filter type unchanged. The FX `distorttype('fold')` string remains a level
-diagnostic.
+filter type unchanged. FX `distorttype('fold')` now carries a distortion
+algorithm variant and passes at 0.99999999/1.00065; `test_fx_distort_fold`
+pins the curve.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

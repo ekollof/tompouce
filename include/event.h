@@ -49,6 +49,7 @@ enum { AUDIO_FX_LPF, AUDIO_FX_HPF, AUDIO_FX_BPF, AUDIO_FX_PAN,
 typedef struct {
     int type;
     double a, b; /* filter: cutoff/Q; pan: normalized -1..1; shape: drive/volume */
+    int variant; /* distortion algorithm */
 } AudioFxStage;
 typedef struct {
     char name[64];

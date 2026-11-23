@@ -444,9 +444,29 @@ static int fx_filter_type(int operation) {
     }
 }
 
+static int fx_distort_variant(const char *name) {
+    if (!name) return -1;
+    if (!strcmp(name,"soft")) return 0;
+    if (!strcmp(name,"fold")) return 1;
+    if (!strcmp(name,"hard")) return 2;
+    if (!strcmp(name,"sinefold")) return 3;
+    if (!strcmp(name,"chebyshev")) return 4;
+    if (!strcmp(name,"scurve")) return 5;
+    if (!strcmp(name,"diode")) return 6;
+    if (!strcmp(name,"asym")) return 7;
+    if (!strcmp(name,"cubic")) return 8;
+    return -1;
+}
+
+static int fx_last_distort_stage(const AudioEvent *ev) {
+    for (int i=ev->fx_stage_count-1;i>=0;i--)
+        if (ev->fx_stages[i].type==AUDIO_FX_DISTORT) return i;
+    return -1;
+}
+
 static void fx_add_stage(AudioEvent *ev, int type, double a, double b) {
     if (ev->fx_stage_count>=AUDIO_FX_STAGES_MAX) return;
-    ev->fx_stages[ev->fx_stage_count++]=(AudioFxStage){type,a,b};
+    ev->fx_stages[ev->fx_stage_count++]=(AudioFxStage){type,a,b,0};
 }
 
 static int fx_last_filter_stage(const AudioEvent *ev, int type) {
@@ -569,6 +589,15 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (fx_arg_string(step,0,ev->fx_ir,sizeof(ev->fx_ir)))
                     ev->fx_room_fields|=1u<<6; /* keep the custom IR explicit */
                 continue;
+            }
+            if (operation==FX_OP_DISTORTTYPE && pattern) {
+                char algorithm[32];
+                if (fx_arg_string(step,0,algorithm,sizeof(algorithm))) {
+                    int variant=fx_distort_variant(algorithm);
+                    int at=fx_last_distort_stage(ev);
+                    if (variant>=0 && at>=0) ev->fx_stages[at].variant=variant;
+                    continue;
+                }
             }
             double value=0;
             if (!fx_arg_number(step,0,&value)) continue;
@@ -734,7 +763,12 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 }
                 break;
             case FX_OP_DISTORTTYPE:
-                if (value>=0 && value<=6) ev->dsp.p[DSP_DISTTYPE]=value;
+                if (value>=0 && value<=8) {
+                    if (pattern) {
+                        int at=fx_last_distort_stage(ev);
+                        if (at>=0) ev->fx_stages[at].variant=(int)value;
+                    } else ev->dsp.p[DSP_DISTTYPE]=value;
+                }
                 break;
             case FX_OP_POST:
                 if (value>=0 && value<=16) ev->dsp.p[DSP_POST]=value;

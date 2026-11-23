@@ -441,6 +441,15 @@ and measured divergences are recorded in the archive.
       `test_audio` locks the cutoff mapping, SoA bypass and dynamic-vs-static
       PCM. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
+- [ ] Cutoff-LFO full onset. The same pattern without `.lfo()` matches the
+      complete 0.6 s window at 0.99999995, so the residual 0.682 is the LFO
+      graph onset. A one-quantum base hold was re-tested with the current
+      renderer: full 0.826, RMS 2.54, native peak 1.0 from a direct-form
+      biquad state rail, and remains rejected. The deployed filter's first
+      quanta ring at RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the
+      ninth. Next models should smooth or reset the native filter state across
+      the LFO connection instead of holding or bypassing the filter. The
+      `.05-.6 s` steady gate stays green at 0.99977/1.00363.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

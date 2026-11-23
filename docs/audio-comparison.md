@@ -575,7 +575,9 @@ response over `.05-.6 s` gates at **0.99977 correlation and 1.00363 RMS ratio**
 with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
 `windowStart` option). The full 0.6-second window remains diagnostic at 0.682
 because the first ~50 ms graph onset does not match; the full-window case stays
-`correlation:null`. A 50 ms native base-cutoff hold was tested and rejected:
+`correlation:null`. The same pattern without `.lfo()` matches the complete
+0.6-second window at 0.99999995, isolating the residual to the LFO graph onset.
+A 50 ms native base-cutoff hold was tested and rejected:
 the full window fell to 0.6076 and the steady gate to 0.9580. A 50 ms
 unfiltered hold was also rejected: full window 0.5459, steady 0.8557. The
 onset is therefore not a simple delayed or bypassed LFO; it is a more complex

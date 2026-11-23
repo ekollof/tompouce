@@ -780,18 +780,19 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Code quality
 
-- [ ] Code style sweep. Audit the C sources against AGENTS.md: KNF style,
+- [x] Code style sweep. Audit the C sources against AGENTS.md: KNF style,
       `switch`/`case` instead of large `if`/`else` chains, C11 facilities where
-      they fit, focused functions and state owned by its module. Converted so
-      far: `audio.c` note parsing, drum token/instrument dispatch, LFO
-      wave/target, oscillator DSP selection, the pattern distortion
-      variant/table dispatch, the `tui.c` search-mode key dispatch, the `tui.c`
-      `/command` table/switch, `mcp.c` tool plus `music_track` action
-      table/switch dispatch, the `dsp.c` FM shape selection, the
-      `sampler.c` drum slot plus `websamp.c` note-name tables, the `tui.c`
-      file-palette and command-input key dispatches, and the `midi.c` ALSA
-      event dispatch. Remaining: the `tui.c` main editor key chain, which
-      mixes `continue` flow with one loop exit and needs care.
+      they fit, focused functions and state owned by its module. Converted:
+      `audio.c` note parsing, drum token/instrument dispatch, LFO wave/target,
+      oscillator DSP selection and pattern distortion variant/table dispatch;
+      `tui.c` search-mode keys, the `/command` table/switch, the file-palette
+      and command-input keys, and the main editor key dispatch;
+      `mcp.c` tool plus `music_track` action dispatch; `dsp.c` FM shape
+      selection; `sampler.c` drum slots; `websamp.c` note names; `midi.c` ALSA
+      event dispatch. A contiguous-run audit now leaves only short
+      mixed-condition selections (no run of six or more `else if`), so the
+      remaining occurrences are local validation branches rather than
+      action dispatch chains.
 
 ## Terminal blockers awaiting upstream
 

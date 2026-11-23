@@ -5001,13 +5001,17 @@ void tui_run(void) {
         if (ch == 27 || (!(vi_mode && vi_normal) &&
             (ch == (int)NCKEY_UP || ch == (int)NCKEY_DOWN || ch == (int)NCKEY_LEFT ||
              ch == (int)NCKEY_RIGHT || ch == (int)NCKEY_HOME || ch == (int)NCKEY_END))) sel_active = 0;
-        if (ch == 17) {
+        int session_quit = 0;
+        switch (ch) {
+        case 17:
             state_save(); /* persist session for next launch */
+            session_quit = 1;
             break;
-        } else if (ch == 16) {
+        case 16:
             if (audio_is_playing()) { scheduler_transport_set(0); } else { do_perform(); }
             continue;
-        } else if (ch == 2001 || ch == 2002) {
+        case 2001:
+        case 2002: {
             int i = slider_at_cursor();
             if (i<0 && slider_count()==1 && (!slider_document_generation || slider_sites_count==1) &&
                 !strstr(code_lines[cur_line],"slider(")) i=0;
@@ -5026,33 +5030,37 @@ void tui_run(void) {
                 snprintf(status_msg, sizeof(status_msg), "slider %d = %.3g", i + 1, v);
             }
             continue;
-        } else if (ch == 31 || ch == 29) { /* Ctrl+- / Ctrl+= */
+        }
+        case 31:
+        case 29: { /* Ctrl+- / Ctrl+= */
             int direction=ch==29?1:-1;
             if (audio_output_adjust_latency(direction))
                 snprintf(status_msg,sizeof(status_msg),"audio %s",audio_output_latency_label());
             else
                 snprintf(status_msg,sizeof(status_msg),"latency presets apply to the OpenAL backend only");
             continue;
-        } else if (ch == ((int)NCKEY_F00+(5)) || ch == 18) {
+        }
+        case (int)NCKEY_F00+5:
+        case 18:
             do_perform();
             continue;
-        } else if (ch == ((int)NCKEY_F00+(2))) {
+        case (int)NCKEY_F00+2:
             input_mode = 1;
             input_len = 0;
             input_buf[0] = 0;
             continue;
-        } else if (ch == ((int)NCKEY_F00+(1))) {
+        case (int)NCKEY_F00+1:
             show_reference=reference_focus=0;
             show_docs = !show_docs;
             docs_scroll = 0;
             snprintf(status_msg, 256, show_docs ? "cheatsheet on" : "cheatsheet off");
             continue;
-        } else if (ch == ((int)NCKEY_F00+(4))) {
+        case (int)NCKEY_F00+4:
             show_state = !show_state;
             if (!show_state)output_volume_focus=output_volume_drag=0;
             snprintf(status_msg, 256, show_state ? "state on" : "state off");
             continue;
-        } else if (ch == ((int)NCKEY_F00+(6))) {
+        case (int)NCKEY_F00+6:
             if (!search_mode) {
                 banks_ensure_default();
                 search_mode = 1;
@@ -5063,7 +5071,7 @@ void tui_run(void) {
                 snprintf(status_msg, 256, "bank search");
             } else search_mode = 0;
             continue;
-        } else if (ch == ((int)NCKEY_F00+(7))) {
+        case (int)NCKEY_F00+7:
             if (scheduler_song_on()) {
                 scheduler_song_set(0);
                 snprintf(status_msg, 256, "song off");
@@ -5077,29 +5085,29 @@ void tui_run(void) {
                 }
             }
             continue;
-        } else if (ch == ((int)NCKEY_F00+(8))) {
+        case (int)NCKEY_F00+8:
             scheduler_song_hold_toggle();
             snprintf(status_msg, 256, scheduler_song_hold() ? "hold on" : "hold off");
             continue;
-        } else if (ch == ((int)NCKEY_F00+(9))) {
+        case (int)NCKEY_F00+9:
             show_tracks = !show_tracks;
             snprintf(status_msg, 256, show_tracks ? "tracks on" : "tracks off");
             continue;
-        } else if (ch == ((int)NCKEY_F00+(10))) {
+        case (int)NCKEY_F00+10:
             split_ratio -= 0.05;
             if (split_ratio < 0.3) split_ratio = 0.3;
             snprintf(status_msg, 256, "split %.0f%%", split_ratio * 100);
             continue;
-        } else if (ch == ((int)NCKEY_F00+(11))) {
+        case (int)NCKEY_F00+11:
             split_ratio += 0.05;
             if (split_ratio > 0.85) split_ratio = 0.85;
             snprintf(status_msg, 256, "split %.0f%%", split_ratio * 100);
             continue;
-        } else if (ch == ((int)NCKEY_F00+(12))) {
+        case (int)NCKEY_F00+12:
             show_viz = !show_viz;
             snprintf(status_msg, 256, show_viz ? "viz on" : "viz off");
             continue;
-        } else if (ch == 20) {
+        case 20: {
             char *buf = editor_flatten();
             if (!buf) {
                 snprintf(status_msg, 256, "out of memory");
@@ -5112,7 +5120,8 @@ void tui_run(void) {
                 }
             }
             continue;
-        } else if (ch == 14) {
+        }
+        case 14:
             if (scheduler_song_count() <= 0) {
                 snprintf(status_msg, 256, "no tracks (Ctrl+T copies current)");
             } else {
@@ -5120,7 +5129,7 @@ void tui_run(void) {
                 sync_editor_from_track(scheduler_song_pos());
             }
             continue;
-        } else if (ch == 2) {
+        case 2:
             if (scheduler_song_count() <= 0) {
                 snprintf(status_msg, 256, "no tracks (Ctrl+T copies current)");
             } else {
@@ -5128,63 +5137,64 @@ void tui_run(void) {
                 sync_editor_from_track(scheduler_song_pos());
             }
             continue;
-        } else if (ch == 4) {
+        case 4:
             duplicate_line();
             continue;
-        } else if (ch == 19) {
+        case 19:
             file_open(1); /* Ctrl+S: save picker (whole song) */
             continue;
-        } else if (ch == 15) {
+        case 15:
             file_open(2); /* Ctrl+O: load picker */
             continue;
-        } else if (ch == 9) {
+        case 9:
             if (sel_active || (vi_mode && vi_normal) || !editor_complete(0,0)) editor_indent(0);
             continue;
-        } else if (ch == 2102) {
+        case 2102:
             if (!completion_current(1)) editor_indent(1); else (void)editor_complete(1,0);
             continue;
-        } else if (ch == 0) {
+        case 0:
             (void)editor_complete(0,1);
             continue;
-        } else if (ch == ((int)NCKEY_F00+(3))) {
+        case (int)NCKEY_F00+3:
             editor_toggle_mode();
             save_editor_config();
             snprintf(status_msg, 256, vi_mode ? (vi_normal ? "vi normal" : "vi insert") : "insert mode");
             continue;
-        } else if (ch == 27) {
+        case 27:
             if (vi_mode && !vi_normal && cur_col>0) cur_col=vi_prev(code_lines[cur_line],cur_col);
             vi_normal = vi_mode;
             vi_pending = 0;
             vi_reset();
             snprintf(status_msg, 256, "%s", vi_mode ? "vi normal" : "insert mode");
             continue;
-        } else if (ch == (int)NCKEY_UP) {
+        case (int)NCKEY_UP:
             editor_move_rows(-1);
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_DOWN) {
+        case (int)NCKEY_DOWN:
             editor_move_rows(1);
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_LEFT) {
+        case (int)NCKEY_LEFT:
             if (cur_col > 0) cur_col=vi_prev(code_lines[cur_line],cur_col);
             else if (cur_line > 0) { cur_line--; cur_col = strlen(code_lines[cur_line]); }
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_RIGHT) {
+        case (int)NCKEY_RIGHT:
             if (cur_col < (int)strlen(code_lines[cur_line])) cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line]));
             else if (cur_line < code_line_count-1) { cur_line++; cur_col = 0; }
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_HOME) {
+        case (int)NCKEY_HOME:
             cur_col = 0;
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_END) {
+        case (int)NCKEY_END:
             cur_col = strlen(code_lines[cur_line]);
             vi_pending = 0;
             continue;
-        } else if (ch == (int)NCKEY_PGDOWN || ch == (int)NCKEY_PGUP) {
+        case (int)NCKEY_PGDOWN:
+        case (int)NCKEY_PGUP:
             if (show_docs) {
                 int mid, h, w, sh, th;
                 right_geom(&mid, &h, &w, &sh, &th);
@@ -5211,22 +5221,25 @@ void tui_run(void) {
             }
             vi_pending = 0;
             continue;
-        } else if (vi_mode && vi_normal) {
-            if (ch == 17) break;
-            /* Motions/operators are handled by vi_handle_normal above. */
-            if (ch == 'i') { vi_normal = 0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'a') { cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line])); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'I') { cur_col = vi_first_nonblank(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'A') { cur_col = strlen(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
-            if (ch == 'o' || ch == 'O') {
-                if(editor_smart_open_line(ch=='O')) {
-                    vi_normal=0;snprintf(status_msg,sizeof(status_msg),"vi insert");
+        default:
+            if (vi_mode && vi_normal) {
+                /* Motions/operators are handled by vi_handle_normal above. */
+                if (ch == 'i') { vi_normal = 0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+                if (ch == 'a') { cur_col=vi_next(code_lines[cur_line],cur_col,(int)strlen(code_lines[cur_line])); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+                if (ch == 'I') { cur_col = vi_first_nonblank(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+                if (ch == 'A') { cur_col = strlen(code_lines[cur_line]); vi_normal=0; vi_pending=0; snprintf(status_msg, 256, "vi insert"); continue; }
+                if (ch == 'o' || ch == 'O') {
+                    if(editor_smart_open_line(ch=='O')) {
+                        vi_normal=0;snprintf(status_msg,sizeof(status_msg),"vi insert");
+                    }
+                    vi_pending=0; continue;
                 }
-                vi_pending=0; continue;
+                vi_pending = 0;
+                continue;
             }
-            vi_pending = 0;
-            continue;
+            break;
         }
+        if (session_quit) break;
         if (ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) {
             if (cur_col > 0) {
                 char *l = code_lines[cur_line];

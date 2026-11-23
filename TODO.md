@@ -386,7 +386,9 @@ and measured divergences are recorded in the archive.
       diagnostic (correlation 0.947), and post-source stages that overlap
       source controls (source filter plus FX filter, or source room plus FX
       room) are not modeled separately. ADSR, speed, note/sample/bank and
-      string-valued controls remain outside. Very long modulation uses a
+      string-valued controls remain outside. Callable argument replay is
+      intentionally absent because the current site ignores it; revisit if
+      that changes. Very long modulation uses a
       bounded conservative connection deadline; distinguish these limits from
       established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).

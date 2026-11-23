@@ -384,8 +384,9 @@ first cycle; native arithmetic alone has not resolved the query deadline.
 The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
-timeouts remain failures. The two ungated PCM diagnostics remain ungated
-(fractional room switch correlation 0.989538; Arpoon opening 0.945504).
+timeouts remain failures. The fractional room-switch and shared-room
+source-unity diagnostics remain ungated; the Arpoon opening now uses the
+shared generated-room seed and gates at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
 composition (112818) without rewriting its source. Its four-cycle event
@@ -592,9 +593,12 @@ bounds each hap's capture to its clipped duration (hard zeros past it), so no
 convolver tail reaches a gate there. A CTest locks sequence variety (distinct
 rooms differ) and cache identity. Custom IR correlation remains 0.99999997.
 
-Original wet Arpoon is captured as a diagnostic with no pass threshold. It has
-independent random impulses and observed opening correlation around 0.94–0.95.
-The original stretched-piano capture compared
+Original wet Arpoon now uses the shared `0xc0ffee` generated-room seed and is
+gated: `arpoon-opening` measures **0.99986 correlation and 1.0030 RMS ratio**
+over the 0.6-second opening at the unchanged 0.99/0.85–1.15 gates. Before the
+seed, independent random impulses gave 0.94–0.95. Randomized multi-room
+sequences remain diagnostic because each superdough trigger also draws an
+incidental chain-ID random before the room draw. The original stretched-piano capture compared
 native overlap-add grains against the browser phase vocoder and observed
 correlation about 0.08 before the native phase-vocoder replacement. It now
 correlates above 0.9999 with RMS ratio 0.9999. It uses the matrix's existing

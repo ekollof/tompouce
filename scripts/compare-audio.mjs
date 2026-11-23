@@ -476,7 +476,7 @@ try {
     { name: 'gm-violin', code: `note(69).s('gm_violin').gain(.5).clip(.5)`, sound: 'gm_violin', cycles: 1, cps: .5, window: 2, correlation: .99 },
     // Different reverb algorithms and randomized browser impulses: record
     // evidence, without inventing a universal acceptance threshold.
-    { name: 'arpoon-opening', code: arpoon.code, sound: 'piano', cycles: 4, cps: .5, window: .6, correlation: null },
+    { name: 'arpoon-opening', code: arpoon.code, sound: 'piano', cycles: 4, cps: .5, window: .6, correlation: .99, randomSeed: 0xc0ffee },
   ];
   const report = { browser: version, url: 'https://strudel.cc/', capturedAt: new Date().toISOString(), complete: false,
     nativeBundleSha256: hash(await fs.readFile('js/dist/runtime.js')),

@@ -398,6 +398,11 @@ and measured divergences are recorded in the archive.
       the browser's low-level IR-speed path, not source width or the IR kernel.
       The case stays diagnostic at correlation 0.9893; the 0.99 threshold is
       unchanged.
+- [x] Seeded Arpoon opening gate. The previously diagnostic random-room
+      `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
+      and passes at correlation **0.99986** and RMS ratio **1.0030** with the
+      unchanged 0.99/0.85-1.15 thresholds. Unseeded multi-room sequences remain
+      diagnostic because of the browser's incidental chain-ID draw.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

@@ -845,7 +845,7 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.delay_time-.1875)<1e-9);
     assert(event.dsp.p[DSP_LPF]==0 && event.dsp.p[DSP_HPF]==0 &&
         event.dsp.p[DSP_BPF]==0);
-    assert(event.fx_stage_count==5);
+    assert(event.fx_stage_count==6);
     assert(event.fx_stages[0].type==AUDIO_FX_LPF &&
         fabs(event.fx_stages[0].a-800)<1e-9 &&
         fabs(event.fx_stages[0].b-2)<1e-9);
@@ -859,6 +859,8 @@ static void test_fx_shared_routing(void) {
         fabs(event.fx_stages[3].a+.5)<1e-9);
     assert(event.fx_stages[4].type==AUDIO_FX_SHAPE &&
         fabs(event.fx_stages[4].a-.4)<1e-9);
+    assert(event.fx_stages[5].type==AUDIO_FX_DISTORT &&
+        fabs(event.fx_stages[5].a-2)<1e-9);
     assert(!event.has_pan);
     assert(fabs(event.dsp.p[DSP_LPA]-.02)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPD]-.1)<1e-9);
@@ -866,7 +868,6 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_LPR]-.2)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPE]-3)<1e-9);
     assert(fabs(event.dsp.p[DSP_COARSE]-4)<1e-9);
-    assert(fabs(event.dsp.p[DSP_DISTORT]-2)<1e-9);
     assert(fabs(event.dsp.p[DSP_CHORUS]-.3)<1e-9);
     assert(fabs(event.dsp.p[DSP_CRUSH]-8)<1e-9);
     assert(fabs(event.dsp.p[DSP_POST]-1.2)<1e-9);

@@ -753,17 +753,23 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         x = (1+k)*x/(1+k*fabs(x))*p[DSP_SHAPEVOL];
     }
     if (p[DSP_DISTORT] > 0) {
-        double input = x*(1+p[DSP_DISTORT]*8);
-        switch ((int)p[DSP_DISTTYPE]) {
-        case 1: x = fabs(fmod(input+3,4)-2)-1; break;
-        case 2: x = cos(clamp(p[DSP_DISTORT],1,32)*acos(clamp(x,-1,1))); break;
-        case 3: x = input/(1+fabs(input)); break;
-        case 4: x = input < 0 ? tanh(input*.5)*.5 : tanh(input); break;
-        case 5: x = tanh(input+.5)-tanh(.5); break;
-        case 6: x = sin(input); break;
-        default: x = tanh(input); break;
+        if ((int)p[DSP_DISTTYPE] == 0) {
+            double shape=expm1(p[DSP_DISTORT]);
+            double postgain=clamp(p[DSP_DISTVOL],.001,1);
+            x=((1+shape)*x/(1+shape*fabs(x)))*postgain;
+        } else {
+            double input = x*(1+p[DSP_DISTORT]*8);
+            switch ((int)p[DSP_DISTTYPE]) {
+            case 1: x = fabs(fmod(input+3,4)-2)-1; break;
+            case 2: x = cos(clamp(p[DSP_DISTORT],1,32)*acos(clamp(x,-1,1))); break;
+            case 3: x = input/(1+fabs(input)); break;
+            case 4: x = input < 0 ? tanh(input*.5)*.5 : tanh(input); break;
+            case 5: x = tanh(input+.5)-tanh(.5); break;
+            case 6: x = sin(input); break;
+            default: x = tanh(input); break;
+            }
+            x *= p[DSP_DISTVOL];
         }
-        x *= p[DSP_DISTVOL];
     }
     if (p[DSP_TREM] > 0)
         x *= 1-p[DSP_TDEPTH] + p[DSP_TDEPTH]*mod_wave((int)p[DSP_TSHAPE],p[DSP_TSKEW],age*p[DSP_TREM]+p[DSP_TPHASE]);
@@ -787,21 +793,6 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
             s->phaser_z[i] = wet + a*y; wet = y;
         }
         x = x*(1-p[DSP_PHDEPTH]*.5) + wet*p[DSP_PHDEPTH]*.5;
-    }
-    if (p[DSP_CHORUS] > 0) {
-        double delay = SR*(.02+.005*sin(2*M_PI*age*.8));
-        /* chorus_pos and delay are both below DSP_CHORUS_LEN, so one wrap
-           correction is enough and no modulo is needed in the callback. */
-        double read = (double)s->chorus_pos-delay;
-        if (read < 0) read += DSP_CHORUS_LEN;
-        unsigned a = (unsigned)read;
-        if (a >= DSP_CHORUS_LEN) a -= DSP_CHORUS_LEN;
-        unsigned b = a+1 < DSP_CHORUS_LEN ? a+1 : 0;
-        double f = read-floor(read);
-        double wet = s->chorus[a]*(1-f)+s->chorus[b]*f;
-        s->chorus[s->chorus_pos] = (float)x;
-        if (++s->chorus_pos >= DSP_CHORUS_LEN) s->chorus_pos = 0;
-        x = x*(1-p[DSP_CHORUS]*.5)+wet*p[DSP_CHORUS]*.5;
     }
     x *= p[DSP_POST];
     return isfinite(x) ? clamp(x, -64, 64) : 0;

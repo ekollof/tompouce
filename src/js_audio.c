@@ -711,10 +711,22 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=1 && value<=24) ev->dsp.p[DSP_CRUSH]=value;
                 break;
             case FX_OP_DISTORT:
-                if (value>=0 && value<=100) ev->dsp.p[DSP_DISTORT]=value;
+                if (value>=0 && value<=100) {
+                    if (pattern) fx_add_stage(ev,AUDIO_FX_DISTORT,value,1);
+                    else ev->dsp.p[DSP_DISTORT]=value;
+                }
                 break;
             case FX_OP_DISTORTVOL:
-                if (value>=0 && value<=16) ev->dsp.p[DSP_DISTVOL]=value;
+                if (value>=0 && value<=16) {
+                    if (pattern) {
+                        int at=-1;
+                        for (int k=ev->fx_stage_count-1;k>=0;k--)
+                            if (ev->fx_stages[k].type==AUDIO_FX_DISTORT) {
+                                at=k; break;
+                            }
+                        if (at>=0) ev->fx_stages[at].b=value;
+                    } else ev->dsp.p[DSP_DISTVOL]=value;
+                }
                 break;
             case FX_OP_DISTORTTYPE:
                 if (value>=0 && value<=6) ev->dsp.p[DSP_DISTTYPE]=value;

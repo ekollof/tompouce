@@ -108,6 +108,16 @@ static void test_stereo_filter_persistent(void) {
     printf("persistent stereo filter: scalar %.3f ms, SIMD %.3f ms (%.2fx)\n",c,v,v>0?c/v:0);
 }
 
+static void test_distortion_site_formula(void) {
+    DspParams params; dsp_params_init(&params); params.enabled=1;
+    params.p[DSP_DISTORT]=2;
+    DspState state; dsp_init(&state,&params);
+    double output=dsp_process(&state,.12,0,1);
+    double shape=expm1(2);
+    double expected=((1+shape)*.12/(1+shape*.12));
+    assert(fabs(output-expected)<1e-12);
+}
+
 static void test_parameter_lookup(void) {
     int index=-1; double minimum=0,maximum=0;
     assert(dsp_parameter_lookup("loopBegin",&index,&minimum,&maximum));
@@ -680,6 +690,7 @@ int main(void) {
     test_source_controls();
     test_periodic_limits();
     test_parameter_lookup();
+    test_distortion_site_formula();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

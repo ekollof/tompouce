@@ -2036,6 +2036,11 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
             double k=2*shape, volume=stage->b;
             left_in=(1+k)*left_in/(1+k*fabs(left_in))*volume;
             right_in=(1+k)*right_in/(1+k*fabs(right_in))*volume;
+        } else if (stage->type==AUDIO_FX_DISTORT) {
+            double shape=expm1(fmax(0,fmin(100,stage->a)));
+            double volume=fmax(.001,fmin(1,stage->b));
+            left_in=((1+shape)*left_in/(1+shape*fabs(left_in)))*volume;
+            right_in=((1+shape)*right_in/(1+shape*fabs(right_in)))*volume;
         }
     }
     double ll=v->route_ll, lr=v->route_lr;

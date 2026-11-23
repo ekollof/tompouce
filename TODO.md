@@ -402,13 +402,19 @@ and measured divergences are recorded in the archive.
       pan and 2.012 at full pan. `fx-overlap-source-room` measures
       0.9999994/0.9938, `fx-overlap-source-room-pan` 0.9999991/1.00056, and
       `test_fx_room_routing` covers routing, ratio and pan gain.
-- [ ] Distort/chorus and remaining source controls. Source distort and chorus
-      remain ungated (`fx-source-distort`/`fx-source-chorus` diagnostics).
-      ADSR, speed, note/sample/bank and string-valued controls remain outside.
-      Callable argument replay is intentionally absent because the current
-      site ignores it; revisit if that changes. Very long modulation uses a
-      bounded conservative connection deadline; distinguish these limits from
-      established PCM parity. See
+- [x] Source distort/chorus parity. Default `distort` now uses the deployed
+      processor shape (`expm1(distort)`, postgain clamped to 0.001..1) and a
+      post-source FX distort stage composes with source distortion.
+      `fx-source-distort` measures 0.999999999/1.00006; `fx-pattern-distort`
+      0.99954/1.127 and `fx-overlap-source-distort` 0.99993/1.065. The
+      deployed player exposes no chorus control, so source, pattern and
+      overlap chorus are no-ops; their gates pass at 0.9999999+.
+- [ ] Remaining source controls. ADSR, speed, note/sample/bank and
+      string-valued controls remain outside. Callable argument replay is
+      intentionally absent because the current site ignores it; revisit if
+      that changes. Very long modulation uses a bounded conservative
+      connection deadline; distinguish these limits from established PCM
+      parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

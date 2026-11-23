@@ -450,12 +450,13 @@ static void render_retiring_effect_tail(int effect, unsigned long block, float *
     double energy=0;
     for(int frame=24255;frame<26460;frame++) energy+=pcm[frame*2]*pcm[frame*2];
     /* Coarse hold freezes the last value for up to one hold period after the
-       source stops, then renders silence; stateful filters and chorus retain
-       audible ring-out past retire_end. The retired phaser is bypassed (the
-       web's eviction gain sits downstream of it), so its tail is silent. */
+       source stops, then renders silence; stateful filters retain audible
+       ring-out past retire_end. Chorus is a no-op on the deployed player and
+       the retired phaser is bypassed (the web's eviction gain sits downstream
+       of it), so both tails are silent. */
     if (effect==6) {
         for(int frame=24400;frame<26460;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
-    } else if (effect==4) {
+    } else if (effect==4 || effect==5) {
         for(int frame=24255;frame<26460;frame++) assert(pcm[frame*2]==0 && pcm[frame*2+1]==0);
     } else {
         assert(energy>1e-12);
@@ -655,9 +656,8 @@ static void vowel_reference(void) {
     cJSON_Delete(tests); cJSON_Delete(results); free(input);
 }
 
-/* Native-only chorus regression: no deployed web control exists, so lock the
-   delay-line behavior instead. At chorus depth .5 the dry path carries .75
-   and the LFO centers the wet tap at 20 ms. */
+/* The deployed player exposes no chorus control, so chorus must be a no-op:
+   the dry impulse passes and no wet tap appears. */
 static void test_chorus_impulse(void) {
     DspParams params; dsp_params_init(&params); params.enabled = 1;
     params.p[DSP_CHORUS] = .5;
@@ -667,15 +667,8 @@ static void test_chorus_impulse(void) {
         out[frame] = dsp_process(&state, frame == 0 ? 1 : 0, frame / (double)SR, 1);
         assert(isfinite(out[frame]));
     }
-    assert(fabs(out[0] - .75) < 1e-12);
-    int peak = 700;
-    for (int frame = 701; frame < 1100; frame++)
-        if (fabs(out[frame]) > fabs(out[peak])) peak = frame;
-    /* The fractional 20 ms tap straddles the impulse across two taps, so the
-       echo peaks near 0.7 dry instead of the full wet mix. */
-    assert(peak >= 900 && peak <= 910);
-    assert(fabs(out[peak]) > .12 && fabs(out[peak]) < .22);
-    for (int frame = 2000; frame < 4410; frame++) assert(fabs(out[frame]) < 1e-6);
+    assert(fabs(out[0] - 1) < 1e-12);
+    for (int frame = 1; frame < 4410; frame++) assert(fabs(out[frame]) < 1e-12);
 }
 
 int main(int argc, char **argv) {

@@ -462,22 +462,24 @@ natural sample endings do not move them. The source ADSR's minimum release is
 separate: `.release(0).fxr(.005)` still fades over five milliseconds after the
 hap end, while a naturally ending sample can leave a much later delay tail.
 Pattern-form `FX(...)` controls replay shared `room`/`delay`, filter, pan,
-coarse, shape, distort, chorus, postgain, phaser, tremolo, compressor, FM
-operator/envelope/matrix, IR/room and canonical numeric DSP controls. Pattern
+coarse, shape, distort, postgain, phaser, tremolo, compressor, FM
+operator/envelope/matrix, IR/room and canonical numeric DSP controls; chorus
+is a no-op because the deployed player exposes no chorus control. Pattern
 filters and pan are post-source stages before source pan, so source controls
 and multiple FX arguments compose; each FX argument applies its own default
 0.8 gain. Callable FX arguments are ignored by the current site and retain only
 that default gain, so native ignores their recorded steps. Pattern `partials`
 arrays flatten to a numeric control and FX loop windows are ignored by the
-site; parity gates cover both. Pattern shape is a post-source waveshaper;
-pattern delay/IR sends are ignored, leaving source sends in force. FX room
-presence feeds a mono-left room send with the source R/L ratio held through
-the tail, with measured pan feed gains of 1.423 center, 1.86 half pan and
-2.012 full pan; `fx-overlap-source-room` and the panned gate pass at
-0.9999994/0.9938 and 0.9999991/1.00056. Source distort/chorus remain
-ungated. ADSR/speed/note/sample/bank/string controls remain outside. The
-graph/effect boundary is covered: a `K()` source does not receive the chain's
-default gain, while `audioin()` worklet effects and ordinary sources do.
+site; parity gates cover both. Pattern shape and distort are post-source
+stages; pattern delay/IR sends are ignored, leaving source sends in force. FX
+room presence feeds a mono-left room send with the source R/L ratio held
+through the tail, with measured pan feed gains of 1.423 center, 1.86 half pan
+and 2.012 full pan; `fx-overlap-source-room` and the panned gate pass at
+0.9999994/0.9938 and 0.9999991/1.00056. Source distortion follows the deployed
+`expm1(distort)` processor; source chorus is a no-op. ADSR/speed/note/sample/
+bank/string controls remain outside. The graph/effect boundary is covered: a
+`K()` source does not receive the chain's default gain, while `audioin()`
+worklet effects and ordinary sources do.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

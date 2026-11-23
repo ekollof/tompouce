@@ -821,8 +821,8 @@ stop until the original cleanup deadline, retaining state and shared sends.
 The retired phaser is bypassed there: the deployed player holds a retired
 phaser at exactly zero post-stop while its low-pass rings, so the eviction
 gain sits downstream of the phaser graph. The deployed player exposes no
-chorus control, so chorus stays native-only: an impulse regression locks the
-dry mix, the 20 ms LFO-centered wet tap and the tail silence. Vowel topology
+chorus control, so chorus is a no-op: an impulse regression locks the dry
+impulse and zero tail. Vowel topology
 is gated instead: `voice-vowel-reference-qa.mjs` compares one-second impulse
 responses for all fifteen vowels against the deployed five-formant parallel
 filter (per-formant gains, makeup gain 8, Q up to 140), worst case 1.2e-7,
@@ -1009,8 +1009,12 @@ mono-left room feed plus the source R/L ratio and holds that ratio through the
 tail; the feed gain is 1.423 center, 1.86 at half pan and 2.012 at full pan.
 `fx-overlap-source-room` measures 0.9999994/0.9938,
 `fx-overlap-source-room-pan` 0.9999991/1.00056, and `test_fx_room_routing`
-covers routing, ratio and pan gain. Source distort/chorus remain ungated; the
-remaining controls above are still outside.
+covers routing, ratio and pan gain. Default source distortion now follows the
+deployed `expm1(distort)` processor; `fx-source-distort` measures
+0.999999999/1.00006, `fx-pattern-distort` 0.99954/1.127 and
+`fx-overlap-source-distort` 0.99993/1.065. Chorus is a no-op and its source,
+pattern and overlap gates pass at 0.9999999+. Remaining controls above are
+still outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

@@ -45,7 +45,7 @@ typedef struct StretchBuffer StretchBuffer;
 #define AUDIO_LV2_PARAMS_MAX 8
 #define AUDIO_FX_STAGES_MAX 16
 enum { AUDIO_FX_LPF, AUDIO_FX_HPF, AUDIO_FX_BPF, AUDIO_FX_PAN,
-       AUDIO_FX_SHAPE };
+       AUDIO_FX_SHAPE, AUDIO_FX_DISTORT };
 typedef struct {
     int type;
     double a, b; /* filter: cutoff/Q; pan: normalized -1..1; shape: drive/volume */

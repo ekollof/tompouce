@@ -482,17 +482,15 @@ and measured divergences are recorded in the archive.
       `-ftype-string` pass at 0.9990+; `test_javascript` checks the source
       frequency, token and filter type stay unchanged.
 - [x] FX `distorttype` string variants. The pattern distort stage applies the
-      deployed `t = expm1(distort)` argument to every algorithm. `fold`,
-      `soft`, `scurve`, `hard`, `sinefold`, `cubic`, `diode` and `asym` pass
-      the unchanged thresholds at 0.99763–0.99999999 correlation and
-      1.00013–1.12824 RMS ratio. `chebyshev` remains diagnostic at
-      0.62440/1.23368: native reproduces the deployed worklet's iterative sum
-      exactly on the recovered input, but the site's rendered output carries
-      a dominant seventh harmonic even though it passes
-      `processorOptions.algorithm = 'chebyshev'` to a worklet containing that
-      sum. The divergence is on the site side and unexplained; do not change
-      the native curve to chase it. `test_fx_distort_fold`
-      pins the fold curve.
+      deployed `t = expm1(distort)` argument to every algorithm, and all nine
+      variants now pass the unchanged thresholds at 0.9999999+ correlation
+      and 1.00011–1.00018 RMS ratio. The chebyshev gap was gain ordering: the
+      site applies each FX-stage gain before its effect and the main pattern
+      gain after the chain. Native now carries `fx_chain_gain` separately for
+      pure FX chains, defaults `distorttype` to the site's index-0 `scurve`,
+      and maps numeric values through the worklet key order. Source DSP
+      voices keep the established folded chain gain. `test_fx_distort_fold`
+      pins the fold curve; `test_fx_graph_gain` pins the gain separation.
       Callable argument replay remains intentionally absent because the
       current site ignores it; revisit if that changes. Very long modulation
       uses a bounded conservative connection deadline; distinguish these

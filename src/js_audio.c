@@ -456,6 +456,13 @@ static int fx_distort_variant(const char *name) {
     return -1;
 }
 
+/* Numeric distorttype uses the deployed worklet's key order:
+   scurve, soft, hard, cubic, diode, asym, fold, sinefold, chebyshev. */
+static int fx_distort_site_variant(int index) {
+    static const int variants[9] = {5,0,2,8,6,7,1,3,4};
+    return index>=0 && index<9 ? variants[index] : 5;
+}
+
 static int fx_last_distort_stage(const AudioEvent *ev) {
     for (int i=ev->fx_stage_count-1;i>=0;i--)
         if (ev->fx_stages[i].type==AUDIO_FX_DISTORT) return i;
@@ -478,6 +485,16 @@ static int fx_last_filter_stage(const AudioEvent *ev, int type) {
    default 0.8 gain; pattern arguments carry serializable controls and replay
    here. Legacy non-pattern steps keep outer-control precedence. */
 static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
+    ev->fx_chain_gain = 1;
+    ev->fx_chain_folded = 0;
+    /* Source DSP effects consume the event gain before the FX chain in the
+       native renderer; keep their established chain-gain folding. Pure FX
+       chains apply stage gains before the stages and the main gain after. */
+    int fold_chain=(int)ev->dsp.p[DSP_COARSE]>1 || ev->dsp.p[DSP_CRUSH]<16 ||
+        ev->dsp.p[DSP_SHAPE]>0 || ev->dsp.p[DSP_DISTORT]>0 ||
+        ev->dsp.p[DSP_COMP]<0 || ev->dsp.p[DSP_TREM]>0 ||
+        ev->dsp.p[DSP_PHASER]>0 || ev->dsp.p[DSP_CHORUS]>0;
+    ev->fx_chain_folded=fold_chain;
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
     if (!cJSON_IsArray(chains)) return;
     int count = cJSON_GetArraySize(chains);
@@ -744,8 +761,11 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             case FX_OP_DISTORT:
                 if (value>=0 && value<=100) {
-                    if (pattern) fx_add_stage(ev,AUDIO_FX_DISTORT,value,1);
-                    else ev->dsp.p[DSP_DISTORT]=value;
+                    if (pattern) {
+                        fx_add_stage(ev,AUDIO_FX_DISTORT,value,1);
+                        int at=fx_last_distort_stage(ev);
+                        if (at>=0) ev->fx_stages[at].variant=5;
+                    } else ev->dsp.p[DSP_DISTORT]=value;
                 }
                 break;
             case FX_OP_DISTORTVOL:
@@ -764,7 +784,8 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=8) {
                     if (pattern) {
                         int at=fx_last_distort_stage(ev);
-                        if (at>=0) ev->fx_stages[at].variant=(int)value;
+                        if (at>=0)
+                            ev->fx_stages[at].variant=fx_distort_site_variant((int)value);
                     } else ev->dsp.p[DSP_DISTTYPE]=value;
                 }
                 break;
@@ -918,7 +939,8 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             }
         }
-        ev->gain *= chain_gain;
+        if (fold_chain) ev->gain *= chain_gain;
+        else ev->fx_chain_gain *= chain_gain;
     }
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
 }

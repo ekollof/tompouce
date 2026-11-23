@@ -150,8 +150,9 @@ static void test_sample_windows(void) {
     assert(!sample->active && sample->smppos == 4);
 }
 
-/* The deployed renderer applies the FX chain's default gain to ordinary
-   sources and worklet audioin effects, but not to a K() graph source. */
+/* The deployed renderer applies the FX chain's default gain before the
+   chain and the main gain after it. Native keeps them separate so nonlinear
+   stages see the source gain order. */
 static void test_fx_graph_gain(void) {
     static const char *base =
         "{\"begin\":0,\"end\":1,\"value\":{\"note\":69,\"s\":\"sine\","
@@ -163,13 +164,14 @@ static void test_fx_graph_gain(void) {
         "\"_nativeProgram\":{\"kind\":\"graph\",\"effect\":true}",
         "\"x\":0"
     };
-    const double expected[] = {0.3, 0.24, 0.24};
+    const double expected_chain[] = {1, 0.8, 0.8};
     for (int i=0;i<3;i++) {
         snprintf(text,sizeof(text),base,cases[i]);
         cJSON *hap=cJSON_Parse(text); assert(hap);
         AudioEvent event;
         assert(js_audio_event(hap,0,2,&event));
-        assert(fabs(event.gain-expected[i])<1e-12);
+        assert(fabs(event.gain-0.3)<1e-12);
+        assert(fabs(event.fx_chain_gain-expected_chain[i])<1e-12);
         cJSON_Delete(hap);
     }
 }
@@ -698,6 +700,8 @@ static void test_fx_room_routing(void) {
 static void test_fx_distort_fold(void) {
     Voice voice={0};
     voice.active=1;
+    voice.amp=1;
+    voice.fx_chain_gain=1;
     voice.route_cached=1;
     voice.route_ll=voice.route_rr=1;
     voice.route_side_one=1;

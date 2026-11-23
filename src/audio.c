@@ -1494,6 +1494,8 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     prepare_stereo_filter(v);
     v->fx_stage_count=ev->fx_stage_count;
     v->fx_room_present=ev->fx_room_present;
+    v->fx_chain_gain=ev->fx_chain_gain>0?ev->fx_chain_gain:1;
+    v->fx_chain_folded=ev->fx_chain_folded;
     if (v->fx_stage_count>AUDIO_FX_STAGES_MAX) v->fx_stage_count=AUDIO_FX_STAGES_MAX;
     if (v->fx_stage_count>0) {
         memcpy(v->fx_stages,ev->fx_stages,
@@ -2048,7 +2050,23 @@ static double fx_chebyshev(double x,double t) {
 }
 
 static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
-    double left_in=l, right_in=r;
+    /* The deployed chain is source -> stage gain -> effect -> main gain.
+       Source paths arrive with the event gain already folded in, so undo it
+       for the nonlinear stages and restore it after the chain. */
+    double amp=v->amp;
+    double chain=v->fx_chain_gain>0?v->fx_chain_gain:1;
+    double left_in, right_in;
+    if (v->fx_chain_folded) {
+        /* Source DSP voices already carry the chain gains in the event gain. */
+        left_in=l;
+        right_in=r;
+    } else if (amp != 0) {
+        left_in=l*chain/amp;
+        right_in=r*chain/amp;
+    } else {
+        left_in=0;
+        right_in=0;
+    }
     int stereo=v->route_fx_stereo;
     for (int i=0;i<v->fx_stage_count;i++) {
         const AudioFxStage *stage=&v->fx_stages[i];
@@ -2131,6 +2149,10 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     }
     double ll=v->route_ll, lr=v->route_lr;
     double rl=v->route_rl, rr=v->route_rr;
+    if (!v->fx_chain_folded) {
+        left_in *= amp;
+        right_in *= amp;
+    }
     if (stereo && v->has_pan) {
         double pan=fmax(-1,fmin(1,v->pan));
         if (pan<=0) {
@@ -2185,7 +2207,8 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         double fade=fmax(0,(v->graph_end-audio_time)/span);
         l*=fade; r*=fade;
     }
-    if (v->fx_stage_count>0) {
+    if (v->fx_stage_count>0 ||
+        (v->fx_chain_gain>0 && v->fx_chain_gain!=1)) {
         route_voice_fx(v,l,r,mix);
         return;
     }

@@ -251,7 +251,7 @@ try {
     {name:'fx-pattern-distorttype-cubic',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('cubic'))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-distorttype-diode',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('diode'))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-distorttype-asym',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('asym'))`,cycles:1,cps:.5,window:.6,correlation:.99},
-    {name:'diag-distorttype-chebyshev',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('chebyshev'))`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'fx-pattern-distorttype-chebyshev',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('chebyshev'))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-graph-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out()).FX(x=>x.lpf(200))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-graph-out-channels',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out(0).mul(.5).out(1)).FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-worklet-effect-gain',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).worklet('audioin().delay(.05).out()').FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

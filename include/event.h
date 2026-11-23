@@ -159,6 +159,8 @@ typedef struct {
     DspParams dsp;
     int fx_stage_count;
     int fx_room_present;
+    double fx_chain_gain; /* product of FX-chain stage gains, applied before stages */
+    int fx_chain_folded; /* chain gains already folded into the event gain */
     AudioFxStage fx_stages[AUDIO_FX_STAGES_MAX];
 } AudioEvent;
 

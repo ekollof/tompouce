@@ -185,6 +185,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   tempo and program changes. Duck callbacks use a bounded independent timeline;
   control-only events reserve no voice and emit no MIDI or note history. Preserve
   phase anchors and transport revisions rather than restarting the scheduler.
+- Pattern FX chains apply each stage gain before its effect and the main event
+  gain after the chain. Keep `fx_chain_gain` separate from the event gain for
+  pure FX chains; source-DSP voices retain their established folded gain.
 - Dominant MIDI gates use hap duration/clip in cycles and retain fractional
   milliseconds. Preserve mapped-CC-before-note order, complete NRPN transactions
   and bounded note-off admission; never emit an on whose off cannot be queued.

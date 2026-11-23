@@ -366,15 +366,26 @@ and measured divergences are recorded in the archive.
       tail, then starts a live room+filter+pan+coarse+shape+distort+chorus edit
       with FM/IR values on the same orbit and verifies the delay tail remains
       audible.
-- [ ] Remaining rare graph-local controls (loop windows, partials and other
-      non-replayed parameters) and non-linear IR-rate parity remain open.
-      Fractional IR
-      rates are a measured divergence: `.irspeed(.5|.75)` with matching source
-      speed gave correlations -0.78/-0.92; an interpolation attempt was
-      reverted rather than tuned to the capture. See
+- [x] Replay loop windows, partials/phases and canonical numeric DSP controls
+      from materialized `FX(...)` steps. `dsp_parameter_lookup` shares the
+      parameter table with `dsp_params_read`; the recorder accepts bounded
+      finite arrays (32 entries). `test_javascript` covers
+      `loop`/`loopBegin`/`loopEnd`, array `partials`/`phases`, pitch, vibrato,
+      unison/spread and outer precedence.
+- [x] Fractional IR-rate parity. `convolution_resample_ir` reproduces the web
+      `adjustLength` index math, including truncation and the negative-index
+      path for rates below unity. `test_convolution_prepare` pins `.5/.75/2/
+      -2/0/1`; new browser gates `shared-room-lifetime-rate-half` and
+      `-rate-threequarter` measure correlations **0.99999999/0.99999998** at
+      the unchanged 0.99 correlation and 0.85-1.15 RMS thresholds.
+- [ ] Remaining graph-local source controls (gain, ADSR, speed, note/sample/
+      bank selection and string-valued controls) remain outside replay. Very
+      long modulation uses a bounded conservative connection deadline;
+      distinguish these limits from established PCM parity. A later run of the
+      hosted player also drifted the `fx-nested-` gates to 0.8177 correlation
+      with unchanged native PCM; reconcile that site change without relaxing
+      the gates. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
-      Very long modulation uses a bounded conservative connection deadline;
-      distinguish these limits from established PCM parity.
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)
       — browser-only styling is a deliberate ceiling, shared orbit tails and

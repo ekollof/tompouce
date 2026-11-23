@@ -108,6 +108,16 @@ static void test_stereo_filter_persistent(void) {
     printf("persistent stereo filter: scalar %.3f ms, SIMD %.3f ms (%.2fx)\n",c,v,v>0?c/v:0);
 }
 
+static void test_parameter_lookup(void) {
+    int index=-1; double minimum=0,maximum=0;
+    assert(dsp_parameter_lookup("loopBegin",&index,&minimum,&maximum));
+    assert(index==DSP_LOOPBEGIN && minimum==0 && maximum==1);
+    assert(dsp_parameter_lookup("unison",&index,&minimum,&maximum));
+    assert(index==DSP_UNISON && minimum==1 && maximum==DSP_SUPERSAW_VOICES);
+    assert(!dsp_parameter_lookup("not-a-control",&index,&minimum,&maximum));
+    assert(!dsp_parameter_lookup(NULL,&index,&minimum,&maximum));
+}
+
 static void test_sample_interp(void) {
     float samples[64];
     for (int i=0;i<64;i++) samples[i]=(float)((i*37%101)-50)/37.0f;
@@ -669,6 +679,7 @@ int main(void) {
     test_supersaw();
     test_source_controls();
     test_periodic_limits();
+    test_parameter_lookup();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

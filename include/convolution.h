@@ -40,6 +40,12 @@ int convolution_state_clone(ConvState *dst, const ConvState *src);
    waiters may sleep. Never call these from the audio callback. Immutable
    cached kernels live for the process. */
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin);
+/* Generator/worker only. Resample a custom impulse response exactly like the
+   web's adjustLength: truncating `.at()` indices, modulo wrap, and its
+   negative-index path for speeds below unity. Writes interleaved stereo. */
+int convolution_resample_ir(const float *stereo, int frames, int channels,
+                            double speed, double begin, int out_frames,
+                            float *out);
 const ConvKernel *convolution_prepare_reverb(double size,double fade,double lp,double dim);
 /* Optional static failure description; generator/worker only. */
 const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double lp,double dim,const char **error);

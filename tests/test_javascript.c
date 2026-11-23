@@ -913,6 +913,39 @@ static void test_fx_shared_routing(void) {
     assert(event.has_pan && fabs(event.pan-.5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(60).s('saw').FX(x=>x.loop(1).loopBegin(.1)"
+        ".loopEnd(.8).penv(2).vib(3).unison(3).spread(.4))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.p[DSP_LOOP]==1);
+    assert(fabs(event.dsp.p[DSP_LOOPBEGIN]-.1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_LOOPEND]-.8)<1e-9);
+    assert(fabs(event.dsp.p[DSP_PENV]-2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_VIB]-3)<1e-9);
+    assert(fabs(event.dsp.p[DSP_UNISON]-3)<1e-9);
+    assert(fabs(event.dsp.p[DSP_SPREAD]-.4)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('saw').FX(x=>x.partials([1,.5,.25])"
+        ".phases([0,.5,.25]))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.n_partials==3);
+    assert(fabs(event.dsp.partials[0]-1)<1e-9 &&
+        fabs(event.dsp.partials[1]-.5)<1e-9 &&
+        fabs(event.dsp.partials[2]-.25)<1e-9);
+    assert(fabs(event.dsp.phases[1]-.5)<1e-9 &&
+        fabs(event.dsp.phases[2]-.25)<1e-9);
+    assert(event.inst==INST_ADDITIVE);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).loop(0).s('saw').partials([1])"
+        ".FX(x=>x.loop(1).partials([1,.5]))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.p[DSP_LOOP]==0 && event.dsp.n_partials==1);
+    cJSON_Delete(haps); javascript_free(program);
+
     cJSON *graph=cJSON_Parse(
         "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"s\":\"sine\","
         "\"_nativeProgram\":{\"kind\":\"graph\",\"effect\":false},"

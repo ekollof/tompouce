@@ -72,13 +72,39 @@ ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, in
     return build_kernel(stereo,frames,channels,normalize,frames);
 }
 
+int convolution_resample_ir(const float *stereo, int frames, int channels,
+                            double speed, double begin, int out_frames,
+                            float *out) {
+    if (!stereo || !out || frames < 1 || frames > CONV_MAX_FRAMES ||
+        (channels != 1 && channels != 2) || out_frames < 1 ||
+        out_frames > CONV_MAX_FRAMES || !isfinite(speed) || fabs(speed) > 8 ||
+        !isfinite(begin) || begin < 0 || begin > 1) return 0;
+    int start=(int)floor(begin*(double)frames);
+    for (int i=0;i<out_frames;i++) {
+        double u=fmod((double)start+(double)i*fabs(speed),(double)frames);
+        /* The browser negates sub-unity rates before Array.at(), so those
+           indices count backward from the end of the IR. */
+        if (speed<1.0) u=-u;
+        int index=(int)trunc(u);
+        if (index<0) index+=frames;
+        float left=0,right=0;
+        if (index>=0 && index<frames) {
+            left=stereo[(size_t)index*2];
+            right=channels==2?stereo[(size_t)index*2+1]:left;
+        }
+        out[(size_t)i*2]=left;
+        out[(size_t)i*2+1]=right;
+    }
+    return out_frames;
+}
+
 const ConvKernel *convolution_prepare(int sample, double size, double speed, double begin) {
     enum { CACHE = 16 };
     static struct { int sample; double size, speed, begin; ConvKernel *kernel; int reserved; unsigned waiters; } cache[CACHE];
     static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
     static pthread_cond_t ready = PTHREAD_COND_INITIALIZER;
     if (!isfinite(size) || !isfinite(speed) || !isfinite(begin) || size <= 0 || size > 10 ||
-        speed == 0 || fabs(speed) > 8 || begin < 0 || begin > 1) return NULL;
+        fabs(speed) > 8 || begin < 0 || begin > 1) return NULL;
     prep_lock(&lock, PREP_LOCK_CONV);
     for (unsigned i = 0; i < CACHE; i++) if ((cache[i].kernel || cache[i].reserved) && cache[i].sample == sample && cache[i].size == size &&
         cache[i].speed == speed && cache[i].begin == begin) {
@@ -116,12 +142,13 @@ const ConvKernel *convolution_prepare(int sample, double size, double speed, dou
         prep_unlock(&lock, PREP_LOCK_CONV);
         return NULL;
     }
-    for (int i = 0; i < frames; i++) {
-        double position = fmod(floor(begin*length)+(speed < 0 ? -i : i)*fabs(speed),length);
-        if (position < 0) position += length;
-        int index = (int)position;
-        impulse[(size_t)i*2] = buffer[(size_t)index*2];
-        impulse[(size_t)i*2+1] = buffer[(size_t)index*2+1];
+    if (!convolution_resample_ir(buffer,length,channels,speed,begin,frames,impulse)) {
+        free(impulse);
+        prep_lock(&lock, PREP_LOCK_CONV);
+        cache[slot].reserved = 0;
+        pthread_cond_broadcast(&ready);
+        prep_unlock(&lock, PREP_LOCK_CONV);
+        return NULL;
     }
     ConvKernel *kernel = build_kernel(impulse,frames,channels,1,length);
     free(impulse);

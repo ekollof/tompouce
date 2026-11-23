@@ -99,6 +99,32 @@ static void concurrent_case(int room,int failure) {
         assert(reverb_stream==linear_advance(0xc0ffeeu,consumed+(failure?2:1)*draws));
     }
 }
+static void test_web_ir_rate(void) {
+    float ir[16], out[16];
+    for (int i=0;i<8;i++) ir[i*2]=ir[i*2+1]=(float)i;
+    const struct { double speed, begin; int expected[8]; } cases[] = {
+        {.5,0,{0,0,7,7,6,6,5,5}},
+        {.75,.25,{6,6,5,4,3,3,2,1}},
+        {2,.25,{2,4,6,0,2,4,6,0}},
+        {-2,.25,{6,4,2,0,6,4,2,0}},
+        {0,.25,{6,6,6,6,6,6,6,6}},
+        {1,.25,{2,3,4,5,6,7,0,1}},
+    };
+    for (unsigned c=0;c<sizeof(cases)/sizeof(cases[0]);c++) {
+        assert(convolution_resample_ir(ir,8,1,cases[c].speed,cases[c].begin,8,out)==8);
+        for (int i=0;i<8;i++) {
+            assert(out[i*2]==(float)cases[c].expected[i]);
+            assert(out[i*2+1]==(float)cases[c].expected[i]);
+        }
+    }
+    assert(!convolution_resample_ir(NULL,8,1,1,0,8,out));
+    assert(!convolution_resample_ir(ir,8,1,9,0,8,out));
+    assert(!convolution_resample_ir(ir,8,1,1,-.1,8,out));
+    assert(convolution_prepare(0,.5,0,0)); /* The web accepts a frozen IR. */
+    assert(convolution_prepare(0,.5,.5,0));
+    assert(convolution_prepare(0,.5,.75,.25));
+}
+
 static void test_distinct_rooms(void) {
     convolution_reverb_reset_stream();
     Request requests[4]; pthread_t threads[4]; uint64_t draws=0;
@@ -115,6 +141,7 @@ int main(void) {
     test_jump();
     for (int room=0;room<2;room++) for (int failure=0;failure<=3;failure++) concurrent_case(room,failure);
     test_distinct_rooms();
+    test_web_ir_rate();
     puts("convolution shared preparation, allocation failures/retries and concurrent reverb random segments ok");
     return 0;
 }

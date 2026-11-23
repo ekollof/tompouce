@@ -97,6 +97,9 @@ typedef struct {
 
 void dsp_params_init(DspParams *p);
 void dsp_params_read(DspParams *p, const cJSON *value);
+/* Canonical numeric DSP parameter lookup, shared with FX(...) replay. */
+int dsp_parameter_lookup(const char *name, int *index, double *minimum,
+                         double *maximum);
 void dsp_read_adsr(const cJSON *value, const char *const names[4], const double defaults[4], double out[4]);
 double dsp_filter_frequency(const DspParams *params, int type, double age, double gate);
 /* Same computation from cached cutoff/envelope controls. */

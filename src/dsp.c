@@ -86,6 +86,18 @@ static int symbol(const cJSON *obj, const char *key, const char *const *names, i
     return -1;
 }
 
+int dsp_parameter_lookup(const char *name, int *index, double *minimum,
+                         double *maximum) {
+    if (!name) return 0;
+    for (int i=0;i<DSP_FMBASE;i++) if (!strcmp(parameters[i].name,name)) {
+        if (index) *index=i;
+        if (minimum) *minimum=parameters[i].min;
+        if (maximum) *maximum=parameters[i].max;
+        return 1;
+    }
+    return 0;
+}
+
 void dsp_params_read(DspParams *p, const cJSON *value) {
     dsp_params_init(p); p->enabled = 1;
     /* Superdough's supersaw uses detune ?? n ?? .18 as total frequency

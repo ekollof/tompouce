@@ -963,28 +963,19 @@ Two `shared-room-kernel-` gates extend this to kernel-change automation via
 0.99999999, RMS ratios 0.9930 for both, with the same unchanged thresholds. Two
 further `shared-*-graph-source` gates connect a Kabelsalat graph source to the
 shared mono IR and to the shared delay: correlations 0.999999998 and 0.9999990,
-RMS ratios 0.9930 and 1.0007. A fractional **IR** rate is a separate,
-unresolved divergence. Adding
-`.irspeed(.5)` or `.irspeed(.75)` together with the matching source speed gave
-correlations -0.78 and -0.92 with the same windows and thresholds; an initial
-attempt at linear interpolation in the IR kernel changed the result only
-marginally and was reverted rather than tuned to the capture. A second attempt
-stretched the kernel length for sub-unity IR rates (so the same impulse covers
-proportionally more output samples). That brought the `.irspeed(.5)` RMS ratio
-from 1.13 to 0.994, but correlation stayed at -0.73; even with interpolation
-added the best cross-correlation over ±1 s of lag was only 0.71 at lag -115
-samples, with -0.63 at lag zero. The difference is therefore structural in the
-web's IR-rate resampling, not just a buffer length or interpolation detail. Both
-experiments were reverted rather than accepted without parity. A third probe
-ruled out simpler explanations: the web capture with `.irspeed(.5)` is
-byte-different from both no `irspeed` and `.irspeed(1)` (SHA 3c336c4e… vs
-40647527…), so the browser does not ignore the setting; cross-correlating that
-capture against native renders at IR rates 0.25, 0.5, 1, 2 and −0.5, a
-compounded source speed of 0.25 and a doubled room size gave best |correlation|
-0.63 (native 0.5, negative sign). No simple inverse-rate or compound-speed
-mapping reproduces it. Keep integer IR rates in gates and do not treat these
-measurements as parity; this is distinct from the established PCM and room-send
-gates.
+RMS ratios 0.9930 and 1.0007. Fractional **IR** rates previously diverged: matched-source
+`.irspeed(.5|.75)` measured correlations -0.78/-0.92. The cause is the web's
+`adjustLength` index math: it multiplies the index by `abs(speed)`, wraps it
+with `%`, then negates the index when speed is below unity before `Array.at()`.
+Sub-unity rates therefore read backward from the end with truncation, not
+interpolation. `convolution_resample_ir` now reproduces that exactly, including
+zero speed, and `test_convolution_prepare` pins `.5/.75/2/-2/0/1`.
+`shared-room-lifetime-rate-half` and `-rate-threequarter` now measure
+correlations **0.99999999/0.99999998** and RMS ratios 0.9930/0.9931 at the
+unchanged gates. A source-unity-speed variant remains diagnostic
+(`correlation:null`): its room level is tiny and the residual is dominated by
+a source-path level/phase difference, not the IR kernel. The earlier
+interpolation and kernel-stretch attempts were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same
@@ -1005,8 +996,9 @@ and filter/pan/coarse steps now replay with outer controls taking precedence,
 and `test_javascript`/`test_audio` cover the graph-source boundary and a live
 room+filter+pan+coarse+shape+distort+chorus edit during an active delay tail.
 The replay also covers crush, postgain, phaser, tremolo, compressor, FM
-operator/envelope/matrix and IR/room controls; loop/partial and other rare
-graph-local parameters remain outside it.
+operator/envelope/matrix, IR/room, loop windows, partials/phases and canonical
+numeric DSP controls; source selection, gain/ADSR/speed, note/sample/bank and
+string-valued controls remain outside it.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

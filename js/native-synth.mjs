@@ -136,11 +136,15 @@ function graph(code, frequency, inputs=[]) {
 const MAX_FX_STEPS = 32;
 const MAX_FX_CHAINS = 8;
 const MAX_FX_ARG_LENGTH = 32;
+const MAX_FX_ARRAY = 32;
 
 function fxArgument(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'boolean') return value ? 1 : 0;
   if (typeof value === 'string' && value.length <= 64) return value;
+  if (Array.isArray(value) && value.length <= MAX_FX_ARRAY &&
+      value.every(entry => typeof entry === 'number' && Number.isFinite(entry)))
+    return value.slice();
   return null;
 }
 

@@ -421,12 +421,18 @@ static int fx_fm_parse(const char *name, int *operation, int *operator_index,
     return 0;
 }
 
-static uint64_t fx_outer_mask(const cJSON *v) {
-    uint64_t mask=0;
+static int fx_outer_has(const cJSON *v, int operation) {
+    if (operation<0) return 0;
     for (unsigned i=0;i<sizeof(fx_names)/sizeof(fx_names[0]);i++)
-        if (cJSON_HasObjectItem(v,fx_names[i].name))
-            mask|=1ull<<(unsigned)fx_names[i].op;
-    return mask;
+        if (fx_names[i].op==operation && cJSON_HasObjectItem(v,fx_names[i].name))
+            return 1;
+    return 0;
+}
+
+static const cJSON *fx_step_array(const cJSON *step, int position) {
+    const cJSON *args=cJSON_GetObjectItemCaseSensitive(step,"args");
+    const cJSON *arg=cJSON_GetArrayItem(args,position);
+    return cJSON_IsArray(arg)?arg:NULL;
 }
 
 /* Apply query-time materialized FX(...) steps. The web invokes each closure
@@ -449,7 +455,6 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
     if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
         !cJSON_IsTrue(effect)) return;
-    uint64_t outer=fx_outer_mask(v);
     double chain_gain = .8;
     for (int i = 0; i < count; i++) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
@@ -462,13 +467,52 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
             const cJSON *op = cJSON_IsObject(step)
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
+            const char *name=op->valuestring;
+            if (cJSON_HasObjectItem(v,name)) continue;
+            if (!strcmp(name,"partials") || !strcmp(name,"phases")) {
+                const cJSON *array=fx_step_array(step,0);
+                if (!array) continue;
+                int count=cJSON_GetArraySize(array);
+                if (!strcmp(name,"partials")) {
+                    if (count<1 || count>32) { ev->dsp.n_partials=-1; continue; }
+                    ev->dsp.n_partials=count;
+                    ev->dsp.periodic_numeric=0;
+                    for (int i=0;i<count;i++) {
+                        const cJSON *x=cJSON_GetArrayItem(array,i);
+                        double value=cJSON_IsNumber(x) && isfinite(x->valuedouble)?
+                            x->valuedouble:0;
+                        ev->dsp.partials[i]=value<-1000000?-1000000:
+                            value>1000000?1000000:value;
+                    }
+                } else {
+                    if (ev->dsp.n_partials<1) continue;
+                    if (count>ev->dsp.n_partials) count=ev->dsp.n_partials;
+                    for (int i=0;i<count;i++) {
+                        const cJSON *x=cJSON_GetArrayItem(array,i);
+                        if (cJSON_IsNumber(x) && isfinite(x->valuedouble))
+                            ev->dsp.phases[i]=x->valuedouble-floor(x->valuedouble);
+                    }
+                }
+                continue;
+            }
             int fm_operator=0, matrix_a=-1, matrix_b=-1;
-            int operation=fx_op(op->valuestring);
-            if (operation<0)
-                fx_fm_parse(op->valuestring,&operation,&fm_operator,
-                    &matrix_a,&matrix_b);
-            if (operation<0 || (outer&(1ull<<(unsigned)operation)) ||
-                cJSON_HasObjectItem(v,op->valuestring)) continue;
+            int operation=fx_op(name);
+            int dsp_index=-1;
+            double dsp_min=0,dsp_max=0;
+            if (operation<0) {
+                fx_fm_parse(name,&operation,&fm_operator,&matrix_a,&matrix_b);
+                if (operation<0) {
+                    if (!dsp_parameter_lookup(name,&dsp_index,&dsp_min,&dsp_max))
+                        continue;
+                    double value=0;
+                    if (!fx_arg_number(step,0,&value)) continue;
+                    value=value<dsp_min?dsp_min:value>dsp_max?dsp_max:value;
+                    ev->dsp.p[dsp_index]=value;
+                    if (dsp_index==DSP_PW) ev->pw=value;
+                    continue;
+                }
+            }
+            if (fx_outer_has(v,operation)) continue;
             if (operation==FX_OP_IR) {
                 if (fx_arg_string(step,0,ev->fx_ir,sizeof(ev->fx_ir)))
                     ev->fx_room_fields|=1u<<6; /* keep the custom IR explicit */

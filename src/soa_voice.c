@@ -149,7 +149,8 @@ static int process_supersaw_lane(SoaVoiceLane *lane, int sub, double time,
 
 static int process_synth_lane(SoaVoiceLane *lane, int sub, double time,
                               double *in_l, double saw_sample,
-                              int has_saw_sample) {
+                              int has_saw_sample, double square_sample,
+                              int has_square_sample) {
     if (!lane->released && time>=lane->note_off_time) {
         lane->released=1;
         lane->release_start_level=lane->env;
@@ -164,8 +165,9 @@ static int process_synth_lane(SoaVoiceLane *lane, int sub, double time,
         case SOA_KIND_SINE: sample=sin(lane->phase); break;
         case SOA_KIND_SAW: sample=has_saw_sample?saw_sample:
             dsp_oscillator(0,lane->phase,lane->freq,.5); break;
-        case SOA_KIND_SQUARE: sample=dsp_oscillator(1,lane->phase,lane->freq,
-            lane->pw>=0?lane->pw:.5); break;
+        case SOA_KIND_SQUARE: sample=has_square_sample?square_sample:
+            dsp_oscillator(1,lane->phase,lane->freq,
+                lane->pw>=0?lane->pw:.5); break;
         default: sample=dsp_oscillator(2,lane->phase,lane->freq,.5); break;
     }
     sample*=lane->wave_gain;
@@ -193,7 +195,9 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
             double in_l[4]={0}, in_r[4]={0};
             double result_l[4]={0}, result_r[4]={0};
             double saw_phase[4]={0}, saw_freq[4]={0}, saw_value[4]={0};
-            int any_saw=0;
+            double square_phase[4]={0}, square_freq[4]={0};
+            double square_width[4]={0}, square_value[4]={0};
+            int any_saw=0, any_square=0;
             for (int sub=0;sub<4;sub++) {
                 int index=group*4+sub;
                 SoaVoiceLane *lane=&bank->lanes[index];
@@ -201,9 +205,17 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
                     saw_phase[sub]=lane->phase;
                     saw_freq[sub]=lane->freq;
                     any_saw=1;
+                } else if (lane->active && lane->kind==SOA_KIND_SQUARE) {
+                    square_phase[sub]=lane->phase;
+                    square_freq[sub]=lane->freq;
+                    square_width[sub]=lane->pw>=0?lane->pw:.5;
+                    any_square=1;
                 }
             }
             if (any_saw) dsp_saw4(saw_phase,saw_freq,saw_value);
+            if (any_square)
+                dsp_square4(square_phase,square_freq,square_width,
+                    square_value);
             unsigned rendered=0, stereo=0;
             for (int sub=0;sub<4;sub++) {
                 int index=group*4+sub;
@@ -222,7 +234,8 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
                     if (ok) stereo=1;
                 } else {
                     ok=process_synth_lane(lane,sub,times[frame],in_l,
-                        saw_value[sub],lane->kind==SOA_KIND_SAW);
+                        saw_value[sub],lane->kind==SOA_KIND_SAW,
+                        square_value[sub],lane->kind==SOA_KIND_SQUARE);
                 }
                 if (!ok) continue;
                 rendered|=1u<<sub;

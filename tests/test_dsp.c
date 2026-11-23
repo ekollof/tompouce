@@ -252,6 +252,64 @@ static void test_saw4(void) {
 #endif
 }
 
+static void test_square4(void) {
+    double phase[4], freq[4], width[4], scalar[4], lane[4];
+    unsigned state=0x85ebca6bu;
+    for (int iteration=0;iteration<10000;iteration++) {
+        for (int i=0;i<4;i++) {
+            state=state*1664525u+1013904223u;
+            phase[i]=(state>>8)/16777216.0*2*M_PI;
+            state=state*1664525u+1013904223u;
+            freq[i]=20+(state>>8)/16777216.0*20000;
+            state=state*1664525u+1013904223u;
+            width[i]=(state>>8)/16777216.0;
+        }
+        dsp_square4_c(phase,freq,width,scalar);
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_cpu_init();
+        if (__builtin_cpu_supports("avx2")) {
+            dsp_square4_avx2(phase,freq,width,lane);
+            for (int i=0;i<4;i++) {
+                if (memcmp(&scalar[i],&lane[i],sizeof(scalar[i]))) {
+                    fprintf(stderr,"square mismatch i=%d phase=%.17g freq=%.17g width=%.17g C=%.17g AVX=%.17g\n",
+                        i,phase[i],freq[i],width[i],scalar[i],lane[i]);
+                }
+                assert(memcmp(&scalar[i],&lane[i],sizeof(scalar[i]))==0);
+            }
+        }
+#else
+        (void)lane;
+#endif
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        enum { N=2000000 };
+        volatile double sink=0;
+        struct timespec t0,t1,t2;
+        double p[4]={.1,.4,1.2,2.6}, f[4]={220,330,440,880};
+        double w[4]={.25,.5,.75,.4}, out[4];
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            for (int k=0;k<4;k++) sink+=dsp_oscillator(1,p[k],f[k],w[k]);
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            dsp_square4_avx2(p,f,w,out);
+            sink+=out[0]+out[1]+out[2]+out[3];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double scalar_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double lane_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("four-lane square: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
+            scalar_ms,lane_ms,lane_ms>0?scalar_ms/lane_ms:0);
+    }
+#endif
+}
+
 static void test_sample_interp(void) {
     float samples[64];
     for (int i=0;i<64;i++) samples[i]=(float)((i*37%101)-50)/37.0f;
@@ -817,6 +875,7 @@ int main(void) {
     test_distortion_site_formula();
     test_envelope4();
     test_saw4();
+    test_square4();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

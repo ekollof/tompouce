@@ -639,6 +639,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       **53.008 ms C vs 13.096 ms AVX2 (4.05x)**. SoA saw lanes now use the
       runtime-selected kernel; `test_soa_voice` remains exact and forced
       `TOMPOUCE_SIMD=c`/`avx2` runs pass.
+- [x] Four-lane polyBLEP square AVX2 kernel. `dsp_square4` shares the
+      polyBLEP helper and is byte-exact against four scalar
+      `dsp_oscillator(1, ...)` calls in `test_dsp` (including forced direct
+      AVX2 calls); 2,000,000 groups measured **68.625 ms C vs 18.462 ms AVX2
+      (3.72x)**. SoA square lanes (including pulse widths) use the
+      runtime-selected kernel; `test_soa_voice` remains exact and forced
+      `TOMPOUCE_SIMD=c`/`avx2` runs pass.
 - [x] Four-lane ADSR AVX2 candidate measured. `src/envelope_simd.c` is
       byte-exact against four scalar `dsp_envelope` calls in `test_dsp`
       (including forced direct AVX2 calls), but 2,000,000 groups measured
@@ -658,7 +665,8 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       This is a measured fallback-path gain, not a whole-callback speedup.
 - [ ] Later SIMD kernels, only after measurement:
   - per-voice stereo DSP beyond the single-filter path, and FM oscillators;
-    IIR recurrences need the block/SoA layout rather than frame lanes
+    FM's per-frame sine is a scalar libm call, so vectorizing the surrounding
+    add/clamp/envelope arithmetic cannot remain byte-exact
   - four-frame routing/mix and sample interpolation; the current two-lane SSE2
     route and paired source interpolation were only incremental or neutral
   - stereo delay and independent reverb combs; feedback state must stay per

@@ -176,6 +176,11 @@ A four-lane polyBLEP saw AVX2 kernel is byte-exact against four scalar
 `dsp_oscillator` calls and 2,000,000 groups took **13.096 ms versus 53.008 ms
 for C (4.05x)**. SoA saw lanes now use the runtime-selected kernel; forced
 `TOMPOUCE_SIMD=c` and `avx2` runs preserve the same PCM.
+A four-lane polyBLEP square kernel is also byte-exact (including pulse width)
+and measured **18.462 ms versus 68.625 ms for C (3.72x)** over 2,000,000
+groups. SoA square/pulse lanes use it under the same runtime selection. FM's
+per-frame sine remains a scalar libm call, so the FM oscillator itself is not
+vectorized.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

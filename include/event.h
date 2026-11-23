@@ -155,6 +155,7 @@ typedef struct {
     int lfo_wave;       /* 0 triangle, 1 sine, 2 saw, 3 square */
     double lfo_hz;
     double lfo_depth;
+    int lfo_unsupported; /* generic .lfo() target outside gain */
     DspParams dsp;
     int fx_stage_count;
     int fx_room_present;

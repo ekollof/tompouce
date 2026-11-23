@@ -410,13 +410,13 @@ and measured divergences are recorded in the archive.
       `pcm-onset-fractional-roomswitch-first` case now gates the first room at
       correlation **0.99935** and RMS ratio **0.98384** with the unchanged
       thresholds.
-- [x] Generic `.lfo()` audit. Valid Strudel control modulation was silently
-      ignored: the cutoff diagnostic measures correlation 0.4448 and the gain
-      diagnostic 0.9591. The control now logs one
-      `control 'lfo' is not implemented` warning instead of rendering a static
-      value; filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
-      tremolo remain separate supported controls. Both diagnostics stay
-      ungated.
+- [x] Generic `.lfo()` gain path. A relative-depth triangle now drives the
+      voice gain; `lfo-generic-gain` passes at correlation **0.99965** and RMS
+      ratio **0.99920** with the unchanged thresholds. Cutoff and other targets
+      keep their static value and log one
+      `LFO modulation is implemented only for gain` warning; the cutoff
+      diagnostic stays ungated at 0.44477. Filter-specific `lp`/`hp`/`bp` LFOs,
+      vibrato, pulse-width LFO and tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

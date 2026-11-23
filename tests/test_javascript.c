@@ -779,6 +779,21 @@ static void test_analyser_controls(void) {
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.analyser_id==N_ANALYSERS && event.analyser_fft==10);
     cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').gain(.5)"
+        ".lfo({control:'gain',rate:.5,depth:1})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo_tgt==2 && fabs(event.lfo_hz-.5)<1e-9 &&
+        fabs(event.lfo_depth-.5)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sawtooth').lpf(500)"
+        ".lfo({control:'cutoff',rate:.5,depth:2})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo_tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
 }
 
 static void test_hydra_learn_examples(void) {

@@ -925,6 +925,34 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
 }
 
+/* Generic Strudel `.lfo()` modulation. Native supports the relative-depth
+   triangle gain path; other targets keep their static value and surface one
+   warning instead of silently misrendering. */
+static void read_generic_lfo(AudioEvent *ev, const cJSON *value) {
+    const cJSON *lfo=cJSON_GetObjectItemCaseSensitive(value,"lfo");
+    if (!cJSON_IsObject(lfo)) return;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry,lfo) {
+        if (!entry->string || !strcmp(entry->string,"__ids") ||
+            !cJSON_IsObject(entry)) continue;
+        const cJSON *target=cJSON_GetObjectItemCaseSensitive(entry,"control");
+        if (!cJSON_IsString(target) || !target->valuestring) continue;
+        double rate=control(entry,"rate",0,0,1000);
+        double depth=control(entry,"depth",0,-100,100);
+        double absolute=control(entry,"depthabs",0,-100000,100000);
+        if (!(rate>0) || (depth==0 && absolute==0)) continue;
+        const char *name=target->valuestring;
+        if (!strcmp(name,"gain") || !strcmp(name,"amp")) {
+            ev->lfo_tgt=2;
+            ev->lfo_wave=0;
+            ev->lfo_hz=rate;
+            ev->lfo_depth=(absolute?absolute:depth)/2;
+            return;
+        }
+        ev->lfo_unsupported=1;
+    }
+}
+
 static int audio_event_values(const cJSON *hap, double origin, double seconds, AudioEvent *ev, int include_ducks) {
     const cJSON *begin = cJSON_GetObjectItemCaseSensitive(hap,"begin");
     const cJSON *end = cJSON_GetObjectItemCaseSensitive(hap,"end");
@@ -983,6 +1011,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     const char *sync[] = {"lpsync","hpsync","bpsync"};
     for (int i = 0; i < 3; i++)
         if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
+    read_generic_lfo(ev,v);
     apply_fx_steps(ev,v);
     const char *sound = text_control(v,"s");
     if (!strncmp(sound,"lv2:",4))
@@ -1355,7 +1384,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
             "midibend","miditouch","nrpnn","nrpv","midimap","duration","analyze","fft","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","lv2preset","lv2state","carlaProject","carlaTarget","color","colour","label","activeLabel","markcss",
-            "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","znoise","zmod","zcrush","zdelay","zzfx",
+            "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
             "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
         int implemented = 0;
         for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
@@ -1391,6 +1420,9 @@ static int plan_hap(JsProgram *program, const cJSON *hap, double time,
     warn_unknown_controls(program,value);
     AudioEvent event;
     if (!audio_event_values(hap,plan->origin,seconds,&event,0)) return 0;
+    if (event.lfo_unsupported)
+        javascript_warn_once(program,"lfo-target",
+            "native audio: LFO modulation is implemented only for gain");
     plan->kind=csound?HAP_IMMEDIATE:HAP_SOURCE;
     return 1;
 }

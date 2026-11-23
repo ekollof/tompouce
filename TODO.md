@@ -20,12 +20,12 @@ verification, installation and upstream terminal constraints.
       values; `test_audio`/`test_audio_sanitize` cover tap energy, FFT sizes,
       generation replacement, staged blocks and unchanged PCM;
       `test_mcp_security` bounds the `id` argument and response.
-- [ ] Native `analyze` control warning. Some pattern forms still reach the
-      audio control parser as an unsupported control and log
-      `native audio: control 'analyze' is not implemented`, even though the
-      event/MCP analyser path above is implemented. Identify the remaining
-      form (source, `FX(...)`, or worklet), route it through the bounded
-      analyser registration, and keep PCM unchanged with focused coverage.
+- [x] Native `analyze` control warning. `warn_unknown_controls` treated
+      `analyze` and `fft` as unknown even though `audio_event_values` and
+      `FX_OP_ANALYZE`/`FX_OP_FFT` handle them. Both are now in the known
+      event-control list; `test_analyser_controls_do_not_warn` schedules a
+      pattern and checks the console ring, while `test_javascript`/`test_audio`
+      keep the event fields and analyser taps unchanged.
 - [x] Hydra learn-page examples. The browser page now bundles the pinned
       Strudel pattern packages for `H(pattern)`, resolves function-valued Hydra
       parameters per frame, maps `o0`–`o3` to previous-frame feedback, feeds

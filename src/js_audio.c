@@ -1351,7 +1351,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
         const char *known[] = {"s","n","note","freq","bank","gain","amp","velocity","pan","cps",
             "attack","decay","sustain","release","speed","detune","delay","delaytime",
             "delayfeedback","midichan","midiport","midicmd","ccn","ccv","progNum","sysexid","sysexdata",
-            "midibend","miditouch","nrpnn","nrpv","midimap","duration","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
+            "midibend","miditouch","nrpnn","nrpv","midimap","duration","analyze","fft","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","color","colour","label","activeLabel","markcss",
             "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",

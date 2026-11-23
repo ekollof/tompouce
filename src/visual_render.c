@@ -131,10 +131,11 @@ static void waveform(TerminalImage *im, const VisualOptions *o, const float *s, 
     /* Web scope uses canvas-height units and keeps width/n spacing after a
        falling crossing of -trigger. Do not normalize or stretch the suffix. */
     double last_x=left,last_y=0;
+    int thickness=im->compact?0:(int)(o->thickness-1)/2;
     for (int j=begin;j<n;j++) {
         double x=left+(double)(j-begin)*width/n;
         double y=(o->pos-(isfinite(s[j])?s[j]:0)*scale)*im->height;
-        if (j>begin) line(im,last_x,last_y,x,y,color,(int)(o->thickness-1)/2);
+        if (j>begin) line(im,last_x,last_y,x,y,color,thickness);
         last_x=x; last_y=y;
     }
     if (left) {

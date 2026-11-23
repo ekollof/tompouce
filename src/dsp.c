@@ -72,6 +72,7 @@ void dsp_read_adsr(const cJSON *value, const char *const names[4], const double 
 void dsp_params_init(DspParams *p) {
     memset(p, 0, sizeof(*p));
     p->supersaw_detune = .18;
+    p->lfo_start_time = -1;
     for (int i = 0; i < DSP_FMBASE; i++) p->p[i] = parameters[i].initial;
     for (int i = 0; i < 8; i++) {
         double *op = p->p + DSP_FMBASE + i * 8;
@@ -361,6 +362,21 @@ static double biquad(DspBiquad *f, double x) {
     f->z2 = f->b2*x - f->a2*y;
     if (!isfinite(y) || !isfinite(f->z1) || !isfinite(f->z2)) {
         f->z1 = f->z2 = 0; return 0;
+    }
+    return y;
+}
+
+/* Chromium's BiquadFilterNode uses direct form I, which reacts differently
+   from transposed direct form II when coefficients change per sample. */
+static double biquad_df1(DspBiquad *f, double x) {
+    double y = f->b0*x + f->b1*f->x1 + f->b2*f->x2
+        - f->a1*f->y1 - f->a2*f->y2;
+    f->x2 = f->x1; f->x1 = x;
+    f->y2 = f->y1; f->y1 = y;
+    if (!isfinite(y) || !isfinite(f->x1) || !isfinite(f->x2) ||
+        !isfinite(f->y1) || !isfinite(f->y2)) {
+        f->x1 = f->x2 = f->y1 = f->y2 = 0;
+        return 0;
     }
     return y;
 }
@@ -741,8 +757,33 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
             double hz = dsp_filter_frequency(&s->control,type,age,gate);
             int lfo = DSP_LPRATE+type*6;
             if (p[lfo] > 0) {
-                double wave = mod_wave((int)p[lfo+3],p[lfo+5],age*p[lfo])+p[lfo+4];
-                hz += wave*(p[lfo+2] > 0 ? p[lfo+2] : p[base]*p[lfo+1]);
+                double rate=p[lfo];
+                double phase=age*rate;
+                int active=1;
+                if (s->control.lfo_start_time >= 0) {
+                    /* The deployed LFO worklet leaves its output at zero for
+                       the render quantum containing the node start, then
+                       begins at the absolute start phase. The previous output
+                       history is damped at that connection so the
+                       direct-form-I state step matches the deployed filter. */
+                    double quantum=128.0/SR;
+                    double rel=fmod(s->control.lfo_start_time,quantum);
+                    double hold=rel>0?quantum-rel:quantum;
+                    if (age < hold) active=0;
+                    else {
+                        phase=(s->control.lfo_start_time+age-hold)*rate;
+                        if (!s->lfo_switched) {
+                            DspBiquad *f=&s->filter[type*2];
+                            f->y1*=.77;
+                            f->y2*=.77;
+                            s->lfo_switched=1;
+                        }
+                    }
+                }
+                if (active) {
+                    double wave = mod_wave((int)p[lfo+3],p[lfo+5],phase)+p[lfo+4];
+                    hz += wave*(p[lfo+2] > 0 ? p[lfo+2] : p[base]*p[lfo+1]);
+                }
             }
             if (type == 0 && p[DSP_FTYPE] == 1) {
                 double g = tan(M_PI*clamp(hz,20,SR*.45)/SR);
@@ -753,9 +794,13 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
             coefficients(&s->filter[type*2+1], type, hz, p[base+1]);
         }
         if (type == 0 && p[DSP_FTYPE] == 1) x = ladder_filter(s,x);
+        else if (s->control.lfo_sample_rate)
+            x = biquad_df1(&s->filter[type*2], x);
         else x = biquad(&s->filter[type*2], x);
         if (p[DSP_FTYPE] >= 2) {
-            x = biquad(&s->filter[type*2+1], x);
+            if (s->control.lfo_sample_rate)
+                x = biquad_df1(&s->filter[type*2+1], x);
+            else x = biquad(&s->filter[type*2+1], x);
         }
     }
     if (p[DSP_VOWEL] >= 0) {

@@ -1384,6 +1384,8 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->has_pan=ev->has_pan;
     v->waveform_gain=ev->waveform_gain>0?ev->waveform_gain:1;
     v->start_time = fmax(audio_time,ev->time);
+    v->dsp.control.lfo_start_time = v->start_time;
+    v->dsp_right.control.lfo_start_time = v->start_time;
     v->note_off_time = v->start_time + (ev->duration > 0 ? ev->duration : 0.25);
     v->gate_end = v->note_off_time;
     v->phase = 0;

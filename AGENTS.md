@@ -149,6 +149,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   JavaScript, perform FFT preparation or make blocking syscalls. Prepare immutable
   samples, stretch PCM, synth programs and IR kernels outside it; preserve their
   queued/voice references and bounded caches. Keep existing lock windows short.
+  Per-sample cutoff LFO filters use direct-form-I state with a one-render-quantum
+  base hold, absolute-start phase and the 0.77 connection damping; static filters
+  stay on transposed direct-form-II.
   Convolution selects its CPU kernel before rendering; retain the portable C
   fallback, per-kernel target flags and `TOMPOUCE_SIMD` verification override.
   Mono-IR input-width transitions pause the right convolution history; preserve

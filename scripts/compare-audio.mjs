@@ -210,7 +210,7 @@ try {
     /* Generic .lfo() supports the relative triangle gain path. Cutoff and
        other targets warn and keep their static value; filter-specific
        lp/hp/bp LFOs, vibrato, pulse-width LFO and tremolo are separate. */
-    {name:'lfo-generic-cutoff-diagnostic',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'lfo-generic-cutoff',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'lfo-generic-cutoff-steady',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.55,windowStart:.05,correlation:.99},
     {name:'lfo-generic-gain',sound:'sine',code:`note(69).s('sine').gain(.5).lfo({control:'gain',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

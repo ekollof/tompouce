@@ -570,39 +570,22 @@ and 0.99920 RMS ratio**. The deployed `lfo-processor` computes
 `clamp(pow((tri(phase) + dcoffset) * depth, curve), min, max)` on a begin-gated
 worklet phase. The measured cutoff event is exactly `rate=.5`, `depth=1000`,
 `dcoffset=-.5`, `min=-480`, `max=23500`, triangle shape, `begin=0`, `time=0`.
-Native maps those parameters onto the scalar sample-rate filter LFO. The steady
-response over `.05-.6 s` gates at **0.99977 correlation and 1.00363 RMS ratio**
-with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
-`windowStart` option). The full 0.6-second window remains diagnostic at 0.682
-because the first ~50 ms graph onset does not match; the full-window case stays
-`correlation:null`. The same pattern without `.lfo()` matches the complete
-0.6-second window at 0.99999995, isolating the residual to the LFO graph onset.
-The pattern without any lowpass peaks at 0.2336 in the browser, below the
-0.39985 LFO-case peak, so the onset is a filter overshoot rather than the dry
-source passing through. A 50 ms native base-cutoff hold was tested and rejected:
-the full window fell to 0.6076 and the steady gate to 0.9580. A 50 ms
-unfiltered hold was also rejected: full window 0.5459, steady 0.8557. The
-onset is therefore not a simple delayed or bypassed LFO; it is a more complex
-graph/filter connection response. A tap on the deployed `BiquadFilterNode`
-output shows the first 50 ms has RMS 0.2039 and peak 0.39985, while the native
-scalar filter at the LFO minimum is nearly silent; the deployed filter is
-effectively passing the source before its LFO connection settles. A true
-50 ms filter bypass with zero state was also rejected: full window 0.6215,
-steady 0.99962. A 50 ms dry-to-wet crossfade was likewise rejected: full
-0.6590, steady 0.99977. A tap on the deployed graph confirms the LFO control
-signal is the expected `-480..500` triangle. The connection trace shows the
-LFO `AudioParam` connected last at time 0; the first filter quanta are
-RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the ninth quantum, which is
-a filter transient rather than the source. A one-quantum base hold improves
-the full correlation to 0.8336 but overshoots (RMS 2.52, peak 1.0) and is
-rejected. Ramping the held LFO influence over eight quanta removes the rail and
-improves the steady gate to 0.99994/0.99970, but the full window falls to
-0.6658; a one-quantum ramp overshoots to peak 0.84 and full -0.28. Resetting
-the biquad state at the hold boundary selects the best full-window result of
-0.779 (two-quantum ramp, peak 0.743); tuning the ramp to match the browser
-peak (`0.398` at 1.5 quanta) gives 0.017. Neither smoothing nor a state reset
-reaches the unchanged gate, so the remaining gap is the browser's time-varying
-biquad state/coefficient handling rather than the LFO control signal.
+Native maps those parameters onto the scalar sample-rate filter LFO. Both the
+full 0.6-second window and the steady section now pass the unchanged
+thresholds: `lfo-generic-cutoff` at **0.998685 correlation and 1.00196 RMS
+ratio**, and `lfo-generic-cutoff-steady` at **0.9999996/1.00009**. The same
+pattern without `.lfo()` matches the complete window at 0.99999995, and the
+unfiltered source peaks at 0.2336 versus 0.39985 for the LFO case, so the
+onset is a filter overshoot. The deployed filter's first quanta ring at
+RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the ninth. A one-quantum
+base hold alone reproduces the first samples but rails the transposed
+direct-form-II state (0.826, RMS 2.54, peak 1.0). The per-sample cutoff path
+now uses Chromium's direct-form-I filter state, holds the base cutoff for the
+render quantum containing the LFO start, starts the phase at the absolute node
+start, and damps the previous output history by 0.77 at the connection. That
+matches the deployed overshoot (native peak 0.399, browser 0.3998). Earlier
+50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected; they
+were measured before direct-form-I was in use.
 Other non-gain/cutoff targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic

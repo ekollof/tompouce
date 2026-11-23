@@ -419,10 +419,10 @@ and measured divergences are recorded in the archive.
       triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,
       `max=23500`, triangle, 0.5 Hz) onto the scalar sample-rate filter LFO;
-      the steady `.05-.6 s` section passes at **0.99977/1.00363** with the
-      unchanged thresholds via the harness `windowStart` option. The full
-      0.6-second window remains diagnostic at 0.682 because the first ~50 ms
-      graph onset does not match. A 50 ms native base-cutoff hold was tested
+      both the full 0.6 s window (**0.998685/1.00196**) and the steady
+      `.05-.6 s` section (**0.9999996/1.00009**) pass the unchanged thresholds;
+      the direct-form-I onset model is recorded in the next item.
+      A 50 ms native base-cutoff hold was tested
       and rejected: full window 0.6076, steady gate 0.9580. A 50 ms unfiltered
       hold was also rejected: full 0.5459, steady 0.8557. A true 50 ms filter
       bypass with zero state was rejected too: full 0.6215, steady 0.99962.
@@ -441,21 +441,19 @@ and measured divergences are recorded in the archive.
       `test_audio` locks the cutoff mapping, SoA bypass and dynamic-vs-static
       PCM. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
-- [ ] Cutoff-LFO full onset. The same pattern without `.lfo()` matches the
-      complete 0.6 s window at 0.99999995, so the residual 0.682 is the LFO
-      graph onset. The pattern without any lowpass peaks at 0.2336 in the
-      browser, below the 0.39985 LFO-case peak, so the onset is a filter
-      overshoot, not the dry source. A one-quantum base hold was re-tested with
-      the current renderer: full 0.826, RMS 2.54, native peak 1.0 from a
-      biquad state rail, and remains rejected. Smoothing the LFO influence
-      over eight quanta removes the rail and lifts the steady gate to
-      0.99994/0.99970 but leaves the full window at 0.6658; a one-quantum ramp
-      overshoots (peak 0.84, full -0.28). Resetting the biquad state at the
-      hold boundary peaks at full 0.779 (two-quantum ramp, peak 0.743), and
-      matching the browser peak (1.5-quantum ramp) gives 0.017. The remaining
-      gap is the browser's time-varying biquad state/coefficient handling, not
-      the LFO control. The `.05-.6 s` steady gate stays green at
-      0.99977/1.00363.
+- [x] Cutoff-LFO full onset. The full 0.6 s window passes at
+      **0.998685/1.00196** and the steady section at **0.9999996/1.00009**.
+      The pattern without `.lfo()` matches the complete window at 0.99999995,
+      and the unfiltered source peaks at 0.2336 versus 0.39985 for the LFO
+      case, so the onset is a filter overshoot. The per-sample cutoff path now
+      uses direct-form-I filter state (Chromium's form), holds the base cutoff
+      for the render quantum containing the LFO start, starts the phase at the
+      absolute node start, and damps the previous output history by 0.77 at
+      the connection. That reproduces the deployed overshoot (native peak
+      0.399 versus browser 0.3998). The earlier one-quantum hold alone railed
+      the transposed direct-form-II state (0.826, RMS 2.54, peak 1.0); the
+      50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected.
+      `test_audio` and 53 `source-` cases stay green.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

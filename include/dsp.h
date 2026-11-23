@@ -46,10 +46,13 @@ typedef struct {
     int periodic_kind, periodic_numeric;
     int n_partials;
     int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
+    double lfo_start_time; /* absolute node start; -1 disables the quantum hold */
 } DspParams;
 
 typedef struct {
     double b0, b1, b2, a1, a2, z1, z2;
+    /* Direct-form-I history used when coefficients update per sample. */
+    double x1, x2, y1, y2;
 } DspBiquad;
 
 typedef struct {
@@ -67,6 +70,7 @@ typedef struct {
     unsigned fm_order[8], fm_count, fm_frame;
     unsigned fm_initial_frames;
     double phaser_z[6], phaser_feedback;
+    int lfo_switched;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;
     double supersaw_pan_l, supersaw_pan_r, supersaw_gain;

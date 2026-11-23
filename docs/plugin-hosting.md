@@ -107,6 +107,19 @@ temp dir, a null sink, one headless Carla instance, one daemon and one stereo
 recorder with the engine and synth on separate channels — and cleans it up
 without touching the user's session or routing.
 
+### Physical USB/DIN output timing (community follow-up)
+
+The host-side MIDI dispatcher, channel fan-out and note-off deadlines are
+covered by `test_midi`, which uses an owned ALSA sequencer receiver. Physical
+USB/DIN transport and device response timing remain unmeasured here: this box
+has a Behringer UMC404HD (`16:0`) with MIDI I/O, but no receiving synth and no
+DIN OUT→IN cable, and an owned ALSA loopback cannot observe hardware or driver
+queues. A community measurement needs either a receiving device on the
+UMC404HD MIDI OUT or a 5-pin DIN cable from MIDI OUT to MIDI IN. Measure
+note-on/off round-trip jitter and device response with the same owned-session
+discipline used above; do not substitute a virtual ALSA loopback for the
+physical leg.
+
 ## Supported classes and the UI ceiling
 
 Today the supported plugin classes are exactly those the separate Carla process

@@ -527,10 +527,10 @@ and measured divergences are recorded in the archive.
       (`32:0`): `midikeys('LPK25')` produced 5–9 concurrent sine voices from
       live key presses in an owned engine. The Behringer UMC404HD (`16:0`)
       exposes MIDI I/O, but no receiving synth or OUT→IN cable is present, so
-      physical note-off output timing and device response remain unmeasured.
-- [ ] Real USB/DIN MIDI output transport and device response timing remain
-      unmeasured; the owned ALSA loopback cannot observe hardware or driver
-      queues. This requires a receiving device or a DIN loopback cable.
+      physical note-off output timing and device response are left to
+      community measurement. See
+      [physical output timing](docs/plugin-hosting.md#physical-usbdin-output-timing-community-follow-up)
+      for the host-side coverage and remaining hardware setup.
 
 Input beyond CC/note-on has been evaluated against the deployed stack:
 note-off, bend, touch and program messages do not become native CC entries.

@@ -381,16 +381,19 @@ and measured divergences are recorded in the archive.
       -2/0/1`; new browser gates `shared-room-lifetime-rate-half` and
       `-rate-threequarter` measure correlations **0.99999999/0.99999998** at
       the unchanged 0.99 correlation and 0.85-1.15 RMS thresholds.
-- [ ] Remaining FX and graph-local limits: pattern `partials`/`phases` arrays
-      flatten to a number in the event value, pattern loop-window PCM is a
-      diagnostic (correlation 0.947), and post-source stages that overlap
-      source controls (source filter plus FX filter, or source room plus FX
-      room) are not modeled separately. ADSR, speed, note/sample/bank and
-      string-valued controls remain outside. Callable argument replay is
-      intentionally absent because the current site ignores it; revisit if
-      that changes. Very long modulation uses a
-      bounded conservative connection deadline; distinguish these limits from
-      established PCM parity. See
+- [ ] Real post-source FX chain for pattern-form FX. Current event-level
+      replay overrides source controls instead of composing stages. Diagnostics
+      `fx-overlap-source-lpf` 0.9356, `fx-overlap-multi-lpf` 0.8175 and
+      `fx-overlap-source-pan` 0.8164; `fx-overlap-source-coarse` already
+      matches 0.99999997. Add bounded filter/pan/gain stages and browser gates.
+- [ ] Pattern `partials`/`phases` arrays flatten to a number in the event
+      value, and pattern loop-window PCM remains diagnostic (correlation
+      0.947). Cover both with browser gates after the post-source chain exists.
+- [ ] ADSR, speed, note/sample/bank and string-valued FX controls remain
+      outside replay. Callable argument replay is intentionally absent because
+      the current site ignores it; revisit if that changes. Very long
+      modulation uses a bounded conservative connection deadline; distinguish
+      these limits from established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

@@ -208,6 +208,11 @@ try {
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-pan',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(pan(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-coarse',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(coarse(4))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    /* Pending post-source FX composition; diagnostics only. */
+    {name:'fx-overlap-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).lpf(1200).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'fx-overlap-multi-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800), lpf(1200))`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'fx-overlap-source-pan',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).pan(.25).FX(pan(.75))`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'fx-overlap-source-coarse',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).coarse(2).FX(coarse(4))`,cycles:1,cps:.5,window:.6,correlation:null},
     {name:'fx-graph-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out()).FX(x=>x.lpf(200))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-graph-out-channels',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out(0).mul(.5).out(1)).FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-worklet-effect-gain',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).worklet('audioin().delay(.05).out()').FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

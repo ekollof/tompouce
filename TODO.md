@@ -403,6 +403,13 @@ and measured divergences are recorded in the archive.
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
       unchanged 0.99/0.85-1.15 thresholds. Unseeded multi-room sequences remain
       diagnostic because of the browser's incidental chain-ID draw.
+- [x] Deterministic first-room fractional switch gate. The full
+      `pcm-onset-fractional-roomswitch` window stays diagnostic because the
+      eager renderer zeros each clipped hap's convolver tail and later rooms
+      draw unseeded random impulse responses. A separate 0.35 s
+      `pcm-onset-fractional-roomswitch-first` case now gates the first room at
+      correlation **0.99935** and RMS ratio **0.98384** with the unchanged
+      thresholds.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

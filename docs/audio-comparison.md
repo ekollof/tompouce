@@ -384,9 +384,10 @@ first cycle; native arithmetic alone has not resolved the query deadline.
 The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
-timeouts remain failures. The fractional room-switch and shared-room
-source-unity diagnostics remain ungated; the Arpoon opening now uses the
-shared generated-room seed and gates at 0.99986.
+timeouts remain failures. The shared-room source-unity and full fractional
+room-switch tail diagnostics remain ungated; the deterministic first-room
+onset of that switch now gates at 0.99935, and the seeded Arpoon opening gates
+at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
 composition (112818) without rewriting its source. Its four-cycle event
@@ -590,8 +591,12 @@ Multi-room sequences stay diagnostic: each superdough trigger also draws one
 chain-ID random before any room draw, so exact seeded alignment would require
 mirroring that incidental consumption, and the eager comparison renderer
 bounds each hap's capture to its clipped duration (hard zeros past it), so no
-convolver tail reaches a gate there. A CTest locks sequence variety (distinct
-rooms differ) and cache identity. Custom IR correlation remains 0.99999997.
+convolver tail reaches a gate there. The deterministic first room of the
+fractional switch is gated separately:
+`pcm-onset-fractional-roomswitch-first` measures **0.99935 correlation and
+0.98384 RMS ratio** over its 0.35-second window at the unchanged thresholds.
+A CTest locks sequence variety (distinct rooms differ) and cache identity.
+Custom IR correlation remains 0.99999997.
 
 Original wet Arpoon now uses the shared `0xc0ffee` generated-room seed and is
 gated: `arpoon-opening` measures **0.99986 correlation and 1.0030 RMS ratio**

@@ -138,10 +138,11 @@ static void test_transport(void) {
     rewind(f); assert(fread(text,1,(size_t)size,f) == (size_t)size); text[size] = 0;
     assert(fclose(f) == 0);
     assert(strstr(text,"a=q,t=d,f=24;AAAA"));
-    assert(strstr(text,"\033[4;6H\033_Ga=T,t=d,f=32,s=43,v=25,i=77,p=1,c=43,r=2,C=1,q=2,m=1;"));
+    assert(strstr(text,"\033[4;6H\033_Ga=t,t=d,f=32,s=43,v=25,i=77,q=2,m=1;"));
+    assert(strstr(text,"\033_Ga=p,i=77,p=1,c=43,r=2,C=1,q=2"));
     assert(strstr(text,"a=d,d=I,i=77,q=2"));
     unsigned char decoded[43*25*4]; size_t written = 0; int chunks = 0;
-    char *at = strstr(text,"\033_Ga=T"); assert(at);
+    char *at = strstr(text,"\033_Ga=t"); assert(at);
     while (at) {
         char *payload = strchr(at,';'), *end = payload ? strstr(payload,"\033\\") : NULL;
         assert(end); payload++;

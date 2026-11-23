@@ -331,13 +331,17 @@ int terminal_graphics_send(FILE *out, uint32_t id, const TerminalImage *im,
         if (n > 3072) n = 3072;
         int more = at+n < total;
         if (at == 0) {
-            if (fprintf(out,"\033_Ga=T,t=d,f=32,s=%d,v=%d,i=%u,p=1,c=%d,r=%d,C=1,q=2,m=%d;",
-                        im->width,height,id,columns,rows,more) < 0) return 0;
+            /* Upload hidden, then place atomically below. Displaying while
+               chunks are still arriving is what makes kitty images flicker. */
+            if (fprintf(out,"\033_Ga=t,t=d,f=32,s=%d,v=%d,i=%u,q=2,m=%d;",
+                        im->width,height,id,more) < 0) return 0;
         } else if (fprintf(out,"\033_Gq=2,m=%d;",more) < 0) return 0;
         char encoded[4096]; size_t length = encode(im->rgba+offset+at,n,encoded);
         if (fwrite(encoded,1,length,out) != length || fputs("\033\\",out) == EOF) return 0;
         at += n;
     }
+    if (fprintf(out,"\033_Ga=p,i=%u,p=1,c=%d,r=%d,C=1,q=2\033\\",
+                id,columns,rows) < 0) return 0;
     return !ferror(out);
 }
 

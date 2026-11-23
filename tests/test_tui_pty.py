@@ -195,7 +195,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 if graphics:
                     chunks=re.findall(rb'\x1b_G([^;]*);([A-Za-z0-9+/=]*)\x1b\\',bytes(output[start:]))
                     pixels=b''.join(base64.b64decode(payload) for header,payload in chunks
-                                    if header.startswith((b'a=T,',b'q=2,m=')))
+                                    if header.startswith((b'a=T,',b'a=t,',b'q=2,m=')))
                     assert b'\xab\xcd\xef\xff' in pixels, 'file change did not recolor graphics labels'
                 with open(root+'/tompouce/config.json') as config:
                     assert json.load(config)['theme_source']=='pywal'
@@ -212,12 +212,12 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     drain(.15)
                     chunks=re.findall(rb'\x1b_G([^;]*);([A-Za-z0-9+/=]*)\x1b\\',bytes(output[start:]))
                     pixels=b''.join(base64.b64decode(payload) for header,payload in chunks
-                                    if header.startswith((b'a=T,',b'q=2,m=')))
+                                    if header.startswith((b'a=T,',b'a=t,',b'q=2,m=')))
                     assert b'\xab\xcd\xef\xff' in pixels, 'scope did not use Notcurses terminal cyan'
                     assert b'\x11\x22\x33\xff' in pixels, 'axis text did not use foreground'
                 if graphics != 'unsupported':
                     if graphics != 'live':
-                        assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'missing Kitty image')
+                        assert b'\x1b_Ga=t,t=d,f=32,' in output or b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'missing Kitty image')
                         assert b'i=1414483201,p=1' in output, (name, 'missing first placement')
                         assert b'i=1414483202,p=1' in output, (name, 'missing second placement')
                     if name in ('Kitty graphics capability, resize and editor input', 'Kitty spectrum'):
@@ -225,7 +225,8 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                         started = time.monotonic()
                         drain(.5)
                         elapsed = time.monotonic()-started
-                        frames = output[start:].count(b'i=1414483201,p=1')
+                        frames = sum(output[start:].count(f'i={image_id},p=1'.encode())
+                                     for image_id in (1414483201, 1414483209))
                         fps = frames/elapsed
                         print(f'{name}: {fps:.1f} FPS')
                         assert fps >= 30, (name, 'graphics refresh stalled', fps)
@@ -299,9 +300,9 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                 # Generator-side attachment and the first graphics frame are
                 # asynchronous; wait for the frame instead of a fixed sleep.
                 deadline=time.monotonic()+2
-                while b'\x1b_Ga=T,t=d,f=32,' not in output and time.monotonic()<deadline:
+                while b'\x1b_Ga=t,t=d,f=32,' not in output and b'\x1b_Ga=T,t=d,f=32,' not in output and time.monotonic()<deadline:
                     drain(.05)
-                assert b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels',screen_text(output)[-6000:])
+                assert b'\x1b_Ga=t,t=d,f=32,' in output or b'\x1b_Ga=T,t=d,f=32,' in output, (name, 'live view did not send Kitty pixels',screen_text(output)[-6000:])
                 assert b'i=1414483201,p=1' in output, (name, 'live view did not place Kitty image')
             if graphics == 'braille' or name == 'Kitty hide inline cleanup':
                 assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'hidden images survived until exit')
@@ -380,7 +381,7 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
                     raise AssertionError("companion survived UI shutdown")
             drain(.05)
             if graphics == 'unsupported':
-                assert b'\x1b_Ga=T' not in output, (name, 'unsupported terminal received images')
+                assert b'\x1b_Ga=t' not in output and b'\x1b_Ga=T' not in output, (name, 'unsupported terminal received images')
             elif graphics:
                 assert b'\x1b_Ga=d,d=I,i=1414483201,q=2' in output, (name, 'owned images were not removed', re.findall(rb'\x1b_Ga=d[^\x1b]*', output), bytes(output[-1500:]))
                 if graphics == 'braille':

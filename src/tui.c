@@ -112,8 +112,14 @@ typedef struct {
 } InlineGraphic;
 static InlineGraphic graphics_pending[GRAPHICS_IMAGES], graphics_previous[GRAPHICS_IMAGES];
 static int graphics_pending_count, graphics_previous_count;
+static int graphics_front[GRAPHICS_IMAGES] = {-1,-1,-1,-1,-1,-1,-1,-1};
 static double graphics_last_frame;
 #define GRAPHICS_FRAME_SECONDS (1.0/60.0)
+/* Each slot owns two kitty image ids: the visible front buffer and the back
+   buffer receiving the next frame. */
+static uint32_t inline_graphic_id(int slot, int bank) {
+    return GRAPHICS_IMAGE_ID+(uint32_t)(bank*GRAPHICS_IMAGES+slot);
+}
 static void inline_graphics_clear(void);
 static void fullscreen_clear(void);
 
@@ -2535,8 +2541,11 @@ static int queue_inline_graphic(int line, int kind, int sub, int row, int col,
 }
 
 static void inline_graphics_clear(void) {
-    for (int i = 0; i < graphics_previous_count; i++)
-        terminal_graphics_delete(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i);
+    for (int i = 0; i < graphics_previous_count; i++) {
+        terminal_graphics_delete(terminal_output,inline_graphic_id(i,0));
+        terminal_graphics_delete(terminal_output,inline_graphic_id(i,1));
+        graphics_front[i] = -1;
+    }
     graphics_previous_count = 0;
     graphics_redraw = 1;
 }
@@ -2587,8 +2596,10 @@ static void inline_graphics_flush(void) {
     double now = now_seconds();
     if (!changed && now-graphics_last_frame < GRAPHICS_FRAME_SECONDS) return;
     graphics_redraw = 0; graphics_last_frame = now;
-    for (int i = graphics_pending_count; i < graphics_previous_count; i++)
-        terminal_graphics_delete(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i);
+    for (int i = graphics_pending_count; i < graphics_previous_count; i++) {
+        terminal_graphics_delete(terminal_output,inline_graphic_id(i,0));
+        terminal_graphics_delete(terminal_output,inline_graphic_id(i,1));
+    }
     static TerminalImage image;
     for (int i = 0; i < graphics_pending_count; i++) {
         const InlineGraphic *g = &graphics_pending[i];
@@ -2603,13 +2614,17 @@ static void inline_graphics_flush(void) {
         image.height = full_rows*cell_height;
         image.compact=0;
         render_inline_feedback(&image,g->kind,g->feed,g->generation);
-        if (!terminal_graphics_send(terminal_output,GRAPHICS_IMAGE_ID+(unsigned)i,&image,
+        int back = graphics_front[i] < 0 ? 0 : !graphics_front[i];
+        if (!terminal_graphics_send(terminal_output,inline_graphic_id(i,back),&image,
                                    g->row,g->col,g->width,g->count,g->first*cell_height,g->count*cell_height)) {
             graphics_supported = 0;
             if (graphics_previous_count < i+1) graphics_previous_count = i+1;
             inline_graphics_clear();
             return;
         }
+        /* The new image is displayed before the previous buffer is removed. */
+        terminal_graphics_delete(terminal_output,inline_graphic_id(i,!back));
+        graphics_front[i] = back;
     }
     memcpy(graphics_previous,graphics_pending,(size_t)graphics_pending_count*sizeof(InlineGraphic));
     graphics_previous_count = graphics_pending_count;

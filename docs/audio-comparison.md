@@ -576,8 +576,10 @@ with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
 `windowStart` option). The full 0.6-second window remains diagnostic at 0.682
 because the first ~50 ms graph onset does not match; the full-window case stays
 `correlation:null`. A 50 ms native base-cutoff hold was tested and rejected:
-the full window fell to 0.6076 and the steady gate to 0.9580, so the onset is
-not an LFO application delay. A tap on the deployed graph confirms the LFO
+the full window fell to 0.6076 and the steady gate to 0.9580. A 50 ms
+unfiltered hold was also rejected: full window 0.5459, steady 0.8557. The
+onset is therefore not a simple delayed or bypassed LFO; it is a more complex
+graph/filter connection response. A tap on the deployed graph confirms the LFO
 control signal is the expected `-480..500` triangle. Other non-gain/cutoff
 targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.

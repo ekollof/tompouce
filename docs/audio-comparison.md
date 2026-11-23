@@ -1115,7 +1115,11 @@ pass at 0.9999997+ and leave source values in force. Pattern `note`, `n`,
 `-s`, `-bank`, `-ftype-string`), leaving the source frequency, token and
 filter type unchanged. FX `distorttype('fold')` now carries a distortion
 algorithm variant and passes at 0.99999999/1.00065; `test_fx_distort_fold`
-pins the curve.
+pins the curve. The `soft` and `scurve` variants also pass the unchanged
+thresholds at 0.99999/0.95920 and 0.99954/1.12723. The remaining string
+algorithms (`hard`, `sinefold`, `chebyshev`, `diode`, `asym`, `cubic`) stay
+diagnostic: their measured correlations are 0.93097–0.99999 with RMS ratios
+0.736–1.060, so they are not gated.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

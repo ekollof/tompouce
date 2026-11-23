@@ -481,10 +481,13 @@ and measured divergences are recorded in the archive.
       source values in force. `fx-pattern-note`, `-n`, `-s`, `-bank` and
       `-ftype-string` pass at 0.9990+; `test_javascript` checks the source
       frequency, token and filter type stay unchanged.
-- [x] FX `distorttype('fold')` string. A pattern distort stage now carries an
-      algorithm variant, and fold uses the deployed folding curve with its
-      measured gain. `fx-pattern-distorttype-string` measures
-      0.99999999/1.00065 and `test_fx_distort_fold` pins the native curve.
+- [x] FX `distorttype` string variants. A pattern distort stage now carries an
+      algorithm variant. `fx-pattern-distorttype-string` (fold) measures
+      0.99999999/1.00065 and `test_fx_distort_fold` pins the native curve;
+      `fx-pattern-distorttype-soft` and `-scurve` pass at 0.99999/0.95920 and
+      0.99954/1.12723. The remaining `hard`, `sinefold`, `chebyshev`, `diode`,
+      `asym` and `cubic` variants stay diagnostic at 0.93097–0.99999
+      correlation and 0.736–1.060 RMS ratio.
       Callable argument replay remains intentionally absent because the
       current site ignores it; revisit if that changes. Very long modulation
       uses a bounded conservative connection deadline; distinguish these

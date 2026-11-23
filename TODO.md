@@ -427,7 +427,12 @@ and measured divergences are recorded in the archive.
       thresholds. In the full window the browser is exactly zero from
       0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3;
       the 2 s diagnostic at 0.98954 (also 0.98954 with float32 capture) is
-      that capture bound, not a site tail.
+      that capture bound, not a site tail. Suppressing
+      `AudioNode.disconnect` during the offline render does not preserve the
+      tail: the cleanup releases BiquadFilter/AudioBufferSource/Gain nodes and
+      no `ConvolverNode`, and a single-hap room probe is still zero after its
+      0.5 s clip. The truncation is the eager renderer's per-hap room
+      lifecycle; a different capture path is required.
 - [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
       triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,

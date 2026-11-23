@@ -634,7 +634,13 @@ hap's capture past its clipped duration: the browser is exactly zero from
 0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3, and the
 2-second window measures 0.98954 (0.98954 with the float32 capture as well,
 confirming quantization is not involved). This is a harness capture bound, not
-a site tail. A CTest locks sequence variety
+a site tail. A tail-preserving capture was attempted by suppressing
+`AudioNode.disconnect` during the offline render: the cleanup releases
+BiquadFilter/AudioBufferSource/Gain nodes and no `ConvolverNode`, yet the
+browser still cuts the room tail at the hap clip end (a single-hap room probe
+is zero after 0.5 s). The truncation is the eager renderer's per-hap room
+lifecycle, not a released node, so it needs a different capture path. A CTest
+locks sequence variety
 (distinct rooms differ) and cache identity. Custom IR correlation remains
 0.99999997.
 

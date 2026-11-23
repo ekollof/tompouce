@@ -567,11 +567,16 @@ arbitrary modulation/effects or full-song parity.
 Generic `.lfo()` gain modulation is implemented as a relative-depth triangle
 and gated: `lfo-generic-gain` measures **0.99965 correlation and 0.99920 RMS
 ratio** at the unchanged thresholds. The cutoff path remains unsupported
-(diagnostic 0.4448) because the deployed LFO spans the target's full modulation
-range with a global phase model; cutoff and other targets keep their static
-value and log one `LFO modulation is implemented only for gain` warning.
-Filter-specific `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width
-LFO and tremolo are separate supported controls with their own gates.
+(diagnostic 0.4448). The deployed `lfo-processor` computes
+`clamp(pow((tri(phase) + dcoffset) * depth, curve), min, max)` on a begin-gated
+worklet phase; for `cutoff` it uses `depth = depth * target_value` and
+`min/max = 20-target_value .. 24000-target_value`. Native's sample-0 DSP
+filter-LFO state does not reproduce that worklet phase/onset, so cutoff and
+other non-gain targets keep their static value and log one
+`LFO modulation is implemented only for gain` warning. Matching cutoff needs a
+worklet-equivalent global phase model, not a threshold change. Filter-specific
+`lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
+tremolo are separate supported controls with their own gates.
 
 `cmake --build build --target test-supersaw-reference-web` separately compares
 the production supersaw source with the actual deployed AudioWorklet. It seeds

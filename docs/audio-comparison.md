@@ -384,11 +384,13 @@ first cycle; native arithmetic alone has not resolved the query deadline.
 The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
-timeouts remain failures. The full fractional room-switch tail and full
-2-second source-unity tail remain diagnostic; the 1.8-second active
-source-unity portion gates at 0.99029, the same IR path at gain 1 gates the
-full 2 s at 0.999988, both deterministic rooms of the switch gate at 0.99935
-and 0.99556, and the seeded Arpoon opening gates at 0.99986.
+timeouts remain failures. The full fractional room-switch tail remains
+diagnostic (the harness hard-zeros each clipped capture); both deterministic
+rooms gate at 0.99935 and 0.99556. The full 2-second source-unity window gates
+at 0.999996 with the harness's float32 capture (the int16 capture is
+quantization-limited at 0.98935); its 1.8-second active portion gates at
+0.99029 and the same path at gain 1 gates on int16 at 0.999988. The seeded
+Arpoon opening gates at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
 composition (112818) without rewriting its source. Its four-cycle event
@@ -630,8 +632,9 @@ fractional switch is gated separately:
 window remains diagnostic only because the eager renderer hard-zeros each
 hap's capture past its clipped duration: the browser is exactly zero from
 0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3, and the
-2-second window measures 0.98954. This is a harness capture bound, not a site
-tail. A CTest locks sequence variety
+2-second window measures 0.98954 (0.98954 with the float32 capture as well,
+confirming quantization is not involved). This is a harness capture bound, not
+a site tail. A CTest locks sequence variety
 (distinct rooms differ) and cache identity. Custom IR correlation remains
 0.99999997.
 
@@ -1077,13 +1080,16 @@ the browser's low-level IR-speed path, not source width or the IR kernel.
 2 s matches at **0.99918/1.032** (per-100 ms 0.9980-0.9998, ratio
 1.057->1.012), so the resampler and IR edge are not the residual. The deployed
 `adjustLength` is the backward index resampler native already mirrors, not a
-phase vocoder. The .03 source peaks at 3e-4, about ten int16 levels, so its
-browser capture is quantization-limited: the same IR path at `.gain(1)`
-(peak 0.011) gates over the full 2 s at **0.999988/0.9959**
-(`shared-room-lifetime-rate-half-source-unity-gain`). The residual was the
-16-bit capture floor, not a room-send envelope. The .03 full window stays
-diagnostic and the 1.8 s active portion gates at 0.99029. The earlier
-interpolation, kernel-stretch and envelope models were removed.
+phase vocoder. The .03 source peaks at 3e-4, about ten int16 levels. The
+harness now supports a `float32: true` capture that wraps the main
+`OfflineAudioContext.startRendering` buffer and writes an IEEE-float WAV;
+with it the original .03 full 2 s window gates at **0.999996/0.99208**
+without changing gain or thresholds (the int16 capture measured 0.98935).
+The same path at `.gain(1)` also gates on int16 at **0.999988/0.9959**
+(`shared-room-lifetime-rate-half-source-unity-gain`). The 1.8 s active
+portion remains gated at 0.99029. The residual was the 16-bit capture floor,
+not a room-send envelope. Earlier interpolation, kernel-stretch and envelope
+models were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

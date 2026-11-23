@@ -137,7 +137,7 @@ try {
       ['fxr',`.speed(8).irspeed(8).fxr(1.5)`],
     ].map(([name,controls])=>({name:`shared-room-lifetime-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
       code:`s('stretch_fixture').gain(.03)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
-    {name:'shared-room-lifetime-rate-half-source-unity',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:null}, /* Diagnostic: the .03 source peaks at 3e-4, about 10 int16 levels, so the browser capture is quantization-limited. The same IR path at gain 1 gates as -source-unity-gain. */
+    {name:'shared-room-lifetime-rate-half-source-unity',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',float32:true,code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'shared-room-lifetime-rate-half-source-unity-active',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:1.8,correlation:.99},
     {name:'shared-room-single',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.3).clip(.05).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99},
     ...[
@@ -470,7 +470,7 @@ try {
     { name: 'pcm-onset-fractional-reverse', code: `s('stretch_fixture').speed(-2).begin(.25).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional-speedswitch', code: `s('stretch_fixture').stretch(-2).speed("0.75 1").clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional-delayauto', code: `s('stretch_fixture').gain(.5).clip(.25).late(.137).dry(0).delay(1).delaytime("0.05 0.075").delayfeedback(.5)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
-    { name: 'pcm-onset-fractional-roomswitch', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: null, randomSeed: 0xc0ffee }, /* Diagnostic: both deterministic rooms are gated separately by
+    { name: 'pcm-onset-fractional-roomswitch', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, float32:true, cycles: 1, cps: .5, window: 2, correlation: null, randomSeed: 0xc0ffee }, /* Diagnostic: both deterministic rooms are gated separately by
    pcm-onset-fractional-roomswitch-first (window .35, corr 0.99935) and
    -second (windowStart 1.137, corr 0.99556). The full switch window stays
    diagnostic because the eager renderer bounds each hap's capture to its
@@ -635,26 +635,57 @@ try {
         return createBuffer.call(this,channels,length,rate);
       };
       OfflineAudioContext.prototype.suspend=undefined;
+      const originalStart=OfflineAudioContext.prototype.startRendering;
+      let renderedBuffer=null;
+      const expectedFrames=Math.round(spec.cycles/spec.cps*44100);
+      if(spec.float32)OfflineAudioContext.prototype.startRendering=function(){
+        const pending=originalStart.call(this);
+        pending.then(buffer=>{
+          if(!renderedBuffer && buffer.length===expectedFrames &&
+             buffer.numberOfChannels===2) renderedBuffer=buffer;
+        }).catch(()=>{});
+        return pending;
+      };
       try {
         await renderPatternAudio(selected,spec.cps,0,spec.cycles,44100,128,false,'comparison');
         if(!blob)throw new Error('No WAV captured');
         const bytes=new Uint8Array(await blob.arrayBuffer());
         let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+        let wav32='';
+        if(spec.float32){
+          if(!renderedBuffer)throw new Error('No float buffer captured');
+          const channels=renderedBuffer.numberOfChannels,frames=renderedBuffer.length;
+          const pcm=new Uint8Array(44+frames*channels*4),view=new DataView(pcm.buffer);
+          const put=(offset,text)=>{for(let i=0;i<text.length;i++)view.setUint8(offset+i,text.charCodeAt(i));};
+          put(0,'RIFF');view.setUint32(4,36+frames*channels*4,true);put(8,'WAVE');
+          put(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,3,true);
+          view.setUint16(22,channels,true);view.setUint32(24,44100,true);
+          view.setUint32(28,44100*channels*4,true);view.setUint16(32,channels*4,true);
+          view.setUint16(34,32,true);put(36,'data');view.setUint32(40,frames*channels*4,true);
+          const data=[];for(let c=0;c<channels;c++)data.push(renderedBuffer.getChannelData(c));
+          let offset=44;
+          for(let i=0;i<frames;i++)for(let c=0;c<channels;c++){view.setFloat32(offset,data[c][i],true);offset+=4;}
+          let encoded='';for(let i=0;i<pcm.length;i+=8192)encoded+=String.fromCharCode(...pcm.subarray(i,i+8192));
+          wav32=btoa(encoded);
+        }
         if(spec.seedSupersaw && !seededWorklets.length)throw Error('Seeded supersaw worklet was not loaded');
-        return {wav:btoa(binary),events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents,seededWorklets};
-      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random;AudioWorklet.prototype.addModule=addModule}
+        return {wav:btoa(binary),wav32,events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents,seededWorklets};
+      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;OfflineAudioContext.prototype.startRendering=originalStart;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random;AudioWorklet.prototype.addModule=addModule}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
+    const wav32 = captured.wav32 ? Buffer.from(captured.wav32, 'base64') : null;
     const distortModule = await evaluate('window.__distortModule||""');
     if (distortModule) await fs.writeFile('/tmp/opencode/distort-worklet.js', distortModule);
     await fs.writeFile(path.join(out, `${spec.name}-browser.wav`), wav);
+    if (wav32) await fs.writeFile(path.join(out, `${spec.name}-browser32.wav`), wav32);
     await fs.writeFile(path.join(out, `${spec.name}-browser-events.json`), JSON.stringify(captured.events, null, 2));
     if(captured.renderEvents.length)await fs.writeFile(path.join(out,`${spec.name}-browser-render-events.json`),JSON.stringify(captured.renderEvents,null,2));
     const nativeBytes = await fs.readFile(native);
-    const metrics = compare(nativeBytes, wav, spec.window, spec.windowStart ?? 0);
+    const browserBytes = spec.float32 && wav32 ? wav32 : wav;
+    const metrics = compare(nativeBytes, browserBytes, spec.window, spec.windowStart ?? 0);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
-    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.fixtureIR?{sharedIrSha256:hash(monoFixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
+    report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.fixtureIR?{sharedIrSha256:hash(monoFixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(browserBytes), metrics, passed });
     await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
     console.log(spec.name, JSON.stringify(metrics), passed === null ? 'DIAGNOSTIC' : passed ? 'PASS' : 'FAIL');
     await call('Target.closeTarget', { targetId: page.targetId }, null);

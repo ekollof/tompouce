@@ -407,13 +407,12 @@ and measured divergences are recorded in the archive.
       isolates the sub-unity IR tail and matches at 0.99918/1.032 over the
       full 2 s, so the resampler and IR edge are not the residual; the
       deployed `adjustLength` is the backward index resampler native mirrors,
-      not a phase vocoder. The .03 source peaks at 3e-4, about ten int16
-      levels, so the browser capture is quantization-limited: the same path
-      at gain 1 (peak 0.011) gates the full 2 s as
-      `shared-room-lifetime-rate-half-source-unity-gain` at
-      **0.999988/0.9959**. The residual was the 16-bit capture floor, not a
-      room-send envelope. The .03 full window stays diagnostic; shorter
-      0.6/1.0 s windows were worse (0.9814/0.9889).
+      not a phase vocoder. The harness now captures the main render as
+      float32 (`float32: true`), and the original .03 full 2 s window gates at
+      **0.999996/0.99208** without changing gain or thresholds; the int16
+      capture measured 0.98935. The same path at gain 1 also gates on int16
+      at **0.999988/0.9959**. The residual was the 16-bit capture floor, not a
+      room-send envelope. The 1.8 s active window remains gated at 0.99029.
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
@@ -427,7 +426,8 @@ and measured divergences are recorded in the archive.
       (windowStart 1.137 s) at **0.99556/1.01511** with the unchanged
       thresholds. In the full window the browser is exactly zero from
       0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3;
-      the 2 s diagnostic at 0.98954 is that capture bound, not a site tail.
+      the 2 s diagnostic at 0.98954 (also 0.98954 with float32 capture) is
+      that capture bound, not a site tail.
 - [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
       triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,

@@ -589,8 +589,10 @@ steady 0.99962. A 50 ms dry-to-wet crossfade was likewise rejected: full
 signal is the expected `-480..500` triangle. Other non-gain/cutoff targets
 keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
-Filter-specific `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width
-LFO and tremolo are separate supported controls with their own gates.
+`test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
+versus static PCM. Filter-specific
+`lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
+tremolo are separate supported controls with their own gates.
 
 `cmake --build build --target test-supersaw-reference-web` separately compares
 the production supersaw source with the actual deployed AudioWorklet. It seeds

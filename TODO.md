@@ -434,7 +434,8 @@ and measured divergences are recorded in the archive.
       graph/filter connection response. Other targets keep their static value
       and log
       one `LFO modulation is implemented only for gain and cutoff` warning.
-      Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
+      `test_audio` locks the cutoff mapping, SoA bypass and dynamic-vs-static
+      PCM. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent

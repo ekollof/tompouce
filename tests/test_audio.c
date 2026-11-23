@@ -500,6 +500,39 @@ static void test_generic_lfo_warns(void) {
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
+/* Generic cutoff LFOs must use the scalar sample-rate DSP filter path and
+   actually change the rendered filter response. */
+static void test_generic_cutoff_lfo(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    cJSON *dynamic=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"s\":\"sawtooth\","
+        "\"cutoff\":500,\"lfo\":{\"0\":{\"control\":\"cutoff\",\"rate\":0.5,"
+        "\"depth\":2},\"__ids\":{}}}}");
+    cJSON *static_hap=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"s\":\"sawtooth\","
+        "\"cutoff\":500}}");
+    assert(dynamic && static_hap);
+    AudioEvent a, b;
+    assert(js_audio_event(dynamic,0,1,&a));
+    assert(js_audio_event(static_hap,0,1,&b));
+    assert(a.dsp.lfo_sample_rate && !b.dsp.lfo_sample_rate);
+    audio_trigger_event(&a);
+    assert(voices[0].dsp.control.lfo_sample_rate);
+    assert(!voices[0].soa_pending);
+    float dynamic_pcm[256];
+    pa_callback(NULL,dynamic_pcm,128,NULL,0,NULL);
+    assert(!voices[0].soa_active);
+    memset(voices,0,sizeof(voices)); audio_time=0;
+    audio_trigger_event(&b);
+    float static_pcm[256];
+    pa_callback(NULL,static_pcm,128,NULL,0,NULL);
+    assert(memcmp(dynamic_pcm,static_pcm,sizeof(dynamic_pcm))!=0);
+    cJSON_Delete(dynamic); cJSON_Delete(static_hap);
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
+}
+
 /* A slow missing sample must not discard later stacked sources whose onsets
    cross during its preparation. This observer simulates that delay. */
 static void slow_missing_prep(const AudioEvent *event) {
@@ -1305,6 +1338,7 @@ int main(void) {
     test_failed_source_siblings();
     test_analyser_controls_do_not_warn();
     test_generic_lfo_warns();
+    test_generic_cutoff_lfo();
     test_active_voice_list();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");

@@ -131,7 +131,9 @@ static void waveform(TerminalImage *im, const VisualOptions *o, const float *s, 
     /* Web scope uses canvas-height units and keeps width/n spacing after a
        falling crossing of -trigger. Do not normalize or stretch the suffix. */
     double last_x=left,last_y=0;
-    int thickness=im->compact?0:(int)(o->thickness-1)/2;
+    /* The terminal image is far smaller than the web canvas; a web-sized
+       thickness reads as a fat stroke here. Keep the waveform one pixel. */
+    int thickness=0;
     for (int j=begin;j<n;j++) {
         double x=left+(double)(j-begin)*width/n;
         double y=(o->pos-(isfinite(s[j])?s[j]:0)*scale)*im->height;

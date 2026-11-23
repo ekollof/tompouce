@@ -246,7 +246,10 @@ try {
     {name:'fx-pattern-distorttype-string',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('fold'))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-distorttype-soft',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('soft'))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-distorttype-scurve',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('scurve'))`,cycles:1,cps:.5,window:.6,correlation:.99},
-    ...['hard','sinefold','chebyshev','diode','asym','cubic'].map(type=>({name:`diag-distorttype-${type}`,sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('${type}'))`,cycles:1,cps:.5,window:.6,correlation:null})),
+    {name:'fx-pattern-distorttype-hard',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('hard'))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-pattern-distorttype-sinefold',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('sinefold'))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-pattern-distorttype-cubic',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('cubic'))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    ...['chebyshev','diode','asym'].map(type=>({name:`diag-distorttype-${type}`,sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(distort(1).distorttype('${type}'))`,cycles:1,cps:.5,window:.6,correlation:null})),
     {name:'fx-graph-source-lpf',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out()).FX(x=>x.lpf(200))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-graph-out-channels',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).K(sine(sFreq).mul(.2).out(0).mul(.5).out(1)).FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-worklet-effect-gain',sound:'sine',code:`note(69).s('sine').gain(.3).clip(.1).worklet('audioin().delay(.05).out()').FX(x=>x.gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
@@ -605,6 +608,11 @@ try {
       const createBuffer=BaseAudioContext.prototype.createBuffer;
       const random=Math.random;
       const addModule=AudioWorklet.prototype.addModule;
+      AudioWorklet.prototype.addModule=async function(url,...args){
+        const text=await(await fetch(url)).text();
+        if(text.includes('distort-processor'))window.__distortModule=text;
+        return addModule.call(this,url,...args);
+      };
       const seededWorklets=[];
       if(spec.seedSupersaw)AudioWorklet.prototype.addModule=async function(url,...args){
         const text=await(await fetch(url)).text();
@@ -631,6 +639,8 @@ try {
       } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random;AudioWorklet.prototype.addModule=addModule}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
+    const distortModule = await evaluate('window.__distortModule||""');
+    if (distortModule) await fs.writeFile('/tmp/opencode/distort-worklet.js', distortModule);
     await fs.writeFile(path.join(out, `${spec.name}-browser.wav`), wav);
     await fs.writeFile(path.join(out, `${spec.name}-browser-events.json`), JSON.stringify(captured.events, null, 2));
     if(captured.renderEvents.length)await fs.writeFile(path.join(out,`${spec.name}-browser-render-events.json`),JSON.stringify(captured.renderEvents,null,2));

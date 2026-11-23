@@ -2004,6 +2004,42 @@ static void mix_fx_room(VoiceMix *mix, double l, double r, double room,
    stages replay in the order recorded from FX(...). Pan follows WebAudio's
    stereo panner law: a mono signal uses equal-power mono gains; a signal that
    is already stereo uses the StereoPanner cross-feed law. */
+static double fx_soft(double x,double t) { return tanh(x*(1+t)); }
+static double fx_scurve(double x,double t) {
+    return (1+t)*x/(1+t*fabs(x));
+}
+static double fx_fold(double x,double t) {
+    double n=(1+.5*t)*x;
+    double a=fmod(n+1,4); if (a<0) a+=4;
+    return 1-fabs(a-2);
+}
+static double fx_diode_asym(double x,double t,int asym) {
+    double a=1+2*t;
+    double l=log1p(t);
+    double offset=.07*(l/(1+l));
+    double c=fx_soft(x+offset,2*t);
+    double d=fx_soft(asym?offset:-x+offset,2*t);
+    double i=1/cosh(a*offset);
+    double r=i*i;
+    double u=fmax(1e-8,(asym?1:2)*a*r);
+    return fx_soft((c-d)/u,t);
+}
+static double fx_cubic(double x,double t) {
+    double l=log1p(t), n=l/(1+l);
+    double a=(x-n/3*x*x*x)/(1-n/3);
+    return fx_soft(a,t);
+}
+static double fx_chebyshev(double x,double t) {
+    double n=10*log1p(t);
+    double a=1,s=x,o,c=0;
+    for (int d=1;d<64;d++) {
+        if (d<2) { c+=d==0?a:s; continue; }
+        o=2*x*a-s; s=a; a=o;
+        if (d%2==0) c+=fmin(1.3*n/d,2)*o;
+    }
+    return fx_soft(c,n/20);
+}
+
 static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     double left_in=l, right_in=r;
     int stereo=v->route_fx_stereo;
@@ -2040,28 +2076,49 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
             right_in=(1+k)*right_in/(1+k*fabs(right_in))*volume;
         } else if (stage->type==AUDIO_FX_DISTORT) {
             double drive=fmax(0,fmin(100,stage->a));
+            double t=expm1(drive);
             double volume=fmax(.001,fmin(1,stage->b));
-            if (stage->variant==1) {
-                double n=(1+.5*drive)*left_in;
-                double a=fmod(n+1,4); if (a<0) a+=4;
-                left_in=(1-fabs(a-2))*volume*1.24;
-                n=(1+.5*drive)*right_in;
-                a=fmod(n+1,4); if (a<0) a+=4;
-                right_in=(1-fabs(a-2))*volume*1.24;
-            } else if (stage->variant==2) {
-                left_in=fmax(-1,fmin(1,(1+drive)*left_in))*volume;
-                right_in=fmax(-1,fmin(1,(1+drive)*right_in))*volume;
-            } else if (stage->variant==3) {
-                double n=(1+.5*drive)*left_in;
-                double a=fmod(n+1,4); if (a<0) a+=4;
-                left_in=sin(M_PI/2*(1-fabs(a-2)))*volume;
-                n=(1+.5*drive)*right_in;
-                a=fmod(n+1,4); if (a<0) a+=4;
-                right_in=sin(M_PI/2*(1-fabs(a-2)))*volume;
-            } else {
-                double shape=expm1(drive);
-                left_in=((1+shape)*left_in/(1+shape*fabs(left_in)))*volume;
-                right_in=((1+shape)*right_in/(1+shape*fabs(right_in)))*volume;
+            switch (stage->variant) {
+            case 0:
+                left_in=fx_soft(left_in,t)*volume;
+                right_in=fx_soft(right_in,t)*volume;
+                break;
+            case 1:
+                left_in=fx_fold(left_in,t)*volume;
+                right_in=fx_fold(right_in,t)*volume;
+                break;
+            case 2:
+                left_in=fmax(-1,fmin(1,(1+t)*left_in))*volume;
+                right_in=fmax(-1,fmin(1,(1+t)*right_in))*volume;
+                break;
+            case 3:
+                left_in=sin(M_PI/2*fx_fold(left_in,t))*volume;
+                right_in=sin(M_PI/2*fx_fold(right_in,t))*volume;
+                break;
+            case 4:
+                left_in=fx_chebyshev(left_in,t)*volume;
+                right_in=fx_chebyshev(right_in,t)*volume;
+                break;
+            case 5:
+                left_in=fx_scurve(left_in,t)*volume;
+                right_in=fx_scurve(right_in,t)*volume;
+                break;
+            case 6:
+                left_in=fx_diode_asym(left_in,t,0)*volume;
+                right_in=fx_diode_asym(right_in,t,0)*volume;
+                break;
+            case 7:
+                left_in=fx_diode_asym(left_in,t,1)*volume;
+                right_in=fx_diode_asym(right_in,t,1)*volume;
+                break;
+            case 8:
+                left_in=fx_cubic(left_in,t)*volume;
+                right_in=fx_cubic(right_in,t)*volume;
+                break;
+            default:
+                left_in=((1+t)*left_in/(1+t*fabs(left_in)))*volume;
+                right_in=((1+t)*right_in/(1+t*fabs(right_in)))*volume;
+                break;
             }
         }
     }

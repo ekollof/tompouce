@@ -1113,13 +1113,12 @@ are ignored by the deployed player; `fx-pattern-adsr`,
 pass at 0.9999997+ and leave source values in force. Pattern `note`, `n`,
 `s`, `bank` and string `ftype` are also ignored (`fx-pattern-note`, `-n`,
 `-s`, `-bank`, `-ftype-string`), leaving the source frequency, token and
-filter type unchanged. FX `distorttype('fold')` now carries a distortion
-algorithm variant and passes at 0.99999999/1.00065; `test_fx_distort_fold`
-pins the curve. The `soft` and `scurve` variants also pass the unchanged
-thresholds at 0.99999/0.95920 and 0.99954/1.12723. The remaining string
-algorithms (`hard`, `sinefold`, `chebyshev`, `diode`, `asym`, `cubic`) stay
-diagnostic: their measured correlations are 0.93097–0.99999 with RMS ratios
-0.736–1.060, so they are not gated.
+filter type unchanged. The pattern distort stage now uses the deployed
+`t = expm1(distort)` argument for every algorithm. `fold`, `soft`, `scurve`,
+`hard`, `sinefold` and `cubic` pass the unchanged thresholds at
+0.99954–0.99999999 correlation and 1.00013–1.12723 RMS ratio. `chebyshev`,
+`diode` and `asym` remain diagnostic at 0.62440/1.23368, 0.99840/1.12824 and
+0.99763/1.12664.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

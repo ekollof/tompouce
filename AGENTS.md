@@ -237,7 +237,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   limits and failure behavior. Reuse the existing guarded entry points; do not
   add an alternate route that bypasses their checks. Fail closed before side
   effects when validation or authorization fails.
-- Use C11/C17 and preserve warning-as-error builds. Keep functions focused and
+- Use C11/C17 and preserve warning-as-error builds. Follow KNF style: do not
+  build large `if`/`else` chains, use `switch`/`case`; use C11 facilities where
+  they fit. Keep functions focused and
   state within its owning module; use `strtok_r` in reentrant/multilayer parsers.
 - Validate external JSON, terminal/AI input, environment values and paths for
   type, length and range. Bound copies and writes, verify termination, and check

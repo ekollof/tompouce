@@ -707,10 +707,11 @@ static void test_fx_distort_fold(void) {
     voice.fx_stages[0]=(AudioFxStage){AUDIO_FX_DISTORT,1,1,1};
     VoiceMix mix={0};
     route_voice(&voice,.096,.096,&mix);
-    double n=(1+.5*1)*.096;
+    double t=expm1(1);
+    double n=(1+.5*t)*.096;
     double folded=1-fabs(fmod(n+1,4)-2);
-    assert(fabs(mix.left-folded*1.24)<1e-12);
-    assert(fabs(mix.right-folded*1.24)<1e-12);
+    assert(fabs(mix.left-folded)<1e-12);
+    assert(fabs(mix.right-folded)<1e-12);
 }
 
 static void test_supersaw_callback(void) {

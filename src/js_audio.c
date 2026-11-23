@@ -445,16 +445,14 @@ static int fx_filter_type(int operation) {
 }
 
 static int fx_distort_variant(const char *name) {
+    static const struct { const char *name; int variant; } types[] = {
+        {"soft",0}, {"fold",1}, {"hard",2}, {"sinefold",3},
+        {"chebyshev",4}, {"scurve",5}, {"diode",6}, {"asym",7},
+        {"cubic",8}
+    };
     if (!name) return -1;
-    if (!strcmp(name,"soft")) return 0;
-    if (!strcmp(name,"fold")) return 1;
-    if (!strcmp(name,"hard")) return 2;
-    if (!strcmp(name,"sinefold")) return 3;
-    if (!strcmp(name,"chebyshev")) return 4;
-    if (!strcmp(name,"scurve")) return 5;
-    if (!strcmp(name,"diode")) return 6;
-    if (!strcmp(name,"asym")) return 7;
-    if (!strcmp(name,"cubic")) return 8;
+    for (unsigned i=0;i<sizeof(types)/sizeof(types[0]);i++)
+        if (!strcmp(name,types[i].name)) return types[i].variant;
     return -1;
 }
 

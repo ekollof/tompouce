@@ -481,13 +481,13 @@ and measured divergences are recorded in the archive.
       source values in force. `fx-pattern-note`, `-n`, `-s`, `-bank` and
       `-ftype-string` pass at 0.9990+; `test_javascript` checks the source
       frequency, token and filter type stay unchanged.
-- [x] FX `distorttype` string variants. A pattern distort stage now carries an
-      algorithm variant. `fx-pattern-distorttype-string` (fold) measures
-      0.99999999/1.00065 and `test_fx_distort_fold` pins the native curve;
-      `fx-pattern-distorttype-soft` and `-scurve` pass at 0.99999/0.95920 and
-      0.99954/1.12723. The remaining `hard`, `sinefold`, `chebyshev`, `diode`,
-      `asym` and `cubic` variants stay diagnostic at 0.93097–0.99999
-      correlation and 0.736–1.060 RMS ratio.
+- [x] FX `distorttype` string variants. The pattern distort stage applies the
+      deployed `t = expm1(distort)` argument to every algorithm. `fold`,
+      `soft`, `scurve`, `hard`, `sinefold` and `cubic` pass the unchanged
+      thresholds at 0.99954–0.99999999 correlation and 1.00013–1.12723 RMS
+      ratio. `chebyshev`, `diode` and `asym` remain diagnostic at
+      0.62440/1.23368, 0.99840/1.12824 and 0.99763/1.12664. `test_fx_distort_fold`
+      pins the fold curve.
       Callable argument replay remains intentionally absent because the
       current site ignores it; revisit if that changes. Very long modulation
       uses a bounded conservative connection deadline; distinguish these
@@ -772,6 +772,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       Existing kernels have byte-exact C/direct-AVX2 comparisons and forced
       `TOMPOUCE_SIMD=c`/`avx2` runs. Keep applying this rule to any new kernel;
       do not add a global `-mavx2` build.
+
+## Code quality
+
+- [ ] Code style sweep. Audit the C sources against AGENTS.md: KNF style,
+      `switch`/`case` instead of large `if`/`else` chains, C11 facilities where
+      they fit, focused functions and state owned by its module.
 
 ## Terminal blockers awaiting upstream
 

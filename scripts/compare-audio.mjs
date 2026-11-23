@@ -137,7 +137,8 @@ try {
       ['fxr',`.speed(8).irspeed(8).fxr(1.5)`],
     ].map(([name,controls])=>({name:`shared-room-lifetime-${name}`,sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',
       code:`s('stretch_fixture').gain(.03)${controls}.ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99})),
-    {name:'shared-room-lifetime-rate-half-source-unity',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:null},
+    {name:'shared-room-lifetime-rate-half-source-unity',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:null}, /* Diagnostic: the full 2 s window includes a near-silent tail; the active 1.5 s portion is gated below. */
+    {name:'shared-room-lifetime-rate-half-source-unity-active',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.03).irspeed(.5).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:1.5,correlation:.99},
     {name:'shared-room-single',sound:'stretch_fixture',fixture:true,fixtureIR:'mono_fixture',code:`s('stretch_fixture').gain(.3).clip(.05).ir('mono_fixture').room(1).dry(0)`,cycles:1,cps:.5,window:2,correlation:.99},
     ...[
       ['send-toggle',`.room("1 0 1")`],

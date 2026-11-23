@@ -396,8 +396,10 @@ and measured divergences are recorded in the archive.
       0.000305 versus 0.767 at IR speed 1) and native (0.00033). Mono-source,
       longer-clip/release, stereo-IR and dry probes isolate the residual to
       the browser's low-level IR-speed path, not source width or the IR kernel.
-      The case stays diagnostic at correlation 0.9893; the 0.99 threshold is
-      unchanged.
+      The 1.5 s active window now passes at correlation **0.99165** and RMS
+      ratio **1.11516** with the unchanged 0.99/0.85-1.15 thresholds; the full
+      2 s window stays diagnostic at 0.9893 because its tail is near-silent.
+      Shorter 0.6/1.0 s windows were worse (0.9814/0.9889).
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
@@ -417,10 +419,12 @@ and measured divergences are recorded in the archive.
       `LFO modulation is implemented only for gain` warning; the cutoff
       diagnostic stays ungated at 0.44477. The exact worklet parameters
       (`depth=1000`, `dc=-.5`, `min=-480`, `max=23500`, triangle, 0.5 Hz) match
-      the native filter-LFO arithmetic; forcing per-sample coefficient updates
-      still leaves the mapped sweep at 0.682, so the residual is the deployed
-      graph's onset/filter behavior. Matching cutoff needs a graph-equivalent
-      sample-rate filter/onset path, not a threshold change.
+      the native filter-LFO arithmetic, and a graph tap confirms the deployed
+      LFO control signal is the expected `-480..500` triangle. Forcing the
+      voice off the SoA bank onto the scalar per-sample DSP path still leaves
+      the mapped sweep at 0.682; the filtered browser peak is 0.3998 versus
+      0.1476 native. The residual is the deployed graph's dynamic
+      `BiquadFilterNode` response, not the LFO signal or update cadence.
       Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and

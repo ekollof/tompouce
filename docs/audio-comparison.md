@@ -384,10 +384,10 @@ first cycle; native arithmetic alone has not resolved the query deadline.
 The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
-timeouts remain failures. The shared-room source-unity and full fractional
-room-switch tail diagnostics remain ungated; the deterministic first-room
-onset of that switch now gates at 0.99935, and the seeded Arpoon opening gates
-at 0.99986.
+timeouts remain failures. The full fractional room-switch tail and full
+2-second source-unity tail remain diagnostic; the 1.5-second active
+source-unity portion gates at 0.99165, the deterministic first-room onset of
+the switch gates at 0.99935, and the seeded Arpoon opening gates at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
 composition (112818) without rewriting its source. Its four-cycle event
@@ -571,12 +571,15 @@ ratio** at the unchanged thresholds. The cutoff path remains unsupported
 `clamp(pow((tri(phase) + dcoffset) * depth, curve), min, max)` on a begin-gated
 worklet phase. The measured cutoff event is exactly `rate=.5`, `depth=1000`,
 `dcoffset=-.5`, `min=-480`, `max=23500`, triangle shape, `begin=0`, `time=0`.
-Native's filter-LFO arithmetic reproduces that waveform and these parameters
-exactly. Forcing per-sample biquad coefficient updates still leaves the mapped
-diagnostic at 0.682 (static 0.4448), so the residual is the deployed graph's
-own onset/filter behavior rather than the LFO update rate. Matching cutoff
-needs a graph-equivalent sample-rate filter/onset path, not a threshold change.
-Cutoff and other non-gain targets keep their static value and log one
+A tap on the deployed graph captures the LFO control signal as the expected
+`-480..500` triangle. Native's arithmetic reproduces that waveform and these
+parameters exactly. Forcing the voice off the SoA bank onto the scalar
+per-sample DSP filter path still leaves the mapped diagnostic at 0.682
+(static 0.4448); the filtered browser output peaks at 0.3998 versus 0.1476
+native. The residual is the deployed graph's dynamic `BiquadFilterNode`
+response, not the LFO signal or update cadence. Matching cutoff needs a
+graph-equivalent dynamic filter path, not a threshold change. Cutoff and other
+non-gain targets keep their static value and log one
 `LFO modulation is implemented only for gain` warning. Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.
@@ -1039,14 +1042,15 @@ interpolation. `convolution_resample_ir` now reproduces that exactly, including
 zero speed, and `test_convolution_prepare` pins `.5/.75/2/-2/0/1`.
 `shared-room-lifetime-rate-half` and `-rate-threequarter` now measure
 correlations **0.99999999/0.99999998** and RMS ratios 0.9930/0.9931 at the
-unchanged gates. A source-unity-speed variant remains diagnostic
-(`correlation:null`, 0.9893): with `.irspeed(.5)` and a unity source the
-deployed player itself renders near-silence (peak 0.000305 versus 0.767 at IR
-speed 1), and native also renders near-silence (peak 0.00033). Mono-source,
-longer-clip/release, stereo-IR and dry probes isolate the residual to the
-browser's low-level IR-speed path, not source width or the IR kernel; the 0.99
-threshold is unchanged. The earlier interpolation and kernel-stretch attempts
-were removed.
+unchanged gates. A source-unity-speed variant's full 2-second window remains
+diagnostic (`correlation:null`, 0.9893): with `.irspeed(.5)` and a unity source
+the deployed player itself renders near-silence (peak 0.000305 versus 0.767 at
+IR speed 1), and native also renders near-silence (peak 0.00033). The 1.5-second
+active portion now gates at **0.99165 correlation and 1.11516 RMS ratio** with
+the unchanged thresholds; shorter 0.6/1.0-second windows were worse (0.9814 and
+0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes isolate the
+residual tail to the browser's low-level IR-speed path, not source width or the
+IR kernel. The earlier interpolation and kernel-stretch attempts were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

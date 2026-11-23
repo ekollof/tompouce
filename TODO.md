@@ -403,8 +403,12 @@ and measured divergences are recorded in the archive.
       the near-silent IR-speed edges: 0-0.5 s 0.966-0.989 at RMS 1.24-1.13,
       0.5-1.6 s 0.989-0.997 at 1.08-1.13, and 1.7-2.0 s 0.944-0.986 at
       1.30-1.32. The absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so
-      only correlation misses, by 0.00065; modeling the browser's phase-vocoder
-      IR edge envelope is the remaining work. Shorter 0.6/1.0 s windows were
+      only correlation misses, by 0.00065. `diag-ir-tail` (0.2 ms source)
+      isolates the sub-unity IR tail and matches at 0.99918/1.032 over the
+      full 2 s, so the resampler and IR edge are not the residual; the
+      deployed `adjustLength` is the backward index resampler native mirrors,
+      not a phase vocoder. The remaining difference is the 1 s source's
+      room-send envelope at the onset and tail. Shorter 0.6/1.0 s windows were
       worse (0.9814/0.9889).
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed

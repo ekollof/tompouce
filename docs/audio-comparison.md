@@ -1071,9 +1071,15 @@ body: 0-0.5 s correlates 0.966-0.989 with native/browser RMS 1.24-1.13,
 absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so only the correlation
 misses, by 0.00065. Shorter 0.6/1.0 second windows were worse (0.9814 and
 0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes isolate
-the edge envelope to the browser's low-level IR-speed path, not source width
-or the IR kernel; modeling that phase-vocoder edge envelope is the remaining
-work. The earlier interpolation and kernel-stretch attempts were removed.
+the residual to the browser's low-level IR-speed path, not source width or
+the IR kernel. `diag-ir-tail` narrows it further with a 0.2 ms source that
+isolates the sub-unity IR tail: the full 2 s matches at **0.99918/1.032**
+(per-100 ms 0.9980-0.9998, native/browser ratio 1.057->1.012), so the
+resampler and IR edge are not the residual. The deployed `adjustLength` is the
+backward index resampler native already mirrors, not a phase vocoder. The
+remaining source-unity edge difference is the 1 s source's room-send envelope
+at the onset and tail. The earlier interpolation and kernel-stretch attempts
+were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

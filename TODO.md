@@ -422,7 +422,9 @@ and measured divergences are recorded in the archive.
       the steady `.05-.6 s` section passes at **0.99977/1.00363** with the
       unchanged thresholds via the harness `windowStart` option. The full
       0.6-second window remains diagnostic at 0.682 because the first ~50 ms
-      graph onset does not match. Other targets keep their static value and log
+      graph onset does not match. A 50 ms native base-cutoff hold was tested
+      and rejected: full window 0.6076, steady gate 0.9580, so the onset is not
+      an LFO application delay. Other targets keep their static value and log
       one `LFO modulation is implemented only for gain and cutoff` warning.
       Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.

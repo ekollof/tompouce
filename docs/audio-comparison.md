@@ -575,9 +575,11 @@ response over `.05-.6 s` gates at **0.99977 correlation and 1.00363 RMS ratio**
 with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
 `windowStart` option). The full 0.6-second window remains diagnostic at 0.682
 because the first ~50 ms graph onset does not match; the full-window case stays
-`correlation:null`. A tap on the deployed graph confirms the LFO control signal
-is the expected `-480..500` triangle. Other non-gain/cutoff targets keep their
-static value and log one
+`correlation:null`. A 50 ms native base-cutoff hold was tested and rejected:
+the full window fell to 0.6076 and the steady gate to 0.9580, so the onset is
+not an LFO application delay. A tap on the deployed graph confirms the LFO
+control signal is the expected `-480..500` triangle. Other non-gain/cutoff
+targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
 Filter-specific `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width
 LFO and tremolo are separate supported controls with their own gates.

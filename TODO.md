@@ -383,8 +383,10 @@ and measured divergences are recorded in the archive.
       long modulation uses a bounded conservative connection deadline;
       distinguish these limits from established PCM parity. A later run of the
       hosted player also drifted the `fx-nested-` gates to 0.8177 correlation
-      with unchanged native PCM; reconcile that site change without relaxing
-      the gates. See
+      at lag zero with unchanged native PCM; a lag scan reaches 0.9998 at
+      -10 samples with an RMS ratio of 1.17, so the site now delays ordinary
+      oscillator FX chains and changes their level. Reconcile that site change
+      without relaxing the gates. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

@@ -4092,10 +4092,36 @@ static void do_command_or_ai(const char *text) {
         snprintf(tmp, sizeof(tmp), "%s", text+1);
         char *save = NULL;
         char *cmd = strtok_r(tmp, " \t", &save);
-        if (cmd && strcmp(cmd,"reference")==0) {
+        enum {
+            CMD_REFERENCE, CMD_BPM, CMD_VOLUME, CMD_TUTOR, CMD_PLAY,
+            CMD_STOP, CMD_COMPANION, CMD_HYDRA, CMD_CLEAR, CMD_RESCAN,
+            CMD_SAVE, CMD_LOAD, CMD_SONG, CMD_INLINE, CMD_GRAPHICS,
+            CMD_THEME, CMD_SCOPE, CMD_WRAP
+        };
+        static const struct { const char *name; int command; } command_names[] = {
+            {"reference",CMD_REFERENCE}, {"bpm",CMD_BPM},
+            {"volume",CMD_VOLUME}, {"tutor",CMD_TUTOR},
+            {"tutor!",CMD_TUTOR}, {"play",CMD_PLAY}, {"stop",CMD_STOP},
+            {"companion",CMD_COMPANION}, {"hydra",CMD_HYDRA},
+            {"clear",CMD_CLEAR}, {"rescan",CMD_RESCAN}, {"save",CMD_SAVE},
+            {"load",CMD_LOAD}, {"song",CMD_SONG}, {"inline",CMD_INLINE},
+            {"graphics",CMD_GRAPHICS}, {"theme",CMD_THEME},
+            {"scope",CMD_SCOPE}, {"wrap",CMD_WRAP}
+        };
+        int command = -1;
+        if (cmd)
+            for (unsigned i=0;i<sizeof(command_names)/sizeof(command_names[0]);i++)
+                if (!strcmp(cmd,command_names[i].name)) {
+                    command=command_names[i].command;
+                    break;
+                }
+        switch (command) {
+        case CMD_REFERENCE: {
             const char *query=save?save:"";while(*query==' ' || *query=='\t') query++;
             reference_open(query);
-        } else if (cmd && strcmp(cmd,"bpm")==0) {
+            break;
+        }
+        case CMD_BPM: {
             char *a = strtok_r(NULL, " \t", &save);
             if (a) {
                 char *end; double bpm=strtod(a,&end);
@@ -4103,7 +4129,9 @@ static void do_command_or_ai(const char *text) {
                     audio_set_bpm(bpm); snprintf(status_msg,256,"BPM %.0f",audio_get_bpm());
                 } else snprintf(status_msg,256,"BPM must be a nonnegative finite number");
             }
-        } else if (cmd && !strcmp(cmd,"volume")) {
+            break;
+        }
+        case CMD_VOLUME: {
             char *arg=strtok_r(NULL," \t",&save), *extra=strtok_r(NULL," \t",&save);
             if (!arg && !extra)output_volume_status();
             else {
@@ -4113,14 +4141,22 @@ static void do_command_or_ai(const char *text) {
                     snprintf(status_msg,sizeof(status_msg),"usage: /volume 0..1");
                 else output_volume_status();
             }
-        } else if (cmd && (!strcmp(cmd,"tutor") || !strcmp(cmd,"tutor!"))) {
+            break;
+        }
+        case CMD_TUTOR: {
             if (strtok_r(NULL," \t",&save)) snprintf(status_msg,sizeof(status_msg),"usage: /tutor[!]");
             else tutor_open(cmd[5]=='!');
-        } else if (cmd && strcmp(cmd,"play")==0) {
+            break;
+        }
+        case CMD_PLAY: {
             if (!audio_is_playing()) do_perform();
-        } else if (cmd && strcmp(cmd,"stop")==0) {
+            break;
+        }
+        case CMD_STOP: {
             scheduler_transport_set(0); snprintf(status_msg,256,"stopped");
-        } else if (cmd && strcmp(cmd,"companion")==0) {
+            break;
+        }
+        case CMD_COMPANION: {
             char *arg = strtok_r(NULL," \t",&save);
             char *extra = strtok_r(NULL," \t",&save);
             if (extra || (arg && strcmp(arg,"stop") && strcmp(arg,"start"))) {
@@ -4131,7 +4167,9 @@ static void do_command_or_ai(const char *text) {
                 int port = mcp_companion_port();
                 snprintf(status_msg,256,port && companion_start(port) ? "companion starting (URL in console)" : "companion unavailable (see console)");
             }
-        } else if (cmd && strcmp(cmd,"hydra")==0) {
+            break;
+        }
+        case CMD_HYDRA: {
             char *arg = strtok_r(NULL," \t",&save);
             char *extra = strtok_r(NULL," \t",&save);
             if (extra || (arg && strcmp(arg,"stop") && strcmp(arg,"start"))) {
@@ -4142,22 +4180,32 @@ static void do_command_or_ai(const char *text) {
                 int port = mcp_companion_port();
                 snprintf(status_msg,256,port && hydra_start(port) ? "hydra starting (URL in console)" : "hydra unavailable (see console)");
             }
-        } else if (cmd && strcmp(cmd,"clear")==0) {
+            break;
+        }
+        case CMD_CLEAR: {
             replace_code_with("");
             log_console("Code cleared");
-        } else if (cmd && strcmp(cmd,"rescan")==0) {
+            break;
+        }
+        case CMD_RESCAN: {
             smp_invalidate();
             if (banks_rescan()) snprintf(status_msg, 256, "rescanning banks...");
             else snprintf(status_msg, 256, "indexing already running");
-        } else if (cmd && strcmp(cmd,"save")==0) {
+            break;
+        }
+        case CMD_SAVE: {
             char path[sizeof(project_path)];
             while (save && isspace((unsigned char)*save)) save++;
             if (command_path(save?save:"",path,sizeof(path))) project_save(*path?path:NULL);
-        } else if (cmd && strcmp(cmd,"load")==0) {
+            break;
+        }
+        case CMD_LOAD: {
             char path[sizeof(project_path)];
             while (save && isspace((unsigned char)*save)) save++;
             if (command_path(save?save:"",path,sizeof(path))) project_load(*path?path:NULL,0);
-        } else if (cmd && strcmp(cmd,"song")==0) {
+            break;
+        }
+        case CMD_SONG: {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) {
                 scheduler_song_toggle();
@@ -4173,7 +4221,9 @@ static void do_command_or_ai(const char *text) {
                 log_console("Unknown song arg: %s (on/off/hold)", a);
             }
             snprintf(status_msg, 256, scheduler_song_on() ? "song on" : "song off");
-        } else if (cmd && strcmp(cmd, "inline") == 0) {
+            break;
+        }
+        case CMD_INLINE: {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) inline_visuals = !inline_visuals;
             else if (!strcmp(a,"on")) inline_visuals = 1;
@@ -4182,7 +4232,9 @@ static void do_command_or_ai(const char *text) {
             view_top = 0;
             save_editor_config();
             snprintf(status_msg,sizeof(status_msg),"inline visuals %s",inline_visuals ? "on" : "off");
-        } else if (cmd && strcmp(cmd, "graphics") == 0) {
+            break;
+        }
+        case CMD_GRAPHICS: {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a || !strcmp(a,"auto")) graphics_disabled = 0;
             else if (!strcmp(a,"braille")) graphics_disabled = 1;
@@ -4191,14 +4243,18 @@ static void do_command_or_ai(const char *text) {
             graphics_redraw = 1;
             if (!graphics_disabled && !graphics_supported) graphics_probe();
             snprintf(status_msg,sizeof(status_msg),"inline graphics %s",graphics_disabled ? "braille" : "auto");
-        } else if (cmd && strcmp(cmd, "theme") == 0) {
+            break;
+        }
+        case CMD_THEME: {
             char *a = strtok_r(NULL, " \t", &save);
             int mode=-1;
             if (a) for (int i=0;i<4;i++) if (!strcmp(a,theme_modes[i])) mode=i;
             if (mode<0) { log_console("theme off|omarchy|pywal|auto"); return; }
             theme_mode=mode; theme_poll(1); save_editor_config();
             snprintf(status_msg,sizeof(status_msg),"theme %s",theme_modes[mode]);
-        } else if (cmd && strcmp(cmd, "scope") == 0) {
+            break;
+        }
+        case CMD_SCOPE: {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) editor_scope = !editor_scope;
             else if (!strcmp(a,"on")) editor_scope = 1;
@@ -4206,7 +4262,9 @@ static void do_command_or_ai(const char *text) {
             else { log_console("scope on|off"); return; }
             save_editor_config();
             snprintf(status_msg,sizeof(status_msg),"editor scope %s",editor_scope ? "on" : "off");
-        } else if (cmd && strcmp(cmd, "wrap") == 0) {
+            break;
+        }
+        case CMD_WRAP: {
             char *a = strtok_r(NULL, " \t", &save);
             if (!a) editor_wrap = !editor_wrap;
             else if (strcmp(a, "on") == 0) editor_wrap = 1;
@@ -4216,8 +4274,12 @@ static void do_command_or_ai(const char *text) {
             view_col = 0;
             save_editor_config();
             snprintf(status_msg, 256, editor_wrap ? "wrap on" : "wrap off (scroll)");
-        } else {
+            break;
+        }
+        default: {
             log_console("Unknown command: %s", text);
+            break;
+        }
         }
         return;
     }

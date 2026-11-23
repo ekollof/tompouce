@@ -1013,8 +1013,11 @@ covers routing, ratio and pan gain. Default source distortion now follows the
 deployed `expm1(distort)` processor; `fx-source-distort` measures
 0.999999999/1.00006, `fx-pattern-distort` 0.99954/1.127 and
 `fx-overlap-source-distort` 0.99993/1.065. Chorus is a no-op and its source,
-pattern and overlap gates pass at 0.9999999+. Remaining controls above are
-still outside.
+pattern and overlap gates pass at 0.9999999+. Pattern ADSR and speed controls
+are ignored by the deployed player; `fx-pattern-adsr`,
+`fx-overlap-source-adsr`, `fx-pattern-speed` and `fx-overlap-source-speed`
+pass at 0.9999997+ and leave source values in force. Remaining note/bank and
+string controls above are still outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

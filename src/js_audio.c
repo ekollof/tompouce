@@ -503,7 +503,10 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 !strcmp(name,"delaysync") || !strcmp(name,"delayfeedback") ||
                 !strcmp(name,"ir") || !strcmp(name,"irspeed") ||
                 !strcmp(name,"irbegin") || !strcmp(name,"roomfade") ||
-                !strcmp(name,"roomlp") || !strcmp(name,"roomdim")))
+                !strcmp(name,"roomlp") || !strcmp(name,"roomdim") ||
+                !strcmp(name,"attack") || !strcmp(name,"decay") ||
+                !strcmp(name,"sustain") || !strcmp(name,"release") ||
+                !strcmp(name,"speed")))
                 continue;
             if (pattern && !strcmp(name,"gain")) {
                 double value=0;

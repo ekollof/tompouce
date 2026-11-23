@@ -919,6 +919,15 @@ static void test_fx_shared_routing(void) {
     assert(event.dsp.p[DSP_SHAPE]==0);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(60).s('sine').FX(attack(.1).decay(.2)"
+        ".sustain(.5).release(.3).speed(.5))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.att-.001)<1e-9 && fabs(event.dec-.05)<1e-9 &&
+        fabs(event.sus-.6)<1e-9 && fabs(event.rel-.01)<1e-9);
+    assert(fabs(event.smp_speed-1)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("note(60).s('sine').FX(lpf(800), lpf(1200))",&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));

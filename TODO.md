@@ -409,12 +409,17 @@ and measured divergences are recorded in the archive.
       0.99954/1.127 and `fx-overlap-source-distort` 0.99993/1.065. The
       deployed player exposes no chorus control, so source, pattern and
       overlap chorus are no-ops; their gates pass at 0.9999999+.
-- [ ] Remaining source controls. ADSR, speed, note/sample/bank and
-      string-valued controls remain outside. Callable argument replay is
-      intentionally absent because the current site ignores it; revisit if
-      that changes. Very long modulation uses a bounded conservative
-      connection deadline; distinguish these limits from established PCM
-      parity. See
+- [x] ADSR and speed FX controls. Pattern `attack`/`decay`/`sustain`/
+      `release`/`speed` are ignored by the deployed player, leaving source
+      values/defaults in force. `fx-pattern-adsr`, `fx-overlap-source-adsr`,
+      `fx-pattern-speed` and `fx-overlap-source-speed` all pass at
+      0.9999997+ with RMS ratios near 1.0003; `test_javascript` checks the
+      event fields stay at their source/default values.
+- [ ] Remaining source controls. Note, sample/bank selection and string-valued
+      controls remain outside. Callable argument replay is intentionally absent
+      because the current site ignores it; revisit if that changes. Very long
+      modulation uses a bounded conservative connection deadline; distinguish
+      these limits from established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

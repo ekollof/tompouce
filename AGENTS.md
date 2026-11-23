@@ -241,6 +241,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   build large `if`/`else` chains, use `switch`/`case`; use C11 facilities where
   they fit. Keep functions focused and
   state within its owning module; use `strtok_r` in reentrant/multilayer parsers.
+- Avoid unsafe coding practices: use bounded string functions and explicit
+  length checks, and check size arithmetic and allocations for overflow before
+  writing or reserving memory.
 - Validate external JSON, terminal/AI input, environment values and paths for
   type, length and range. Bound copies and writes, verify termination, and check
   allocation and API failures. Do not use unbounded string operations.

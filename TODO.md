@@ -779,9 +779,10 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       `switch`/`case` instead of large `if`/`else` chains, C11 facilities where
       they fit, focused functions and state owned by its module. Converted so
       far: `audio.c` note parsing, drum token/instrument dispatch, LFO
-      wave/target, oscillator DSP selection, and the pattern distortion
-      variant/table dispatch. Remaining large string dispatches in `tui.c`,
-      `mcp.c`, `websamp.c`, `js_audio.c`, `dsp.c`, `sampler.c` and `midi.c`.
+      wave/target, oscillator DSP selection, the pattern distortion
+      variant/table dispatch, and `tui.c` search-mode key dispatch. Remaining
+      large dispatches include `tui.c` command/palette handling, `mcp.c` tool
+      dispatch, `websamp.c`, `js_audio.c`, `dsp.c`, `sampler.c` and `midi.c`.
 
 ## Terminal blockers awaiting upstream
 

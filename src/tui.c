@@ -4697,44 +4697,70 @@ void tui_run(void) {
 
         if (search_mode) {
             int nrows = search_ndirs + (search_path[0] ? 1 : 0);
-            if (ch == 27 || ch == ((int)NCKEY_F00+(6))) { search_mode = 0; continue; }
-            else if (ch == (int)NCKEY_LEFT || ch == (int)NCKEY_RIGHT) {
+            switch (ch) {
+            case 27:
+            case (int)NCKEY_F00+6:
+                search_mode = 0;
+                break;
+            case (int)NCKEY_LEFT:
+            case (int)NCKEY_RIGHT: {
                 int direction = ch == (int)NCKEY_RIGHT ? 1 : -1;
                 int previous = search_category;
                 search_category = (search_category+1+direction+SOUND_CATEGORIES+2)%(SOUND_CATEGORIES+2)-1;
                 if (previous == SOUND_IMPORT || search_category == SOUND_IMPORT) {
                     search_buf[0] = 0; search_len = 0;
                 }
-                search_path[0] = 0; search_sel = 0; search_dirty = 1; continue;
+                search_path[0] = 0; search_sel = 0; search_dirty = 1;
+                break;
             }
-            else if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
+            case (int)NCKEY_ENTER:
+            case '\n':
+            case '\r':
                 search_descend_or_use();
-                continue;
-            } else if (ch == 9) {
+                break;
+            case 9: {
                 int t = search_row_target();
                 if (t >= 0 && t < search_ndirs && search_rows[t].kind==SOUND_ROW_BANK) {
                     search_use_bank(search_dirs[t]);
                     search_mode = 0;
                 } else search_descend_or_use();
-                continue;
-            } else if (ch == (int)NCKEY_UP) { if (search_sel > 0) search_sel--; continue; }
-            else if (ch == (int)NCKEY_DOWN) {
+                break;
+            }
+            case (int)NCKEY_UP:
+                if (search_sel > 0) search_sel--;
+                break;
+            case (int)NCKEY_DOWN:
                 if (search_sel < nrows - 1) search_sel++;
-                continue;
-            } else if (ch == (int)NCKEY_PGDOWN) { search_sel += 10; if (search_sel > nrows - 1) search_sel = nrows - 1; continue; }
-            else if (ch == (int)NCKEY_PGUP) { search_sel -= 10; if (search_sel < 0) search_sel = 0; continue; }
-            else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_len > 0) {
-                search_len--;
-                while (search_len > 0 && ((unsigned char)search_buf[search_len]&0xc0) == 0x80) search_len--;
-                search_buf[search_len] = 0; search_sel = 0; search_dirty = 1; continue;
-            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_path[0]) {
-                search_ascend();
-                continue;
-            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && search_category >= 0) {
-                search_category = -1; search_sel = 0; search_dirty = 1; continue;
-            } else if (ch >= 32 && ch < 127 && search_len < 240) {
-                search_buf[search_len++] = (char)ch; search_buf[search_len] = 0;
-                search_sel = 0; search_dirty = 1; continue;
+                break;
+            case (int)NCKEY_PGDOWN:
+                search_sel += 10;
+                if (search_sel > nrows - 1) search_sel = nrows - 1;
+                break;
+            case (int)NCKEY_PGUP:
+                search_sel -= 10;
+                if (search_sel < 0) search_sel = 0;
+                break;
+            case (int)NCKEY_BACKSPACE:
+            case 127:
+            case 8:
+                if (search_len > 0) {
+                    search_len--;
+                    while (search_len > 0 && ((unsigned char)search_buf[search_len]&0xc0) == 0x80)
+                        search_len--;
+                    search_buf[search_len] = 0; search_sel = 0; search_dirty = 1;
+                } else if (search_path[0]) {
+                    search_ascend();
+                } else if (search_category >= 0) {
+                    search_category = -1; search_sel = 0; search_dirty = 1;
+                }
+                break;
+            default:
+                if (ch >= 32 && ch < 127 && search_len < 240) {
+                    search_buf[search_len++] = (char)ch;
+                    search_buf[search_len] = 0;
+                    search_sel = 0; search_dirty = 1;
+                }
+                break;
             }
             continue;
         }

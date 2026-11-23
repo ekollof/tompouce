@@ -435,29 +435,40 @@ static void test_analysers(void) {
     next_voice_onset = HUGE_VAL;
 }
 
-/* analyze/fft are event controls, not DSP parameters; scheduling them must
-   not produce the unknown-control warning. */
+/* analyze/fft, LV2 presets/state/parameters are event controls, not DSP
+   parameters; scheduling them must not produce the unknown-control warning. */
 static void test_analyser_controls_do_not_warn(void) {
     double old_time=audio_time; int old_playing=playing;
     playing=1; audio_set_reference_mode(1); audio_time=0;
     memset(voices,0,sizeof(voices));
     assert(prep_pool_start(0,0));
     event_queue_clear();
-    cJSON *metadata=NULL; char error[512];
-    JsProgram *program=javascript_compile(
-        "note(60).s(\"sine\").analyze(7).fft(4)",120,&metadata,error,sizeof(error));
-    assert(program); cJSON_Delete(metadata);
-    unsigned generation=event_queue_generation();
-    assert(js_audio_schedule(program,0,0,generation));
+    const char *patterns[]={
+        "note(60).s('sine').analyze(7).fft(4)",
+        "note(60).s('sine').lv2preset('Quiet')",
+        "note(60).s('sine').lv2state('state.ttl')",
+        "note(60).s('sine').lv2param('cut',.5)",
+        NULL};
+    for (int i=0;patterns[i];i++) {
+        cJSON *metadata=NULL; char error[512];
+        JsProgram *program=javascript_compile(patterns[i],120,&metadata,error,
+            sizeof(error));
+        assert(program); cJSON_Delete(metadata);
+        unsigned generation=event_queue_generation();
+        assert(js_audio_schedule(program,0,0,generation));
+        javascript_free(program);
+    }
     int warned=0;
     for (int i=0;i<console_count_get();i++) {
         const char *line=console_line(i);
         if (strstr(line,"control 'analyze' is not implemented") ||
-            strstr(line,"control 'fft' is not implemented")) warned=1;
+            strstr(line,"control 'fft' is not implemented") ||
+            strstr(line,"control 'lv2preset' is not implemented") ||
+            strstr(line,"control 'lv2state' is not implemented") ||
+            strstr(line,"control 'lv2param_cut' is not implemented")) warned=1;
     }
     assert(!warned);
     event_queue_clear();
-    javascript_free(program);
     prep_pool_stop();
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }

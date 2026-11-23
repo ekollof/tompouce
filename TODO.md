@@ -209,6 +209,11 @@ license blocker), driven over JACK + MIDI CC + OSC with no engine changes.
       per-plugin crash isolation does not take down playback. Discovery reads
       control-port metadata for all safe plugins — 3155 ports across 219 plugins
       on this box.
+- [x] Native LV2/Carla control warning cleanup. `lv2preset`, `lv2state`,
+      `carlaProject`, `carlaTarget` and the `lv2param_*` prefix are valid event
+      controls rather than unknown fields. `warn_unknown_controls` now accepts
+      them, and `test_audio` schedules each form and checks the console ring
+      for `control '...' is not implemented`.
 - [x] One instrument and one effect behind pinned reference gates, plus
       failure tests (missing/broken plugin, dead worker, preset rejection) and
       sanitizer coverage of the host glue. The instrument side has a pinned

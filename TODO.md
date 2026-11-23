@@ -633,6 +633,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       (0.76x) on this box, so it is not used by the audio path. The scalar C
       path remains; this kernel needs a block/batch layout before it can pay
       for conversion and call overhead.
+- [x] Four-lane polyBLEP saw AVX2 kernel. `src/oscillator_simd.c` is
+      byte-exact against four scalar `dsp_oscillator` calls in `test_dsp`
+      (including forced direct AVX2 calls); 2,000,000 groups measured
+      **53.008 ms C vs 13.096 ms AVX2 (4.05x)**. SoA saw lanes now use the
+      runtime-selected kernel; `test_soa_voice` remains exact and forced
+      `TOMPOUCE_SIMD=c`/`avx2` runs pass.
 - [x] Four-lane ADSR AVX2 candidate measured. `src/envelope_simd.c` is
       byte-exact against four scalar `dsp_envelope` calls in `test_dsp`
       (including forced direct AVX2 calls), but 2,000,000 groups measured

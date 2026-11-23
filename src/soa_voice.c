@@ -1,4 +1,5 @@
 #include "soa_voice.h"
+#include "oscillator_simd.h"
 #include "common.h"
 #include <math.h>
 #include <string.h>
@@ -147,7 +148,8 @@ static int process_supersaw_lane(SoaVoiceLane *lane, int sub, double time,
 }
 
 static int process_synth_lane(SoaVoiceLane *lane, int sub, double time,
-                              double *in_l) {
+                              double *in_l, double saw_sample,
+                              int has_saw_sample) {
     if (!lane->released && time>=lane->note_off_time) {
         lane->released=1;
         lane->release_start_level=lane->env;
@@ -160,7 +162,8 @@ static int process_synth_lane(SoaVoiceLane *lane, int sub, double time,
     double sample;
     switch (lane->kind) {
         case SOA_KIND_SINE: sample=sin(lane->phase); break;
-        case SOA_KIND_SAW: sample=dsp_oscillator(0,lane->phase,lane->freq,.5); break;
+        case SOA_KIND_SAW: sample=has_saw_sample?saw_sample:
+            dsp_oscillator(0,lane->phase,lane->freq,.5); break;
         case SOA_KIND_SQUARE: sample=dsp_oscillator(1,lane->phase,lane->freq,
             lane->pw>=0?lane->pw:.5); break;
         default: sample=dsp_oscillator(2,lane->phase,lane->freq,.5); break;
@@ -189,6 +192,18 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
         for (unsigned frame=0;frame<frames;frame++) {
             double in_l[4]={0}, in_r[4]={0};
             double result_l[4]={0}, result_r[4]={0};
+            double saw_phase[4]={0}, saw_freq[4]={0}, saw_value[4]={0};
+            int any_saw=0;
+            for (int sub=0;sub<4;sub++) {
+                int index=group*4+sub;
+                SoaVoiceLane *lane=&bank->lanes[index];
+                if (lane->active && lane->kind==SOA_KIND_SAW) {
+                    saw_phase[sub]=lane->phase;
+                    saw_freq[sub]=lane->freq;
+                    any_saw=1;
+                }
+            }
+            if (any_saw) dsp_saw4(saw_phase,saw_freq,saw_value);
             unsigned rendered=0, stereo=0;
             for (int sub=0;sub<4;sub++) {
                 int index=group*4+sub;
@@ -206,7 +221,8 @@ void soa_voice_bank_process(SoaVoiceBank *bank, unsigned frames,
                     ok=process_supersaw_lane(lane,sub,times[frame],in_l,in_r);
                     if (ok) stereo=1;
                 } else {
-                    ok=process_synth_lane(lane,sub,times[frame],in_l);
+                    ok=process_synth_lane(lane,sub,times[frame],in_l,
+                        saw_value[sub],lane->kind==SOA_KIND_SAW);
                 }
                 if (!ok) continue;
                 rendered|=1u<<sub;

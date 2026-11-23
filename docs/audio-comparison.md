@@ -172,6 +172,10 @@ A four-lane ADSR AVX2 kernel (`src/envelope_simd.c`) was also measured and
 rejected: it is byte-exact against four scalar `dsp_envelope` calls, but
 2,000,000 groups took 41.1 ms versus 7.69 ms for C (0.19x). The branchy
 per-lane envelope path stays scalar.
+A four-lane polyBLEP saw AVX2 kernel is byte-exact against four scalar
+`dsp_oscillator` calls and 2,000,000 groups took **13.096 ms versus 53.008 ms
+for C (4.05x)**. SoA saw lanes now use the runtime-selected kernel; forced
+`TOMPOUCE_SIMD=c` and `avx2` runs preserve the same PCM.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

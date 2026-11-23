@@ -477,10 +477,12 @@ through the tail, with measured pan feed gains of 1.423 center, 1.86 half pan
 and 2.012 full pan; `fx-overlap-source-room` and the panned gate pass at
 0.9999994/0.9938 and 0.9999991/1.00056. Source distortion follows the
 deployed `expm1(distort)` processor; source chorus is a no-op. Pattern ADSR
-and speed controls are ignored, leaving source values in force. Remaining
-note/bank/string controls remain outside. The graph/effect boundary is
-covered: a `K()` source does not receive the chain's default gain, while
-`audioin()` worklet effects and ordinary sources do.
+and speed controls are ignored, leaving source values in force. Pattern
+`note`, `n`, `s`, `bank` and string `ftype` are ignored too, leaving source
+frequency, token and filter type unchanged. The FX `distorttype('fold')`
+string remains a level diagnostic. The graph/effect boundary is covered: a
+`K()` source does not receive the chain's default gain, while `audioin()`
+worklet effects and ordinary sources do.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

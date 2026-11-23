@@ -1016,8 +1016,11 @@ deployed `expm1(distort)` processor; `fx-source-distort` measures
 pattern and overlap gates pass at 0.9999999+. Pattern ADSR and speed controls
 are ignored by the deployed player; `fx-pattern-adsr`,
 `fx-overlap-source-adsr`, `fx-pattern-speed` and `fx-overlap-source-speed`
-pass at 0.9999997+ and leave source values in force. Remaining note/bank and
-string controls above are still outside.
+pass at 0.9999997+ and leave source values in force. Pattern `note`, `n`,
+`s`, `bank` and string `ftype` are also ignored (`fx-pattern-note`, `-n`,
+`-s`, `-bank`, `-ftype-string`), leaving the source frequency, token and
+filter type unchanged. The FX `distorttype('fold')` string remains a level
+diagnostic.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

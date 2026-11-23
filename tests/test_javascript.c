@@ -1,5 +1,6 @@
 #include "javascript.h"
 #include "js_audio.h"
+#include "audio.h"
 #include "slider.h"
 #include "common.h"
 #include <assert.h>
@@ -926,6 +927,22 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.att-.001)<1e-9 && fabs(event.dec-.05)<1e-9 &&
         fabs(event.sus-.6)<1e-9 && fabs(event.rel-.01)<1e-9);
     assert(fabs(event.smp_speed-1)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').FX(note(72).n(2)"
+        ".s('saw').bank('RolandTR909'))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.freq-midi_to_freq(60))<1e-9);
+    assert(!strcmp(event.token,"sine"));
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('saw').FX(ftype('24db').lpf(800))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.p[DSP_FTYPE]==0 && event.fx_stage_count==1);
+    assert(event.fx_stages[0].type==AUDIO_FX_LPF &&
+        fabs(event.fx_stages[0].a-800)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
     haps=query("note(60).s('sine').FX(lpf(800), lpf(1200))",&program);

@@ -415,8 +415,14 @@ and measured divergences are recorded in the archive.
       `fx-pattern-speed` and `fx-overlap-source-speed` all pass at
       0.9999997+ with RMS ratios near 1.0003; `test_javascript` checks the
       event fields stay at their source/default values.
-- [ ] Remaining source controls. Note, sample/bank selection and string-valued
-      controls remain outside. Callable argument replay is intentionally absent
+- [x] Note/source/bank and string filter controls. Pattern `note`, `n`, `s`,
+      `bank` and string `ftype` are ignored by the deployed player, leaving
+      source values in force. `fx-pattern-note`, `-n`, `-s`, `-bank` and
+      `-ftype-string` pass at 0.9990+; `test_javascript` checks the source
+      frequency, token and filter type stay unchanged.
+- [ ] Remaining FX string algorithm control. `distorttype('fold')` in a
+      pattern still differs in level (0.99969 correlation, 1.336 RMS ratio),
+      so it stays diagnostic. Callable argument replay is intentionally absent
       because the current site ignores it; revisit if that changes. Very long
       modulation uses a bounded conservative connection deadline; distinguish
       these limits from established PCM parity. See

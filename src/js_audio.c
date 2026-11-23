@@ -506,7 +506,9 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 !strcmp(name,"roomlp") || !strcmp(name,"roomdim") ||
                 !strcmp(name,"attack") || !strcmp(name,"decay") ||
                 !strcmp(name,"sustain") || !strcmp(name,"release") ||
-                !strcmp(name,"speed")))
+                !strcmp(name,"speed") || !strcmp(name,"note") ||
+                !strcmp(name,"n") || !strcmp(name,"s") ||
+                !strcmp(name,"bank")))
                 continue;
             if (pattern && !strcmp(name,"gain")) {
                 double value=0;

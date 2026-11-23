@@ -867,14 +867,16 @@ int note_name_to_midi(const char *name) {
     const char *p = name;
     char note = tolower((unsigned char)*p++);
     int semitone = 0;
-    if (note == 'c') semitone = 0;
-    else if (note == 'd') semitone = 2;
-    else if (note == 'e') semitone = 4;
-    else if (note == 'f') semitone = 5;
-    else if (note == 'g') semitone = 7;
-    else if (note == 'a') semitone = 9;
-    else if (note == 'b') semitone = 11;
-    else return 60;
+    switch (note) {
+    case 'c': semitone = 0; break;
+    case 'd': semitone = 2; break;
+    case 'e': semitone = 4; break;
+    case 'f': semitone = 5; break;
+    case 'g': semitone = 7; break;
+    case 'a': semitone = 9; break;
+    case 'b': semitone = 11; break;
+    default: return 60;
+    }
     // accidental
     while (*p == '#' || *p == 'b' || *p == 's' || *p == 'f') {
         if (*p == '#') { semitone++; p++; }
@@ -1364,12 +1366,17 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
             base[col - ev->token] = 0;
             tok = base;
         }
-        if (strcmp(tok, "bd")==0) v->inst = INST_KICK;
-        else if (strcmp(tok, "sd")==0 || strcmp(tok, "sn")==0) v->inst = INST_SNARE;
-        else if (strcmp(tok, "hh")==0 || strcmp(tok, "hat")==0) v->inst = INST_HH;
-        else if (strcmp(tok, "cp")==0 || strcmp(tok, "clap")==0) v->inst = INST_CP;
-        else if (strcmp(tok, "tom")==0) v->inst = INST_TOM;
-        else v->inst = INST_HH;
+        static const struct { const char *name; int inst; } drum_names[] = {
+            {"bd",INST_KICK}, {"sd",INST_SNARE}, {"sn",INST_SNARE},
+            {"hh",INST_HH}, {"hat",INST_HH}, {"cp",INST_CP},
+            {"clap",INST_CP}, {"tom",INST_TOM}
+        };
+        v->inst = INST_HH;
+        for (unsigned i=0;i<sizeof(drum_names)/sizeof(drum_names[0]);i++)
+            if (!strcmp(tok,drum_names[i].name)) {
+                v->inst=drum_names[i].inst;
+                break;
+            }
     }
     v->freq = ev->freq > 0 ? ev->freq : 440.0;
     v->amp = ev->dsp.enabled ? ev->gain : (ev->gain > 0 ? ev->gain : 0.8);
@@ -2766,7 +2773,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                        incoming target plus 250 ms regardless of type. */
                     double drum_fade = retiring_envelope(V,1.0);
                     // per-drum envelope
-                    if (V->inst == INST_KICK) {
+                    switch (V->inst) {
+                    case INST_KICK: {
                         double t = age;
                         double dur = 0.35;
                         if (t >= dur) { V->active = 0; continue; }
@@ -2779,7 +2787,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         V->phase += (2*M_PI * V->freq)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI)) * env;
                         mix_voice(V,s*V->amp*.9*drum_fade,vm);
-                    } else if (V->inst == INST_SNARE) {
+                        break;
+                    }
+                    case INST_SNARE: {
                         double t = age;
                         double dur = 0.25;
                         if (t >= dur) { V->active = 0; continue; }
@@ -2789,7 +2799,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double tone = wt_sample(V->wt, 200.0*audio_time); // fixed 200
                         double s = (0.7*noise + 0.3*tone)*env;
                         mix_voice(V,s*V->amp*.7*drum_fade,vm);
-                    } else if (V->inst == INST_HH) {
+                        break;
+                    }
+                    case INST_HH: {
                         double t = age;
                         double dur = 0.08;
                         if (t >= dur) { V->active = 0; continue; }
@@ -2800,7 +2812,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double hp = noise - prev; prev = noise*0.5 + prev*0.5; // crude
                         double s = hp*env;
                         mix_voice(V,s*V->amp*.5*drum_fade,vm);
-                    } else if (V->inst == INST_CP) {
+                        break;
+                    }
+                    case INST_CP: {
                         double t = age;
                         double dur = 0.2;
                         if (t >= dur) { V->active = 0; continue; }
@@ -2808,7 +2822,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double s = noise*env;
                         mix_voice(V,s*V->amp*.6*drum_fade,vm);
-                    } else if (V->inst == INST_TOM) {
+                        break;
+                    }
+                    case INST_TOM: {
                         double t = age;
                         double dur = 0.3;
                         if (t >= dur) { V->active = 0; continue; }
@@ -2817,6 +2833,10 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         V->phase += (2*M_PI * pitch)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI))*env;
                         mix_voice(V,s*V->amp*.8*drum_fade,vm);
+                        break;
+                    }
+                    default:
+                        break;
                     }
                 } else {
                     // synth with ADSR gate until note_off
@@ -2868,27 +2888,39 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double u = V->lfo_phase / (2.0 * M_PI);
                         u -= floor(u);
                         double lfo;
-                        if (V->lfo_wave == 1) lfo = sin(V->lfo_phase);
-                        else if (V->lfo_wave == 2) lfo = 2.0 * u - 1.0;
-                        else if (V->lfo_wave == 3) lfo = (u < 0.5) ? 1.0 : -1.0;
-                        else lfo = (u < 0.5) ? (4.0 * u - 1.0) : (3.0 - 4.0 * u);
+                        switch (V->lfo_wave) {
+                        case 1: lfo = sin(V->lfo_phase); break;
+                        case 2: lfo = 2.0 * u - 1.0; break;
+                        case 3: lfo = (u < 0.5) ? 1.0 : -1.0; break;
+                        default:
+                            lfo = (u < 0.5) ? (4.0 * u - 1.0) : (3.0 - 4.0 * u);
+                            break;
+                        }
                         V->lfo_phase += (2.0 * M_PI * V->lfo_hz) / SR;
                         if (V->lfo_phase > 2.0 * M_PI)
                             V->lfo_phase -= 2.0 * M_PI * floor(V->lfo_phase / (2.0 * M_PI));
-                        if (V->lfo_tgt == 1) {
+                        switch (V->lfo_tgt) {
+                        case 1: {
                             double semi = lfo * V->lfo_depth;
                             if (semi > 24.0) semi = 24.0;
                             if (semi < -24.0) semi = -24.0;
                             freq *= pow(2.0, semi / 12.0);
-                        } else if (V->lfo_tgt == 2) {
+                            break;
+                        }
+                        case 2:
                             amp *= 1.0 + lfo * V->lfo_depth;
                             if (amp < 0.0) amp = 0.0;
-                        } else if (V->lfo_tgt == 3) {
+                            break;
+                        case 3:
                             if (fc <= 0.0) fc = 1000.0;
                             fc += lfo * V->lfo_depth;
-                        } else if (V->lfo_tgt == 4) {
+                            break;
+                        case 4:
                             if (pwuse < 0.0) pwuse = 0.5;
                             pwuse += lfo * V->lfo_depth;
+                            break;
+                        default:
+                            break;
                         }
                     }
                     // oscillator
@@ -2947,9 +2979,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         default: sample = sin(V->phase)*sine_gain; break;
                     }
                     if (V->dsp.control.enabled) {
-                        if (V->inst == INST_SAW) sample = dsp_oscillator(0,V->phase,render_freq,.5);
-                        else if (V->inst == INST_SQUARE) sample = dsp_oscillator(1,V->phase,render_freq,pwuse >= 0 ? pwuse : .5);
-                        else if (V->inst == INST_TRI) sample = dsp_oscillator(2,V->phase,render_freq,.5);
+                        switch (V->inst) {
+                        case INST_SAW:
+                            sample=dsp_oscillator(0,V->phase,render_freq,.5);
+                            break;
+                        case INST_SQUARE:
+                            sample=dsp_oscillator(1,V->phase,render_freq,
+                                pwuse >= 0 ? pwuse : .5);
+                            break;
+                        case INST_TRI:
+                            sample=dsp_oscillator(2,V->phase,render_freq,.5);
+                            break;
+                        default:
+                            break;
+                        }
                     }
                     if (V->lpf_hz > 0.0 || V->lfo_tgt == 3) {
                         double base = (V->lfo_tgt == 3) ? fc : V->lpf_hz;

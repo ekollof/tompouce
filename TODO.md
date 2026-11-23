@@ -777,7 +777,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 - [ ] Code style sweep. Audit the C sources against AGENTS.md: KNF style,
       `switch`/`case` instead of large `if`/`else` chains, C11 facilities where
-      they fit, focused functions and state owned by its module.
+      they fit, focused functions and state owned by its module. Converted so
+      far: `audio.c` note parsing, drum token/instrument dispatch, LFO
+      wave/target, oscillator DSP selection, and the pattern distortion
+      variant/table dispatch. Remaining large string dispatches in `tui.c`,
+      `mcp.c`, `websamp.c`, `js_audio.c`, `dsp.c`, `sampler.c` and `midi.c`.
 
 ## Terminal blockers awaiting upstream
 

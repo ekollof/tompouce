@@ -407,9 +407,13 @@ and measured divergences are recorded in the archive.
       isolates the sub-unity IR tail and matches at 0.99918/1.032 over the
       full 2 s, so the resampler and IR edge are not the residual; the
       deployed `adjustLength` is the backward index resampler native mirrors,
-      not a phase vocoder. The remaining difference is the 1 s source's
-      room-send envelope at the onset and tail. Shorter 0.6/1.0 s windows were
-      worse (0.9814/0.9889).
+      not a phase vocoder. The .03 source peaks at 3e-4, about ten int16
+      levels, so the browser capture is quantization-limited: the same path
+      at gain 1 (peak 0.011) gates the full 2 s as
+      `shared-room-lifetime-rate-half-source-unity-gain` at
+      **0.999988/0.9959**. The residual was the 16-bit capture floor, not a
+      room-send envelope. The .03 full window stays diagnostic; shorter
+      0.6/1.0 s windows were worse (0.9814/0.9889).
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the

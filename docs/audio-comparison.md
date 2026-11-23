@@ -386,8 +386,9 @@ all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
 timeouts remain failures. The full fractional room-switch tail and full
 2-second source-unity tail remain diagnostic; the 1.8-second active
-source-unity portion gates at 0.99029, both deterministic rooms of the switch
-gate at 0.99935 and 0.99556, and the seeded Arpoon opening gates at 0.99986.
+source-unity portion gates at 0.99029, the same IR path at gain 1 gates the
+full 2 s at 0.999988, both deterministic rooms of the switch gate at 0.99935
+and 0.99556, and the seeded Arpoon opening gates at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
 composition (112818) without rewriting its source. Its four-cycle event
@@ -1070,16 +1071,19 @@ body: 0-0.5 s correlates 0.966-0.989 with native/browser RMS 1.24-1.13,
 1.30-1.32. The full window's RMS ratio 1.12449 is inside 0.85-1.15 and the
 absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so only the correlation
 misses, by 0.00065. Shorter 0.6/1.0 second windows were worse (0.9814 and
-0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes isolate
-the residual to the browser's low-level IR-speed path, not source width or
-the IR kernel. `diag-ir-tail` narrows it further with a 0.2 ms source that
-isolates the sub-unity IR tail: the full 2 s matches at **0.99918/1.032**
-(per-100 ms 0.9980-0.9998, native/browser ratio 1.057->1.012), so the
-resampler and IR edge are not the residual. The deployed `adjustLength` is the
-backward index resampler native already mirrors, not a phase vocoder. The
-remaining source-unity edge difference is the 1 s source's room-send envelope
-at the onset and tail. The earlier interpolation and kernel-stretch attempts
-were removed.
+0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes point at
+the browser's low-level IR-speed path, not source width or the IR kernel.
+`diag-ir-tail` isolates the sub-unity IR tail with a 0.2 ms source: the full
+2 s matches at **0.99918/1.032** (per-100 ms 0.9980-0.9998, ratio
+1.057->1.012), so the resampler and IR edge are not the residual. The deployed
+`adjustLength` is the backward index resampler native already mirrors, not a
+phase vocoder. The .03 source peaks at 3e-4, about ten int16 levels, so its
+browser capture is quantization-limited: the same IR path at `.gain(1)`
+(peak 0.011) gates over the full 2 s at **0.999988/0.9959**
+(`shared-room-lifetime-rate-half-source-unity-gain`). The residual was the
+16-bit capture floor, not a room-send envelope. The .03 full window stays
+diagnostic and the 1.8 s active portion gates at 0.99029. The earlier
+interpolation, kernel-stretch and envelope models were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

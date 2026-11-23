@@ -4827,30 +4827,63 @@ void tui_run(void) {
             continue;
         }
         if (file_mode) {
-            if (ch == 27) { file_mode = 0; continue; }
-            else if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
+            switch (ch) {
+            case 27:
+                file_mode = 0;
+                break;
+            case (int)NCKEY_ENTER:
+            case '\n':
+            case '\r':
                 file_confirm();
-                continue;
-            } else if (ch == (int)NCKEY_UP) { if (file_sel > 0) file_sel--; continue; }
-            else if (ch == (int)NCKEY_DOWN) {
+                break;
+            case (int)NCKEY_UP:
+                if (file_sel > 0) file_sel--;
+                break;
+            case (int)NCKEY_DOWN:
                 if (file_sel < file_n - 1) file_sel++;
-                continue;
-            } else if (ch == (int)NCKEY_PGDOWN) { if (file_n > 0) { file_sel += 10; if (file_sel > file_n - 1) file_sel = file_n - 1; } continue; }
-            else if (ch == (int)NCKEY_PGUP) { if (file_n > 0) { file_sel -= 10; if (file_sel < 0) file_sel = 0; } continue; }
-            else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && file_len > 0) {
-                file_len--; file_buf[file_len] = 0; file_sel = 0; file_dirty = 1; continue;
-            } else if (ch >= 32 && ch < 127 && file_len < 240) {
-                char c = (char)ch;
-                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                    (c >= '0' && c <= '9') || strchr("_.-", c)) {
-                    file_buf[file_len++] = c; file_buf[file_len] = 0;
-                    file_sel = 0; file_dirty = 1; continue;
+                break;
+            case (int)NCKEY_PGDOWN:
+                if (file_n > 0) {
+                    file_sel += 10;
+                    if (file_sel > file_n - 1) file_sel = file_n - 1;
                 }
+                break;
+            case (int)NCKEY_PGUP:
+                if (file_n > 0) {
+                    file_sel -= 10;
+                    if (file_sel < 0) file_sel = 0;
+                }
+                break;
+            case (int)NCKEY_BACKSPACE:
+            case 127:
+            case 8:
+                if (file_len > 0) {
+                    file_len--;
+                    file_buf[file_len] = 0;
+                    file_sel = 0;
+                    file_dirty = 1;
+                }
+                break;
+            default:
+                if (ch >= 32 && ch < 127 && file_len < 240) {
+                    char c = (char)ch;
+                    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || strchr("_.-", c)) {
+                        file_buf[file_len++] = c;
+                        file_buf[file_len] = 0;
+                        file_sel = 0;
+                        file_dirty = 1;
+                    }
+                }
+                break;
             }
             continue;
         }
         if (input_mode) {
-            if (ch == (int)NCKEY_ENTER || ch == '\n' || ch == '\r') {
+            switch (ch) {
+            case (int)NCKEY_ENTER:
+            case '\n':
+            case '\r':
                 input_buf[input_len] = 0;
                 if (input_len > 0) {
                     if (input_mode==2) command_execute(input_buf);
@@ -4860,21 +4893,36 @@ void tui_run(void) {
                 input_len = 0;
                 input_buf[0] = 0;
                 input_mode = 0;
-            } else if (ch == 27) {
+                break;
+            case 27:
                 input_mode = 0;
                 input_len = 0;
                 input_buf[0] = 0;
-            } else if ((ch == (int)NCKEY_BACKSPACE || ch == 127 || ch == 8) && input_len > 0) {
-                input_len=vi_prev(input_buf,input_len);
-                input_buf[input_len] = 0;
-            } else if (ch==9 || ch==2102 || ch==0) {
+                break;
+            case (int)NCKEY_BACKSPACE:
+            case 127:
+            case 8:
+                if (input_len > 0) {
+                    input_len=vi_prev(input_buf,input_len);
+                    input_buf[input_len] = 0;
+                }
+                break;
+            case 9:
+            case 2102:
+            case 0:
                 (void)command_complete(ch==2102);
-            } else if (ch==21) {
-                input_len=0; input_buf[0]=0;
-            } else if (ch >= 32 && ch <= 255 && ch!=127 &&
-                       input_len < (input_mode==2?(int)sizeof(input_buf)-1:AI_PROMPT_MAX)) {
-                input_buf[input_len++] = (char)ch;
-                input_buf[input_len] = 0;
+                break;
+            case 21:
+                input_len=0;
+                input_buf[0]=0;
+                break;
+            default:
+                if (ch >= 32 && ch <= 255 && ch!=127 &&
+                    input_len < (input_mode==2?(int)sizeof(input_buf)-1:AI_PROMPT_MAX)) {
+                    input_buf[input_len++] = (char)ch;
+                    input_buf[input_len] = 0;
+                }
+                break;
             }
             continue;
         }

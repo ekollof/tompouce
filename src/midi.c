@@ -1113,19 +1113,29 @@ static void *midi_input_worker(void *arg) {
             snd_seq_event_t *event = NULL;
             if (snd_seq_event_input(seq, &event) < 0 || !event) break;
             double at = audio_time_now();
-            if (event->type == SND_SEQ_EVENT_NOTEON)
-                midi_input_event(0, event->data.note.channel, event->data.note.note, event->data.note.velocity, at,
-                    event->source.client, event->source.port);
-            else if (event->type == SND_SEQ_EVENT_NOTEOFF)
+            switch (event->type) {
+            case SND_SEQ_EVENT_NOTEON:
+                midi_input_event(0, event->data.note.channel, event->data.note.note,
+                    event->data.note.velocity, at, event->source.client, event->source.port);
+                break;
+            case SND_SEQ_EVENT_NOTEOFF:
                 midi_input_event(0, event->data.note.channel, event->data.note.note, 0, at,
                     event->source.client, event->source.port);
-            else if (event->type == SND_SEQ_EVENT_CONTROLLER)
-                midi_input_event(1, event->data.control.channel, event->data.control.param, event->data.control.value, at,
-                    event->source.client, event->source.port);
-            else if (event->type == SND_SEQ_EVENT_PORT_EXIT || event->type == SND_SEQ_EVENT_CLIENT_EXIT ||
-                event->type == SND_SEQ_EVENT_PORT_UNSUBSCRIBED || event->type == SND_SEQ_EVENT_PORT_START ||
-                event->type == SND_SEQ_EVENT_CLIENT_START)
+                break;
+            case SND_SEQ_EVENT_CONTROLLER:
+                midi_input_event(1, event->data.control.channel, event->data.control.param,
+                    event->data.control.value, at, event->source.client, event->source.port);
+                break;
+            case SND_SEQ_EVENT_PORT_EXIT:
+            case SND_SEQ_EVENT_CLIENT_EXIT:
+            case SND_SEQ_EVENT_PORT_UNSUBSCRIBED:
+            case SND_SEQ_EVENT_PORT_START:
+            case SND_SEQ_EVENT_CLIENT_START:
                 midi_announce_event(event);
+                break;
+            default:
+                break;
+            }
         }
     }
     free(fds);

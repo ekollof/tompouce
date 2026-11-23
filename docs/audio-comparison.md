@@ -577,7 +577,9 @@ with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
 because the first ~50 ms graph onset does not match; the full-window case stays
 `correlation:null`. The same pattern without `.lfo()` matches the complete
 0.6-second window at 0.99999995, isolating the residual to the LFO graph onset.
-A 50 ms native base-cutoff hold was tested and rejected:
+The pattern without any lowpass peaks at 0.2336 in the browser, below the
+0.39985 LFO-case peak, so the onset is a filter overshoot rather than the dry
+source passing through. A 50 ms native base-cutoff hold was tested and rejected:
 the full window fell to 0.6076 and the steady gate to 0.9580. A 50 ms
 unfiltered hold was also rejected: full window 0.5459, steady 0.8557. The
 onset is therefore not a simple delayed or bypassed LFO; it is a more complex
@@ -593,7 +595,15 @@ LFO `AudioParam` connected last at time 0; the first filter quanta are
 RMS 0.106/0.281/0.372/0.398 then decay to 0.019 by the ninth quantum, which is
 a filter transient rather than the source. A one-quantum base hold improves
 the full correlation to 0.8336 but overshoots (RMS 2.52, peak 1.0) and is
-rejected. Other non-gain/cutoff targets keep their static value and log one
+rejected. Ramping the held LFO influence over eight quanta removes the rail and
+improves the steady gate to 0.99994/0.99970, but the full window falls to
+0.6658; a one-quantum ramp overshoots to peak 0.84 and full -0.28. Resetting
+the biquad state at the hold boundary selects the best full-window result of
+0.779 (two-quantum ramp, peak 0.743); tuning the ramp to match the browser
+peak (`0.398` at 1.5 quanta) gives 0.017. Neither smoothing nor a state reset
+reaches the unchanged gate, so the remaining gap is the browser's time-varying
+biquad state/coefficient handling rather than the LFO control signal.
+Other non-gain/cutoff targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
 versus static PCM. Filter-specific

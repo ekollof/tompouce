@@ -43,6 +43,12 @@ typedef struct {
 typedef struct StretchBuffer StretchBuffer;
 
 #define AUDIO_LV2_PARAMS_MAX 8
+#define AUDIO_FX_STAGES_MAX 16
+enum { AUDIO_FX_LPF, AUDIO_FX_HPF, AUDIO_FX_BPF, AUDIO_FX_PAN };
+typedef struct {
+    int type;
+    double a, b; /* filter: cutoff/Q; pan: normalized -1..1 */
+} AudioFxStage;
 typedef struct {
     char name[64];
     float value;
@@ -148,6 +154,8 @@ typedef struct {
     double lfo_hz;
     double lfo_depth;
     DspParams dsp;
+    int fx_stage_count;
+    AudioFxStage fx_stages[AUDIO_FX_STAGES_MAX];
 } AudioEvent;
 
 #endif

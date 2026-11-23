@@ -15,6 +15,10 @@ typedef struct Voice {
     DspState dsp_right;
     int stereo_filter_type; /* -1 or single filter type for persistent lanes */
     DspBiquad2 stereo_filter;
+    int fx_stage_count;
+    int route_fx_stereo;
+    AudioFxStage fx_stages[AUDIO_FX_STAGES_MAX];
+    DspBiquad fx_filters[2][AUDIO_FX_STAGES_MAX];
     int active;
     int out_target; /* 0 default, 1..4 named output streams */
     int analyser_id, analyser_fft; /* per-pattern analyser tap */

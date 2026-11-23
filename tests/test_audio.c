@@ -526,6 +526,44 @@ static void test_live_scope_attachment(void) {
     cJSON_Delete(haps); javascript_free(program); memset(voices,0,sizeof(voices));
 }
 
+/* Pattern FX filters/pans are post-source stages. A single FX filter must
+   match the source filter path, and an FX pan must match source pan. */
+static void render_code(const char *code, float *output) {
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile(code,120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    cJSON *haps=javascript_query_audio(program,0,1,.5);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    AudioEvent event;
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,2,&event));
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); audio_time=0; playing=1;
+    audio_trigger_event(&event);
+    pa_callback(NULL,output,256,NULL,0,NULL);
+    cJSON_Delete(haps); javascript_free(program);
+}
+
+static void test_pattern_fx_chain_pcm(void) {
+    int old_playing=playing, old_reference=audio_reference_mode();
+    float source_filter[512], fx_filter[512], source_pan[512], fx_pan[512];
+    audio_set_reference_mode(1);
+    render_code("note(69).s('sine').gain(.32).clip(.1).lpf(800)",
+        source_filter);
+    render_code("note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))",
+        fx_filter);
+    for (int i=0;i<512;i++)
+        assert(fabs(source_filter[i]-fx_filter[i])<1e-12);
+    render_code("note(69).s('sine').gain(.32).clip(.1).pan(.5)",
+        source_pan);
+    render_code("note(69).s('sine').gain(.4).clip(.1).FX(pan(.5))",
+        fx_pan);
+    for (int i=0;i<512;i++)
+        assert(fabs(source_pan[i]-fx_pan[i])<1e-12);
+    memset(voices,0,sizeof(voices)); active_voice_reset(); soa_bank_reset();
+    event_queue_clear(); playing=old_playing;
+    audio_set_reference_mode(old_reference);
+}
+
 static void test_supersaw_callback(void) {
     memset(voices,0,sizeof(voices)); playing=1;
     AudioEvent event={.inst=INST_SUPERSAW,.smp=-1,.freq=440,.gain=.2,
@@ -1138,6 +1176,7 @@ int main(void) {
     test_pattern_scopes();
     test_analysers();
     test_live_scope_attachment();
+    test_pattern_fx_chain_pcm();
     test_supersaw_callback();
     test_stereo_filter_playback();
     bench_stereo_filter_callback();

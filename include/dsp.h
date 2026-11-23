@@ -108,6 +108,9 @@ double dsp_filter_frequency_values(double cutoff, double depth, double anchor,
     double age, double gate);
 /* Coefficients for a cached cutoff/Q pair and biquad type. */
 void dsp_filter_q(DspBiquad *filter, int type, double hz, double q);
+/* Scalar biquad step with the same operation order and non-finite reset as
+   dsp_process. Used by post-source FX filter stages. */
+double dsp_biquad_process(DspBiquad *filter, double sample);
 /* Returns the single active filter type (0 low-pass, 1 high-pass, 2 band-pass)
    when no other per-sample effect can change the signal, else -1. */
 int dsp_single_filter(const DspState *state);

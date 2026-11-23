@@ -334,6 +334,12 @@ void dsp_filter_q(DspBiquad *filter, int type, double hz, double q) {
     coefficients(filter,type,hz,q);
 }
 
+static double biquad(DspBiquad *f, double x);
+
+double dsp_biquad_process(DspBiquad *filter, double sample) {
+    return biquad(filter,sample);
+}
+
 int dsp_single_filter(const DspState *state) {
     if (!state || !state->control.enabled || !state->effects_active) return -1;
     const double *p=state->control.p;

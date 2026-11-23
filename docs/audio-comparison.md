@@ -991,15 +991,19 @@ kernel changes and the graph/effect FX boundary now have independent checks.
 The eviction/reconnection checks use `test_audio`: a retired source's shared
 delay samples survive pool saturation and a same-orbit dry source; changing the
 prepared delay time keeps the line and reads it at the new offset; a fallback
-room tail survives source retirement. Pattern `FX(...)` controls replay on the event, while callable arguments are
-ignored by the current site and retain only the chain's default 0.8 gain;
-`test_javascript`/`test_audio` cover the graph-source boundary and a live
-room+filter+pan+coarse+shape+distort+chorus edit during an active delay tail.
-The replay also covers crush, postgain, phaser, tremolo, compressor, FM
-operator/envelope/matrix, IR/room and canonical numeric DSP controls; pattern
-`partials`/`phases` arrays flatten in the event value, loop-window PCM is
-diagnostic, overlapping post-source stages are not modeled separately, and
-ADSR/speed/note/sample/bank/string controls remain outside.
+room tail survives source retirement. Pattern `FX(...)` controls replay on the
+event, while callable arguments are ignored by the current site and retain only
+the chain's default 0.8 gain. Pattern filters and pan are post-source stages
+before source pan; source filter plus FX filter, multiple FX filter arguments
+and source pan plus FX pan have `fx-overlap-` gates at 0.9999988+ and ratios
+near 1.0003. `test_javascript`/`test_audio` cover the graph-source boundary and
+a live room+filter+pan+coarse+shape+distort+chorus edit during an active delay
+tail. The replay also covers crush, postgain, phaser, tremolo, compressor, FM
+operator/envelope/matrix, IR/room and canonical numeric DSP controls. Pattern
+`partials` arrays flatten to a numeric control and loop windows are ignored by
+the site; both have parity gates. Overlapping source/FX stages for room,
+delay, shape, distort and chorus, plus ADSR/speed/note/sample/bank/string
+controls, remain outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
@@ -1183,10 +1187,14 @@ Pattern arguments (`FX(lpf(800), ...)`) carry serializable controls; the JS
 query layer materializes both forms into bounded `_fxSteps` (at most 8 chains,
 32 steps each) and the native renderer replays pattern controls. Four new
 `fx-pattern-` gain/lpf/pan/coarse gates pass at correlations 0.99999967+ and
-RMS ratios near 1.0003. The two `fx-nested-` callable-argument cases pass
-unchanged at 0.99999997/1.0003 because native now ignores their steps and
-applies only the default gain. Pattern partial arrays, loop-window PCM and
-overlapping post-source stages remain open. No threshold or baseline changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
+RMS ratios near 1.0003. Four `fx-overlap-` gates cover source filter plus FX
+filter, two FX filter arguments, source pan plus FX pan and source coarse plus
+FX coarse at 0.9999988+ and ratios near 1.0003. `fx-pattern-partials`
+(0.9990/0.9939) and `fx-pattern-loop` (0.99999994/1.0003) cover the site's
+flattened partials and ignored FX loop windows. The two `fx-nested-` callable
+cases pass unchanged at 0.99999997/1.0003. Remaining overlap is limited to
+room/delay/shape/distort/chorus and the source-level controls above. No
+threshold or baseline changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
 source replaces the oscillator or sample outside the FX chain, and the deployed
 renderer does not apply the chain's default gain there. The native renderer now
 skips that gain for graph sources while keeping it for `audioin()` worklet

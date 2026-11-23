@@ -373,27 +373,31 @@ and measured divergences are recorded in the archive.
       steps and keeps only the chain's default 0.8 gain. New `fx-pattern-`
       gain/lpf/pan/coarse gates pass at correlations 0.99999967+ with RMS
       ratios near 1.0003; both `fx-nested-` gates pass unchanged at
-      0.99999997. Pattern loop fields are covered by `test_javascript`, but
-      loop-window PCM remains diagnostic.
+      0.99999997.
 - [x] Fractional IR-rate parity. `convolution_resample_ir` reproduces the web
       `adjustLength` index math, including truncation and the negative-index
       path for rates below unity. `test_convolution_prepare` pins `.5/.75/2/
       -2/0/1`; new browser gates `shared-room-lifetime-rate-half` and
       `-rate-threequarter` measure correlations **0.99999999/0.99999998** at
       the unchanged 0.99 correlation and 0.85-1.15 RMS thresholds.
-- [ ] Real post-source FX chain for pattern-form FX. Current event-level
-      replay overrides source controls instead of composing stages. Diagnostics
-      `fx-overlap-source-lpf` 0.9356, `fx-overlap-multi-lpf` 0.8175 and
-      `fx-overlap-source-pan` 0.8164; `fx-overlap-source-coarse` already
-      matches 0.99999997. Add bounded filter/pan/gain stages and browser gates.
-- [ ] Pattern `partials`/`phases` arrays flatten to a number in the event
-      value, and pattern loop-window PCM remains diagnostic (correlation
-      0.947). Cover both with browser gates after the post-source chain exists.
-- [ ] ADSR, speed, note/sample/bank and string-valued FX controls remain
-      outside replay. Callable argument replay is intentionally absent because
-      the current site ignores it; revisit if that changes. Very long
-      modulation uses a bounded conservative connection deadline; distinguish
-      these limits from established PCM parity. See
+- [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
+      `pan` stages run in recorded order before source pan, with independent
+      left/right filter state. Source filter plus FX filter, multiple FX filter
+      arguments and source pan plus FX pan now pass `fx-overlap-` gates at
+      correlations 0.9999988+ and RMS ratios near 1.0003. Each FX argument
+      applies its own default 0.8 gain, so two-argument chains compose.
+      Coarse remains event-level and matches 0.99999997.
+- [x] Pattern partials/loop windows. The site flattens `partials` arrays to a
+      numeric control and does not apply them as arrays; it also ignores source
+      loop windows in pattern FX. Native matches with `fx-pattern-partials`
+      (0.9990/0.9939) and `fx-pattern-loop` (0.99999994/1.0003) gates.
+- [ ] Post-source composition for `room`/`delay`/`shape`/`distort`/`chorus`
+      and other effect stages that overlap source controls. ADSR, speed,
+      note/sample/bank and string-valued FX controls remain outside replay.
+      Callable argument replay is intentionally absent because the current
+      site ignores it; revisit if that changes. Very long modulation uses a
+      bounded conservative connection deadline; distinguish these limits from
+      established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

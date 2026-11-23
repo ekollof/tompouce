@@ -435,6 +435,26 @@ static const cJSON *fx_step_array(const cJSON *step, int position) {
     return cJSON_IsArray(arg)?arg:NULL;
 }
 
+static int fx_filter_type(int operation) {
+    switch (operation) {
+    case FX_OP_LPF: case FX_OP_LPQ: return AUDIO_FX_LPF;
+    case FX_OP_HPF: case FX_OP_HPQ: return AUDIO_FX_HPF;
+    case FX_OP_BPF: case FX_OP_BPQ: return AUDIO_FX_BPF;
+    default: return -1;
+    }
+}
+
+static void fx_add_stage(AudioEvent *ev, int type, double a, double b) {
+    if (ev->fx_stage_count>=AUDIO_FX_STAGES_MAX) return;
+    ev->fx_stages[ev->fx_stage_count++]=(AudioFxStage){type,a,b};
+}
+
+static int fx_last_filter_stage(const AudioEvent *ev, int type) {
+    for (int i=ev->fx_stage_count-1;i>=0;i--)
+        if (ev->fx_stages[i].type==type) return i;
+    return -1;
+}
+
 /* Apply query-time FX(...) chains. The deployed renderer ignores callable
    arguments (they arrive as empty control objects) and keeps the chain's
    default 0.8 gain; pattern arguments carry serializable controls and replay
@@ -454,8 +474,9 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         cJSON_GetObjectItemCaseSensitive(program,"effect"):NULL;
     if (cJSON_IsString(kind) && !strcmp(kind->valuestring,"graph") &&
         !cJSON_IsTrue(effect)) return;
-    double chain_gain = .8;
     for (int i = 0; i < count; i++) {
+        double chain_gain = .8;
+        double pending_q[3] = {1,1,1};
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
             cJSON_GetArrayItem(chains,i),"steps");
         if (!cJSON_IsArray(steps)) continue;
@@ -513,6 +534,11 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (operation<0) {
                     if (!dsp_parameter_lookup(name,&dsp_index,&dsp_min,&dsp_max))
                         continue;
+                    /* Source loop windows in an FX pattern are not applied by
+                       the deployed renderer; they stay source defaults. */
+                    if (pattern && (dsp_index==DSP_LOOP ||
+                        dsp_index==DSP_LOOPBEGIN || dsp_index==DSP_LOOPEND))
+                        continue;
                     double value=0;
                     if (!fx_arg_number(step,0,&value)) continue;
                     value=value<dsp_min?dsp_min:value>dsp_max?dsp_max:value;
@@ -552,10 +578,22 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=.98) ev->delay_fb=value;
                 break;
             case FX_OP_LPF:
-                if (value>=0 && value<=20000) ev->dsp.p[DSP_LPF]=value;
+                if (value>=0 && value<=20000) {
+                    if (pattern) {
+                        int type=fx_filter_type(operation);
+                        fx_add_stage(ev,type,value,pending_q[type]);
+                        pending_q[type]=1;
+                    } else ev->dsp.p[DSP_LPF]=value;
+                }
                 break;
             case FX_OP_LPQ:
-                if (value>=.05 && value<=50) ev->dsp.p[DSP_LPQ]=value;
+                if (value>=.05 && value<=50) {
+                    if (pattern) {
+                        int at=fx_last_filter_stage(ev,AUDIO_FX_LPF);
+                        if (at>=0) ev->fx_stages[at].b=value;
+                        else pending_q[AUDIO_FX_LPF]=value;
+                    } else ev->dsp.p[DSP_LPQ]=value;
+                }
                 break;
             case FX_OP_LPA:
                 if (value>=0 && value<=30) ev->dsp.p[DSP_LPA]=value;
@@ -573,10 +611,21 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=-16 && value<=16) ev->dsp.p[DSP_LPE]=value;
                 break;
             case FX_OP_HPF:
-                if (value>=0 && value<=20000) ev->dsp.p[DSP_HPF]=value;
+                if (value>=0 && value<=20000) {
+                    if (pattern) {
+                        fx_add_stage(ev,AUDIO_FX_HPF,value,pending_q[AUDIO_FX_HPF]);
+                        pending_q[AUDIO_FX_HPF]=1;
+                    } else ev->dsp.p[DSP_HPF]=value;
+                }
                 break;
             case FX_OP_HPQ:
-                if (value>=.05 && value<=50) ev->dsp.p[DSP_HPQ]=value;
+                if (value>=.05 && value<=50) {
+                    if (pattern) {
+                        int at=fx_last_filter_stage(ev,AUDIO_FX_HPF);
+                        if (at>=0) ev->fx_stages[at].b=value;
+                        else pending_q[AUDIO_FX_HPF]=value;
+                    } else ev->dsp.p[DSP_HPQ]=value;
+                }
                 break;
             case FX_OP_HPA:
                 if (value>=0 && value<=30) ev->dsp.p[DSP_HPA]=value;
@@ -594,10 +643,21 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=-16 && value<=16) ev->dsp.p[DSP_HPE]=value;
                 break;
             case FX_OP_BPF:
-                if (value>=0 && value<=20000) ev->dsp.p[DSP_BPF]=value;
+                if (value>=0 && value<=20000) {
+                    if (pattern) {
+                        fx_add_stage(ev,AUDIO_FX_BPF,value,pending_q[AUDIO_FX_BPF]);
+                        pending_q[AUDIO_FX_BPF]=1;
+                    } else ev->dsp.p[DSP_BPF]=value;
+                }
                 break;
             case FX_OP_BPQ:
-                if (value>=.05 && value<=50) ev->dsp.p[DSP_BPQ]=value;
+                if (value>=.05 && value<=50) {
+                    if (pattern) {
+                        int at=fx_last_filter_stage(ev,AUDIO_FX_BPF);
+                        if (at>=0) ev->fx_stages[at].b=value;
+                        else pending_q[AUDIO_FX_BPF]=value;
+                    } else ev->dsp.p[DSP_BPQ]=value;
+                }
                 break;
             case FX_OP_BPA:
                 if (value>=0 && value<=30) ev->dsp.p[DSP_BPA]=value;
@@ -616,8 +676,11 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             case FX_OP_PAN:
                 if (value>=0 && value<=1) {
-                    ev->pan=value*2-1;
-                    ev->has_pan=1;
+                    if (pattern) fx_add_stage(ev,AUDIO_FX_PAN,value*2-1,0);
+                    else {
+                        ev->pan=value*2-1;
+                        ev->has_pan=1;
+                    }
                 }
                 break;
             case FX_OP_COARSE:
@@ -782,9 +845,9 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 break;
             }
         }
+        ev->gain *= chain_gain;
     }
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
-    ev->gain *= chain_gain;
 }
 
 static int audio_event_values(const cJSON *hap, double origin, double seconds, AudioEvent *ev, int include_ducks) {

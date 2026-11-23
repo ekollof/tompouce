@@ -438,7 +438,8 @@ static int soa_kind_for(const Voice *v) {
 }
 
 static int soa_bank_eligible(const Voice *v) {
-    if (!v->active || v->retiring || v->stretch_buffer) return 0;
+    if (!v->active || v->retiring || v->stretch_buffer ||
+        v->fx_stage_count>0) return 0;
     if (native_synth_effect(v->native_program)) return 0;
     if (!v->dsp.control.enabled) return 0;
     int filter_type=-1;
@@ -1320,6 +1321,11 @@ static void cache_routing(Voice *v) {
         v->route_room = 0;
         v->route_room_size = -1;
     }
+    int source_stereo = v->smp_channels==2 || v->inst==INST_SUPERSAW ||
+        v->inst==INST_PULSE || native_synth_stereo(v->native_program);
+    /* FX stages run before the source pan matrix, matching the deployed
+       source -> FX -> panner order. */
+    v->route_fx_stereo = source_stereo;
     v->route_ll = ll; v->route_lr = lr; v->route_rl = rl; v->route_rr = rr;
     v->route_left = left; v->route_right = right;
     v->route_delay = v->delay_send;
@@ -1477,6 +1483,20 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         }
     }
     prepare_stereo_filter(v);
+    v->fx_stage_count=ev->fx_stage_count;
+    if (v->fx_stage_count>AUDIO_FX_STAGES_MAX) v->fx_stage_count=AUDIO_FX_STAGES_MAX;
+    if (v->fx_stage_count>0) {
+        memcpy(v->fx_stages,ev->fx_stages,
+            (size_t)v->fx_stage_count*sizeof(v->fx_stages[0]));
+        for (int i=0;i<v->fx_stage_count;i++)
+            if (v->fx_stages[i].type>=AUDIO_FX_LPF &&
+                v->fx_stages[i].type<=AUDIO_FX_BPF) {
+                dsp_filter_q(&v->fx_filters[0][i],v->fx_stages[i].type,
+                    v->fx_stages[i].a,v->fx_stages[i].b);
+                dsp_filter_q(&v->fx_filters[1][i],v->fx_stages[i].type,
+                    v->fx_stages[i].a,v->fx_stages[i].b);
+            }
+    }
     cache_routing(v);
     if (v->start_time<=audio_time+1e-10) voice_onset(v);
     else next_voice_onset=fmin(next_voice_onset,v->start_time);
@@ -1947,6 +1967,81 @@ static void target_add(int target, double l, double r) {
     }
 }
 
+/* Post-source pattern FX stage chain. Source pan is applied first, then the
+   stages replay in the order recorded from FX(...). Pan follows WebAudio's
+   stereo panner law: a mono signal uses equal-power mono gains; a signal that
+   is already stereo uses the StereoPanner cross-feed law. */
+static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
+    double left_in=l, right_in=r;
+    int stereo=v->route_fx_stereo;
+    for (int i=0;i<v->fx_stage_count;i++) {
+        const AudioFxStage *stage=&v->fx_stages[i];
+        if (stage->type==AUDIO_FX_PAN) {
+            double pan=fmax(-1,fmin(1,stage->a));
+            if (!stereo) {
+                double theta=(pan+1)*M_PI/4;
+                double next_l=left_in*cos(theta);
+                double next_r=right_in*sin(theta);
+                left_in=next_l; right_in=next_r; stereo=1;
+            } else if (pan<=0) {
+                double c=cos((pan+1)*M_PI/2), s=sin((pan+1)*M_PI/2);
+                double next_l=left_in+right_in*c;
+                double next_r=right_in*s;
+                left_in=next_l; right_in=next_r;
+            } else {
+                double c=cos(pan*M_PI/2), s=sin(pan*M_PI/2);
+                double next_l=left_in*c;
+                double next_r=right_in+left_in*s;
+                left_in=next_l; right_in=next_r;
+            }
+            continue;
+        }
+        if (stage->type==AUDIO_FX_LPF || stage->type==AUDIO_FX_HPF ||
+            stage->type==AUDIO_FX_BPF) {
+            left_in=dsp_biquad_process(&v->fx_filters[0][i],left_in);
+            right_in=dsp_biquad_process(&v->fx_filters[1][i],right_in);
+        }
+    }
+    double ll=v->route_ll, lr=v->route_lr;
+    double rl=v->route_rl, rr=v->route_rr;
+    if (stereo && v->has_pan) {
+        double pan=fmax(-1,fmin(1,v->pan));
+        if (pan<=0) {
+            ll=1; lr=cos((pan+1)*M_PI/2); rl=0; rr=sin((pan+1)*M_PI/2);
+        } else {
+            ll=cos(pan*M_PI/2); lr=0; rl=sin(pan*M_PI/2); rr=1;
+        }
+    }
+    double base_l, base_r;
+    if (lr == 0 && rl == 0) {
+        base_l = left_in * ll;
+        base_r = right_in * rr;
+    } else {
+        base_l = left_in * ll + right_in * lr;
+        base_r = left_in * rl + right_in * rr;
+    }
+    double left=v->route_left, right=v->route_right;
+    if (!v->route_side_one) { base_l*=left; base_r*=right; }
+    double dry=v->route_dry;
+    unsigned scope_mask=v->scope_mask;
+    for (int i=0;scope_mask;i++,scope_mask>>=1)
+        if ((scope_mask&1u) && v->scope_generation==pattern_scope_generation[i])
+            pattern_scope_frame[i]+=(base_l+base_r)*dry*.5;
+    if (v->analyser_id>0 && v->analyser_id<=N_ANALYSERS &&
+        v->scope_generation==analyser_generation[v->analyser_id-1])
+        analyser_frame[v->analyser_id-1]+=(base_l+base_r)*dry*.5;
+    target_add(v->out_target,base_l*dry,base_r*dry);
+    if (v->out_target>0) return;
+    mix->left += base_l*dry; mix->right += base_r*dry;
+    mix->delay_l += base_l*v->route_delay;
+    mix->delay_r += base_r*v->route_delay;
+    if (v->route_dsp) {
+        double room=v->route_room;
+        mix->room_l += base_l*room; mix->room_r += base_r*room;
+        if (room > 0) mix->room_size=v->route_room_size;
+    }
+}
+
 static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     /* Routing inputs are frozen at note-on. Directly constructed voices
        (internal tests) start with route_cached == 0. */
@@ -1957,6 +2052,10 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         double span=v->graph_end-v->graph_fade_start;
         double fade=fmax(0,(v->graph_end-audio_time)/span);
         l*=fade; r*=fade;
+    }
+    if (v->fx_stage_count>0) {
+        route_voice_fx(v,l,r,mix);
+        return;
     }
     if (block_staging && v>=voices && v<voices+VOICE_SLOTS &&
         block_frame<RENDER_BLOCK_FRAMES) {
@@ -2294,7 +2393,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     int stage=1;
                     for (unsigned ai=0;ai<active_count && stage;ai++) {
                         int slot=active_slots[ai];
-                        if (voices[slot].active && voices[slot].out_target) stage=0;
+                        if (voices[slot].active &&
+                            (voices[slot].out_target || voices[slot].fx_stage_count>0))
+                            stage=0;
                     }
                     if (stage) {
                         block_staging=1;

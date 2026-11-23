@@ -397,14 +397,17 @@ and measured divergences are recorded in the archive.
       delay/IR sends are ignored by the site, so source delay remains
       (`fx-overlap-source-delay` 0.9999996/1.0005).
 - [ ] Room send composition and distort/chorus. FX room only manifests with a
-      source room and still differs in the right channel
-      (`fx-overlap-source-room` diagnostic); source distort and chorus remain
-      ungated (`fx-source-distort`/`fx-source-chorus` diagnostics). ADSR,
-      speed, note/sample/bank and string-valued controls remain outside.
-      Callable argument replay is intentionally absent because the current
-      site ignores it; revisit if that changes. Very long modulation uses a
-      bounded conservative connection deadline; distinguish these limits from
-      established PCM parity. See
+      source room; its value is ignored. For stereo sources the browser output
+      remains proportional to the source-only left room signal but gains a
+      stereo right-channel component (source R/L ratio -2 for the fixture, 2.42
+      with pan .75); mono sources show no extra. This needs a second/stereo
+      room-send model rather than another event override. Source distort and
+      chorus remain ungated (`fx-source-distort`/`fx-source-chorus`
+      diagnostics). ADSR, speed, note/sample/bank and string-valued controls
+      remain outside. Callable argument replay is intentionally absent because
+      the current site ignores it; revisit if that changes. Very long
+      modulation uses a bounded conservative connection deadline; distinguish
+      these limits from established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

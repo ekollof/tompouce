@@ -129,13 +129,12 @@ function graph(code, frequency, inputs=[]) {
   if (graphs.size>=256) graphs.delete(graphs.keys().next().value);
   graphs.set(key,result); return result;
 }
-/* Materialize FX(...) closures into bounded, serializable control steps.
-   The web renderer invokes those closures per event; JSON otherwise turns them
-   into {} and the native renderer cannot see the chain at all. Steps are
-   recorded at query time, never in the audio callback. */
+/* Materialize FX(...) chains into bounded, serializable control steps. Pattern
+   arguments carry real controls; callable arguments reach superdough as empty
+   objects and are ignored, so they only retain the chain's default gain. Steps
+   are prepared at query time, never in the audio callback. */
 const MAX_FX_STEPS = 32;
 const MAX_FX_CHAINS = 8;
-const MAX_FX_ARG_LENGTH = 32;
 const MAX_FX_ARRAY = 32;
 
 function fxArgument(value) {
@@ -148,32 +147,26 @@ function fxArgument(value) {
   return null;
 }
 
-function recordFXChain(fn) {
-  const steps = [];
-  const chain = new Proxy({}, {
-    get(target, property) {
-      if (typeof property === 'symbol' || property === 'then') return undefined;
-      return (...args) => {
-        if (steps.length < MAX_FX_STEPS && args.length <= MAX_FX_ARG_LENGTH) {
-          const values = args.map(fxArgument);
-          if (values.every(entry => entry !== null))
-            steps.push({ op: String(property), args: values });
-        }
-        return chain;
-      };
-    },
-  });
-  try { fn(chain); } catch (error) { return []; }
-  return steps;
-}
-
 export function prepareFX(value) {
   if (!value || !Array.isArray(value.FX) || !value.FX.length) return value;
   const chains = [];
   for (const effect of value.FX.slice(0, MAX_FX_CHAINS)) {
-    if (typeof effect !== 'function' || chains.length >= MAX_FX_CHAINS) continue;
-    const steps = recordFXChain(effect);
-    if (steps.length) chains.push({ steps });
+    if (chains.length >= MAX_FX_CHAINS) break;
+    /* The deployed renderer ignores callable FX arguments: they reach
+       superdough as empty control objects. Only the chain's default gain
+       remains, so record a closure marker without replayable steps. */
+    if (typeof effect === 'function') {
+      chains.push({ steps: [], closure: true });
+      continue;
+    }
+    if (!effect || typeof effect !== 'object' || Array.isArray(effect)) continue;
+    const steps = [];
+    for (const [op, entry] of Object.entries(effect)) {
+      if (steps.length >= MAX_FX_STEPS) break;
+      const arg = fxArgument(entry);
+      if (arg !== null) steps.push({ op, args: [arg] });
+    }
+    chains.push({ steps, pattern: true });
   }
   if (!chains.length) return value;
   return { ...value, _fxSteps: chains };

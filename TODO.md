@@ -322,15 +322,15 @@ and measured divergences are recorded in the archive.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
       startup now have independent web comparisons. Nested `FX(...)` chains now
       have two gated cases (`fx-nested-`, correlation 0.99999996, RMS ratio
-      1.0003): query-time materialization exposes bounded step descriptors and
-      the native renderer applies the web chain's default 0.8 gain. Four `fx-`
+      1.0003): query-time materialization exposes bounded step descriptors;
+      callable chains retain only the web chain's default 0.8 gain, while
+      pattern filter/send/pan controls replay. Four `fx-`
       gates cover the graph/effect boundary: the web does not apply that chain
       gain to a `K()` graph source, so the native renderer skips it there
       (`fx-graph-source-lpf` 0.99999997/1.0003 and `fx-graph-out-channels`
       0.99999994/1.0004) while keeping it for `audioin()` worklet effects
       (`fx-worklet-effect-gain` and `fx-worklet-effect-tail`, both
-      0.99999994/1.0004). Individual filter/send/pan steps are materialized but
-      not replayed yet. See
+      0.99999994/1.0004). See
       [Kabelsalat effect tails](docs/audio-comparison.md#kabelsalat-effect-tails-and-input-routing).
 - [x] Extend shared-effect checks beyond the 24 send/orbit/fixed-IR/lifetime
       cases: two `shared-room-source-` gates cover a panned source
@@ -366,27 +366,29 @@ and measured divergences are recorded in the archive.
       tail, then starts a live room+filter+pan+coarse+shape+distort+chorus edit
       with FM/IR values on the same orbit and verifies the delay tail remains
       audible.
-- [x] Replay loop windows, partials/phases and canonical numeric DSP controls
-      from materialized `FX(...)` steps. `dsp_parameter_lookup` shares the
-      parameter table with `dsp_params_read`; the recorder accepts bounded
-      finite arrays (32 entries). `test_javascript` covers
-      `loop`/`loopBegin`/`loopEnd`, array `partials`/`phases`, pitch, vibrato,
-      unison/spread and outer precedence.
+- [x] Match the current site's two FX argument forms. Pattern arguments
+      (`FX(gain(.5), lpf(800), pan(.5), coarse(4), ...)`) carry serializable
+      controls and replay on the event; callable arguments (`FX(x=>...)`) reach
+      the site as empty objects and are ignored, so native now ignores their
+      steps and keeps only the chain's default 0.8 gain. New `fx-pattern-`
+      gain/lpf/pan/coarse gates pass at correlations 0.99999967+ with RMS
+      ratios near 1.0003; both `fx-nested-` gates pass unchanged at
+      0.99999997. Pattern loop fields are covered by `test_javascript`, but
+      loop-window PCM remains diagnostic.
 - [x] Fractional IR-rate parity. `convolution_resample_ir` reproduces the web
       `adjustLength` index math, including truncation and the negative-index
       path for rates below unity. `test_convolution_prepare` pins `.5/.75/2/
       -2/0/1`; new browser gates `shared-room-lifetime-rate-half` and
       `-rate-threequarter` measure correlations **0.99999999/0.99999998** at
       the unchanged 0.99 correlation and 0.85-1.15 RMS thresholds.
-- [ ] Remaining graph-local source controls (gain, ADSR, speed, note/sample/
-      bank selection and string-valued controls) remain outside replay. Very
-      long modulation uses a bounded conservative connection deadline;
-      distinguish these limits from established PCM parity. A later run of the
-      hosted player also drifted the `fx-nested-` gates to 0.8177 correlation
-      at lag zero with unchanged native PCM; a lag scan reaches 0.9998 at
-      -10 samples with an RMS ratio of 1.17, so the site now delays ordinary
-      oscillator FX chains and changes their level. Reconcile that site change
-      without relaxing the gates. See
+- [ ] Remaining FX and graph-local limits: pattern `partials`/`phases` arrays
+      flatten to a number in the event value, pattern loop-window PCM is a
+      diagnostic (correlation 0.947), and post-source stages that overlap
+      source controls (source filter plus FX filter, or source room plus FX
+      room) are not modeled separately. ADSR, speed, note/sample/bank and
+      string-valued controls remain outside. Very long modulation uses a
+      bounded conservative connection deadline; distinguish these limits from
+      established PCM parity. See
       [shared sends](docs/audio-comparison.md#shared-sends-and-mono-ir-tail-width).
 - [x] Assess remaining visualization options and shared-effect tail attribution:
       documented in [visual feedback](docs/javascript.md#live-coding-and-visual-feedback)

@@ -739,8 +739,9 @@ static void test_lv2param_control(void) {
     cJSON_Delete(audio); cJSON_Delete(haps); javascript_free(program);
 }
 
-/* Materialized FX(...) closures can route shared room/delay sends. Outer
-   controls are applied after FX in the web, so they must win; K() graph sources
+/* Pattern FX controls route shared room/delay sends; callable FX arguments are
+   ignored by the current site and retain only the chain's default gain.
+   Legacy step descriptors keep outer-control precedence; K() graph sources
    remain outside the scale/gain boundary. */
 static void test_analyser_controls(void) {
     JsProgram *program=NULL;
@@ -757,17 +758,20 @@ static void test_analyser_controls(void) {
     assert(event.analyser_id==1 && event.analyser_fft==8);
     cJSON_Delete(haps); javascript_free(program);
 
-    haps=query("note(60).FX(x=>x.analyze(3).fft(2))",&program);
+    haps=query("note(60).FX(analyze(3).fft(2))",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.analyser_id==3 && event.analyser_fft==2);
     cJSON_Delete(haps); javascript_free(program);
 
-    haps=query("note(60).analyze(5).fft(4).FX(x=>x.analyze(3).fft(2))",&program);
-    assert(cJSON_GetArraySize(haps)==1);
-    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    cJSON *manual_analyser=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,"
+        "\"analyze\":5,\"fft\":4,\"_fxSteps\":[{\"steps\":["
+        "{\"op\":\"analyze\",\"args\":[3]},"
+        "{\"op\":\"fft\",\"args\":[2]}]}]}}");
+    assert(manual_analyser && js_audio_event(manual_analyser,0,1,&event));
     assert(event.analyser_id==5 && event.analyser_fft==4);
-    cJSON_Delete(haps); javascript_free(program);
+    cJSON_Delete(manual_analyser);
 
     haps=query("note(60).analyze(99).fft(99)",&program);
     assert(cJSON_GetArraySize(haps)==1);
@@ -819,9 +823,9 @@ static void test_hydra_learn_examples(void) {
 
 static void test_fx_shared_routing(void) {
     const char *code =
-        "note(60).s('sine').FX(x=>x.room(.3).size(4).dry(.6)"
+        "note(60).s('sine').FX(room(.3).size(4).dry(.6)"
         ".lpf(800).lpq(2).lpa(.02).lpd(.1).lps(.5).lpr(.2).lpenv(3),"
-        "x=>x.delay(.2).delaytime(.125).delayfeedback(.25)"
+        "delay(.2).delaytime(.125).delayfeedback(.25)"
         ".hpf(120).hpq(1.5).bpf(900).bpq(2).coarse(4).pan(.25)"
         ".shape(.4).distort(2).chorus(.3).crush(8).postgain(1.2)"
         ".tremolo(5).phaser(1)"
@@ -879,41 +883,20 @@ static void test_fx_shared_routing(void) {
     assert(event.has_pan && fabs(event.pan+ .5)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
-    const char *outer =
-        "note(60).s('sine').room(.8).size(6).dry(.4)"
-        ".delay(.4).delaytime(.5).delayfeedback(.9)"
-        ".lpf(600).hpf(300).bpf(700).coarse(8).pan(.75)"
-        ".shape(.6).distort(1.5).chorus(.7).crush(4).postgain(1)"
-        ".tremolo(3).phaser(2)"
-        ".FX(x=>x.room(.3).size(4).dry(.6)"
-        ".lpf(800).hpf(120).bpf(900).coarse(4).pan(.25)"
-        ".shape(.4).distort(2).chorus(.3).crush(8).postgain(1.2)"
-        ".tremolo(5).phaser(1)"
-        ".delay(.2).delaytime(.125).delayfeedback(.25))";
-    haps=query(outer,&program);
-    assert(haps && cJSON_GetArraySize(haps)==1);
-    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    cJSON *legacy=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,"
+        "\"s\":\"sine\",\"room\":0.8,\"cutoff\":600,\"pan\":0.75,"
+        "\"_fxSteps\":[{\"steps\":["
+        "{\"op\":\"room\",\"args\":[0.3]},"
+        "{\"op\":\"lpf\",\"args\":[800]},"
+        "{\"op\":\"pan\",\"args\":[0.25]}]}]}}");
+    assert(legacy && js_audio_event(legacy,0,1,&event));
     assert(fabs(event.dsp.p[DSP_ROOM]-.8)<1e-9);
-    assert(fabs(event.dsp.p[DSP_SIZE]-6)<1e-9);
-    assert(fabs(event.dsp.p[DSP_DRY]-.4)<1e-9);
-    assert(fabs(event.delay_send-.4)<1e-9);
-    assert(fabs(event.delay_time-.5)<1e-9);
-    assert(fabs(event.delay_fb-.9)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPF]-600)<1e-9);
-    assert(fabs(event.dsp.p[DSP_HPF]-300)<1e-9);
-    assert(fabs(event.dsp.p[DSP_BPF]-700)<1e-9);
-    assert(fabs(event.dsp.p[DSP_COARSE]-8)<1e-9);
-    assert(fabs(event.dsp.p[DSP_SHAPE]-.6)<1e-9);
-    assert(fabs(event.dsp.p[DSP_DISTORT]-1.5)<1e-9);
-    assert(fabs(event.dsp.p[DSP_CHORUS]-.7)<1e-9);
-    assert(fabs(event.dsp.p[DSP_CRUSH]-4)<1e-9);
-    assert(fabs(event.dsp.p[DSP_POST]-1)<1e-9);
-    assert(fabs(event.dsp.p[DSP_TREM]-3)<1e-9);
-    assert(fabs(event.dsp.p[DSP_PHASER]-2)<1e-9);
     assert(event.has_pan && fabs(event.pan-.5)<1e-9);
-    cJSON_Delete(haps); javascript_free(program);
+    cJSON_Delete(legacy);
 
-    haps=query("note(60).s('saw').FX(x=>x.loop(1).loopBegin(.1)"
+    haps=query("note(60).s('saw').FX(loop(1).loopBegin(.1)"
         ".loopEnd(.8).penv(2).vib(3).unison(3).spread(.4))",&program);
     assert(haps && cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
@@ -926,25 +909,15 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_SPREAD]-.4)<1e-9);
     cJSON_Delete(haps); javascript_free(program);
 
-    haps=query("note(60).s('saw').FX(x=>x.partials([1,.5,.25])"
-        ".phases([0,.5,.25]))",&program);
-    assert(haps && cJSON_GetArraySize(haps)==1);
-    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
-    assert(event.dsp.n_partials==3);
-    assert(fabs(event.dsp.partials[0]-1)<1e-9 &&
-        fabs(event.dsp.partials[1]-.5)<1e-9 &&
-        fabs(event.dsp.partials[2]-.25)<1e-9);
-    assert(fabs(event.dsp.phases[1]-.5)<1e-9 &&
-        fabs(event.dsp.phases[2]-.25)<1e-9);
-    assert(event.inst==INST_ADDITIVE);
-    cJSON_Delete(haps); javascript_free(program);
-
-    haps=query("note(60).loop(0).s('saw').partials([1])"
-        ".FX(x=>x.loop(1).partials([1,.5]))",&program);
-    assert(haps && cJSON_GetArraySize(haps)==1);
-    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    cJSON *legacy_loop=cJSON_Parse(
+        "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,"
+        "\"s\":\"saw\",\"loop\":0,\"partials\":[1],"
+        "\"_fxSteps\":[{\"steps\":["
+        "{\"op\":\"loop\",\"args\":[1]},"
+        "{\"op\":\"partials\",\"args\":[[1,0.5]]}]}]}}");
+    assert(legacy_loop && js_audio_event(legacy_loop,0,1,&event));
     assert(event.dsp.p[DSP_LOOP]==0 && event.dsp.n_partials==1);
-    cJSON_Delete(haps); javascript_free(program);
+    cJSON_Delete(legacy_loop);
 
     cJSON *graph=cJSON_Parse(
         "{\"begin\":0,\"end\":1,\"value\":{\"note\":60,\"s\":\"sine\","
@@ -962,7 +935,7 @@ static void test_fx_shared_routing(void) {
         event.dsp.p[DSP_SHAPE]==0 && event.dsp.p[DSP_DISTORT]==0 &&
         event.dsp.p[DSP_CHORUS]==0 && !event.has_pan);
     cJSON_Delete(graph);
-    puts("nested FX shared/filter/pan routing and outer-control precedence ok");
+    puts("FX pattern replay, callable-chain gain and legacy outer-control precedence ok");
 }
 
 int main(int argc, char **argv) {

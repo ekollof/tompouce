@@ -991,14 +991,15 @@ kernel changes and the graph/effect FX boundary now have independent checks.
 The eviction/reconnection checks use `test_audio`: a retired source's shared
 delay samples survive pool saturation and a same-orbit dry source; changing the
 prepared delay time keeps the line and reads it at the new offset; a fallback
-room tail survives source retirement. Materialized nested `FX(...)` room/delay
-and filter/pan/coarse steps now replay with outer controls taking precedence,
-and `test_javascript`/`test_audio` cover the graph-source boundary and a live
+room tail survives source retirement. Pattern `FX(...)` controls replay on the event, while callable arguments are
+ignored by the current site and retain only the chain's default 0.8 gain;
+`test_javascript`/`test_audio` cover the graph-source boundary and a live
 room+filter+pan+coarse+shape+distort+chorus edit during an active delay tail.
 The replay also covers crush, postgain, phaser, tremolo, compressor, FM
-operator/envelope/matrix, IR/room, loop windows, partials/phases and canonical
-numeric DSP controls; source selection, gain/ADSR/speed, note/sample/bank and
-string-valued controls remain outside it.
+operator/envelope/matrix, IR/room and canonical numeric DSP controls; pattern
+`partials`/`phases` arrays flatten in the event value, loop-window PCM is
+diagnostic, overlapping post-source stages are not modeled separately, and
+ADSR/speed/note/sample/bank/string controls remain outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms
@@ -1176,22 +1177,16 @@ factor would be tuning to this capture rather than deriving the web's full FX
 gain staging, so it was not accepted. Two `fx-nested-` diagnostic cases in
 `scripts/compare-audio.mjs` reproduce the 1.2504 ratio without a gate. The
 browser's serialized events contain `FX:[{}]` because the pinned `FX(...)`
-builder stores **functions**, not control objects; both the plain and inner-gain
-variants produce identical events, so the gain staging is applied by the web
-renderer when it invokes those closures. The JS query layer now materializes
-each closure into bounded `_fxSteps` (at most 8 chains, 32 steps each) using a
-chain recorder; the field is separate from `FX` so event-comparison gates still
-see the web's `FX:[{}]`. The native renderer applies the FX chain's default
-superdough gain (0.8) per event, which is the measured difference; materialized
-shared `room`/`size`/`dry`/`delay`/`delaytime`/`delayfeedback`, filter/pan/coarse
-the common shape/distort/chorus/postgain/phaser/tremolo/compressor steps,
-FM operator/envelope/matrix controls, and IR/room parameters now replay with
-outer controls taking precedence. The replay is callback-level and has focused
-event/callback tests; it is not a new web PCM gate. Loop/partial and other rare
-graph-local parameters remain outside replay. The two
-`fx-nested-` cases are now gated at the unchanged 0.99 correlation and 0.85–1.15
-RMS ratio: correlation 0.99999996 and ratio 1.0003. No threshold or baseline
-was changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
+builder stores callable FX arguments as empty control objects, so the deployed
+renderer ignores their controls and retains only the chain's default 0.8 gain.
+Pattern arguments (`FX(lpf(800), ...)`) carry serializable controls; the JS
+query layer materializes both forms into bounded `_fxSteps` (at most 8 chains,
+32 steps each) and the native renderer replays pattern controls. Four new
+`fx-pattern-` gain/lpf/pan/coarse gates pass at correlations 0.99999967+ and
+RMS ratios near 1.0003. The two `fx-nested-` callable-argument cases pass
+unchanged at 0.99999997/1.0003 because native now ignores their steps and
+applies only the default gain. Pattern partial arrays, loop-window PCM and
+overlapping post-source stages remain open. No threshold or baseline changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
 source replaces the oscillator or sample outside the FX chain, and the deployed
 renderer does not apply the chain's default gain there. The native renderer now
 skips that gain for graph sources while keeping it for `audioin()` worklet

@@ -461,15 +461,17 @@ The cleanup and fade use the original hap end and the raw `release` control;
 natural sample endings do not move them. The source ADSR's minimum release is
 separate: `.release(0).fxr(.005)` still fades over five milliseconds after the
 hap end, while a naturally ending sample can leave a much later delay tail.
-General nested `FX(...)` chains remain outside the PCM comparison matrix, but
-their materialized shared `room`/`delay`, filter, pan, coarse, shape, distort,
-chorus, postgain, phaser, tremolo, compressor, FM operator/envelope/matrix and
-IR/room steps are replayed with outer controls taking precedence. Loop
-windows, `partials`/`phases` arrays and canonical numeric DSP controls are
-also replayed. Source selection, gain/ADSR/speed, note/sample/bank selection
-and string-valued controls remain outside this coverage. The graph/effect
-boundary is covered: a `K()` source does not receive the chain's default gain,
-while `audioin()` worklet effects and ordinary sources do.
+Pattern-form `FX(...)` controls replay shared `room`/`delay`, filter, pan,
+coarse, shape, distort, chorus, postgain, phaser, tremolo, compressor, FM
+operator/envelope/matrix, IR/room and canonical numeric DSP controls. Callable
+FX arguments are ignored by the current site: they arrive as empty control
+objects and retain only the chain's default 0.8 gain, so native ignores their
+recorded steps. Pattern `partials`/`phases` arrays flatten in the event value,
+loop-window PCM is diagnostic, and overlapping post-source stages are not
+modeled separately. ADSR, speed, note/sample/bank and string-valued controls
+remain outside. The graph/effect boundary is covered: a `K()` source does not
+receive the chain's default gain, while `audioin()` worklet effects and
+ordinary sources do.
 
 Programs have at most 256 operations and 16 inputs per operation. The cache
 holds 256 programs and evicts unreferenced entries; queued events and sounding

@@ -435,11 +435,10 @@ static const cJSON *fx_step_array(const cJSON *step, int position) {
     return cJSON_IsArray(arg)?arg:NULL;
 }
 
-/* Apply query-time materialized FX(...) steps. The web invokes each closure
-   per event; those chains start from superdough's default gain of 0.8.
-   Shared room/delay sends and filter/pan/coarse routing are replayed here;
-   outer controls win because the deployed chain applies them after FX(...).
-   Other graph-local steps still wait for their own PCM gates. */
+/* Apply query-time FX(...) chains. The deployed renderer ignores callable
+   arguments (they arrive as empty control objects) and keeps the chain's
+   default 0.8 gain; pattern arguments carry serializable controls and replay
+   here. Legacy non-pattern steps keep outer-control precedence. */
 static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
     if (!cJSON_IsArray(chains)) return;
@@ -460,15 +459,25 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(
             cJSON_GetArrayItem(chains,i),"steps");
         if (!cJSON_IsArray(steps)) continue;
+        const cJSON *chain = cJSON_GetArrayItem(chains,i);
+        int pattern = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(chain,"pattern"));
+        int closure = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(chain,"closure"));
         int nsteps = cJSON_GetArraySize(steps);
         if (nsteps > 32) nsteps = 32;
         for (int j = 0; j < nsteps; j++) {
+            if (closure) break;
             const cJSON *step = cJSON_GetArrayItem(steps,j);
             const cJSON *op = cJSON_IsObject(step)
                 ? cJSON_GetObjectItemCaseSensitive(step,"op") : NULL;
             if (!cJSON_IsString(op) || !op->valuestring) continue;
             const char *name=op->valuestring;
-            if (cJSON_HasObjectItem(v,name)) continue;
+            if (!pattern && cJSON_HasObjectItem(v,name)) continue;
+            if (pattern && !strcmp(name,"gain")) {
+                double value=0;
+                if (fx_arg_number(step,0,&value) && value>=0 && value<=16)
+                    chain_gain=value;
+                continue;
+            }
             if (!strcmp(name,"partials") || !strcmp(name,"phases")) {
                 const cJSON *array=fx_step_array(step,0);
                 if (!array) continue;
@@ -512,7 +521,7 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                     continue;
                 }
             }
-            if (fx_outer_has(v,operation)) continue;
+            if (!pattern && fx_outer_has(v,operation)) continue;
             if (operation==FX_OP_IR) {
                 if (fx_arg_string(step,0,ev->fx_ir,sizeof(ev->fx_ir)))
                     ev->fx_room_fields|=1u<<6; /* keep the custom IR explicit */

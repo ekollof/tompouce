@@ -1014,9 +1014,13 @@ zero speed, and `test_convolution_prepare` pins `.5/.75/2/-2/0/1`.
 `shared-room-lifetime-rate-half` and `-rate-threequarter` now measure
 correlations **0.99999999/0.99999998** and RMS ratios 0.9930/0.9931 at the
 unchanged gates. A source-unity-speed variant remains diagnostic
-(`correlation:null`): its room level is tiny and the residual is dominated by
-a source-path level/phase difference, not the IR kernel. The earlier
-interpolation and kernel-stretch attempts were removed.
+(`correlation:null`, 0.9893): with `.irspeed(.5)` and a unity source the
+deployed player itself renders near-silence (peak 0.000305 versus 0.767 at IR
+speed 1), and native also renders near-silence (peak 0.00033). Mono-source,
+longer-clip/release, stereo-IR and dry probes isolate the residual to the
+browser's low-level IR-speed path, not source width or the IR kernel; the 0.99
+threshold is unchanged. The earlier interpolation and kernel-stretch attempts
+were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

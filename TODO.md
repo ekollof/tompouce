@@ -391,6 +391,13 @@ and measured divergences are recorded in the archive.
       -2/0/1`; new browser gates `shared-room-lifetime-rate-half` and
       `-rate-threequarter` measure correlations **0.99999999/0.99999998** at
       the unchanged 0.99 correlation and 0.85-1.15 RMS thresholds.
+- [x] Shared-room source-unity diagnostic investigated. `.irspeed(.5)` with a
+      unity source renders near-silence in both the deployed player (peak
+      0.000305 versus 0.767 at IR speed 1) and native (0.00033). Mono-source,
+      longer-clip/release, stereo-IR and dry probes isolate the residual to
+      the browser's low-level IR-speed path, not source width or the IR kernel.
+      The case stays diagnostic at correlation 0.9893; the 0.99 threshold is
+      unchanged.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

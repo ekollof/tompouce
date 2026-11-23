@@ -384,9 +384,10 @@ first cycle; native arithmetic alone has not resolved the query deadline.
 The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
-timeouts remain failures. The full fractional room-switch tail remains
-diagnostic (the harness hard-zeros each clipped capture); both deterministic
-rooms gate at 0.99935 and 0.99556. The full 2-second source-unity window gates
+timeouts remain failures. The full fractional room-switch window now gates at
+0.998397 after the harness waits for generated room IRs (`awaitRooms`); the
+first and second rooms gate at 0.99935 and 0.99556. The full 2-second
+source-unity window gates
 at 0.999996 with the harness's float32 capture (the int16 capture is
 quantization-limited at 0.98935); its 1.8-second active portion gates at
 0.99029 and the same path at gain 1 gates on int16 at 0.999988. The seeded
@@ -621,25 +622,17 @@ ordinary browser randomness. Native continues that stream across generations
 of reseeding to identical kernels; ordinary browser rooms remain randomized.
 Multi-room sequences stay diagnostic: each superdough trigger also draws one
 chain-ID random before any room draw, so exact seeded alignment would require
-mirroring that incidental consumption, and the eager comparison renderer
-bounds each hap's capture to its clipped duration (hard zeros past it), so no
-convolver tail reaches a gate there. The deterministic first room of the
-fractional switch is gated separately:
-`pcm-onset-fractional-roomswitch-first` measures **0.99935 correlation and
-0.98384 RMS ratio** over its 0.35-second window, and
-`pcm-onset-fractional-roomswitch-second` gates the second room (windowStart
-1.137 s) at **0.99556/1.01511**, both at the unchanged thresholds. The full
-window remains diagnostic only because the eager renderer hard-zeros each
-hap's capture past its clipped duration: the browser is exactly zero from
-0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3, and the
-2-second window measures 0.98954 (0.98954 with the float32 capture as well,
-confirming quantization is not involved). This is a harness capture bound, not
-a site tail. A tail-preserving capture was attempted by suppressing
-`AudioNode.disconnect` during the offline render: the cleanup releases
-BiquadFilter/AudioBufferSource/Gain nodes and no `ConvolverNode`, yet the
-browser still cuts the room tail at the hap clip end (a single-hap room probe
-is zero after 0.5 s). The truncation is the eager renderer's per-hap room
-lifecycle, not a released node, so it needs a different capture path. A CTest
+mirroring that incidental consumption. Generated-room impulse responses are
+produced asynchronously; without waiting, the browser's dry source stops while
+the convolver still has no buffer, leaving the capture zero between haps. The
+harness's `awaitRooms` waits for every convolver in the main context to receive
+its buffer before `startRendering`, preserving the room tails. The fractional
+switch is now fully gated: `-first` at **0.99935/0.98384**, `-second` (windowStart
+1.137 s) at **0.99556/1.01511**, and the full 2 s window at
+**0.998397/0.99724**, all at the unchanged thresholds. Without `awaitRooms`
+the full window measured 0.98954 (float32 unchanged), and suppressing
+`AudioNode.disconnect` did not help; the truncation was IR readiness, not node
+release. A CTest
 locks sequence variety
 (distinct rooms differ) and cache identity. Custom IR correlation remains
 0.99999997.

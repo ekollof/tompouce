@@ -418,21 +418,15 @@ and measured divergences are recorded in the archive.
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
       unchanged 0.99/0.85-1.15 thresholds. Unseeded multi-room sequences remain
       diagnostic because of the browser's incidental chain-ID draw.
-- [x] Deterministic fractional switch gates. The full
-      `pcm-onset-fractional-roomswitch` window stays diagnostic because the
-      eager renderer hard-zeros each clipped hap's convolver tail and later
-      rooms draw unseeded random impulse responses. Separate 0.35 s cases now
-      gate the first room at **0.99935/0.98384** and the second room
-      (windowStart 1.137 s) at **0.99556/1.01511** with the unchanged
-      thresholds. In the full window the browser is exactly zero from
-      0.55-1.11 s while native's room tail decays from energy 1.87 to 1e-3;
-      the 2 s diagnostic at 0.98954 (also 0.98954 with float32 capture) is
-      that capture bound, not a site tail. Suppressing
-      `AudioNode.disconnect` during the offline render does not preserve the
-      tail: the cleanup releases BiquadFilter/AudioBufferSource/Gain nodes and
-      no `ConvolverNode`, and a single-hap room probe is still zero after its
-      0.5 s clip. The truncation is the eager renderer's per-hap room
-      lifecycle; a different capture path is required.
+- [x] Deterministic fractional switch gates. Generated-room IRs are produced
+      asynchronously, so the offline render previously captured the dry source
+      only and was zero between haps. The harness's `awaitRooms` option waits
+      for every convolver in the main context to receive its buffer before
+      `startRendering`; with it the full 2 s `pcm-onset-fractional-roomswitch`
+      window gates at **0.998397/0.99724**. The first and second rooms also
+      gate at **0.99935/0.98384** and **0.99556/1.01511** (windowStart 1.137 s)
+      with the unchanged thresholds. Suppressing `AudioNode.disconnect` did not
+      help; the truncation was IR readiness, not node release.
 - [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
       triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,

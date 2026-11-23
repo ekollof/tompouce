@@ -470,19 +470,7 @@ try {
     { name: 'pcm-onset-fractional-reverse', code: `s('stretch_fixture').speed(-2).begin(.25).clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional-speedswitch', code: `s('stretch_fixture').stretch(-2).speed("0.75 1").clip(.25).late(.137)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'pcm-onset-fractional-delayauto', code: `s('stretch_fixture').gain(.5).clip(.25).late(.137).dry(0).delay(1).delaytime("0.05 0.075").delayfeedback(.5)`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: 2, correlation: .99 },
-    { name: 'pcm-onset-fractional-roomswitch', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, float32:true, cycles: 1, cps: .5, window: 2, correlation: null, randomSeed: 0xc0ffee }, /* Diagnostic: both deterministic rooms are gated separately by
-   pcm-onset-fractional-roomswitch-first (window .35, corr 0.99935) and
-   -second (windowStart 1.137, corr 0.99556). The full switch window stays
-   diagnostic because the eager renderer bounds each hap's capture to its
-   clipped duration (hard zeros past 0.26 s per hap above), so no convolver
-   tail is captured on either side of a switch. Production randomness is
-   unknowable anyway (fresh Math.random plus one chain-ID draw per trigger),
-   and same-orbit repeats reuse the native kernel while the web regenerates.
-   Observed correlation swings 0.982-0.991 across runs with
-   bit-identical captures within each run, so no threshold here would be
-   sound. Native continues one LCG stream across generations (advancing past
-   cache hits) so rooms vary per call deterministically instead of reseeding
-   to identical kernels. */
+    { name: 'pcm-onset-fractional-roomswitch', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, float32:true, awaitRooms:true, cycles: 1, cps: .5, window: 2, correlation: .99, randomSeed: 0xc0ffee }, /* Full switch gates because awaitRooms waits for generated room buffers before rendering. */
     { name: 'pcm-onset-fractional-roomswitch-first', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: .35, correlation: .99, randomSeed: 0xc0ffee },
     { name: 'pcm-onset-fractional-roomswitch-second', code: `s('stretch_fixture').fast(2).clip(.25).late(.137).room(.5).roomsize("0.5 1")`, sound: 'stretch_fixture', fixture:true, cycles: 1, cps: .5, window: .35, windowStart: 1.137, correlation: .99, randomSeed: 0xc0ffee },
     { name: 'diag-ir-tail', code: `s('stretch_fixture').gain(1).clip(.0001).ir('mono_fixture').room(1).dry(0).irspeed(.5)`, sound: 'stretch_fixture', fixture:true, fixtureIR:'mono_fixture', cycles: 1, cps: .5, window: 2, correlation: null }, /* Diagnostic: a 0.2 ms source isolates the sub-unity IR tail. It matches native at 0.99918/1.032 over the full 2 s, so the IR resampler and edge are not the residual. */
@@ -608,6 +596,15 @@ try {
       let blob;
       URL.createObjectURL=function(value){blob=value;return original.call(URL,value)};
       HTMLAnchorElement.prototype.click=function(){};
+      const originalConvolver=BaseAudioContext.prototype.createConvolver;
+      const roomContexts=new WeakMap();
+      if(spec.awaitRooms)BaseAudioContext.prototype.createConvolver=function(){
+        const convolver=originalConvolver.call(this);
+        const list=roomContexts.get(this)||[];
+        list.push(convolver);
+        roomContexts.set(this,list);
+        return convolver;
+      };
       // Use the renderer's supported eager path. Its suspend/resume path
       // races completion for short offline clips in current Chromium.
       const suspend=OfflineAudioContext.prototype.suspend;
@@ -638,13 +635,21 @@ try {
       const originalStart=OfflineAudioContext.prototype.startRendering;
       let renderedBuffer=null;
       const expectedFrames=Math.round(spec.cycles/spec.cps*44100);
-      if(spec.float32)OfflineAudioContext.prototype.startRendering=function(){
-        const pending=originalStart.call(this);
-        pending.then(buffer=>{
-          if(!renderedBuffer && buffer.length===expectedFrames &&
-             buffer.numberOfChannels===2) renderedBuffer=buffer;
-        }).catch(()=>{});
-        return pending;
+      if(spec.float32||spec.awaitRooms)OfflineAudioContext.prototype.startRendering=function(){
+        const ctx=this;
+        return (async()=>{
+          if(spec.awaitRooms && roomContexts.has(ctx)){
+            const list=roomContexts.get(ctx);
+            for(let i=0;i<2000 && list.some(c=>!c.buffer);i++)
+              await new Promise(resolve=>setTimeout(resolve,1));
+          }
+          const pending=originalStart.call(ctx);
+          if(spec.float32)pending.then(buffer=>{
+            if(!renderedBuffer && buffer.length===expectedFrames &&
+               buffer.numberOfChannels===2) renderedBuffer=buffer;
+          }).catch(()=>{});
+          return pending;
+        })();
       };
       try {
         await renderPatternAudio(selected,spec.cps,0,spec.cycles,44100,128,false,'comparison');
@@ -670,7 +675,7 @@ try {
         }
         if(spec.seedSupersaw && !seededWorklets.length)throw Error('Seeded supersaw worklet was not loaded');
         return {wav:btoa(binary),wav32,events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents,seededWorklets};
-      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;OfflineAudioContext.prototype.startRendering=originalStart;BaseAudioContext.prototype.createBuffer=createBuffer;Math.random=random;AudioWorklet.prototype.addModule=addModule}
+      } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;OfflineAudioContext.prototype.startRendering=originalStart;BaseAudioContext.prototype.createBuffer=createBuffer;BaseAudioContext.prototype.createConvolver=originalConvolver;Math.random=random;AudioWorklet.prototype.addModule=addModule}
     })()`);
     const wav = Buffer.from(captured.wav, 'base64');
     const wav32 = captured.wav32 ? Buffer.from(captured.wav32, 'base64') : null;

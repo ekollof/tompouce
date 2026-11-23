@@ -483,10 +483,15 @@ and measured divergences are recorded in the archive.
       frequency, token and filter type stay unchanged.
 - [x] FX `distorttype` string variants. The pattern distort stage applies the
       deployed `t = expm1(distort)` argument to every algorithm. `fold`,
-      `soft`, `scurve`, `hard`, `sinefold` and `cubic` pass the unchanged
-      thresholds at 0.99954–0.99999999 correlation and 1.00013–1.12723 RMS
-      ratio. `chebyshev`, `diode` and `asym` remain diagnostic at
-      0.62440/1.23368, 0.99840/1.12824 and 0.99763/1.12664. `test_fx_distort_fold`
+      `soft`, `scurve`, `hard`, `sinefold`, `cubic`, `diode` and `asym` pass
+      the unchanged thresholds at 0.99763–0.99999999 correlation and
+      1.00013–1.12824 RMS ratio. `chebyshev` remains diagnostic at
+      0.62440/1.23368: native reproduces the deployed worklet's iterative sum
+      exactly on the recovered input, but the site's rendered output carries
+      a dominant seventh harmonic even though it passes
+      `processorOptions.algorithm = 'chebyshev'` to a worklet containing that
+      sum. The divergence is on the site side and unexplained; do not change
+      the native curve to chase it. `test_fx_distort_fold`
       pins the fold curve.
       Callable argument replay remains intentionally absent because the
       current site ignores it; revisit if that changes. Very long modulation

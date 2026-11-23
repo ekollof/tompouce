@@ -1115,10 +1115,15 @@ pass at 0.9999997+ and leave source values in force. Pattern `note`, `n`,
 `-s`, `-bank`, `-ftype-string`), leaving the source frequency, token and
 filter type unchanged. The pattern distort stage now uses the deployed
 `t = expm1(distort)` argument for every algorithm. `fold`, `soft`, `scurve`,
-`hard`, `sinefold` and `cubic` pass the unchanged thresholds at
-0.99954–0.99999999 correlation and 1.00013–1.12723 RMS ratio. `chebyshev`,
-`diode` and `asym` remain diagnostic at 0.62440/1.23368, 0.99840/1.12824 and
-0.99763/1.12664.
+`hard`, `sinefold`, `cubic`, `diode` and `asym` pass the unchanged thresholds
+at 0.99763–0.99999999 correlation and 1.00013–1.12824 RMS ratio. `chebyshev`
+remains diagnostic at 0.62440/1.23368: the native curve equals the deployed
+worklet formula on the input recovered from the same pattern, while the
+site's rendered output instead carries a dominant seventh harmonic. The
+deployed page was verified to pass `processorOptions.algorithm =
+'chebyshev'` to a worklet whose source contains the exact iterative
+Chebyshev sum, so this is a site-side rendering difference rather than a
+native formula gap; the case stays diagnostic until that path is explained.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

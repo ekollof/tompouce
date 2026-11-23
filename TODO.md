@@ -396,10 +396,11 @@ and measured divergences are recorded in the archive.
       0.000305 versus 0.767 at IR speed 1) and native (0.00033). Mono-source,
       longer-clip/release, stereo-IR and dry probes isolate the residual to
       the browser's low-level IR-speed path, not source width or the IR kernel.
-      The 1.5 s active window now passes at correlation **0.99165** and RMS
-      ratio **1.11516** with the unchanged 0.99/0.85-1.15 thresholds; the full
-      2 s window stays diagnostic at 0.9893 because its tail is near-silent.
-      Shorter 0.6/1.0 s windows were worse (0.9814/0.9889).
+      The 1.8 s active window now passes at correlation **0.99029** and RMS
+      ratio **1.12166** with the unchanged 0.99/0.85-1.15 thresholds; 1.9 s
+      falls to 0.98975, bounding the near-silent tail to roughly the last
+      0.2 s. The full 2 s window stays diagnostic at 0.9893. Shorter 0.6/1.0 s
+      windows were worse (0.9814/0.9889).
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the
@@ -411,7 +412,9 @@ and measured divergences are recorded in the archive.
       draw unseeded random impulse responses. A separate 0.35 s
       `pcm-onset-fractional-roomswitch-first` case now gates the first room at
       correlation **0.99935** and RMS ratio **0.98384** with the unchanged
-      thresholds.
+      thresholds. The remaining residual spans the capture rather than a tail:
+      1.8/1.9/1.95 s windows measure 0.98961/0.98955/0.98954 and the full 2 s
+      window 0.98954, all below the gate.
 - [x] Generic `.lfo()` gain path. A relative-depth triangle now drives the
       voice gain; `lfo-generic-gain` passes at correlation **0.99965** and RMS
       ratio **0.99920** with the unchanged thresholds. Cutoff and other targets

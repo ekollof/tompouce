@@ -385,8 +385,8 @@ The fresh 301-case strudel.cc comparison kept all 256 gated PCM cases passing,
 all 39 musical Bakery compositions that finish querying matching, the empty
 entry empty, and the five-event voicing-reset check matching. The two query
 timeouts remain failures. The full fractional room-switch tail and full
-2-second source-unity tail remain diagnostic; the 1.5-second active
-source-unity portion gates at 0.99165, the deterministic first-room onset of
+2-second source-unity tail remain diagnostic; the 1.8-second active
+source-unity portion gates at 0.99029, the deterministic first-room onset of
 the switch gates at 0.99935, and the seeded Arpoon opening gates at 0.99986.
 
 An audio-only `initHydra` placeholder now accepts the original Hydra Bakery
@@ -615,8 +615,11 @@ convolver tail reaches a gate there. The deterministic first room of the
 fractional switch is gated separately:
 `pcm-onset-fractional-roomswitch-first` measures **0.99935 correlation and
 0.98384 RMS ratio** over its 0.35-second window at the unchanged thresholds.
-A CTest locks sequence variety (distinct rooms differ) and cache identity.
-Custom IR correlation remains 0.99999997.
+The remaining full-switch residual spans the whole capture rather than a tail:
+1.8/1.9/1.95-second windows measure 0.98961/0.98955/0.98954 and the 2-second
+window 0.98954, all below the unchanged gate. A CTest locks sequence variety
+(distinct rooms differ) and cache identity. Custom IR correlation remains
+0.99999997.
 
 Original wet Arpoon now uses the shared `0xc0ffee` generated-room seed and is
 gated: `arpoon-opening` measures **0.99986 correlation and 1.0030 RMS ratio**
@@ -1045,12 +1048,14 @@ correlations **0.99999999/0.99999998** and RMS ratios 0.9930/0.9931 at the
 unchanged gates. A source-unity-speed variant's full 2-second window remains
 diagnostic (`correlation:null`, 0.9893): with `.irspeed(.5)` and a unity source
 the deployed player itself renders near-silence (peak 0.000305 versus 0.767 at
-IR speed 1), and native also renders near-silence (peak 0.00033). The 1.5-second
-active portion now gates at **0.99165 correlation and 1.11516 RMS ratio** with
-the unchanged thresholds; shorter 0.6/1.0-second windows were worse (0.9814 and
-0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes isolate the
-residual tail to the browser's low-level IR-speed path, not source width or the
-IR kernel. The earlier interpolation and kernel-stretch attempts were removed.
+IR speed 1), and native also renders near-silence (peak 0.00033). The
+1.8-second active portion now gates at **0.99029 correlation and 1.12166 RMS
+ratio** with the unchanged thresholds; 1.9 seconds falls to 0.98975, so the
+near-silent tail is bounded to roughly the last 0.2 seconds. Shorter 0.6/1.0
+second windows were worse (0.9814 and 0.9889). Mono-source,
+longer-clip/release, stereo-IR and dry probes isolate the residual tail to the
+browser's low-level IR-speed path, not source width or the IR kernel. The
+earlier interpolation and kernel-stretch attempts were removed.
 
 Preparation calculates the natural buffer lifetime from source rate, offset
 and the source's scheduled stop. Pitch/vibrato transport uses the same

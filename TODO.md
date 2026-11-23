@@ -415,19 +415,15 @@ and measured divergences are recorded in the archive.
       thresholds. The remaining residual spans the capture rather than a tail:
       1.8/1.9/1.95 s windows measure 0.98961/0.98955/0.98954 and the full 2 s
       window 0.98954, all below the gate.
-- [x] Generic `.lfo()` gain path. A relative-depth triangle now drives the
-      voice gain; `lfo-generic-gain` passes at correlation **0.99965** and RMS
-      ratio **0.99920** with the unchanged thresholds. Cutoff and other targets
-      keep their static value and log one
-      `LFO modulation is implemented only for gain` warning; the cutoff
-      diagnostic stays ungated at 0.44477. The exact worklet parameters
-      (`depth=1000`, `dc=-.5`, `min=-480`, `max=23500`, triangle, 0.5 Hz) match
-      the native filter-LFO arithmetic, and a graph tap confirms the deployed
-      LFO control signal is the expected `-480..500` triangle. Forcing the
-      voice off the SoA bank onto the scalar per-sample DSP path still leaves
-      the mapped sweep at 0.682; the filtered browser peak is 0.3998 versus
-      0.1476 native. The residual is the deployed graph's dynamic
-      `BiquadFilterNode` response, not the LFO signal or update cadence.
+- [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
+      triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
+      the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,
+      `max=23500`, triangle, 0.5 Hz) onto the scalar sample-rate filter LFO;
+      the steady `.05-.6 s` section passes at **0.99977/1.00363** with the
+      unchanged thresholds via the harness `windowStart` option. The full
+      0.6-second window remains diagnostic at 0.682 because the first ~50 ms
+      graph onset does not match. Other targets keep their static value and log
+      one `LFO modulation is implemented only for gain and cutoff` warning.
       Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and

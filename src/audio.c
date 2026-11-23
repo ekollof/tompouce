@@ -443,6 +443,7 @@ static int soa_bank_eligible(const Voice *v) {
         v->fx_stage_count>0) return 0;
     if (native_synth_effect(v->native_program)) return 0;
     if (!v->dsp.control.enabled) return 0;
+    if (v->dsp.control.lfo_sample_rate) return 0;
     int filter_type=-1;
     if (v->dsp.effects_active) {
         filter_type=dsp_single_filter(&v->dsp);

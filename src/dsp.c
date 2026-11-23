@@ -707,6 +707,7 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     if (!s->control.enabled) return x;
     const double *p = s->control.p;
     int update = (s->tick++ & 31) == 0;
+    if (s->control.lfo_sample_rate) update=1;
     /* Nothing configured: the full path reduces to the post gain (1) and the
        output guard. Keep tick advancing so state evolution is unchanged. */
     if (!s->effects_active) return isfinite(x) ? clamp(x, -64, 64) : 0;

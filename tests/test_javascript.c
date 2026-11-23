@@ -792,7 +792,11 @@ static void test_analyser_controls(void) {
         ".lfo({control:'cutoff',rate:.5,depth:2})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
-    assert(event.lfo_tgt==0 && event.lfo_unsupported);
+    assert(event.lfo_tgt==0 && !event.lfo_unsupported);
+    assert(fabs(event.dsp.p[DSP_LPRATE]-.5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_LPDEPTH]-2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_LPDC]+.5)<1e-9);
+    assert(event.dsp.p[DSP_LPSHAPE]==1 && event.dsp.lfo_sample_rate);
     cJSON_Delete(haps); javascript_free(program);
 }
 

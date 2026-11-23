@@ -473,8 +473,8 @@ static void test_analyser_controls_do_not_warn(void) {
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
-/* Generic .lfo() modulation is implemented only for gain. Other targets keep
-   their static value and warn instead of silently misrendering. */
+/* Generic .lfo() modulation is implemented for gain and filter cutoff. Other
+   targets keep their static value and warn instead of silently misrendering. */
 static void test_generic_lfo_warns(void) {
     double old_time=audio_time; int old_playing=playing;
     playing=1; audio_set_reference_mode(1); audio_time=0;
@@ -483,15 +483,15 @@ static void test_generic_lfo_warns(void) {
     event_queue_clear();
     cJSON *metadata=NULL; char error[512];
     JsProgram *program=javascript_compile(
-        "note(60).s('sawtooth').lpf(500)"
-        ".lfo({control:'cutoff',rate:.5,depth:2})",
+        "note(60).s('sawtooth').pan(.5)"
+        ".lfo({control:'pan',rate:.5,depth:2})",
         120,&metadata,error,sizeof(error));
     assert(program); cJSON_Delete(metadata);
     assert(js_audio_schedule(program,0,0,event_queue_generation()));
     int warned=0;
     for (int i=0;i<console_count_get();i++)
         if (strstr(console_line(i),
-            "LFO modulation is implemented only for gain"))
+            "LFO modulation is implemented only for gain and cutoff"))
             warned=1;
     assert(warned);
     event_queue_clear();

@@ -564,25 +564,23 @@ does not depend on unrelated chain-ID random draws. They retain the existing
 correlation and gain thresholds. These selected source gates do not establish
 arbitrary modulation/effects or full-song parity.
 
-Generic `.lfo()` gain modulation is implemented as a relative-depth triangle
-and gated: `lfo-generic-gain` measures **0.99965 correlation and 0.99920 RMS
-ratio** at the unchanged thresholds. The cutoff path remains unsupported
-(diagnostic 0.4448). The deployed `lfo-processor` computes
+Generic `.lfo()` gain and filter-cutoff modulation are implemented. Gain uses
+a relative-depth triangle and `lfo-generic-gain` measures **0.99965 correlation
+and 0.99920 RMS ratio**. The deployed `lfo-processor` computes
 `clamp(pow((tri(phase) + dcoffset) * depth, curve), min, max)` on a begin-gated
 worklet phase. The measured cutoff event is exactly `rate=.5`, `depth=1000`,
 `dcoffset=-.5`, `min=-480`, `max=23500`, triangle shape, `begin=0`, `time=0`.
-A tap on the deployed graph captures the LFO control signal as the expected
-`-480..500` triangle. Native's arithmetic reproduces that waveform and these
-parameters exactly. Forcing the voice off the SoA bank onto the scalar
-per-sample DSP filter path still leaves the mapped diagnostic at 0.682
-(static 0.4448); the filtered browser output peaks at 0.3998 versus 0.1476
-native. The residual is the deployed graph's dynamic `BiquadFilterNode`
-response, not the LFO signal or update cadence. Matching cutoff needs a
-graph-equivalent dynamic filter path, not a threshold change. Cutoff and other
-non-gain targets keep their static value and log one
-`LFO modulation is implemented only for gain` warning. Filter-specific
-`lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
-tremolo are separate supported controls with their own gates.
+Native maps those parameters onto the scalar sample-rate filter LFO. The steady
+response over `.05-.6 s` gates at **0.99977 correlation and 1.00363 RMS ratio**
+with the unchanged thresholds (`lfo-generic-cutoff-steady`, using the harness's
+`windowStart` option). The full 0.6-second window remains diagnostic at 0.682
+because the first ~50 ms graph onset does not match; the full-window case stays
+`correlation:null`. A tap on the deployed graph confirms the LFO control signal
+is the expected `-480..500` triangle. Other non-gain/cutoff targets keep their
+static value and log one
+`LFO modulation is implemented only for gain and cutoff` warning.
+Filter-specific `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width
+LFO and tremolo are separate supported controls with their own gates.
 
 `cmake --build build --target test-supersaw-reference-web` separately compares
 the production supersaw source with the actual deployed AudioWorklet. It seeds

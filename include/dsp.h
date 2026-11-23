@@ -45,6 +45,7 @@ typedef struct {
     const DspPeriodic *periodic;
     int periodic_kind, periodic_numeric;
     int n_partials;
+    int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
 } DspParams;
 
 typedef struct {

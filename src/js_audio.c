@@ -949,6 +949,19 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value) {
             ev->lfo_depth=(absolute?absolute:depth)/2;
             return;
         }
+        int type=!strcmp(name,"cutoff")?0:!strcmp(name,"hcutoff")?1:
+            !strcmp(name,"bandf")?2:-1;
+        if (type>=0 && ev->dsp.p[type*7]>0) {
+            int p=DSP_LPRATE+type*6;
+            ev->dsp.p[p]=rate;
+            ev->dsp.p[p+1]=absolute?0:depth;
+            ev->dsp.p[p+2]=absolute;
+            ev->dsp.p[p+3]=1; /* triangle */
+            ev->dsp.p[p+4]=-.5;
+            ev->dsp.p[p+5]=.5;
+            ev->dsp.lfo_sample_rate=1;
+            return;
+        }
         ev->lfo_unsupported=1;
     }
 }
@@ -1422,7 +1435,7 @@ static int plan_hap(JsProgram *program, const cJSON *hap, double time,
     if (!audio_event_values(hap,plan->origin,seconds,&event,0)) return 0;
     if (event.lfo_unsupported)
         javascript_warn_once(program,"lfo-target",
-            "native audio: LFO modulation is implemented only for gain");
+            "native audio: LFO modulation is implemented only for gain and cutoff");
     plan->kind=csound?HAP_IMMEDIATE:HAP_SOURCE;
     return 1;
 }

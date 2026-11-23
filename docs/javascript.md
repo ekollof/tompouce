@@ -294,12 +294,15 @@ Aliases registered by upstream Strudel map to the same controls.
 | MIDI | note events and midichan through the existing ALSA output |
 | OSC | timestamped UDP `/dirt/play` through `.osc()` |
 
-Generic Strudel `.lfo()` modulation is implemented for gain: a relative-depth
-triangle drives the voice gain and is gated at 0.99965 correlation. Other
-targets, including cutoff, keep their static value and log one
-`native audio: LFO modulation is implemented only for gain` warning per
-program. Filter-specific `lp`/`hp`/`bp` LFO controls, pitch envelope/vibrato,
-pulse-width LFO and tremolo are separate supported controls.
+Generic Strudel `.lfo()` modulation is implemented for gain and filter cutoff.
+Gain uses a relative-depth triangle; cutoff maps the deployed worklet's
+`depth=event_depth*target_value`, `dcoffset=-0.5`, triangle and full-range
+clamp onto the sample-rate scalar filter path. The steady cutoff response is
+gated at 0.99977 correlation; only the first ~50 ms graph onset remains a
+comparison limit. Other targets keep their static value and log one
+`native audio: LFO modulation is implemented only for gain and cutoff` warning
+per program. Filter-specific `lp`/`hp`/`bp` LFO controls, pitch
+envelope/vibrato, pulse-width LFO and tremolo are separate supported controls.
 
 Native WAV, MP3 and FLAC sampling preserves stereo channels and recorded
 levels. Pitch-keyed maps accept arrays within each region; sample indices

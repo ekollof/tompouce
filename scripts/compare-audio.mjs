@@ -211,6 +211,7 @@ try {
        other targets warn and keep their static value; filter-specific
        lp/hp/bp LFOs, vibrato, pulse-width LFO and tremolo are separate. */
     {name:'lfo-generic-cutoff-diagnostic',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'lfo-generic-cutoff-steady',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.55,windowStart:.05,correlation:.99},
     {name:'lfo-generic-gain',sound:'sine',code:`note(69).s('sine').gain(.5).lfo({control:'gain',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
@@ -631,7 +632,7 @@ try {
     await fs.writeFile(path.join(out, `${spec.name}-browser-events.json`), JSON.stringify(captured.events, null, 2));
     if(captured.renderEvents.length)await fs.writeFile(path.join(out,`${spec.name}-browser-render-events.json`),JSON.stringify(captured.renderEvents,null,2));
     const nativeBytes = await fs.readFile(native);
-    const metrics = compare(nativeBytes, wav, spec.window);
+    const metrics = compare(nativeBytes, wav, spec.window, spec.windowStart ?? 0);
     const durationMatches = metrics.nativeFrames === Math.round(spec.cycles / spec.cps * 44100) && metrics.nativeFrames === metrics.browserFrames;
     const passed = spec.correlation === null ? null : durationMatches && metrics.correlation >= spec.correlation && metrics.rmsRatio >= .85 && metrics.rmsRatio <= 1.15;
     report.cases.push({ ...spec,...(spec.fixture?{sharedSourceSha256:hash(spec.mono?monoFixture:fixture)}:{}),...(spec.fixtureIR?{sharedIrSha256:hash(monoFixture)}:{}),...(spec.seedSupersaw?{seededWorkletSha256:captured.seededWorklets}:{}),codeSha256: hash(spec.code), nativePcmSha256: hash(nativeBytes), browserWavSha256: hash(wav), metrics, passed });
@@ -663,7 +664,7 @@ function compareEvents(native,browser) {
   };
   return equal(ordered(native),ordered(browser));
 }
-function compare(native, wav, seconds) {
+function compare(native, wav, seconds, start = 0) {
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') throw new Error('Invalid WAV');
   let format, channels, rate, bits, data;
   for (let offset = 12; offset + 8 <= wav.length;) {
@@ -675,8 +676,11 @@ function compare(native, wav, seconds) {
     offset = start + size + (size % 2);
   }
   if (channels !== 2 || rate !== 44100 || !data || !((format === 1 && bits === 16) || (format === 3 && bits === 32))) throw new Error(`Unsupported WAV ${format}/${bits}/${channels}/${rate}`);
+  const first = Math.round(start * rate);
   const samples = Math.round(seconds * rate) * channels;
-  if (native.length < samples * 4 || data.length < samples * bits / 8) throw new Error('Capture too short');
+  const nativeOffset = first * channels * 4;
+  const browserOffset = first * channels * (bits / 8);
+  if (native.length < nativeOffset + samples * 4 || data.length < browserOffset + samples * bits / 8) throw new Error('Capture too short');
   let xy = 0, xx = 0, yy = 0, error = 0, nativePeak=0, browserPeak=0;
   for(let i=0;i<native.length/4;i++) {
     const x=native.readFloatLE(i*4); if(!Number.isFinite(x))throw new Error('Non-finite native capture');
@@ -687,12 +691,12 @@ function compare(native, wav, seconds) {
     if(!Number.isFinite(y))throw new Error('Non-finite browser capture'); browserPeak=Math.max(browserPeak,Math.abs(y));
   }
   for (let i = 0; i < samples; i++) {
-    const x = native.readFloatLE(i * 4), y = format === 1 ? data.readInt16LE(i * 2) / 32768 : data.readFloatLE(i * 4);
+    const x = native.readFloatLE(nativeOffset + i * 4), y = format === 1 ? data.readInt16LE(browserOffset + i * 2) / 32768 : data.readFloatLE(browserOffset + i * 4);
     if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Non-finite audio');
     xy += x*y; xx += x*x; yy += y*y; error += (x-y)**2;
   }
   if (!xx || !yy) throw new Error('Silent capture');
   return { correlation: xy / Math.sqrt(xx*yy), rmsRatio: Math.sqrt(xx/yy), rmsError: Math.sqrt(error/samples),
-    windowSeconds: seconds, lagFrames: 0, nativePeak,browserPeak,
+    windowSeconds: seconds, windowStart: start, lagFrames: 0, nativePeak,browserPeak,
     nativeFrames: native.length / 8, browserFrames: data.length / (bits / 8) / 2 };
 }

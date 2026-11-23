@@ -564,6 +564,15 @@ does not depend on unrelated chain-ID random draws. They retain the existing
 correlation and gain thresholds. These selected source gates do not establish
 arbitrary modulation/effects or full-song parity.
 
+Generic `.lfo()` control modulation is not implemented. Two diagnostics in
+`scripts/compare-audio.mjs` measure a cutoff LFO at correlation 0.4448 and a
+gain LFO at 0.9591; the deployed LFO uses a global phase/DC model that the
+legacy one-LFO voice path does not reproduce. The control now logs one
+`control 'lfo' is not implemented` warning instead of silently rendering a
+static value. Filter-specific `lp`/`hp`/`bp` LFO controls, pitch
+vibrato/envelope, pulse-width LFO and tremolo are separate supported controls
+with their own gates.
+
 `cmake --build build --target test-supersaw-reference-web` separately compares
 the production supersaw source with the actual deployed AudioWorklet. It seeds
 the worklet's random phases and checks stereo PCM for defaults, single/100

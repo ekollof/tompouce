@@ -294,6 +294,11 @@ Aliases registered by upstream Strudel map to the same controls.
 | MIDI | note events and midichan through the existing ALSA output |
 | OSC | timestamped UDP `/dirt/play` through `.osc()` |
 
+Generic Strudel `.lfo()` control modulation is not implemented. It now logs
+one `control 'lfo' is not implemented` warning per program instead of silently
+rendering a static value. Filter-specific `lp`/`hp`/`bp` LFO controls, pitch
+envelope/vibrato, pulse-width LFO and tremolo are separate supported controls.
+
 Native WAV, MP3 and FLAC sampling preserves stereo channels and recorded
 levels. Pitch-keyed maps accept arrays within each region; sample indices
 round and wrap with JavaScript semantics, including negative indices.

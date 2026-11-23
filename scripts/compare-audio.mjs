@@ -206,6 +206,10 @@ try {
     {name:'fx-nested-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-nested-room',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.room(.3))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-nested-delay',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.delay(.2))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    /* Generic .lfo() is not implemented; filter-specific lp/hp/bp LFOs,
+       vibrato, pulse-width LFO and tremolo are separate controls. */
+    {name:'lfo-generic-cutoff-diagnostic',sound:'sawtooth',code:`note(60).s('sawtooth').lpf(500).lfo({rate:.5,depth:2})`,cycles:1,cps:.5,window:.6,correlation:null},
+    {name:'lfo-generic-gain-diagnostic',sound:'sine',code:`note(69).s('sine').gain(.5).lfo({control:'gain',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:null},
     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-pan',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(pan(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

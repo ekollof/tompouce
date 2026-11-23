@@ -1355,7 +1355,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
             "midibend","miditouch","nrpnn","nrpv","midimap","duration","analyze","fft","unit","tremolosync","lpsync","hpsync","bpsync","delaysync",
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","lv2preset","lv2state","carlaProject","carlaTarget","color","colour","label","activeLabel","markcss",
-            "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
+            "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","znoise","zmod","zcrush","zdelay","zzfx",
             "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
         int implemented = 0;
         for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }

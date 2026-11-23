@@ -473,6 +473,33 @@ static void test_analyser_controls_do_not_warn(void) {
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
+/* Generic .lfo() modulation is not implemented; filter-specific and
+   source-specific LFO controls are separate. Scheduling it must warn rather
+   than silently render a static value. */
+static void test_generic_lfo_warns(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    assert(prep_pool_start(0,0));
+    event_queue_clear();
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile(
+        "note(69).s('sine').gain(.5)"
+        ".lfo({control:'gain',rate:.5,depth:1})",
+        120,&metadata,error,sizeof(error));
+    assert(program); cJSON_Delete(metadata);
+    assert(js_audio_schedule(program,0,0,event_queue_generation()));
+    int warned=0;
+    for (int i=0;i<console_count_get();i++)
+        if (strstr(console_line(i),"control 'lfo' is not implemented"))
+            warned=1;
+    assert(warned);
+    event_queue_clear();
+    javascript_free(program);
+    prep_pool_stop();
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
+}
+
 /* A slow missing sample must not discard later stacked sources whose onsets
    cross during its preparation. This observer simulates that delay. */
 static void slow_missing_prep(const AudioEvent *event) {
@@ -1277,6 +1304,7 @@ int main(void) {
     bench_procedural_hh();
     test_failed_source_siblings();
     test_analyser_controls_do_not_warn();
+    test_generic_lfo_warns();
     test_active_voice_list();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");

@@ -429,8 +429,10 @@ and measured divergences are recorded in the archive.
       A tap on the deployed `BiquadFilterNode` output shows the first 50 ms at
       RMS 0.2039 and peak 0.39985 while the native scalar filter at the LFO
       minimum is nearly silent; the deployed filter passes the source before
-      its LFO connection settles. The onset is a more complex graph/filter
-      connection response. Other targets keep their static value and log
+      its LFO connection settles. A 50 ms dry-to-wet crossfade was rejected
+      too: full 0.6590, steady 0.99977. The onset is a more complex
+      graph/filter connection response. Other targets keep their static value
+      and log
       one `LFO modulation is implemented only for gain and cutoff` warning.
       Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
       tremolo remain separate supported controls.

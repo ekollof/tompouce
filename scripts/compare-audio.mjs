@@ -204,6 +204,8 @@ try {
     ...[0,.005,.01].map(release=>({name:`kabel-src-short-release-${release}`,sound:'sine',
       code:`note(69).s('sine').gain(.4).clip(.05).release(${release}).K(sine(sFreq).mul(.1).out()).fxr(.005)`,cycles:1,cps:.5,window:.2,correlation:.99})),
     {name:'fx-nested-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-nested-room',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.room(.3))`,cycles:1,cps:.5,window:.6,correlation:.99},
+    {name:'fx-nested-delay',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(x=>x.delay(.2))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-pan',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(pan(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

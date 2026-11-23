@@ -332,10 +332,10 @@ and measured divergences are recorded in the archive.
 - [x] Extend Kabelsalat checks beyond the verified `audioin()` effect tails.
       Graph-source `fxr`, gain/shape/filter/pan and 128-frame onset/gate
       startup now have independent web comparisons. Nested `FX(...)` chains now
-      have two gated cases (`fx-nested-`, correlation 0.99999996, RMS ratio
-      1.0003): query-time materialization exposes bounded step descriptors;
-      callable chains retain only the web chain's default 0.8 gain, while
-      pattern filter/send/pan controls replay. Four `fx-`
+      have three gated cases (`fx-nested-lpf`, `-room`, `-delay`, correlation
+      0.99999997, RMS ratio 1.00033): query-time materialization exposes
+      bounded step descriptors; callable chains retain only the web chain's
+      default 0.8 gain, while pattern filter/send/pan controls replay. Four `fx-`
       gates cover the graph/effect boundary: the web does not apply that chain
       gain to a `K()` graph source, so the native renderer skips it there
       (`fx-graph-source-lpf` 0.99999997/1.0003 and `fx-graph-out-channels`
@@ -383,8 +383,8 @@ and measured divergences are recorded in the archive.
       the site as empty objects and are ignored, so native now ignores their
       steps and keeps only the chain's default 0.8 gain. New `fx-pattern-`
       gain/lpf/pan/coarse gates pass at correlations 0.99999967+ with RMS
-      ratios near 1.0003; both `fx-nested-` gates pass unchanged at
-      0.99999997.
+      ratios near 1.0003; the three `fx-nested-` callable cases pass at
+      0.99999997/1.00033.
 - [x] Fractional IR-rate parity. `convolution_resample_ir` reproduces the web
       `adjustLength` index math, including truncation and the negative-index
       path for rates below unity. `test_convolution_prepare` pins `.5/.75/2/

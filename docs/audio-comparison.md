@@ -1226,34 +1226,25 @@ FM combination or full-song parity.
 
 ## Kabelsalat effect tails and input routing
 
-Nested `FX(...)` chains remain outside the gated matrix. A probe with
-`.FX(x=>x.lpf(800))`, `.FX(x=>x.room(.3))` and `.FX(x=>x.delay(.2))` over a
-clipped sine gave correlation 0.99999997 in all three cases but a constant
-RMS ratio of 1.2504, outside the unchanged 0.85–1.15 band. The waveform shape
-matches while the level does not, so this is a gain-staging divergence rather
-than a timing or synthesis mismatch; no threshold was changed and no case was
-accepted. A control sine with the same gain and no `FX` passed at ratio 1.000,
-and an FX case with gain 0.5 kept the same 1.2503 ratio, so the factor is
-independent of the explicit gain and consistent with the web applying its 0.8
-default gain to the FX chain. Native has no `FX` gain handling; adding a 0.8
-factor would be tuning to this capture rather than deriving the web's full FX
-gain staging, so it was not accepted. Two `fx-nested-` diagnostic cases in
-`scripts/compare-audio.mjs` reproduce the 1.2504 ratio without a gate. The
-browser's serialized events contain `FX:[{}]` because the pinned `FX(...)`
-builder stores callable FX arguments as empty control objects, so the deployed
-renderer ignores their controls and retains only the chain's default 0.8 gain.
-Pattern arguments (`FX(lpf(800), ...)`) carry serializable controls; the JS
-query layer materializes both forms into bounded `_fxSteps` (at most 8 chains,
-32 steps each) and the native renderer replays pattern controls. Four new
-`fx-pattern-` gain/lpf/pan/coarse gates pass at correlations 0.99999967+ and
-RMS ratios near 1.0003. Four `fx-overlap-` gates cover source filter plus FX
-filter, two FX filter arguments, source pan plus FX pan and source coarse plus
-FX coarse at 0.9999988+ and ratios near 1.0003. `fx-pattern-partials`
-(0.9990/0.9939) and `fx-pattern-loop` (0.99999994/1.0003) cover the site's
-flattened partials and ignored FX loop windows. The two `fx-nested-` callable
-cases pass unchanged at 0.99999997/1.0003. Remaining overlap is limited to
-room/delay/shape/distort/chorus and the source-level controls above. No
-threshold or baseline changed. Four `fx-` gates cover the graph/effect boundary: a `K()` graph
+Callable `FX(...)` chains are gated. The pinned `FX(...)` builder stores callable
+arguments as empty control objects, so the deployed renderer ignores their
+controls and retains only the chain's default 0.8 gain. Native now applies the
+same default: `fx-nested-lpf`, `fx-nested-room` and `fx-nested-delay` all
+measure **0.99999997 correlation and 1.00033 RMS ratio** at the unchanged
+0.99/0.85–1.15 gates. The earlier 1.2504 level diagnostic was a missing
+default-gain application, not a different synthesis path; no threshold or
+baseline changed. Pattern arguments (`FX(lpf(800), ...)`) carry serializable
+controls; the JS query layer materializes both forms into bounded `_fxSteps`
+(at most 8 chains, 32 steps each) and the native renderer replays pattern
+controls. Four `fx-pattern-` gain/lpf/pan/coarse gates pass at correlations
+0.99999967+ and RMS ratios near 1.0003. Four `fx-overlap-` gates cover source
+filter plus FX filter, two FX filter arguments, source pan plus FX pan and
+source coarse plus FX coarse at 0.9999988+ and ratios near 1.0003.
+`fx-pattern-partials` (0.9990/0.9939) and `fx-pattern-loop`
+(0.99999994/1.0003) cover the site's flattened partials and ignored FX loop
+windows. Remaining overlap is limited to room/delay/shape/distort/chorus and
+the source-level controls above. Four `fx-` gates cover the graph/effect
+boundary: a `K()` graph
 source replaces the oscillator or sample outside the FX chain, and the deployed
 renderer does not apply the chain's default gain there. The native renderer now
 skips that gain for graph sources while keeping it for `audioin()` worklet
@@ -1300,8 +1291,8 @@ worklet startup on an `audioin()` delay and correlates at 0.99929. Graph
 sources keep oscillating with the gate low until the hap end plus the longer
 of the pattern release and `fxr`; the linear fade matches the web release
 node. A fractional onset previously let the legacy oscillator envelope stop
-the voice one sample before that tail. Nested `FX(...)` chains remain outside
-these gates.
+the voice one sample before that tail. Nested `FX(...)` chains have their own
+`fx-nested-` gates rather than belonging to this `kabel-` matrix.
 
 Six cleanup-clock regressions extend the `kabel-` matrix to 30 cases. Two
 accelerated shared-PCM samples end naturally at .125 seconds but retain an

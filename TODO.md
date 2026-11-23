@@ -415,11 +415,13 @@ and measured divergences are recorded in the archive.
       ratio **0.99920** with the unchanged thresholds. Cutoff and other targets
       keep their static value and log one
       `LFO modulation is implemented only for gain` warning; the cutoff
-      diagnostic stays ungated at 0.44477. The deployed worklet formula and
-      begin-gated phase are recorded in the comparison doc; matching cutoff
-      needs a worklet-equivalent global phase model. Filter-specific
-      `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and tremolo remain separate
-      supported controls.
+      diagnostic stays ungated at 0.44477. The exact worklet parameters
+      (`depth=1000`, `dc=-.5`, `min=-480`, `max=23500`, triangle, 0.5 Hz) and
+      the native filter's 32-sample coefficient-update limit are recorded in
+      the comparison doc; the mapped sweep reaches only 0.682. Matching cutoff
+      needs a sample-rate filter/LFO path, not a threshold change.
+      Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
+      tremolo remain separate supported controls.
 - [x] Real post-source filter/pan FX chain. Pattern `lpf`/`hpf`/`bpf` and
       `pan` stages run in recorded order before source pan, with independent
       left/right filter state. Source filter plus FX filter, multiple FX filter

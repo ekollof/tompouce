@@ -696,19 +696,18 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       kernel-only 200,000-frame batch is **1.21-1.28x**. Callback runs with
       `TOMPOUCE_SIMD=c` and `TOMPOUCE_SIMD=avx2` both pass the audio gates.
       This is a measured fallback-path gain, not a whole-callback speedup.
-- [ ] Later SIMD kernels, only after measurement:
-  - per-voice stereo DSP beyond the single-filter path, and FM oscillators;
-    FM's per-frame sine is a scalar libm call, so vectorizing the surrounding
-    add/clamp/envelope arithmetic cannot remain byte-exact
-  - four-frame routing/mix and sample interpolation; the current two-lane SSE2
-    route and paired source interpolation were only incremental or neutral
-  - stereo delay and independent reverb combs; the four-comb fallback was
-    measured and rejected at 0.96-0.97x, while the interleaved stereo delay
-    layout won 1.35-1.38x and its SSE2 lane was neutral. Feedback state stays
-    per lane, and the convolution reverb is already SIMD
-  - forward real stretch FFT only if preparation becomes the bottleneck; the
-    visualizer FFT is now precomputed and vectorized, and the audio callback
-    stays FFT-free
+- [x] Forward real stretch FFT assessed. A 10 s stretch preparation measured
+      ~206 ms; the forward real transform is ~48 ms (23.5%) and the complex
+      transform ~74 ms. `src/stretch_real_fft_simd.c` is byte-exact against
+      the legacy layout, but AVX2 measured **19.1-19.8 ms versus 14.4 ms for
+      C** over 2,000 calls (0.73-0.75x), so production keeps the scalar real
+      transform. The visualizer FFT is separately precomputed and vectorized.
+- [x] Later SIMD kernels assessed. Saw, square and the visualizer/stretch
+      complex FFTs are integrated; sample interpolation, ADSR, reverb combs,
+      the stereo delay lane and the forward real stretch FFT were measured and
+      rejected; routing/mix was neutral and FM's per-frame sine is scalar
+      libm. No remaining candidate has a measured win; add one only after a
+      profile shows it is needed.
 - [x] `TOMPOUCE_SIMD` runtime policy audited. Production kernels use per-kernel
       `target("avx2,no-fma")` attributes with the C fallback; the only
       `-mavx2` build is the `EXCLUDE_FROM_ALL` benchmark translation unit.

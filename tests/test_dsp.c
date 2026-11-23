@@ -5,6 +5,7 @@
 #include "reverb_simd.h"
 #include "delay_simd.h"
 #include "stretch_fft_simd.h"
+#include "stretch_real_fft_simd.h"
 #include "visual_fft.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
@@ -634,6 +635,105 @@ static void test_visual_fft(void) {
 #endif
 }
 
+typedef struct { double re, im; } TestComplex;
+static TestComplex test_complex_mul(TestComplex a, TestComplex b) {
+    return (TestComplex){a.re*b.re-a.im*b.im,a.re*b.im+a.im*b.re};
+}
+static void stretch_real_fft_legacy(TestComplex *out, const float *input,
+                                    const TestComplex *twiddle,
+                                    const unsigned *real_reverse) {
+    enum { SIZE=STRETCH_REAL_FFT_SIZE };
+    for (unsigned i=0;i<SIZE/2;i++) {
+        double a=input[real_reverse[i]], b=input[real_reverse[i]+SIZE/2];
+        out[i*2]=(TestComplex){a+b,0};
+        out[i*2+1]=(TestComplex){a-b,0};
+    }
+    for (unsigned step=SIZE/4;step>=2;step/=4) {
+        unsigned length=SIZE*2/step, q=length/4;
+        for (unsigned base=0;base<SIZE;base+=length)
+            for (unsigned j=0,k=0;j<=q/2;j++,k+=step/2) {
+                unsigned a=base+j, b=a+q, c=b+q, d=c+q;
+                TestComplex ma=out[a];
+                TestComplex mb=test_complex_mul(out[b],twiddle[k]);
+                TestComplex mc=test_complex_mul(out[c],twiddle[2*k]);
+                TestComplex md=test_complex_mul(out[d],twiddle[3*k]);
+                TestComplex t0={ma.re+mc.re,ma.im+mc.im};
+                TestComplex t1={ma.re-mc.re,ma.im-mc.im};
+                TestComplex t2={mb.re+md.re,mb.im+md.im};
+                TestComplex t3={mb.re-md.re,mb.im-md.im};
+                out[a]=(TestComplex){t0.re+t2.re,t0.im+t2.im};
+                out[b]=(TestComplex){t1.re+t3.im,t1.im-t3.re};
+                if (!j) {
+                    out[c]=(TestComplex){t0.re-t2.re,t0.im-t2.im};
+                    continue;
+                }
+                if (j==q/2) continue;
+                out[base+q-j]=(TestComplex){t1.re-t3.im,-t1.im-t3.re};
+                out[base+2*q-j]=(TestComplex){t0.re-t2.re,-t0.im+t2.im};
+            }
+    }
+}
+
+static void test_stretch_real_fft(void) {
+#if defined(__x86_64__) || defined(__i386__)
+    enum { SIZE=STRETCH_REAL_FFT_SIZE, HALF=SIZE/2, N=2000 };
+    static TestComplex twiddle[HALF];
+    static unsigned real_reverse[HALF];
+    static float input[SIZE];
+    static double data_c[2*SIZE], data_v[2*SIZE], data_l[2*SIZE];
+    for (unsigned i=0;i<HALF;i++) {
+        twiddle[i]=(TestComplex){cos(2*M_PI*i/SIZE),-sin(2*M_PI*i/SIZE)};
+        unsigned reversed_pairs=0;
+        for (unsigned shift=0;shift<10;shift+=2)
+            reversed_pairs|=((i>>shift)&3)<<(8-shift);
+        real_reverse[i]=reversed_pairs;
+    }
+    unsigned state=0x1b873593u;
+    for (int iteration=0;iteration<20;iteration++) {
+        for (int i=0;i<SIZE;i++) {
+            state=state*1664525u+1013904223u;
+            input[i]=(float)((int)(state>>8)/16777216.0-.5);
+        }
+        memset(data_c,0,sizeof(data_c));
+        memset(data_v,0,sizeof(data_v));
+        memset(data_l,0,sizeof(data_l));
+        stretch_real_fft_legacy((TestComplex*)data_l,input,twiddle,
+            real_reverse);
+        stretch_real_fft_c(data_c,input,(const double*)twiddle,
+            real_reverse);
+        stretch_real_fft_avx2(data_v,input,(const double*)twiddle,
+            real_reverse);
+        assert(memcmp(data_l,data_c,sizeof(data_c))==0);
+        assert(memcmp(data_l,data_v,sizeof(data_v))==0);
+    }
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        volatile double sink=0;
+        struct timespec t0,t1,t2;
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            stretch_real_fft_c(data_c,input,(const double*)twiddle,
+                real_reverse);
+            sink+=data_c[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            stretch_real_fft_avx2(data_v,input,(const double*)twiddle,
+                real_reverse);
+            sink+=data_v[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double c_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double v_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("real stretch FFT: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
+            c_ms,v_ms,v_ms>0?c_ms/v_ms:0);
+    }
+#endif
+}
+
 static void test_sample_interp(void) {
     float samples[64];
     for (int i=0;i<64;i++) samples[i]=(float)((i*37%101)-50)/37.0f;
@@ -1203,6 +1303,7 @@ int main(void) {
     test_comb4();
     test_delay2();
     test_stretch_fft();
+    test_stretch_real_fft();
     test_visual_fft();
     test_sample_interp();
     test_stereo_filter_path();

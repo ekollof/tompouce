@@ -198,6 +198,11 @@ scalar. It is byte-exact against C in both directions; 2,000
 forward+inverse pairs measured 45.8-47.5 ms versus 60.2-61.5 ms for C
 (1.29-1.34x). The forward real transform remains scalar, and stretch PCM gates
 pass.
+A 10 s stretch preparation measured ~206 ms, split into ~48 ms for the
+forward real transform (23.5%) and ~74 ms for the complex transform. An AVX2
+forward real-FFT kernel is byte-exact against the legacy layout but measured
+19.1-19.8 ms versus 14.4 ms for C over 2,000 calls (0.73-0.75x), so production
+keeps the scalar transform.
 The visualizer FFT now precomputes its per-length twiddles once and shares
 them between C and AVX2 butterflies. 500 4096-point transforms measured
 126.6-128.3 ms for the old per-butterfly `sin`/`cos` loop, 15.6-16.5 ms for

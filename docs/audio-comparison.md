@@ -579,9 +579,10 @@ because the first ~50 ms graph onset does not match; the full-window case stays
 the full window fell to 0.6076 and the steady gate to 0.9580. A 50 ms
 unfiltered hold was also rejected: full window 0.5459, steady 0.8557. The
 onset is therefore not a simple delayed or bypassed LFO; it is a more complex
-graph/filter connection response. A tap on the deployed graph confirms the LFO
-control signal is the expected `-480..500` triangle. Other non-gain/cutoff
-targets keep their static value and log one
+graph/filter connection response. A true 50 ms filter bypass with zero state
+was also rejected: full window 0.6215, steady 0.99962. A tap on the deployed
+graph confirms the LFO control signal is the expected `-480..500` triangle.
+Other non-gain/cutoff targets keep their static value and log one
 `LFO modulation is implemented only for gain and cutoff` warning.
 Filter-specific `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width
 LFO and tremolo are separate supported controls with their own gates.

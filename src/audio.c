@@ -2000,6 +2000,11 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
             stage->type==AUDIO_FX_BPF) {
             left_in=dsp_biquad_process(&v->fx_filters[0][i],left_in);
             right_in=dsp_biquad_process(&v->fx_filters[1][i],right_in);
+        } else if (stage->type==AUDIO_FX_SHAPE) {
+            double shape=fmax(0,fmin(.99,stage->a));
+            double k=2*shape, volume=stage->b;
+            left_in=(1+k)*left_in/(1+k*fabs(left_in))*volume;
+            right_in=(1+k)*right_in/(1+k*fabs(right_in))*volume;
         }
     }
     double ll=v->route_ll, lr=v->route_lr;

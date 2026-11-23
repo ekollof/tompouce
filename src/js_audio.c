@@ -493,6 +493,16 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
             if (!cJSON_IsString(op) || !op->valuestring) continue;
             const char *name=op->valuestring;
             if (!pattern && cJSON_HasObjectItem(v,name)) continue;
+            /* The deployed renderer ignores shared-send and room/IR controls
+               inside FX patterns; source controls remain in force. */
+            if (pattern && (!strcmp(name,"room") || !strcmp(name,"size") ||
+                !strcmp(name,"roomsize") || !strcmp(name,"dry") ||
+                !strcmp(name,"delay") || !strcmp(name,"delaytime") ||
+                !strcmp(name,"delaysync") || !strcmp(name,"delayfeedback") ||
+                !strcmp(name,"ir") || !strcmp(name,"irspeed") ||
+                !strcmp(name,"irbegin") || !strcmp(name,"roomfade") ||
+                !strcmp(name,"roomlp") || !strcmp(name,"roomdim")))
+                continue;
             if (pattern && !strcmp(name,"gain")) {
                 double value=0;
                 if (fx_arg_number(step,0,&value) && value>=0 && value<=16)
@@ -690,7 +700,10 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=2) ev->dsp.p[DSP_FTYPE]=value;
                 break;
             case FX_OP_SHAPE:
-                if (value>=0 && value<=.99) ev->dsp.p[DSP_SHAPE]=value;
+                if (value>=0 && value<=.99) {
+                    if (pattern) fx_add_stage(ev,AUDIO_FX_SHAPE,value,1);
+                    else ev->dsp.p[DSP_SHAPE]=value;
+                }
                 break;
             case FX_OP_CRUSH:
                 if (value>=1 && value<=24) ev->dsp.p[DSP_CRUSH]=value;
@@ -711,7 +724,16 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=1) ev->dsp.p[DSP_CHORUS]=value;
                 break;
             case FX_OP_SHAPEVOL:
-                if (value>=0 && value<=16) ev->dsp.p[DSP_SHAPEVOL]=value;
+                if (value>=0 && value<=16) {
+                    if (pattern) {
+                        int at=-1;
+                        for (int k=ev->fx_stage_count-1;k>=0;k--)
+                            if (ev->fx_stages[k].type==AUDIO_FX_SHAPE) {
+                                at=k; break;
+                            }
+                        if (at>=0) ev->fx_stages[at].b=value;
+                    } else ev->dsp.p[DSP_SHAPEVOL]=value;
+                }
                 break;
             case FX_OP_PHASER:
                 if (value>=0 && value<=200) ev->dsp.p[DSP_PHASER]=value;

@@ -51,8 +51,14 @@ to the page description. Link caches may keep an older card after deploy.
 ```sh
 cmake --preset default
 cmake --build --preset default --parallel 4
-ctest --test-dir build --output-on-failure --parallel 4
+./scripts/ctest-safe.sh --output-on-failure --parallel 4
 ```
+
+`ctest-safe.sh` preloads `scripts/no-core.c`, which sets `PR_SET_DUMPABLE=0`
+in each test process so assertion failures do not write systemd-coredump
+journal entries that trigger Omarchy's crash watcher. `ulimit -c 0` alone
+still produces metadata-only crash entries. Run the full suite serially;
+`tui_pty` and `hydra_webgl` can flake under `--parallel`.
 
 Run `./build/tompouce` for the UI or `./build/tompouce --mcp` for newline-delimited
 JSON-RPC on stdio. `--mcp --ui` uses `/dev/tty`; `--mcp-port PORT` enables the

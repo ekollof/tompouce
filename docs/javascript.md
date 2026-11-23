@@ -469,8 +469,10 @@ and multiple FX arguments compose; each FX argument applies its own default
 0.8 gain. Callable FX arguments are ignored by the current site and retain only
 that default gain, so native ignores their recorded steps. Pattern `partials`
 arrays flatten to a numeric control and FX loop windows are ignored by the
-site; parity gates cover both. Overlapping room/delay/shape/distort/chorus
-stages and ADSR/speed/note/sample/bank/string controls remain outside. The
+site; parity gates cover both. Pattern shape is a post-source waveshaper;
+pattern delay/IR sends are ignored, leaving source sends in force, while room
+overlap remains a right-channel diagnostic. Source distort/chorus remain
+ungated. ADSR/speed/note/sample/bank/string controls remain outside. The
 graph/effect boundary is covered: a `K()` source does not receive the chain's
 default gain, while `audioin()` worklet effects and ordinary sources do.
 

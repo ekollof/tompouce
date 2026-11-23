@@ -838,15 +838,14 @@ static void test_fx_shared_routing(void) {
     assert(haps && cJSON_GetArraySize(haps)==1);
     AudioEvent event;
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
-    assert(fabs(event.dsp.p[DSP_ROOM]-.3)<1e-9);
-    assert(fabs(event.dsp.p[DSP_SIZE]-4)<1e-9);
-    assert(fabs(event.dsp.p[DSP_DRY]-.6)<1e-9);
-    assert(fabs(event.delay_send-.2)<1e-9);
-    assert(fabs(event.delay_time-.125)<1e-9);
-    assert(fabs(event.delay_fb-.25)<1e-9);
+    assert(event.dsp.p[DSP_ROOM]==0);
+    assert(fabs(event.dsp.p[DSP_SIZE]-2)<1e-9);
+    assert(fabs(event.dsp.p[DSP_DRY]-1)<1e-9);
+    assert(event.delay_send==0);
+    assert(fabs(event.delay_time-.1875)<1e-9);
     assert(event.dsp.p[DSP_LPF]==0 && event.dsp.p[DSP_HPF]==0 &&
         event.dsp.p[DSP_BPF]==0);
-    assert(event.fx_stage_count==4);
+    assert(event.fx_stage_count==5);
     assert(event.fx_stages[0].type==AUDIO_FX_LPF &&
         fabs(event.fx_stages[0].a-800)<1e-9 &&
         fabs(event.fx_stages[0].b-2)<1e-9);
@@ -858,6 +857,8 @@ static void test_fx_shared_routing(void) {
         fabs(event.fx_stages[2].b-2)<1e-9);
     assert(event.fx_stages[3].type==AUDIO_FX_PAN &&
         fabs(event.fx_stages[3].a+.5)<1e-9);
+    assert(event.fx_stages[4].type==AUDIO_FX_SHAPE &&
+        fabs(event.fx_stages[4].a-.4)<1e-9);
     assert(!event.has_pan);
     assert(fabs(event.dsp.p[DSP_LPA]-.02)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPD]-.1)<1e-9);
@@ -865,7 +866,6 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_LPR]-.2)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPE]-3)<1e-9);
     assert(fabs(event.dsp.p[DSP_COARSE]-4)<1e-9);
-    assert(fabs(event.dsp.p[DSP_SHAPE]-.4)<1e-9);
     assert(fabs(event.dsp.p[DSP_DISTORT]-2)<1e-9);
     assert(fabs(event.dsp.p[DSP_CHORUS]-.3)<1e-9);
     assert(fabs(event.dsp.p[DSP_CRUSH]-8)<1e-9);
@@ -881,14 +881,11 @@ static void test_fx_shared_routing(void) {
     assert(fabs(event.dsp.p[DSP_FMBASE+6]-1)<1e-9);
     assert(fabs(event.dsp.p[DSP_FMBASE+7]-2)<1e-9);
     assert(fabs(event.dsp.matrix[1][1]-3)<1e-9 && (event.dsp.fm_envelopes&1));
-    assert(fabs(event.room_speed-.5)<1e-9);
-    assert(fabs(event.room_begin-.1)<1e-9);
-    assert(fabs(event.dsp.p[DSP_ROOMFADE]-.2)<1e-9);
-    assert(fabs(event.dsp.p[DSP_ROOMLP]-8000)<1e-9);
+    assert(event.room_speed==0 && event.room_begin==0);
+    assert(fabs(event.dsp.p[DSP_ROOMFADE]-.1)<1e-9);
+    assert(fabs(event.dsp.p[DSP_ROOMLP]-15000)<1e-9);
     assert(fabs(event.dsp.p[DSP_ROOMDIM]-1000)<1e-9);
-    assert(event.fx_room_fields==((1u<<0)|(1u<<1)|(1u<<2)|(1u<<3)|
-        (1u<<4)|(1u<<5)|(1u<<6)));
-    assert(!strcmp(event.fx_ir,"impulse"));
+    assert(event.fx_room_fields==0 && event.fx_ir[0]==0);
     cJSON_Delete(haps); javascript_free(program);
 
     haps=query("note(60).s('sine').lpf(1200).pan(.25)"
@@ -903,6 +900,15 @@ static void test_fx_shared_routing(void) {
         fabs(event.fx_stages[0].b-2)<1e-9);
     assert(event.fx_stages[1].type==AUDIO_FX_PAN &&
         fabs(event.fx_stages[1].a-.5)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').FX(shape(.3))",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.fx_stage_count==1);
+    assert(event.fx_stages[0].type==AUDIO_FX_SHAPE &&
+        fabs(event.fx_stages[0].a-.3)<1e-9);
+    assert(event.dsp.p[DSP_SHAPE]==0);
     cJSON_Delete(haps); javascript_free(program);
 
     haps=query("note(60).s('sine').FX(lpf(800), lpf(1200))",&program);

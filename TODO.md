@@ -391,9 +391,16 @@ and measured divergences are recorded in the archive.
       numeric control and does not apply them as arrays; it also ignores source
       loop windows in pattern FX. Native matches with `fx-pattern-partials`
       (0.9990/0.9939) and `fx-pattern-loop` (0.99999994/1.0003) gates.
-- [ ] Post-source composition for `room`/`delay`/`shape`/`distort`/`chorus`
-      and other effect stages that overlap source controls. ADSR, speed,
-      note/sample/bank and string-valued FX controls remain outside replay.
+- [x] Post-source shape and delay FX. Pattern `shape` runs after source shape
+      with the FX waveshaper (`k=2*shape`); `fx-pattern-shape` measures
+      0.99978/0.932 and `fx-overlap-source-shape` 0.99979/0.943. Pattern
+      delay/IR sends are ignored by the site, so source delay remains
+      (`fx-overlap-source-delay` 0.9999996/1.0005).
+- [ ] Room send composition and distort/chorus. FX room only manifests with a
+      source room and still differs in the right channel
+      (`fx-overlap-source-room` diagnostic); source distort and chorus remain
+      ungated (`fx-source-distort`/`fx-source-chorus` diagnostics). ADSR,
+      speed, note/sample/bank and string-valued controls remain outside.
       Callable argument replay is intentionally absent because the current
       site ignores it; revisit if that changes. Very long modulation uses a
       bounded conservative connection deadline; distinguish these limits from

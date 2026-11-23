@@ -1001,9 +1001,12 @@ a live room+filter+pan+coarse+shape+distort+chorus edit during an active delay
 tail. The replay also covers crush, postgain, phaser, tremolo, compressor, FM
 operator/envelope/matrix, IR/room and canonical numeric DSP controls. Pattern
 `partials` arrays flatten to a numeric control and loop windows are ignored by
-the site; both have parity gates. Overlapping source/FX stages for room,
-delay, shape, distort and chorus, plus ADSR/speed/note/sample/bank/string
-controls, remain outside.
+the site; both have parity gates. Pattern shape is a post-source waveshaper
+(`fx-pattern-shape` 0.99978/0.932, `fx-overlap-source-shape` 0.99979/0.943);
+pattern room/delay/IR sends: delay and IR are ignored, leaving source sends in
+force (`fx-overlap-source-delay` 0.9999996/1.0005). Room overlap remains a
+right-channel diagnostic, and source distort/chorus remain ungated; the
+remaining controls above are still outside.
 Existing randomized room-switch diagnostics remain diagnostics.
 
 ## Long generated rooms

@@ -3,6 +3,7 @@
    Spectrum peak regions, phase correction and Float32 OLA follow that source.
    All transforms run during generator preparation, never in the callback. */
 #include "stretch.h"
+#include "stretch_fft_simd.h"
 #include "sampler.h"
 #include "prep_profile.h"
 #include <stdatomic.h>
@@ -13,6 +14,7 @@
 #define CACHE_SIZE 128
 #define CACHE_BYTES (128u*1024u*1024u)
 typedef struct { double re,im; } Complex;
+_Static_assert(sizeof(Complex)==2*sizeof(double),"Complex layout");
 typedef struct {
     char source_key[768];
     int sample, phase, frames;
@@ -80,17 +82,7 @@ static void real_fft(Complex *out,const float *input) {
     }
 }
 static void fft(Complex *data,int inverse) {
-    for (unsigned i=0;i<FFT_SIZE;i++) if (i<reverse_bits[i]) {
-        Complex swap=data[i]; data[i]=data[reverse_bits[i]]; data[reverse_bits[i]]=swap;
-    }
-    for (unsigned length=2;length<=FFT_SIZE;length*=2) for (unsigned base=0;base<FFT_SIZE;base+=length)
-        for (unsigned j=0;j<length/2;j++) {
-            Complex a=data[base+j],b=data[base+j+length/2],w=twiddle[j*(FFT_SIZE/length)];
-            if (inverse) w.im=-w.im;
-            double re=b.re*w.re-b.im*w.im,im=b.re*w.im+b.im*w.re;
-            data[base+j]=(Complex){a.re+re,a.im+im}; data[base+j+length/2]=(Complex){a.re-re,a.im-im};
-        }
-    if (inverse) for (int i=0;i<FFT_SIZE;i++) { data[i].re/=FFT_SIZE; data[i].im/=FFT_SIZE; }
+    stretch_fft((double*)data,inverse,(const double*)twiddle,reverse_bits);
 }
 
 static void transform(const float *input,float *sum,double factor,unsigned cursor,

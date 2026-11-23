@@ -4,6 +4,7 @@
 #include "oscillator_simd.h"
 #include "reverb_simd.h"
 #include "delay_simd.h"
+#include "stretch_fft_simd.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
 #include "audio.h"
@@ -489,6 +490,64 @@ static void test_delay2(void) {
             (t3.tv_nsec-t2.tv_nsec)/1e6;
         printf("stereo delay: separate C %.3f ms, interleaved C %.3f ms, "
             "SSE2 %.3f ms\n",s_ms,c_ms,v_ms);
+    }
+#endif
+}
+
+static void test_stretch_fft(void) {
+#if defined(__x86_64__) || defined(__i386__)
+    enum { SIZE=STRETCH_FFT_SIZE, N=2000 };
+    static double twiddle[SIZE];
+    static unsigned reverse_bits[SIZE];
+    static double data_c[2*SIZE], data_v[2*SIZE];
+    for (unsigned i=0;i<SIZE;i++) {
+        unsigned x=i, reversed=0;
+        for (int bit=0;bit<11;bit++) { reversed=(reversed<<1)|(x&1); x>>=1; }
+        reverse_bits[i]=reversed;
+        if (i<SIZE/2) {
+            twiddle[2*i]=cos(2*M_PI*i/SIZE);
+            twiddle[2*i+1]=-sin(2*M_PI*i/SIZE);
+        }
+    }
+    unsigned state=0x9e3779b9u;
+    for (int inverse=0;inverse<2;inverse++)
+        for (int iteration=0;iteration<20;iteration++) {
+            for (int i=0;i<2*SIZE;i++) {
+                state=state*1664525u+1013904223u;
+                data_c[i]=data_v[i]=(int)(state>>8)/16777216.0-.5;
+            }
+            stretch_fft_c(data_c,inverse,twiddle,reverse_bits);
+            stretch_fft_avx2(data_v,inverse,twiddle,reverse_bits);
+            assert(memcmp(data_c,data_v,sizeof(data_c))==0);
+        }
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        volatile double sink=0;
+        struct timespec t0,t1,t2;
+        for (int i=0;i<2*SIZE;i++) {
+            state=state*1664525u+1013904223u;
+            data_c[i]=data_v[i]=(int)(state>>8)/16777216.0-.5;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            stretch_fft_c(data_c,0,twiddle,reverse_bits);
+            stretch_fft_c(data_c,1,twiddle,reverse_bits);
+            sink+=data_c[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            stretch_fft_avx2(data_v,0,twiddle,reverse_bits);
+            stretch_fft_avx2(data_v,1,twiddle,reverse_bits);
+            sink+=data_v[0];
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double c_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double v_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("2048-point FFT pairs: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
+            c_ms,v_ms,v_ms>0?c_ms/v_ms:0);
     }
 #endif
 }
@@ -1061,6 +1120,7 @@ int main(void) {
     test_square4();
     test_comb4();
     test_delay2();
+    test_stretch_fft();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

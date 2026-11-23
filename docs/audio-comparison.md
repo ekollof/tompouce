@@ -191,6 +191,13 @@ quantum. A two-lane SSE2 kernel is byte-exact but neutral against the
 interleaved C path (2.71-2.79 ms versus 2.72-2.75 ms over 1,000,000 frames),
 so production uses C; the layout itself cut the old separate-plane scalar
 path from 3.66-3.75 ms to 2.72-2.75 ms (1.35-1.38x). Delay PCM gates pass.
+The stretch phase-vocoder's complex FFT now uses an AVX2 kernel for butterfly
+stages of length 8 and up. The interleaved complex multiply keeps the scalar
+operation order, with bit reversal, the length 2/4 stages and the final divide
+scalar. It is byte-exact against C in both directions; 2,000
+forward+inverse pairs measured 45.8-47.5 ms versus 60.2-61.5 ms for C
+(1.29-1.34x). The forward real transform remains scalar, and stretch PCM gates
+pass.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

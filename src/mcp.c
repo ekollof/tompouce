@@ -501,15 +501,53 @@ void handle_request(cJSON *req) {
         char *out = calloc(outcap, 1);
         if (!out) return;
         int iserr = 0;
-        if (strcmp(tname,"music_sounds") == 0) {
+        enum {
+            TOOL_SOUNDS, TOOL_RELOAD_SOUNDS, TOOL_SET_CODE, TOOL_EVALUATE,
+            TOOL_PLAY, TOOL_STOP, TOOL_SET_BPM, TOOL_SONG, TOOL_TRACK,
+            TOOL_SESSION, TOOL_HEALTH, TOOL_DEBUG, TOOL_AUDIO_SCOPE,
+            TOOL_AUDIO_SPECTRUM, TOOL_GET_STATUS, TOOL_GET_CODE,
+            TOOL_GET_CONSOLE, TOOL_AI
+        };
+        static const struct { const char *name; int tool; } tool_names[] = {
+            {"music_sounds",TOOL_SOUNDS},
+            {"music_reload_sounds",TOOL_RELOAD_SOUNDS},
+            {"music_set_code",TOOL_SET_CODE},
+            {"music_evaluate",TOOL_EVALUATE},
+            {"music_play",TOOL_PLAY},
+            {"music_stop",TOOL_STOP},
+            {"music_set_bpm",TOOL_SET_BPM},
+            {"music_song",TOOL_SONG},
+            {"music_track",TOOL_TRACK},
+            {"music_session",TOOL_SESSION},
+            {"music_health",TOOL_HEALTH},
+            {"music_debug",TOOL_DEBUG},
+            {"music_audio_scope",TOOL_AUDIO_SCOPE},
+            {"music_audio_spectrum",TOOL_AUDIO_SPECTRUM},
+            {"music_get_status",TOOL_GET_STATUS},
+            {"music_get_code",TOOL_GET_CODE},
+            {"music_get_console",TOOL_GET_CONSOLE},
+            {"music_ai",TOOL_AI}
+        };
+        int tool = -1;
+        for (unsigned i=0;i<sizeof(tool_names)/sizeof(tool_names[0]);i++)
+            if (!strcmp(tname,tool_names[i].name)) {
+                tool=tool_names[i].tool;
+                break;
+            }
+        switch (tool) {
+        case TOOL_SOUNDS: {
             char *catalog = sound_catalog_json(args);
             if (!catalog) { snprintf(out,outcap,"Invalid sound query or catalog allocation failed."); iserr = 1; }
             else { free(out); out = catalog; outcap = strlen(out)+1; }
-        } else if (strcmp(tname,"music_reload_sounds") == 0) {
+            break;
+        }
+        case TOOL_RELOAD_SOUNDS: {
             int names = user_sounds_reload();
             snprintf(out,outcap,"Imported sound catalog reloaded: %d names.",names);
             iserr = names < 0;
-        } else if (strcmp(tname, "music_set_code") == 0) {
+            break;
+        }
+        case TOOL_SET_CODE: {
             cJSON *code = args ? cJSON_GetObjectItem(args, "code") : NULL;
             const cJSON *autostart=args?cJSON_GetObjectItemCaseSensitive(args,"autostart"):NULL;
             if (autostart && !cJSON_IsBool(autostart)) { snprintf(out,outcap,"autostart must be boolean."); iserr=1; }
@@ -520,7 +558,9 @@ void handle_request(cJSON *req) {
                 }
                 else { snprintf(out,outcap,"Evaluation failed; last playable pattern retained. See music_get_console."); iserr = 1; }
             } else { snprintf(out, outcap, "Missing code"); iserr = 1; }
-        } else if (strcmp(tname, "music_evaluate") == 0) {
+            break;
+        }
+        case TOOL_EVALUATE: {
             const cJSON *autostart=args?cJSON_GetObjectItemCaseSensitive(args,"autostart"):NULL;
             if (autostart && !cJSON_IsBool(autostart)) { snprintf(out,outcap,"autostart must be boolean."); iserr=1; }
             else if (track_load_from_code(current_code)) {
@@ -528,20 +568,28 @@ void handle_request(cJSON *req) {
                 snprintf(out, outcap, "Evaluated %d tracks.", track_count);
             }
             else { snprintf(out,outcap,"Evaluation failed; last playable pattern retained. See music_get_console."); iserr = 1; }
-        } else if (strcmp(tname, "music_play") == 0) {
+            break;
+        }
+        case TOOL_PLAY: {
             scheduler_transport_set(1); scheduler_start();
             snprintf(out, outcap, "Playing.");
-        } else if (strcmp(tname, "music_stop") == 0) {
+            break;
+        }
+        case TOOL_STOP: {
             scheduler_transport_set(0);
             snprintf(out, outcap, "Stopped.");
-        } else if (strcmp(tname, "music_set_bpm") == 0) {
+            break;
+        }
+        case TOOL_SET_BPM: {
             cJSON *b = args ? cJSON_GetObjectItem(args, "bpm") : NULL;
             if (b && cJSON_IsNumber(b) && isfinite(b->valuedouble) && b->valuedouble>=0 &&
                 (b->valuedouble==0 || isfinite(240/b->valuedouble))) {
                 audio_set_bpm(b->valuedouble);
                 snprintf(out, outcap, "BPM set to %.0f.", audio_get_bpm());
             } else { snprintf(out, outcap, "Missing or invalid bpm"); iserr=1; }
-        } else if (strcmp(tname, "music_song") == 0) {
+            break;
+        }
+        case TOOL_SONG: {
             cJSON *e = args ? cJSON_GetObjectItem(args, "enabled") : NULL;
             if (e && (cJSON_IsTrue(e) || cJSON_IsFalse(e))) {
                 scheduler_song_set(cJSON_IsTrue(e) ? 1 : 0);
@@ -555,26 +603,47 @@ void handle_request(cJSON *req) {
                     snprintf(out, outcap, "song on: track %d/%d", si + 1, n);
                 else snprintf(out, outcap, "song off (%d tracks)", n);
             }
-        } else if (strcmp(tname, "music_track") == 0) {
+            break;
+        }
+        case TOOL_TRACK: {
             cJSON *a = args ? cJSON_GetObjectItem(args, "action") : NULL;
             const char *act = (a && cJSON_IsString(a)) ? a->valuestring : "";
-            if (strcmp(act, "copy") == 0) {
+            enum {
+                TRACK_COPY, TRACK_NEXT, TRACK_PREV, TRACK_HOLD,
+                TRACK_GOTO, TRACK_LIST, TRACK_MOVE, TRACK_REMOVE
+            };
+            static const char *const track_actions[] = {
+                "copy","next","prev","hold","goto","list","move","remove"
+            };
+            int action = -1;
+            for (unsigned i=0;i<sizeof(track_actions)/sizeof(track_actions[0]);i++)
+                if (!strcmp(act,track_actions[i])) { action=(int)i; break; }
+            switch (action) {
+            case TRACK_COPY: {
                 int idx = scheduler_track_copy(current_code);
                 scheduler_song_follow();
                 if (idx >= 0) snprintf(out, outcap, "copied to track %d/%d", idx + 1, scheduler_song_count());
                 else { snprintf(out, outcap, "copy failed"); iserr=1; }
-            } else if (strcmp(act, "next") == 0) {
+                break;
+            }
+            case TRACK_NEXT: {
                 scheduler_track_next();
                 scheduler_song_follow();
                 snprintf(out, outcap, "track %d/%d", scheduler_song_pos() + 1, scheduler_song_count());
-            } else if (strcmp(act, "prev") == 0) {
+                break;
+            }
+            case TRACK_PREV: {
                 scheduler_track_prev();
                 scheduler_song_follow();
                 snprintf(out, outcap, "track %d/%d", scheduler_song_pos() + 1, scheduler_song_count());
-            } else if (strcmp(act, "hold") == 0) {
+                break;
+            }
+            case TRACK_HOLD: {
                 scheduler_song_hold_toggle();
                 snprintf(out, outcap, scheduler_song_hold() ? "hold on" : "hold off");
-            } else if (strcmp(act, "goto") == 0) {
+                break;
+            }
+            case TRACK_GOTO: {
                 cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
                 int n = scheduler_song_count();
                 if (ix && cJSON_IsNumber(ix) && isfinite(ix->valuedouble) &&
@@ -583,7 +652,9 @@ void handle_request(cJSON *req) {
                     scheduler_song_follow();
                     snprintf(out, outcap, "track %d/%d", scheduler_song_pos() + 1, n);
                 } else { snprintf(out, outcap, "bad index"); iserr=1; }
-            } else if (strcmp(act, "list") == 0) {
+                break;
+            }
+            case TRACK_LIST: {
                 int n = scheduler_song_count();
                 size_t pos = 0;
                 out[0] = 0;
@@ -596,7 +667,9 @@ void handle_request(cJSON *req) {
                     pos += (size_t)w;
                 }
                 if (n == 0) snprintf(out, outcap, "(no tracks)");
-            } else if (strcmp(act, "move") == 0) {
+                break;
+            }
+            case TRACK_MOVE: {
                 cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
                 cJSON *to = args ? cJSON_GetObjectItem(args, "to") : NULL;
                 if (ix && cJSON_IsNumber(ix) && to && cJSON_IsNumber(to) &&
@@ -606,19 +679,34 @@ void handle_request(cJSON *req) {
                     snprintf(out, outcap, "moved, now track %d/%d",
                         scheduler_song_pos() + 1, scheduler_song_count());
                 } else { snprintf(out, outcap, "bad index"); iserr=1; }
-            } else if (strcmp(act, "remove") == 0) {
+                break;
+            }
+            case TRACK_REMOVE: {
                 cJSON *ix = args ? cJSON_GetObjectItem(args, "index") : NULL;
                 if (ix && cJSON_IsNumber(ix) && isfinite(ix->valuedouble) &&
                     scheduler_track_remove((int)ix->valuedouble)) {
                     scheduler_song_follow();
                     snprintf(out, outcap, "removed, %d left", scheduler_song_count());
                 } else { snprintf(out, outcap, "bad index"); iserr=1; }
-            } else { snprintf(out, outcap, "Unknown action (copy/next/prev/hold/list/goto/move/remove)"); iserr=1; }
-        } else if (strcmp(tname, "music_session") == 0) {
+                break;
+            }
+            default: {
+                snprintf(out, outcap, "Unknown action (copy/next/prev/hold/list/goto/move/remove)");
+                iserr=1;
+                break;
+            }
+            }
+            break;
+        }
+        case TOOL_SESSION: {
             handle_session(args, out, outcap, &iserr);
-        } else if (strcmp(tname, "music_health") == 0) {
+            break;
+        }
+        case TOOL_HEALTH: {
             handle_health(out, outcap);
-        } else if (strcmp(tname, "music_debug") == 0) {
+            break;
+        }
+        case TOOL_DEBUG: {
             cJSON *lim = args ? cJSON_GetObjectItem(args, "limit") : NULL;
             int n = 16;
             size_t pos = 0;
@@ -642,7 +730,9 @@ void handle_request(cJSON *req) {
                     iserr = 1;
                 }
             }
-        } else if (strcmp(tname, "music_audio_scope") == 0) {
+            break;
+        }
+        case TOOL_AUDIO_SCOPE: {
             int count=256;
             const cJSON *lim=args?cJSON_GetObjectItemCaseSensitive(args,"limit"):NULL;
             if (cJSON_IsNumber(lim) && isfinite(lim->valuedouble)) count=(int)lim->valuedouble;
@@ -667,7 +757,9 @@ void handle_request(cJSON *req) {
                 free(text);
             } else snprintf(out,outcap,"{}");
             cJSON_Delete(root);
-        } else if (strcmp(tname, "music_audio_spectrum") == 0) {
+            break;
+        }
+        case TOOL_AUDIO_SPECTRUM: {
             enum { ANALYSER_SAMPLES = 4096 };
             float samples[ANALYSER_SAMPLES];
             float bands[SPECTRUM_BANDS];
@@ -705,7 +797,9 @@ void handle_request(cJSON *req) {
                 free(text);
             } else snprintf(out,outcap,"{}");
             cJSON_Delete(root);
-        } else if (strcmp(tname, "music_get_status") == 0) {
+            break;
+        }
+        case TOOL_GET_STATUS: {
             int si = scheduler_song_pos();
             int n = scheduler_song_count();
             char song[64] = {0};
@@ -717,14 +811,18 @@ void handle_request(cJSON *req) {
             snprintf(out, outcap, "playing=%s bpm=%.0f voices=%d%s\ncurrent_code_bytes=%zu",
                 audio_is_playing()?"yes":"no", audio_get_bpm(), track_count, song,
                 current_code ? strlen(current_code) : 0);
-        } else if (strcmp(tname, "music_get_code") == 0) {
+            break;
+        }
+        case TOOL_GET_CODE: {
             size_t ncode = current_code ? strlen(current_code) : 0;
             if (ncode + 1 > outcap) ncode = outcap ? outcap - 1 : 0;
             if (outcap > 0) {
                 if (ncode) memcpy(out, current_code, ncode);
                 out[ncode] = 0;
             }
-        } else if (strcmp(tname, "music_get_console") == 0) {
+            break;
+        }
+        case TOOL_GET_CONSOLE: {
             cJSON *ln = args ? cJSON_GetObjectItem(args, "lines") : NULL;
             int n = (ln && cJSON_IsNumber(ln)) ? (int)ln->valuedouble : 20;
             if (n < 1) n = 1;
@@ -742,7 +840,9 @@ void handle_request(cJSON *req) {
                 }
             }
             if (pos == 0) snprintf(out, outcap, "%s", "(no console output)");
-        } else if (strcmp(tname, "music_ai") == 0) {
+            break;
+        }
+        case TOOL_AI: {
             cJSON *pr = args ? cJSON_GetObjectItem(args, "prompt") : NULL;
             if (pr && cJSON_IsString(pr)) {
                 ai_request_async(pr->valuestring, current_code);
@@ -768,9 +868,13 @@ void handle_request(cJSON *req) {
                     iserr = 1;
                 }
             } else { snprintf(out, outcap, "Missing prompt"); iserr=1; }
-        } else {
+            break;
+        }
+        default: {
             snprintf(out, outcap, "Unknown tool: %s", tname);
             iserr = 1;
+            break;
+        }
         }
         cJSON *result = text_result(out, iserr);
         cJSON *resp = cJSON_CreateObject();

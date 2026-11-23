@@ -651,6 +651,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       (including forced direct AVX2 calls), but 2,000,000 groups measured
       **7.686 ms C vs 41.063 ms AVX2 (0.19x)**, so it is not integrated. The
       branchy per-lane envelope arithmetic is faster scalar.
+- [x] Four-comb fallback-reverb candidate measured. `src/reverb_simd.c` is
+      byte-exact against the scalar comb loop (line writes and read samples,
+      including forced direct AVX2 calls), but 2,000,000 frames measured
+      **88.2-88.6 ms C vs 91.3-92.3 ms AVX2 (0.96-0.97x)**, so it is not
+      integrated. The scalar `tanh` call and four independent line addresses
+      dominate; the convolution kernel remains the SIMD room path.
 - [x] Persistent per-voice stereo filter. The byte-exact two-lane
       `DspBiquad2` kernel now keeps coefficients and state in the voice
       instead of rebuilding them per sample. `test_voice_soa_dsp` compares C
@@ -669,13 +675,17 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
     add/clamp/envelope arithmetic cannot remain byte-exact
   - four-frame routing/mix and sample interpolation; the current two-lane SSE2
     route and paired source interpolation were only incremental or neutral
-  - stereo delay and independent reverb combs; feedback state must stay per
-    lane, and the convolution reverb is already SIMD
+  - stereo delay and independent reverb combs; the four-comb fallback was
+    measured and rejected at 0.97x, feedback state stays per lane, and the
+    convolution reverb is already SIMD
   - stretch/FFT and visualizer FFT only if preparation or UI becomes the
     bottleneck; the audio callback stays FFT-free
-- [ ] Keep the existing `TOMPOUCE_SIMD` runtime policy, C fallback, per-kernel
-      target flags and no-FMA rule. Every new kernel needs byte-exact PCM
-      comparisons and forced-ISA runs; do not add a global `-mavx2` build.
+- [x] `TOMPOUCE_SIMD` runtime policy audited. Production kernels use per-kernel
+      `target("avx2,no-fma")` attributes with the C fallback; the only
+      `-mavx2` build is the `EXCLUDE_FROM_ALL` benchmark translation unit.
+      Existing kernels have byte-exact C/direct-AVX2 comparisons and forced
+      `TOMPOUCE_SIMD=c`/`avx2` runs. Keep applying this rule to any new kernel;
+      do not add a global `-mavx2` build.
 
 ## Terminal blockers awaiting upstream
 

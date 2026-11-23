@@ -181,6 +181,11 @@ and measured **18.462 ms versus 68.625 ms for C (3.72x)** over 2,000,000
 groups. SoA square/pulse lanes use it under the same runtime selection. FM's
 per-frame sine remains a scalar libm call, so the FM oscillator itself is not
 vectorized.
+A four-lane fallback-reverb comb kernel was measured and rejected: it is
+byte-exact against the scalar comb loop, but 2,000,000 frames took
+91.3-92.3 ms versus 88.2-88.6 ms for C (0.96-0.97x). Scalar `tanh` and four
+independent line addresses dominate; the convolution kernel remains the SIMD
+room path.
 Supersaw voices now
 use from-allocation lanes that point at the voice's oscillator state and reuse
 the AVX2 kernel; the source/envelope clock and stereo biquad state stay in the

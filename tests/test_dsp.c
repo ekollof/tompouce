@@ -2,6 +2,7 @@
 #include "sample_interp.h"
 #include "envelope_simd.h"
 #include "oscillator_simd.h"
+#include "reverb_simd.h"
 #include "voice_soa_dsp.h"
 #include "js_audio.h"
 #include "audio.h"
@@ -307,6 +308,63 @@ static void test_square4(void) {
         printf("four-lane square: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
             scalar_ms,lane_ms,lane_ms>0?scalar_ms/lane_ms:0);
     }
+#endif
+}
+
+static void test_comb4(void) {
+#if defined(__x86_64__) || defined(__i386__)
+    enum { LEN=16384, N=2000000 };
+    static float lines_c[4][LEN], lines_v[4][LEN];
+    float *pc[4]={lines_c[0],lines_c[1],lines_c[2],lines_c[3]};
+    float *pv[4]={lines_v[0],lines_v[1],lines_v[2],lines_v[3]};
+    unsigned read[4]={0}, write=0;
+    unsigned state=0x27d4eb2fu;
+    for (int k=0;k<4;k++)
+        for (int i=0;i<LEN;i++) {
+            state=state*1664525u+1013904223u;
+            lines_c[k][i]=lines_v[k][i]=(float)((int)(state>>8)/16777216.0-.5);
+        }
+    double scalar[4], lane[4];
+    for (int iteration=0;iteration<10000;iteration++) {
+        for (int k=0;k<4;k++) read[k]=(write+1116u*(unsigned)(k+1))%(unsigned)LEN;
+        dsp_comb4_c(pc,read,write,.03125,.84,scalar);
+        dsp_comb4_avx2(pv,read,write,.03125,.84,lane);
+        for (int k=0;k<4;k++) {
+            assert(memcmp(&lines_c[k][write],&lines_v[k][write],
+                sizeof(float))==0);
+            assert(memcmp(&scalar[k],&lane[k],sizeof(double))==0);
+        }
+        if (++write>=(unsigned)LEN) write=0;
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_cpu_init();
+    if (__builtin_cpu_supports("avx2")) {
+        volatile double sink=0;
+        struct timespec t0,t1,t2;
+        clock_gettime(CLOCK_MONOTONIC,&t0);
+        for (int i=0;i<N;i++) {
+            for (int k=0;k<4;k++) read[k]=(write+1116u*(unsigned)(k+1))%(unsigned)LEN;
+            dsp_comb4_c(pc,read,write,.03125,.84,scalar);
+            sink+=scalar[0];
+            if (++write>=(unsigned)LEN) write=0;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t1);
+        for (int i=0;i<N;i++) {
+            for (int k=0;k<4;k++) read[k]=(write+1116u*(unsigned)(k+1))%(unsigned)LEN;
+            dsp_comb4_avx2(pv,read,write,.03125,.84,lane);
+            sink+=lane[0];
+            if (++write>=(unsigned)LEN) write=0;
+        }
+        clock_gettime(CLOCK_MONOTONIC,&t2);
+        (void)sink;
+        double c_ms=(t1.tv_sec-t0.tv_sec)*1e3+
+            (t1.tv_nsec-t0.tv_nsec)/1e6;
+        double v_ms=(t2.tv_sec-t1.tv_sec)*1e3+
+            (t2.tv_nsec-t1.tv_nsec)/1e6;
+        printf("four-comb reverb: C %.3f ms, AVX2 %.3f ms (%.2fx)\n",
+            c_ms,v_ms,v_ms>0?c_ms/v_ms:0);
+    }
+#endif
 #endif
 }
 
@@ -876,6 +934,7 @@ int main(void) {
     test_envelope4();
     test_saw4();
     test_square4();
+    test_comb4();
     test_sample_interp();
     test_stereo_filter_path();
     test_stereo_filter_persistent();

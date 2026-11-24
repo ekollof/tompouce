@@ -702,12 +702,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       the starter's `midi('tout')` selector. `test_midi` also receives pitch
       bend (value 4096), channel aftertouch (77) and clock/start/stop
       transport; two owned subscribers distinguish the default IAC/first
-      selection, `midiport`-selected CC and note-on/off routing, and `"*"`
-      broadcast; an unmatched selector drops. An unsubscribed receiver checks
-      that named and numeric selectors use the writable MIDI-generic output
-      list, with the numeric index computed from that list. Physical DIN/USB
-      note-off timing remains in the separate hardware-blocked community
-      follow-up.
+      subscriber selection, `midiport`-selected CC and note-on/off routing, and
+      `"*"` broadcast; an unmatched selector drops. An unsubscribed receiver
+      checks named/numeric output-list routing and the output-list fallback; a
+      connected subscriber wins over an unconnected IAC-named output, which
+      documents the native deviation needed by `aconnect`/Midi-Bridge.
+      Physical DIN/USB note-off timing remains in the separate hardware-blocked
+      community follow-up.
 
 ## Render and SIMD performance
 

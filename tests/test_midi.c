@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <time.h>
 
+static int switchangel_receiver(snd_seq_t **receiver, int *rport);
+
 static double monotonic(void) {
     struct timespec now; assert(!clock_gettime(CLOCK_MONOTONIC,&now));
     return now.tv_sec+now.tv_nsec/1e9;
@@ -365,7 +367,7 @@ static void test_note_off_under_load(void) {
     event_queue_clear(); audio_time=0; audio_toggle_play(1);
     const unsigned char channels[]={1,3,5,7};
     midi_capture_enable(1);
-    midi_notes_for(channels,4,64,110,.02);
+    midi_notes_for_port(channels,4,64,110,.02,"tompouce-noteoff-load-qa");
     int ons=0,offs=0; double first=monotonic();
     while (offs<4 && monotonic()-first<3) {
         snd_seq_event_t *event=NULL;
@@ -387,7 +389,7 @@ static void test_note_off_under_load(void) {
     event_queue_clear();
     midi_capture_enable(1);
     scheduler_init();
-    assert(track_load_from_code("note(64).fast(4).midi().clip(0.04)"));
+    assert(track_load_from_code("note(64).fast(4).midiport('tompouce-noteoff-load-qa').midi().clip(0.04)"));
     int scheduled_ons=0,scheduled_offs=0;
     double scheduled_start=monotonic();
     while (scheduled_offs<4 && monotonic()-scheduled_start<8) {
@@ -450,7 +452,7 @@ static void test_channel_note_off_loopback(void) {
     event_queue_clear(); audio_time=0; audio_toggle_play(1);
     const unsigned char channels[]={2,0,2};
     midi_capture_enable(1);
-    midi_notes_for(channels,3,67,100,.02);
+    midi_notes_for_port(channels,3,67,100,.02,"tompouce-channel-timing-qa");
     int ons=0,offs=0; double first=monotonic();
     while (offs<3 && monotonic()-first<2) {
         snd_seq_event_t *event=NULL;
@@ -728,7 +730,7 @@ static void test_midi_unconnected_output(void) {
     if (!midi_ready()) { puts("SKIP unconnected MIDI output: no ALSA sequencer"); return; }
     snd_seq_t *out=NULL;
     assert(snd_seq_open(&out,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
-    snd_seq_set_client_name(out,"tompouce-webmidi-qa");
+    snd_seq_set_client_name(out,"tompouce-IAC-webmidi-qa");
     int port=snd_seq_create_simple_port(out,"dest",
         SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,
         SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
@@ -737,9 +739,36 @@ static void test_midi_unconnected_output(void) {
     assert(engine>=0);
     int index=midi_output_index(out,engine,snd_seq_client_id(out),port);
     assert(index>=0);
+    /* A connected subscriber wins over the unconnected IAC-named output; the
+       web would pick the output, but native keeps aconnect/Midi-Bridge routes. */
+    snd_seq_t *subscriber=NULL;
+    int subscriber_port=-1;
+    int subscribed=switchangel_receiver(&subscriber,&subscriber_port);
+    if (subscribed) {
+        midi_cc(4,81,71);
+        int got=0; double first=monotonic();
+        while (!got && monotonic()-first<1) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(subscriber,&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==81 && event->data.control.value==71) got=1;
+            if (!got) usleep(2000);
+        }
+        assert(got);
+        int leaked=0; first=monotonic();
+        while (monotonic()-first<.05) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(out,&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==81) leaked=1;
+            usleep(2000);
+        }
+        assert(!leaked);
+        snd_seq_close(subscriber);
+    }
     /* No snd_seq_connect_from: the port is a WebMIDI-style output, not an
        ALSA subscriber. */
-    midi_cc_port(4,82,72,"tompouce-webmidi-qa");
+    midi_cc_port(4,82,72,"tompouce-IAC-webmidi-qa");
     int named=0; double first=monotonic();
     while (!named && monotonic()-first<1) {
         snd_seq_event_t *event=NULL;
@@ -761,9 +790,21 @@ static void test_midi_unconnected_output(void) {
         if (!indexed) usleep(2000);
     }
     assert(indexed);
+    /* No selector uses the same output list: the IAC-named output wins even
+       though it has no ALSA subscription. */
+    midi_cc(4,84,74);
+    int default_selected=0; first=monotonic();
+    while (!default_selected && monotonic()-first<1) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(out,&event)>=0 && event)
+            if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                event->data.control.param==84 && event->data.control.value==74) default_selected=1;
+        if (!default_selected) usleep(2000);
+    }
+    assert(default_selected);
     snd_seq_close(out);
     midi_shutdown();
-    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index");
+    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index; subscribers keep the default");
 }
 
 static void test_midi_input_stores(void) {

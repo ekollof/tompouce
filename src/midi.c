@@ -96,9 +96,12 @@ static int midi_running = 0;
 static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
-/* Default selection keeps native `aconnect` subscribers working: an
-   IAC-named subscriber, else the first subscriber. If none are connected,
-   fall back to the WebMIDI-style output list below. */
+/* Default selection keeps native `aconnect`/PipeWire Midi-Bridge workflows
+   working: an IAC-named subscriber, else the first subscriber. The web instead
+   picks from its output list; this native preference is documented and tested
+   because ALSA integrations subscribe to the out port rather than appearing as
+   writable destinations. If nothing is subscribed, fall through to the
+   WebMIDI-style output list below. */
 static int midi_subscriber_destination(snd_seq_addr_t *dest) {
     snd_seq_query_subscribe_t *query;
     snd_seq_query_subscribe_alloca(&query);
@@ -139,8 +142,8 @@ static int midi_subscriber_destination(snd_seq_addr_t *dest) {
 /* Resolve a WebMIDI-style selector against ALSA MIDI destinations. The output
    list is every writable MIDI-generic port, not just current subscribers, so
    numeric indices match a WebMIDI output list. An empty selector prefers a
-   name containing "IAC", else the first output; "*" is a native broadcast
-   opt-in handled by the callers. */
+   name containing "IAC", else the first output, matching the web default;
+   "*" is a native broadcast opt-in handled by the callers. */
 static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     if (!seq || seq_port < 0) return 0;
     int default_select = !selector || !*selector;

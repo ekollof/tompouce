@@ -1084,12 +1084,15 @@ array forms) all send through ALSA. `midiport` selects a native ALSA
 client or port by case-sensitive name substring, or a zero-based index into
 the writable MIDI-generic output list. `.midi('name')` sets the same default
 for the pattern. Omitting it prefers the first subscriber whose name contains
-`IAC`, otherwise the first subscriber, then the first output; this keeps
-native `aconnect` workflows while matching the web's default preference.
-`"*"` is a native-only broadcast opt-in, and an unmatched selector drops the
-message like the web's missing-device branch. Numeric selectors use the same
-writable MIDI-generic output ordering as a WebMIDI output list, including
-outputs that are not ALSA subscribers.
+`IAC`, otherwise the first subscriber; if nothing is subscribed, the first
+output whose name contains `IAC`, otherwise the first output. The subscriber
+preference is a documented native deviation from the web's output-list default:
+`aconnect` and PipeWire Midi-Bridge integrations subscribe to the out port
+rather than appearing as writable outputs, and selecting an unrelated output
+would break those routes. `"*"` is a native-only broadcast opt-in, and an
+unmatched selector drops the message like the web's missing-device branch.
+Named and numeric selectors use the writable MIDI-generic output ordering of a
+WebMIDI output list, including outputs that are not ALSA subscribers.
 A hap at cycle zero
 additionally sends transport start, as on the web. Sends run in web order
 (note, program, sysex, CC, NRPN, bend, touch, cycle-zero start,

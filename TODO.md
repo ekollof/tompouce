@@ -642,6 +642,39 @@ queues stopped/restarted the source before those changes; 256×2, 256×3 and
 512×2 measured zero stops. The remaining low-latency path is the block/SoA
 voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
+## Prebake coverage
+
+- [ ] Complete Switch Angel helper reference coverage. The 81-case gate
+      passes, but the pinned starter also defines helpers the matrix does not
+      directly exercise: `comb`/`_comb`, `bend`, `disperse`, `sq`, `irando`,
+      `getCue`, `toMajorKey`, `key_to_cc_value_for_autotune`, `roller` and
+      `spinor`. Add deployed-REPL/native cases and record any helper that is
+      genuinely unsupported. `roller2` and `voc` already have dedicated tests.
+- [ ] Custom Switch Angel `UISlider` widgets. Only the active `Volume`
+      callback is mapped (to F4 output volume). Any other callback, including
+      the commented `djfilt` example that uses `document` and
+      `getSuperdoughAudioController()`, has no mapping. Decide whether to
+      support a confined widget facade or make the unsupported path fail
+      explicitly instead of a silent no-op.
+- [ ] `roller2`'s `bstab` sample. No public installed manifest provides it;
+      the native profile rejects that hap with the sample-unavailable warning
+      while `supersaw`/`white` continue. Track a manifest/licensing path or a
+      documented user-provided sample directory; do not substitute `stab`.
+- [ ] Browser-only starter helpers. `document`, `bmod`, `FX` and arbitrary
+      `getSuperdoughAudioController()` access are unavailable in the sandbox.
+      Either add confined facades where semantics are well-defined or record
+      each as an intentional ceiling with one observable warning; do not add
+      silent fallbacks.
+- [ ] Prebake PCM breadth. Only `prebake-glide`, `prebake-accent` and
+      `prebake-delay` have audio gates. Add reference audio cases for
+      `trancegate`, `tgate`, `acid`, `stxt`, `humanize`, `glitch`, `fmtime`,
+      `strum` and the active `Volume` slider at a nonzero setting, using the
+      existing correlation/RMS thresholds.
+- [ ] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
+      covered through an owned ALSA receiver; pitch bend, aftertouch, clock and
+      multi-device/port routing remain unmeasured. Keep physical DIN/USB output
+      timing in the separate hardware-blocked item.
+
 ## Render and SIMD performance
 
 - [x] Full from-allocation SoA renderer. Target CPU-heavy songs such as

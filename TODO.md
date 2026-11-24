@@ -4,7 +4,8 @@ Active work only. Completed work and measurement details are preserved in the
 [preparation/parity archive](docs/archive/preparation-parity-roadmap.md) and
 [earlier history](docs/archive/todo-history.md). Current behavior and coverage
 live in [JavaScript/native audio](docs/javascript.md),
-[audio comparisons](docs/audio-comparison.md) and
+[audio comparisons](docs/audio-comparison.md),
+[parity bounds](docs/parity-bounds.md) and
 [architecture](docs/architecture.md). Follow [AGENTS.md](AGENTS.md) for security,
 verification, installation and upstream terminal constraints.
 

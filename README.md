@@ -162,6 +162,7 @@ at a time. F1 remains the Tompouce keybinding reference.
 - [`docs/javascript.md`](docs/javascript.md) — upstream JavaScript Strudel runtime,
   native C audio coverage, imports, live highlighting, and remaining limits
 - [`docs/audio-comparison.md`](docs/audio-comparison.md) — repeatable browser/native captures
+- [`docs/parity-bounds.md`](docs/parity-bounds.md) — consolidated web/native divergence ledger with gates and hardware-blocked items
 
 ## Build
 

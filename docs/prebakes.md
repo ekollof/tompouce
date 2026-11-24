@@ -79,9 +79,12 @@ their own support. `bmod` and `FX` are core pattern APIs and work here; the
 so `typeof` feature detection keeps working, and a real use aborts setup with
 a message naming the browser-only helper and its missing facade.
 The pinned `roller2` helper's `bstab` sample is not part of
-the public installed manifests; the native profile keeps the name and rejects
-that hap with the normal sample-unavailable warning instead of substituting
-the unrelated `stab` bank. Its `supersaw` and `white` voices start as soon as
+the public installed manifests; the deployed site's `getSound('bstab')` is
+also empty, so both players drop only that hap. The native profile keeps the
+name and rejects it with the normal sample-unavailable warning instead of
+substituting the unrelated `stab` bank. `test_audio` gates this: exactly one
+warning, one eviction plus the `supersaw` and `white` source events queued,
+and no `bstab` token. Its `supersaw` and `white` voices start as soon as
 preparation of the missing hap completes. External MIDI is covered for the
 starter's `voc` path: `voc` sends `.midi('tout')`, and `test_midi` names its
 owned receiver to match that selector, then delivers its note and CC 34

@@ -555,7 +555,11 @@ and measured divergences are recorded in the archive.
       `bstab` individually with the existing sample-unavailable warning rather
       than substituting `stab`. `test_switchangel_roller2` checks the
       `bstab`/`supersaw`/`white` query names; `test_websamp` checks that
-      `bstab` has no installed default and that generic `stab` exists. An
+      `bstab` has no installed default and that generic `stab` exists; and
+      `test_switchangel_roller2_missing_sample` gates the commit path: one
+      warning, one eviction plus the two sibling source events queued, and no
+      `bstab` token. The deployed site's `getSound('bstab')` is also empty, so
+      both players drop the same hap. An
       owned engine confirmed the two oscillator voices play alongside the
       rejected sample.
 - [x] Full drum-machine bank alias table. `src/banks.c` mirrors the pinned

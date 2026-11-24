@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "../src/audio.c"
 #include "js_audio.h"
 #include "scheduler.h"
@@ -596,6 +597,58 @@ static void test_active_voice_list(void) {
     memset(voices,0,sizeof(voices));
     active_voice_reset();
     audio_set_reference_mode(0); playing=old_playing;
+}
+
+/* The pinned roller2 helper mixes a missing custom bstab sample with two
+   oscillators. Native must reject only that hap and keep both sibling voices
+   queued, matching the web's missing-sound behavior and the generic sibling
+   test above. */
+static void test_switchangel_roller2_missing_sample(void) {
+    char root[]="/tmp/tompouce-roller2-XXXXXX", config[512], path[700];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    assert(!setenv("XDG_CONFIG_HOME",root,1));
+    snprintf(config,sizeof(config),"%s/tompouce",root);
+    assert(!mkdir(config,0700));
+    snprintf(path,sizeof(path),"%s/prebake.strudel",config);
+    const char *fixture=
+        "register('acidenv',(x,pat)=>pat.lpf(100).lpenv(x*9).lps(.2).lpd(.12).lpq(2));\n"
+        "window.roller2=(acidenv=.5)=>s(\"bstab:1:.6,supersaw:1:.6,white:0:.3\")\n"
+        " .detune(rand).begin(\"<0 .02>/4\").room(.5).acidenv(acidenv).lpq(0)\n"
+        " .postgain(1.2).diode([2.5,.6]).sustain(.45).dec(.2);\n";
+    FILE *file=fopen(path,"w"); assert(file); assert(fputs(fixture,file)>=0); assert(!fclose(file));
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    assert(prep_pool_start(0,0));
+    event_queue_clear();
+    cJSON *metadata=NULL; char error[512];
+    JsProgram *program=javascript_compile("roller2()",120,&metadata,error,sizeof(error));
+    if (!program) fprintf(stderr,"roller2 compile: %s\n",error);
+    assert(program); cJSON_Delete(metadata);
+    int logged=console_count_get();
+    unsigned generation=event_queue_generation();
+    assert(js_audio_schedule(program,0,0,generation));
+    int warned=0;
+    for (int i=logged;i<console_count_get();i++) {
+        const char *line=console_line(i);
+        if (line && strstr(line,"sample unavailable")) warned=1;
+    }
+    assert(warned);
+    assert(event_queue_depth()==3);
+    char queue[4096];
+    int qn=scheduler_debug_queue(queue,sizeof(queue),8);
+    assert(qn>0 && strstr(queue,"tok=supersaw") && strstr(queue,"tok=white"));
+    assert(!strstr(queue,"tok=bstab"));
+    event_queue_clear();
+    javascript_free(program);
+    prep_pool_stop();
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
+    if (saved) { setenv("XDG_CONFIG_HOME",saved,1); free(saved); }
+    else unsetenv("XDG_CONFIG_HOME");
+    unlink(path); rmdir(config); rmdir(root);
+    puts("Switch Angel roller2 rejects only bstab and keeps supersaw/white");
 }
 
 static void test_live_scope_attachment(void) {
@@ -1341,6 +1394,7 @@ int main(void) {
     test_supersaw_soa_equivalence();
     bench_procedural_hh();
     test_failed_source_siblings();
+    test_switchangel_roller2_missing_sample();
     test_analyser_controls_do_not_warn();
     test_generic_lfo_warns();
     test_generic_cutoff_lfo();

@@ -120,7 +120,9 @@ that is not a writable output. Physical
 USB/DIN transport and device response timing remain unmeasured here: this box
 has a Behringer UMC404HD (`16:0`) with MIDI I/O, but no receiving synth and no
 DIN OUT→IN cable, and an owned ALSA loopback cannot observe hardware or driver
-queues. A community measurement needs either a receiving device on the
+queues. This leg is deferred because the user has no receiving synth or DIN
+OUT→IN loopback available. If hardware becomes available, a community
+measurement needs either a receiving device on the
 UMC404HD MIDI OUT or a 5-pin DIN cable from MIDI OUT to MIDI IN. Measure
 note-on/off round-trip jitter and device response with the same owned-session
 discipline used above; do not substitute a virtual ALSA loopback for the

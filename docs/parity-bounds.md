@@ -14,7 +14,7 @@ Each row names the gate or measurement that keeps the bound from drifting.
 | Numeric `midiport` | Indexes the browser's WebMIDI output objects. | Indexes writable `MIDI_GENERIC` ALSA ports, including ports with no ALSA subscription. | `test_midi` computes a receiver's index from the same list and delivers by `#index`; a receiver with no subscription receives by name and index. | **Accepted mapping.** The list order is ALSA's, not the browser's; names are the portable selector. |
 | MIDI input stores | Each device has isolated stores; every message byte is filed into the CC store. | Senders are merged; CC, note and bend paths stay separate. | `scripts/midi-input-reference-qa.mjs` / `test-midi-input-reference-web`, plus `test_midi`. | **Accepted.** Matching per-device isolation would break the merged semantics native gates depend on. |
 | Live `wtphaserand` | The wavetable worklet calls its own `Math.random()`. | A time/PID-seeded LCG initializes each voice phase. | Seeded `wt-sample-phaserand-*` cases gate exact draw ordering at `0xc0ffee`. `test-wtphaserand-randomness` compares 16 unseeded renders per side: latest RMS mean difference 0.185%, peak 2.11%; earlier samples 0.914%/1.355% and 0.591%/4.785%. Bound: 5% RMS mean, 10% peak mean, both sides vary, ranges overlap. | **Bounded statistical equivalence.** Unseeded live phases cannot be sample-locked; no sample-exact live PCM claim. |
-| Physical DIN/USB output timing | WebMIDI device queue and hardware latency. | ALSA queue, PipeWire Midi-Bridge and the attached UMC404HD. | Not measured. `docs/plugin-hosting.md` records the setup and the missing hardware. | **Blocked on user hardware.** Needs a receiving synth on the UMC404HD MIDI OUT or a DIN OUT→IN loopback. |
+| Physical DIN/USB output timing | WebMIDI device queue and hardware latency. | ALSA queue, PipeWire Midi-Bridge and the attached UMC404HD. | Not measured. `docs/plugin-hosting.md` records the setup and the missing hardware. | **Deferred by user.** No receiving synth or DIN OUT→IN loopback is available; do not substitute a virtual ALSA loopback. Host-side timing and queueing remain gated by `test_midi`. |
 | Browser-only prebake helpers | `document`, `navigator`, `localStorage` and Superdough nodes are available. | Those globals stay undefined so `typeof` detection still works; a real use aborts setup with a named error. `bmod` and `FX` are supported. | `test_javascript` covers feature detection and both error paths; the starter's non-Volume `UISlider` calls warn and are skipped. | **Accepted ceiling.** |
 | Browser visual styling/layout | Canvas contexts, custom fonts, backgrounds, spiral caps and pitchwheel labels. | Terminal equivalents where one exists; unsupported options are reported once and ignored. | `scripts/scope-reference-qa.mjs` and `test_terminal_graphics` cover the geometry that has a native counterpart. | **Accepted ceiling.** No browser-pixel parity is claimed. |
 | Shared delay/reverb/duck tails and Csound output | Shared orbit effects and a combined Csound stream. | Same shared state, so a per-pattern tap cannot attribute those tails. | Visual and analyser tests; documented in `docs/javascript.md`. | **Accepted design.** Attribution would require duplicating shared state. |
@@ -32,18 +32,18 @@ outputs; numeric selectors and the default use the WebMIDI-style output list.
 `test_midi` gates both the web default and the explicit subscriber path, and
 `managed_carla` gates the end-to-end PipeWire route.
 
-## Hardware request
+## Physical timing: deferred
 
-The physical DIN/USB timing row cannot be completed from this machine. To
-measure it, provide either:
+The user has no receiving synth or DIN OUT→IN loopback available, so physical
+DIN/USB timing is deferred rather than an open implementation task. Host-side
+queueing, note-off deadlines, channel fan-out and MIDI message delivery remain
+covered by `test_midi`; only the hardware/driver leg is unmeasured.
 
-- a receiving synthesizer connected to the UMC404HD MIDI OUT, or
-- a 5-pin DIN cable from MIDI OUT to MIDI IN.
-
-Do not substitute a virtual ALSA loopback for that measurement; it cannot
-observe hardware or driver queues. Once the hardware is available, measure
+If hardware becomes available, connect either a receiving synthesizer to the
+UMC404HD MIDI OUT or a 5-pin DIN cable from MIDI OUT to MIDI IN, then measure
 note-on/off round-trip jitter and device response with the owned-session
-discipline in `docs/plugin-hosting.md`.
+discipline in `docs/plugin-hosting.md`. Do not substitute a virtual ALSA
+loopback for that leg; it cannot observe hardware or driver queues.
 
 ## Verification shortcuts
 

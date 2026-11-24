@@ -678,25 +678,25 @@ static void dispatch_midi_event(const AudioEvent *ev) {
     } else if (ev->midi_chan>=0 && ev->midi_chan<16) channels[count++]=(unsigned char)ev->midi_chan;
     if (ev->midi_only && ev->midi_chan>=0)
         for (int i=0;i<ev->midi_map_count;i++)
-            for (int ch=0;ch<count;ch++) midi_cc(channels[ch],ev->midi_map[i][0],ev->midi_map[i][1]);
+            for (int ch=0;ch<count;ch++) midi_cc_port(channels[ch],ev->midi_map[i][0],ev->midi_map[i][1],ev->midi_port);
     if ((ev->midi_only || (!ev->osc_only && !ev->csound_only)) &&
         ev->midi_chan >= 0 && ev->midi_note >= 0 && !ev->is_drum) {
         int vel = ev->midi_only ? (int)lround(ev->gain * 127.0) : (int)fmax(1, ev->gain * 127.0);
-        if (ev->midi_only) midi_notes_for(channels,count,ev->midi_note,vel,ev->midi_duration);
+        if (ev->midi_only) midi_notes_for_port(channels,count,ev->midi_note,vel,ev->midi_duration,ev->midi_port);
         else midi_note(ev->midi_chan, ev->midi_note, vel, (int)(ev->duration * 1000.0));
     }
     if (!ev->midi_only || ev->midi_chan < 0) return;
-    if (ev->midi_has_prog) for (int ch=0;ch<count;ch++) midi_program(channels[ch],ev->midi_prog);
+    if (ev->midi_has_prog) for (int ch=0;ch<count;ch++) midi_program_port(channels[ch],ev->midi_prog,ev->midi_port);
     if (ev->midi_has_sysex)
-        midi_sysex(ev->midi_sysex_id, ev->midi_sysex_id_len, ev->midi_sysex, ev->midi_sysex_len);
-    if (ev->midi_has_cc) for (int ch=0;ch<count;ch++) midi_cc(channels[ch],ev->midi_cc,ev->midi_ccv);
-    if (ev->midi_nrpn_count) for (int ch=0;ch<count;ch++) midi_cc_batch(channels[ch],ev->midi_nrpn,ev->midi_nrpn_count);
-    if (ev->midi_has_bend) for (int ch=0;ch<count;ch++) midi_bend(channels[ch],ev->midi_bend);
-    if (ev->midi_has_touch) for (int ch=0;ch<count;ch++) midi_touch(channels[ch],ev->midi_touch);
-    if (ev->midi_cycle_start) midi_transport(2);
-    if (ev->midi_cmd) midi_transport(ev->midi_cmd);
-    if (ev->midi_has_post_prog) for (int ch=0;ch<count;ch++) midi_program(channels[ch],ev->midi_post_prog);
-    if (ev->midi_has_post_sysex) midi_sysex(ev->midi_post_sysex_id,ev->midi_post_sysex_id_len,ev->midi_post_sysex,ev->midi_post_sysex_len);
+        midi_sysex_port(ev->midi_sysex_id, ev->midi_sysex_id_len, ev->midi_sysex, ev->midi_sysex_len,ev->midi_port);
+    if (ev->midi_has_cc) for (int ch=0;ch<count;ch++) midi_cc_port(channels[ch],ev->midi_cc,ev->midi_ccv,ev->midi_port);
+    if (ev->midi_nrpn_count) for (int ch=0;ch<count;ch++) midi_cc_batch_port(channels[ch],ev->midi_nrpn,ev->midi_nrpn_count,ev->midi_port);
+    if (ev->midi_has_bend) for (int ch=0;ch<count;ch++) midi_bend_port(channels[ch],ev->midi_bend,ev->midi_port);
+    if (ev->midi_has_touch) for (int ch=0;ch<count;ch++) midi_touch_port(channels[ch],ev->midi_touch,ev->midi_port);
+    if (ev->midi_cycle_start) midi_transport_port(2,ev->midi_port);
+    if (ev->midi_cmd) midi_transport_port(ev->midi_cmd,ev->midi_port);
+    if (ev->midi_has_post_prog) for (int ch=0;ch<count;ch++) midi_program_port(channels[ch],ev->midi_post_prog,ev->midi_port);
+    if (ev->midi_has_post_sysex) midi_sysex_port(ev->midi_post_sysex_id,ev->midi_post_sysex_id_len,ev->midi_post_sysex,ev->midi_post_sysex_len,ev->midi_port);
 }
 
 /* consumer thread */

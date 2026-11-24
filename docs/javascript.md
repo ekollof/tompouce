@@ -1080,11 +1080,14 @@ CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 (`miditouch` 0..1), sysex (integer `sysexid`/`sysexdata` bytes 0..255, up to
 3 id and 256 data bytes framed F0..F7) and transport `midicmd`
 (`clock`/`midiClock`/`start`/`stop`/`continue`, plus `progNum`/`sysex`
-array forms) all send through ALSA. `midiport` values are accepted and
-broadcast to the engine's single ALSA output port and its subscribers; named
-port selection is not exposed. A hap at cycle zero additionally sends
-transport start, as on the web. Sends run in web order (note, program,
-sysex, CC, NRPN, bend, touch, cycle-zero start, transport/command); a rejected extra
+array forms) all send through ALSA. `midiport` selects a subscribed native
+ALSA client or port by case-sensitive name substring, or a zero-based
+subscriber index; `.midi('name')` sets the same default for the pattern.
+Omitting it broadcasts to every subscriber, and an unmatched selector drops
+the message like the web's missing-device branch. A hap at cycle zero
+additionally sends transport start, as on the web. Sends run in web order
+(note, program, sysex, CC, NRPN, bend, touch, cycle-zero start,
+transport/command); a rejected extra
 drops itself and every later extra for that hap with a console warning,
 matching the web throw-abort behavior. Numeric CCs truncate like WebMidi;
 unknown controller names and out-of-range values reject. `nrpnn([msb,lsb])`

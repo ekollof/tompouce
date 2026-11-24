@@ -693,11 +693,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       the supersaw worklet and renders one event. Ten `wt-sample-` gates cover
       the multi-frame wavetable oscillator separately.
 - [x] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
-      covered through an owned ALSA receiver. `test_midi` now also receives
-      pitch bend (value 4096), channel aftertouch (77) and clock/start/stop
-      transport, and two owned subscribers both receive the same broadcast CC.
-      `midiport` stays an intentional ALSA broadcast rather than per-port
-      selection. Physical DIN/USB note-off timing remains in the separate
+      covered through an owned ALSA receiver, with the receiver named to match
+      the starter's `midi('tout')` selector. `test_midi` also receives pitch
+      bend (value 4096), channel aftertouch (77) and clock/start/stop
+      transport; two owned subscribers distinguish broadcast CC from
+      `midiport`-selected CC and note-on/off routing, and an unmatched selector
+      drops. Physical DIN/USB note-off timing remains in the separate
       hardware-blocked community follow-up.
 
 ## Render and SIMD performance

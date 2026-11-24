@@ -18,7 +18,8 @@ static atomic_int midi_in_running;
 static int midi_in_started;
 static void *midi_input_worker(void *arg);
 
-typedef struct { double at; int ch; int note; } OffEv;
+#define MIDI_PORT_NAME 128
+typedef struct { double at; int ch; int note; char port[MIDI_PORT_NAME]; } OffEv;
 
 void midi_state_saved_cc(int client, int port, int chan, int cc, double value);
 
@@ -95,18 +96,70 @@ static int midi_running = 0;
 static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
-static void send_raw(int on, int ch, int note, int vel) {
+/* Resolve a WebMIDI-style selector against this output port's subscribers.
+   Numeric selectors are zero-based subscriber indices; strings are matched
+   against the subscribed client and port names, like WebMidi's includes(). */
+static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
+    if (!selector || !*selector || !seq || seq_port < 0) return 0;
+    int wanted = -1;
+    const char *p = selector;
+    if (*p == '#') {
+        char *end = NULL;
+        long value = strtol(p + 1, &end, 10);
+        if (end && !*end && value >= 0 && value < 1024) wanted = (int)value;
+        else return 0;
+    }
+    snd_seq_query_subscribe_t *query;
+    snd_seq_query_subscribe_alloca(&query);
+    snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
+    snd_seq_query_subscribe_set_root(query, &me);
+    snd_seq_query_subscribe_set_type(query, SND_SEQ_QUERY_SUBS_READ);
+    for (int index = 0; index < 1024; index++) {
+        snd_seq_query_subscribe_set_index(query, index);
+        if (snd_seq_query_port_subscribers(seq, query) < 0) break;
+        const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
+        if (!address) continue;
+        if (wanted >= 0) {
+            if (index == wanted) { *dest = *address; return 1; }
+            continue;
+        }
+        char client_name[128] = "", port_name[128] = "";
+        snd_seq_client_info_t *client;
+        snd_seq_client_info_alloca(&client);
+        if (snd_seq_get_any_client_info(seq, address->client, client) == 0 &&
+            snd_seq_client_info_get_name(client))
+            snprintf(client_name, sizeof(client_name), "%s", snd_seq_client_info_get_name(client));
+        snd_seq_port_info_t *info;
+        snd_seq_port_info_alloca(&info);
+        if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0 &&
+            snd_seq_port_info_get_name(info))
+            snprintf(port_name, sizeof(port_name), "%s", snd_seq_port_info_get_name(info));
+        if (strstr(client_name, selector) || strstr(port_name, selector)) {
+            *dest = *address;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 1 when sent (or no hardware), 0 when an explicit selector matched nothing. */
+static int send_raw_port(int on, int ch, int note, int vel, const char *port) {
     /* midi_lock held */
-    if (!midi_ok) return;
+    if (!midi_ok) return 1;
     snd_seq_event_t ev;
     snd_seq_ev_clear(&ev);
     if (on) snd_seq_ev_set_noteon(&ev, ch, note, vel);
     else snd_seq_ev_set_noteoff(&ev, ch, note, vel);
     snd_seq_ev_set_source(&ev, seq_port);
-    snd_seq_ev_set_subs(&ev);
+    snd_seq_addr_t dest;
+    if (port && *port) {
+        if (!midi_destination_for(port, &dest)) return 0;
+        snd_seq_ev_set_dest(&ev, dest.client, dest.port);
+    } else snd_seq_ev_set_subs(&ev);
     snd_seq_ev_set_direct(&ev);
     snd_seq_event_output(seq, &ev);
     snd_seq_drain_output(seq);
+    return 1;
 }
 
 static void *midi_worker(void *arg) {
@@ -123,7 +176,7 @@ static void *midi_worker(void *arg) {
             OffEv e = offs[0];
             memmove(offs, offs + 1, (size_t)(n_offs - 1) * sizeof(OffEv));
             n_offs--;
-            send_raw(0, e.ch, e.note, 64);
+            send_raw_port(0, e.ch, e.note, 64, e.port);
             midi_log_add(MIDI_CAP_NOTE_OFF, e.ch, e.note, 64, NULL, 0);
             continue;
         }
@@ -231,18 +284,33 @@ void midi_note(int chan, int note, int vel, int dur_ms) {
 }
 
 void midi_note_for(int chan, int note, int vel, double duration) {
+    midi_note_for_port(chan, note, vel, duration, NULL);
+}
+
+void midi_note_for_port(int chan, int note, int vel, double duration, const char *port) {
     if (chan<0 || chan>15) return;
     unsigned char channel=(unsigned char)chan;
-    midi_notes_for(&channel,1,note,vel,duration);
+    midi_notes_for_port(&channel,1,note,vel,duration,port);
 }
 
 void midi_notes_for(const unsigned char *channels,int count,int note,int vel,double duration) {
+    midi_notes_for_port(channels,count,note,vel,duration,NULL);
+}
+
+void midi_notes_for_port(const unsigned char *channels,int count,int note,int vel,
+    double duration,const char *port) {
     if (!channels || count<1 || count>16 || note<0 || note>127) return;
     for (int i=0;i<count;i++) if (channels[i]>15) return;
     if (!isfinite(duration) || duration<0 || duration>86400) return;
     if (vel < 0) vel = 0;
     if (vel > 127) vel = 127;
     pthread_mutex_lock(&midi_lock);
+    const char *selector = port && *port ? port : "";
+    snd_seq_addr_t dest;
+    if (midi_ok && *selector && !midi_destination_for(selector,&dest)) {
+        pthread_mutex_unlock(&midi_lock);
+        return;
+    }
     if (midi_running && count>MIDI_MAX_OFFS-n_offs) {
         pthread_mutex_unlock(&midi_lock);
         log_console("midi: note-off queue full; note not sent"); return;
@@ -252,11 +320,12 @@ void midi_notes_for(const unsigned char *channels,int count,int note,int vel,dou
         int chan=channels[channel];
         midi_log_timed(MIDI_CAP_NOTE_ON,chan,note,vel,NULL,0,duration);
         if (!midi_running) continue;
-        if (midi_ok) send_raw(1,chan,note,vel);
+        if (midi_ok) send_raw_port(1,chan,note,vel,selector);
         OffEv e;
         e.at = at;
         e.ch = chan;
         e.note = note;
+        snprintf(e.port,sizeof(e.port),"%.*s",(int)sizeof(e.port)-1,selector);
         int i = n_offs;
         while (i > 0 && offs[i - 1].at > e.at) { offs[i] = offs[i - 1]; i--; }
         offs[i] = e;
@@ -269,21 +338,33 @@ void midi_notes_for(const unsigned char *channels,int count,int note,int vel,dou
 /* Dominant MIDI extras. Values arrive validated from the scheduler; ranges
    are rechecked defensively. Without hardware the sends are silent no-ops,
    but the capture still records scheduling intent. */
-static void send_fixed_locked(snd_seq_event_t *ev) {
+static void send_fixed_locked(snd_seq_event_t *ev, const char *port) {
     snd_seq_ev_set_source(ev, seq_port);
-    snd_seq_ev_set_subs(ev);
+    snd_seq_addr_t dest;
+    if (port && *port) {
+        if (!midi_destination_for(port, &dest)) return;
+        snd_seq_ev_set_dest(ev, dest.client, dest.port);
+    } else snd_seq_ev_set_subs(ev);
     snd_seq_ev_set_direct(ev);
     snd_seq_event_output(seq, ev);
     snd_seq_drain_output(seq);
 }
 
 void midi_cc(int chan, int cc, int value) {
+    midi_cc_port(chan, cc, value, NULL);
+}
+
+void midi_cc_port(int chan, int cc, int value, const char *port) {
     if (chan < 0 || chan > 15 || cc < 0 || cc > 127 || value < 0 || value > 127) return;
     const unsigned char pairs[1][2]={{(unsigned char)cc,(unsigned char)value}};
-    midi_cc_batch(chan,pairs,1);
+    midi_cc_batch_port(chan,pairs,1,port);
 }
 
 void midi_cc_batch(int chan, const unsigned char (*pairs)[2], int count) {
+    midi_cc_batch_port(chan,pairs,count,NULL);
+}
+
+void midi_cc_batch_port(int chan, const unsigned char (*pairs)[2], int count, const char *port) {
     if (chan<0 || chan>15 || !pairs || count<1 || count>32) return;
     for (int i=0;i<count;i++) if (pairs[i][0]>127 || pairs[i][1]>127) return;
     pthread_mutex_lock(&midi_lock);
@@ -293,13 +374,17 @@ void midi_cc_batch(int chan, const unsigned char (*pairs)[2], int count) {
             snd_seq_event_t ev;
             snd_seq_ev_clear(&ev);
             snd_seq_ev_set_controller(&ev,chan,pairs[i][0],pairs[i][1]);
-            send_fixed_locked(&ev);
+            send_fixed_locked(&ev,port);
         }
     }
     pthread_mutex_unlock(&midi_lock);
 }
 
 void midi_program(int chan, int prog) {
+    midi_program_port(chan,prog,NULL);
+}
+
+void midi_program_port(int chan, int prog, const char *port) {
     if (chan < 0 || chan > 15 || prog < 0 || prog > 127) return;
     midi_log_add(MIDI_CAP_PROG, chan, prog, 0, NULL, 0);
     pthread_mutex_lock(&midi_lock);
@@ -307,12 +392,16 @@ void midi_program(int chan, int prog) {
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
         snd_seq_ev_set_pgmchange(&ev, chan, prog);
-        send_fixed_locked(&ev);
+        send_fixed_locked(&ev,port);
     }
     pthread_mutex_unlock(&midi_lock);
 }
 
 void midi_bend(int chan, int value) {
+    midi_bend_port(chan,value,NULL);
+}
+
+void midi_bend_port(int chan, int value, const char *port) {
     if (chan < 0 || chan > 15 || value < -8192 || value > 8191) return;
     midi_log_add(MIDI_CAP_BEND, chan, value, 0, NULL, 0);
     pthread_mutex_lock(&midi_lock);
@@ -320,12 +409,16 @@ void midi_bend(int chan, int value) {
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
         snd_seq_ev_set_pitchbend(&ev, chan, value);
-        send_fixed_locked(&ev);
+        send_fixed_locked(&ev,port);
     }
     pthread_mutex_unlock(&midi_lock);
 }
 
 void midi_touch(int chan, int value) {
+    midi_touch_port(chan,value,NULL);
+}
+
+void midi_touch_port(int chan, int value, const char *port) {
     if (chan < 0 || chan > 15 || value < 0 || value > 127) return;
     midi_log_add(MIDI_CAP_TOUCH, chan, value, 0, NULL, 0);
     pthread_mutex_lock(&midi_lock);
@@ -333,12 +426,17 @@ void midi_touch(int chan, int value) {
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
         snd_seq_ev_set_chanpress(&ev, chan, value);
-        send_fixed_locked(&ev);
+        send_fixed_locked(&ev,port);
     }
     pthread_mutex_unlock(&midi_lock);
 }
 
 void midi_sysex(const unsigned char *id, int id_len, const unsigned char *data, int len) {
+    midi_sysex_port(id,id_len,data,len,NULL);
+}
+
+void midi_sysex_port(const unsigned char *id, int id_len, const unsigned char *data, int len,
+    const char *port) {
     if (!id || id_len < 1 || id_len > 3 || !data || len < 0 || len > 256) return;
     unsigned char framed[261];
     framed[0] = 0xF0;
@@ -352,16 +450,16 @@ void midi_sysex(const unsigned char *id, int id_len, const unsigned char *data, 
         snd_seq_event_t ev;
         snd_seq_ev_clear(&ev);
         snd_seq_ev_set_sysex(&ev, total, framed);
-        snd_seq_ev_set_source(&ev, seq_port);
-        snd_seq_ev_set_subs(&ev);
-        snd_seq_ev_set_direct(&ev);
-        snd_seq_event_output(seq, &ev);
-        snd_seq_drain_output(seq);
+        send_fixed_locked(&ev,port);
     }
     pthread_mutex_unlock(&midi_lock);
 }
 
 void midi_transport(int cmd) {
+    midi_transport_port(cmd,NULL);
+}
+
+void midi_transport_port(int cmd, const char *port) {
     if (cmd < 1 || cmd > 4) return;
     midi_log_add(MIDI_CAP_TRANSPORT, 0, cmd, 0, NULL, 0);
     pthread_mutex_lock(&midi_lock);
@@ -370,7 +468,7 @@ void midi_transport(int cmd) {
         snd_seq_ev_clear(&ev);
         ev.type = cmd == 1 ? SND_SEQ_EVENT_CLOCK : cmd == 2 ? SND_SEQ_EVENT_START :
             cmd == 3 ? SND_SEQ_EVENT_CONTINUE : SND_SEQ_EVENT_STOP;
-        send_fixed_locked(&ev);
+        send_fixed_locked(&ev,port);
     }
     pthread_mutex_unlock(&midi_lock);
 }

@@ -18,6 +18,12 @@ void midi_note_for(int chan, int note, int vel, double duration);
 /* Ordered fan-out, including duplicate channels. Reserve every note-off
    atomically before sending any note-on; count is bounded to 16. */
 void midi_notes_for(const unsigned char *channels, int count, int note, int vel, double duration);
+/* Explicit WebMIDI-style midiport selector: name substring (case-sensitive,
+   matching a subscribed ALSA client or port name) or a zero-based subscriber
+   index. NULL/empty keeps the default broadcast. No match drops the message. */
+void midi_note_for_port(int chan, int note, int vel, double duration, const char *port);
+void midi_notes_for_port(const unsigned char *channels, int count, int note, int vel,
+    double duration, const char *port);
 /* Dominant MIDI extras, matching the deployed web output's message set.
    Channel is 0-15; sends are best-effort like midi_note and always recorded
    in the scheduling capture when enabled. */
@@ -30,6 +36,13 @@ void midi_bend(int chan, int value); /* -8192..8191, zero-centered */
 void midi_touch(int chan, int value);
 void midi_sysex(const unsigned char *id, int id_len, const unsigned char *data, int len);
 void midi_transport(int cmd); /* 1 clock, 2 start, 3 continue, 4 stop */
+void midi_cc_port(int chan, int cc, int value, const char *port);
+void midi_cc_batch_port(int chan, const unsigned char (*pairs)[2], int count, const char *port);
+void midi_program_port(int chan, int prog, const char *port);
+void midi_bend_port(int chan, int value, const char *port);
+void midi_touch_port(int chan, int value, const char *port);
+void midi_sysex_port(const unsigned char *id, int id_len, const unsigned char *data, int len, const char *port);
+void midi_transport_port(int cmd, const char *port);
 typedef struct MidiHeldKey { int note, chan; double vel, at; int consumed; } MidiHeldKey;
 /* Controller input. Values are normalized 0..1 like the web input; channels
    are 1..16 with 0 selecting the merged stream, and anything else reads 0.

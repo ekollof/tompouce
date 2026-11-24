@@ -1426,7 +1426,8 @@ Its receiver subscribes only to the output client identified by this process's
 PID and client/port names. It receives an ordered three-channel note fan-out,
 including a duplicate channel, then all three 20 ms note-offs before 30 ms of
 synthetic audio time. It also receives pitch bend, channel aftertouch and
-clock/start/stop, and two owned subscribers receive the same broadcast CC.
+clock/start/stop, distinguishes broadcast from `midiport`-selected CC and
+note-on/off routing across two subscribers, and drops an unmatched selector.
 The callback is paced in 128-frame steps. Queue-pressure
 tests prove that insufficient off capacity rejects the entire note fan-out,
 while the remaining scalar slot remains usable. No external MIDI device or

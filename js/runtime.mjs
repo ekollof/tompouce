@@ -678,15 +678,16 @@ globalThis.midikeys = async (input) => {
   return kb;
 };
 /* Dominant MIDI output, mirroring the web routing (local audio bypassed,
-   channel from midichan defaulting to 1). The port argument only selects a
-   web device; native ALSA subscribers receive every note. An options object
-   may carry midichannel as a default when the hap sets no midichan. */
+   channel from midichan defaulting to 1). The port argument selects a native
+   ALSA subscriber by name substring or zero-based index, like WebMIDI's
+   output list; omitting it keeps the broadcast. An options object may carry
+   midichannel as a default when the hap sets no midichan. */
 /**
- * Send MIDI notes instead of local audio. Native ALSA subscribers receive the
- * notes; the web port selector does not select a separate native output port.
+ * Send MIDI notes instead of local audio. A port name selects a subscribed
+ * native ALSA client/port; omitting it broadcasts to every subscriber.
  * Set the channel with midichan(), defaulting to channel 1.
  * @name midi
- * @param {string | object} port optional web device selector or settings object
+ * @param {string | number | object} port optional port selector or settings object
  * @param {object} options optional settings, including midichannel
  * @example
  * note("c3 e3 g3").midichan(2).midi()
@@ -726,7 +727,8 @@ globalThis.midimaps = async (maps) => {
 };
 core.Pattern.prototype.midi = function (port, options) {
   if (core.isPattern(port)) throw new Error(`.midi does not accept Pattern input for midiport. Make sure to pass device name with single quotes.`);
-  const settings = port && typeof port === 'object' ? {...port,...options} : {...options};
+  const settings = port && typeof port === 'object' ? {...port,...options} :
+    (port === undefined ? {...options} : {port,...options});
   return this.fmap(value=> {
     const object = {...((value && typeof value==='object')?value:{note:value})};
     object._midi = true;

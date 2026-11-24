@@ -558,9 +558,92 @@ static void test_external_message_breadth(void) {
         if (!seen[0] || !seen[1]) usleep(2000);
     }
     assert(seen[0] && seen[1]);
+    /* Explicit selector reaches only the matching subscriber. */
+    midi_cc_port(4,75,65,"message-breadth-0");
+    int selected[2]={0,0};
+    first=monotonic();
+    while (!selected[0] && monotonic()-first<1) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.channel==4 && event->data.control.param==75 &&
+                    event->data.control.value==65) selected[i]=1;
+        }
+        if (!selected[0]) usleep(2000);
+    }
+    assert(selected[0] && !selected[1]);
+    /* Numeric selectors use the subscriber index, distinct from a name
+       that happens to contain digits. */
+    midi_cc_port(4,77,67,"#0");
+    int numeric[2]={0,0};
+    first=monotonic();
+    while (!numeric[0] && monotonic()-first<1) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.channel==4 && event->data.control.param==77 &&
+                    event->data.control.value==67) numeric[i]=1;
+        }
+        if (!numeric[0]) usleep(2000);
+    }
+    assert(numeric[0] && !numeric[1]);
+    /* An unmatched selector drops instead of broadcasting. */
+    midi_cc_port(4,76,66,"no-such-subscriber");
+    int dropped[2]={0,0};
+    first=monotonic();
+    while (monotonic()-first<.1) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==76) dropped[i]=1;
+        }
+        usleep(2000);
+    }
+    assert(!dropped[0] && !dropped[1]);
+    /* Selected note-offs retain the same destination. */
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    unsigned char chan=4;
+    midi_notes_for_port(&chan,1,61,100,.02,"message-breadth-1");
+    int notes[2][2]={{0,0},{0,0}};
+    first=monotonic();
+    while ((notes[1][0]<1 || notes[1][1]<1) && monotonic()-first<2) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event) {
+                if (event->type==SND_SEQ_EVENT_NOTEON && event->data.note.note==61) notes[i][0]++;
+                else if (event->type==SND_SEQ_EVENT_NOTEOFF && event->data.note.note==61) notes[i][1]++;
+            }
+        }
+        if (notes[1][0]<1 || notes[1][1]<1) pump_realtime(128);
+    }
+    assert(notes[1][0]==1 && notes[1][1]==1);
+    assert(notes[0][0]==0 && notes[0][1]==0);
+    audio_toggle_play(0); event_queue_clear();
+    /* The scheduler-carried midiport reaches dispatch, not just the direct
+       send helper. */
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    scheduler_init();
+    assert(track_load_from_code("note(60).ccn(74).ccv(.25).midiport('message-breadth-0').midi()"));
+    int scheduled[2]={0,0};
+    first=monotonic();
+    while (!scheduled[0] && monotonic()-first<5) {
+        pump_realtime(128);
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==74 && event->data.control.value==32)
+                    scheduled[i]=1;
+        }
+    }
+    assert(scheduled[0] && !scheduled[1]);
+    scheduler_shutdown(); audio_toggle_play(0); event_queue_clear();
     for (int i=0;i<2;i++) snd_seq_close(receivers[i]);
     midi_shutdown();
-    puts("bend, aftertouch and transport reach an owned receiver; two subscribers receive the same broadcast CC");
+    puts("bend, aftertouch and transport reach an owned receiver; broadcast and selected CC/note routing are distinct");
 }
 
 static void test_midi_input_stores(void) {
@@ -931,6 +1014,7 @@ typedef struct {
     int has_cc, cc, ccv, has_prog, prog, has_bend, bend, has_touch, touch;
     int has_sysex, id_len, data_len;
     unsigned char id[3], data[8];
+    char port[128];
     int cmd, cycle_start;
 } MidiExtra;
 
@@ -952,6 +1036,7 @@ static int collect_extras(MidiExtra *out, int capacity) {
         if (e.data_len > 8) e.data_len = 8;
         memcpy(e.id, node->ev.midi_sysex_id, (size_t)e.id_len);
         memcpy(e.data, node->ev.midi_sysex, (size_t)e.data_len);
+        snprintf(e.port,sizeof(e.port),"%.127s",node->ev.midi_port);
         e.cmd = node->ev.midi_cmd; e.cycle_start = node->ev.midi_cycle_start;
         out[count++] = e;
     }
@@ -1079,16 +1164,28 @@ static void test_midi_extras_commit(void) {
     assert(collect_extras(extras, 16) == 1);
     assert(extras[0].cmd == 0);
     event_queue_clear();
-    /* Port selection broadcasts to ALSA subscribers. */
+    /* Port selection is carried per hap; unroutable names stay in the event
+       and are dropped at send time like the web's missing-device branch. */
     assert(track_load_from_code("note(60).midiport(2).ccn(1).ccv(1).midi()"));
     schedule_loaded(1);
     assert(collect_extras(extras, 16) == 1);
     assert(extras[0].note == 60 && extras[0].has_cc);
+    assert(!strcmp(extras[0].port, "#2"));
+    event_queue_clear();
+    assert(track_load_from_code("note(60).midiport('alpha').midi()"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(!strcmp(extras[0].port, "alpha"));
+    event_queue_clear();
+    assert(track_load_from_code("note(60).midi('beta')"));
+    schedule_loaded(1);
+    assert(collect_extras(extras, 16) == 1);
+    assert(!strcmp(extras[0].port, "beta"));
     event_queue_clear();
     assert(track_load_from_code("note(60).midiport(\"no-such-port\").midi()"));
     schedule_loaded(1);
     assert(collect_extras(extras, 16) == 1);
-    assert(extras[0].note == 60);
+    assert(extras[0].note == 60 && !strcmp(extras[0].port, "no-such-port"));
     event_queue_clear();
     /* Patterned fan-out resolves per hap with cycle-start only on begin 0. */
     assert(track_load_from_code("note(\"60 62\").ccn(\"74 75\").ccv(\"0.5 0.25\").midi()"));
@@ -1184,7 +1281,7 @@ static void switchangel_fixture(char *path, size_t size) {
 /* Owned ALSA receiver subscribed to this process's single output port. */
 static int switchangel_receiver(snd_seq_t **receiver, int *rport) {
     if (snd_seq_open(receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)<0) return 0;
-    snd_seq_set_client_name(*receiver,"tompouce-switchangel-qa");
+    snd_seq_set_client_name(*receiver,"tompouce-tout-qa");
     *rport=snd_seq_create_simple_port(*receiver,"owned receiver",
         SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
     if (*rport<0) return 0;

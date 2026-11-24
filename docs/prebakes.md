@@ -82,11 +82,12 @@ The pinned `roller2` helper's `bstab` sample is not part of
 the public installed manifests; the native profile keeps the name and rejects
 that hap with the normal sample-unavailable warning instead of substituting
 the unrelated `stab` bank. Its `supersaw` and `white` voices start as soon as
-preparation of the missing hap completes. External MIDI is covered for the starter's `voc` path: the native
-engine broadcasts `.midi('tout')` (and any other accepted `midiport`) to ALSA
-subscribers, and `test_midi` delivers its note and CC 34 through an owned
-receiver. Calling an unavailable API retains its error; the native profile
-does not substitute a different sound for it.
+preparation of the missing hap completes. External MIDI is covered for the
+starter's `voc` path: `voc` sends `.midi('tout')`, and `test_midi` names its
+owned receiver to match that selector, then delivers its note and CC 34
+through the subscribed ALSA port. Omitting `midiport` broadcasts. Calling an
+unavailable API retains its error; the native profile does not substitute a
+different sound for it.
 
 A setup helper defined as `window.name` keeps that toplevel meaning even when
 the same file calls `register('name', ...)` for a pattern extension. The

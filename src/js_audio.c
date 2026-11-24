@@ -1815,6 +1815,14 @@ static int midi_prepare_dominant(JsProgram *program, const cJSON *value,
     const cJSON *hap, double seconds, AudioEvent *event) {
     const cJSON *settings=cJSON_GetObjectItemCaseSensitive(value,"_midiOptions");
     const cJSON *channels=cJSON_GetObjectItemCaseSensitive(value,"_midiChannels");
+    const cJSON *port=cJSON_GetObjectItemCaseSensitive(value,"midiport");
+    if (!cJSON_IsString(port) && !cJSON_IsNumber(port))
+        port=cJSON_GetObjectItemCaseSensitive(settings,"port");
+    if (cJSON_IsString(port) && port->valuestring && port->valuestring[0])
+        snprintf(event->midi_port,sizeof(event->midi_port),"%.*s",
+            (int)sizeof(event->midi_port)-1,port->valuestring);
+    else if (cJSON_IsNumber(port) && isfinite(port->valuedouble))
+        snprintf(event->midi_port,sizeof(event->midi_port),"#%ld",lround(port->valuedouble));
     if (channels) {
         if (!cJSON_IsArray(channels) || cJSON_GetArraySize(channels)>16) {
             javascript_warn_control(program,"midi channels (at most 16 destinations per hap)"); return 0;

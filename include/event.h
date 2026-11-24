@@ -106,6 +106,7 @@ typedef struct {
     int analyser_fft;   /* Superdough fft exponent: size = 2 ** (fft + 5) */
     int midi_chan;      // MIDI channel 0-15, -1 = off
     int midi_note;      // MIDI note for midi out, -1 = none
+    char midi_port[128]; /* web midiport selector: name substring or index; empty = broadcast */
     int midi_channel_count; /* -1 empty, 0 legacy scalar, 1..16 ordered fan-out */
     unsigned char midi_channels[16]; /* duplicates retained, channels 0..15 */
     /* Dominant MIDI extras, parsed in web send order (program, sysex, CC,

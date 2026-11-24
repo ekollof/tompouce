@@ -142,6 +142,19 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     return 0;
 }
 
+/* Observable but bounded: a missing WebMIDI-style selector drops like the web
+   and reports once per second instead of on every note. midi_lock held. */
+static void midi_missing_port(const char *selector) {
+    static char reported[MIDI_PORT_NAME];
+    static double reported_at;
+    double now = audio_time_now();
+    if (strcmp(reported, selector) || !isfinite(reported_at) || now - reported_at >= 1) {
+        log_console("midi: midiport \"%.127s\" not found among subscribers; message dropped", selector);
+        snprintf(reported, sizeof(reported), "%.127s", selector);
+        reported_at = now;
+    }
+}
+
 /* 1 when sent (or no hardware), 0 when an explicit selector matched nothing. */
 static int send_raw_port(int on, int ch, int note, int vel, const char *port) {
     /* midi_lock held */
@@ -153,7 +166,7 @@ static int send_raw_port(int on, int ch, int note, int vel, const char *port) {
     snd_seq_ev_set_source(&ev, seq_port);
     snd_seq_addr_t dest;
     if (port && *port) {
-        if (!midi_destination_for(port, &dest)) return 0;
+        if (!midi_destination_for(port, &dest)) { midi_missing_port(port); return 0; }
         snd_seq_ev_set_dest(&ev, dest.client, dest.port);
     } else snd_seq_ev_set_subs(&ev);
     snd_seq_ev_set_direct(&ev);
@@ -308,6 +321,7 @@ void midi_notes_for_port(const unsigned char *channels,int count,int note,int ve
     const char *selector = port && *port ? port : "";
     snd_seq_addr_t dest;
     if (midi_ok && *selector && !midi_destination_for(selector,&dest)) {
+        midi_missing_port(selector);
         pthread_mutex_unlock(&midi_lock);
         return;
     }
@@ -342,7 +356,7 @@ static void send_fixed_locked(snd_seq_event_t *ev, const char *port) {
     snd_seq_ev_set_source(ev, seq_port);
     snd_seq_addr_t dest;
     if (port && *port) {
-        if (!midi_destination_for(port, &dest)) return;
+        if (!midi_destination_for(port, &dest)) { midi_missing_port(port); return; }
         snd_seq_ev_set_dest(ev, dest.client, dest.port);
     } else snd_seq_ev_set_subs(ev);
     snd_seq_ev_set_direct(ev);

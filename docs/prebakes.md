@@ -155,7 +155,7 @@ TOMPOUCE_COMPARE_FILTER=gaincurve node scripts/compare-audio.mjs
 TOMPOUCE_COMPARE_FILTER=custom-default node scripts/compare-audio.mjs
 ```
 
-The web gate uses the deployed REPL and its actual transpiler, comparing 81
+The web gate uses the deployed REPL and its actual transpiler, comparing 89
 setup/helper/API cases with the native QuickJS file-loading path, including
 multi-cycle arrangements and ten branch solo/identity/transform cases. It records the
 upstream starter revision/hash, browser transpiler hash and native bundle hash.

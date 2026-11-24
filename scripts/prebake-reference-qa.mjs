@@ -47,6 +47,9 @@ for(const [name,code] of [
   ['octave',"note('c3').octave(4)"],
   ['scale',"setScale('e:minor'); n(0).sc()"],
   ['global-helper','DX(4,2,2)'],
+  ['toMajorKey',"note(60).set({key:toMajorKey(['D','minor'])})"],
+  ['autotune-cc',"note(60).set({cc:key_to_cc_value_for_autotune('g#')})"],
+  ['sq',"note(60).pan(pure(0.5).sq())"],
 ])cases.push({name:`switchangel-${name}`,setup:starter,nativeSetup:'// tompouce-prebake: switchangel\n'+starter,code});
 for(const test of [
   {name:'orbit-solo',code:"solo(2); stack(note(60).o(1),note(64).o(2))"},
@@ -99,6 +102,11 @@ for(const test of [
   {name:'strum',code:'note("c3,e3,g3").strum(.05)'},
   {name:'humanize',code:'note("60*4").humanize(.5)',controls:['velocity'],random:true,numericTolerance:1e-12},
   {name:'glitch',code:'note("60 64").pan(.5).glitch(.25)',random:true,numericTolerance:1e-12},
+  {name:'irando',code:'n(irando("0 4 7"))',cycles:4,random:true,numericTolerance:1e-12},
+  {name:'roller',code:'roller(1)',numericTolerance:1e-12},
+  {name:'comb',code:'note(60).comb(50)',cycles:2},
+  {name:'bend',code:'note(60).bend("<0 2>","0.1","0.3")',cycles:2},
+  {name:'disperse',code:'note(60).disperse(.4,.9,.05,.5)',cycles:2},
 ])cases.push({...test,name:`switchangel-${test.name}`,setup:starter,nativeSetup:'// tompouce-prebake: switchangel\n'+starter,
   code:(test.controls?'setGainCurve(x=>x); ':'')+(test.random?'let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); ':'')+test.code});
 const bundle=await fs.readFile('js/dist/runtime.js','utf8');
@@ -155,7 +163,10 @@ try {
     // Native sound defaults/gain curves are prepared at query time; web
     // applies them downstream. Compare musical controls independently here.
     const soundKeys=new Set(['gain','postgain','shapevol','distortvol','delay','velocity','tremolodepth']);
-    const musical=haps=>haps.map(h=>({...h,value:Object.fromEntries(Object.entries(h.value).filter(([key])=>!soundKeys.has(key)||test.controls?.includes(key)))}));
+    // Native's _fxSteps is an internal replay plan; the web hap and the
+    // user-visible event carry FX instead.
+    const musical=haps=>haps.map(h=>({...h,value:Object.fromEntries(Object.entries(h.value).filter(([key])=>
+      key!=='_fxSteps' && (!soundKeys.has(key)||test.controls?.includes(key))))}));
     let passed=true;
     const compare=(a,b)=>{
       if(test.numericTolerance && typeof a==='number' && typeof b==='number') {

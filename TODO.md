@@ -644,12 +644,19 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Prebake coverage
 
-- [ ] Complete Switch Angel helper reference coverage. The 81-case gate
-      passes, but the pinned starter also defines helpers the matrix does not
-      directly exercise: `comb`/`_comb`, `bend`, `disperse`, `sq`, `irando`,
-      `getCue`, `toMajorKey`, `key_to_cc_value_for_autotune`, `roller` and
-      `spinor`. Add deployed-REPL/native cases and record any helper that is
-      genuinely unsupported. `roller2` and `voc` already have dedicated tests.
+- [x] Switch Angel helper reference coverage. The gate now compares **89**
+      cases after adding `toMajorKey`, `key_to_cc_value_for_autotune`, `sq`,
+      `irando`, `roller`, `comb`, `bend` and `disperse`; `getCue` is exercised
+      through the existing `cue`/`oncue` cases. `comb`/`disperse` compare after
+      ignoring native's internal `_fxSteps` replay plan, and `roller` uses a
+      1e-12 tolerance for a 1e-16 delay-feedback difference. `bend` passes.
+      `spinor` is the remaining helper and is tracked separately below.
+- [ ] `spinor` zero-delay Kabelsalat feedback. `spinor(1)` builds
+      `audioin().sub(x => x.bpf(sine(.13).mul(S(rand))))`; native's graph
+      compiler rejects the cycle with "Kabelsalat feedback requires a delay"
+      while the deployed REPL accepts it. Decide whether to add a bounded
+      one-sample feedback state for `.sub(fn)` graphs or keep the helper
+      unsupported with an explicit warning; do not silently substitute.
 - [ ] Custom Switch Angel `UISlider` widgets. Only the active `Volume`
       callback is mapped (to F4 output volume). Any other callback, including
       the commented `djfilt` example that uses `document` and

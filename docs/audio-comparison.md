@@ -1210,7 +1210,7 @@ machine, not permanent baselines or guarantees under arbitrary host contention.
 
 ## Prebake helpers and oscillator pitch envelopes
 
-The prebake reference gate compares 81 setup/helper/API cases against the
+The prebake reference gate compares 89 setup/helper/API cases against the
 deployed transpiler and native QuickJS. Multi-cycle cases cover arrangements,
 cueing, sample timing and stateful glide. Ten branch cases check solo labels,
 muting, replacement, query-time identity and `each`/`all` transforms against

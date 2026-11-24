@@ -93,7 +93,8 @@ typedef struct Voice {
     double wt_sample_detune, wt_sample_spread, wt_sample_lfo_skew;
     double wt_sample_env_amount, wt_sample_env[4], wt_sample_warp_env_amount, wt_sample_warp_env[4];
     double wt_sample_warp_lfo_hz, wt_sample_warp_lfo_depth, wt_sample_warp_lfo_skew;
-    int wt_sample_warp_mode, wt_sample_voices, wt_sample_phase_rand, wt_sample_lfo_shape;
+    double wt_sample_phase_rand;
+    int wt_sample_warp_mode, wt_sample_voices, wt_sample_lfo_shape;
     int wt_sample_warp_lfo_shape;
     double wt_sample_phase[WT_SAMPLE_VOICES];
     double wt_sample_lfo_phase, wt_sample_warp_lfo_phase;

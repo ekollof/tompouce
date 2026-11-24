@@ -85,8 +85,8 @@ typedef struct {
     double wt_detune, wt_spread, wt_lfo_skew;
     double wt_env_amount, wt_env[4], wt_warp_env_amount, wt_warp_env[4];
     double wt_warp_lfo_hz, wt_warp_lfo_depth, wt_warp_lfo_skew;
-    double cps;
-    int wt_warp_mode, wt_voices, wt_phase_rand, wt_lfo_shape;
+    double cps, wt_phase_rand;
+    int wt_warp_mode, wt_voices, wt_lfo_shape;
     int wt_warp_lfo_shape;
     int smp;            // sample id when track has bank, else -1
     int live_lv2;       // 0 = none, otherwise scheduler-owned live slot + 1

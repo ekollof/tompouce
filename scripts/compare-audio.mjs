@@ -462,6 +462,9 @@ try {
     { name: 'wt-sample-wtenv', code: `s('wt_digital_echoes').note(60).gain(.5).wt(.1).wtenv(.6).wtattack(.05).wtdecay(.1).wtsustain(.3).wtrelease(.2).clip(.5)`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:2,correlation:.99 },
     { name: 'wt-sample-warpenv', code: `s('wt_digital_echoes').note(60).gain(.5).warp(.1).warpenv(.6).warpattack(.05).warpdecay(.1).warpsustain(.3).warprelease(.2).warpmode('asym').clip(.5)`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:2,correlation:.99 },
     { name: 'wt-sample-warplfo', code: `s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3).warpshape('sine').warpmode('asym')`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
+    { name: 'wt-sample-phaserand', code: `s('wt_digital_echoes').note(60).gain(.5).unison(3).detune(.5).spread(.4).wtphaserand(.75)`, sound:'wt_digital_echoes',wavetable:true,seedWavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
+    { name: 'wt-sample-phaserand-default', code: `s('wt_digital_echoes').note(60).gain(.5).unison(3).detune(.5).spread(.4)`, sound:'wt_digital_echoes',wavetable:true,seedWavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
+    { name: 'wt-sample-phaserand-seq', code: `s('wt_digital_echoes').note("60 64").gain(.5).unison(3).detune(.5).spread(.4)`, sound:'wt_digital_echoes',wavetable:true,seedWavetable:true,cycles:1,cps:.5,window:2,correlation:.99 },
     { name: 'prebake-humanize', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60*4").s('sine').gain(.5).humanize(.5)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
     { name: 'prebake-glitch', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60 64").s('sine').gain(.5).pan(.5).glitch(.25)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
     { name: 'prebake-fmtime', code: `note("60*4").s('sine').gain(.5).fmtime(2,4)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
@@ -649,9 +652,13 @@ try {
         return addModule.call(this,url,...args);
       };
       const seededWorklets=[];
-      if(spec.seedSupersaw)AudioWorklet.prototype.addModule=async function(url,...args){
+      let seededWavetable=false;
+      if(spec.seedSupersaw||spec.seedWavetable)AudioWorklet.prototype.addModule=async function(url,...args){
         const text=await(await fetch(url)).text();
-        if(!text.includes('supersaw-oscillator'))return addModule.call(this,url,...args);
+        const supersaw=spec.seedSupersaw&&text.includes('supersaw-oscillator');
+        const wavetable=spec.seedWavetable&&text.includes('wavetable-oscillator-processor');
+        if(!supersaw&&!wavetable)return addModule.call(this,url,...args);
+        if(wavetable)seededWavetable=true;
         seededWorklets.push(Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join(''));
         const seed='let __comparisonSeed=0xc0ffee; Math.random=()=>{__comparisonSeed=(Math.imul(__comparisonSeed,1664525)+1013904223)>>>0;return __comparisonSeed/4294967296};\\n';
         const owned=original.call(URL,new Blob([seed,text],{type:'text/javascript'}));
@@ -706,6 +713,7 @@ try {
           wav32=btoa(encoded);
         }
         if(spec.seedSupersaw && !seededWorklets.length)throw Error('Seeded supersaw worklet was not loaded');
+        if(spec.seedWavetable && !seededWavetable)throw Error('Seeded wavetable worklet was not loaded');
         return {wav:btoa(binary),wav32,events:haps.map(h=>({begin:Number(h.whole.begin),end:Number(h.whole.end),value:h.value})),renderEvents,seededWorklets};
       } finally {URL.createObjectURL=original;HTMLAnchorElement.prototype.click=click;OfflineAudioContext.prototype.suspend=suspend;OfflineAudioContext.prototype.startRendering=originalStart;BaseAudioContext.prototype.createBuffer=createBuffer;BaseAudioContext.prototype.createConvolver=originalConvolver;Math.random=random;AudioWorklet.prototype.addModule=addModule}
     })()`);

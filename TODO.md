@@ -675,10 +675,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       unison/detune/spread with constant-power panning. It also reproduces the
       worklet's first 128-sample quantum, the 0.3 wavetable gain peak and the
       site's second `clip` application. `prebake-stxt-wavetable` gates at
-      0.999712/1.00037; ten `wt-sample-` gates are at 0.999999+/1.0002–1.0004.
-      Explicit `wtphaserand(0)` is gated; nonzero random phases come from the
-      site worklet's own `Math.random` and cannot be made deterministic from
-      the page realm.
+      0.999712/1.00037; thirteen `wt-sample-` gates are at
+      0.999999+/1.0002–1.0004, including seeded `wtphaserand` for explicit,
+      default-unison and two-event sequences. The compare harness seeds the
+      site worklet's own `Math.random` with 0xc0ffee, and reference mode resets
+      the native LCG to the same seed; the live engine reseeds per session.
 - [x] Browser-only starter helpers. `bmod` and `FX` are core pattern APIs and
       are already reference-gated by the starter's `bend`, `comb`, `disperse`
       and `spinor` cases. `document`, `navigator`, `localStorage` and
@@ -690,8 +691,8 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 - [x] Prebake PCM breadth. Twelve `prebake-` audio gates now cover glide,
       accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum,
       a 0.5 Volume setting and `stxt` at the unchanged thresholds. Acid seeds
-      the supersaw worklet and renders one event. Ten `wt-sample-` gates cover
-      the multi-frame wavetable oscillator separately.
+      the supersaw worklet and renders one event. Thirteen `wt-sample-` gates
+      cover the multi-frame wavetable oscillator separately.
 - [x] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
       covered through an owned ALSA receiver, with the receiver named to match
       the starter's `midi('tout')` selector. `test_midi` also receives pitch

@@ -183,13 +183,16 @@ initialization and `stxt` with the complete pinned starter, using the existing
 renders one event. The Volume widget is DOM-only and is skipped on both sides,
 so that case checks call neutralization and gain shaping, not a value mapping.
 `prebake-stxt-wavetable` matches at 0.999712 correlation and 1.00037 RMS ratio.
-Ten `wt-sample-` gates cover the multi-frame oscillator itself: 2048-sample
+Thirteen `wt-sample-` gates cover the multi-frame oscillator itself: 2048-sample
 frames with partial last frames, `wt` scanning, triangle/sine position LFOs,
 static `bendp` warp, asym warp envelopes, warp-rate LFOs, unison/detune/spread,
-`wtsync`, position envelopes and fractional onsets. They measure 0.999999+
+`wtsync`, position envelopes, fractional onsets and seeded `wtphaserand`
+(explicit, default-unison and two-event sequences). They measure 0.999999+
 correlation and 1.0002–1.0004 RMS ratios. Both players use the vendored
 public-domain `wt_echoes.wav`, whose three frames make position scanning
-audible. Glide additionally exposed and fixed pitch-envelope
+audible. The phase gates seed the site worklet's own `Math.random` and reset
+the native LCG to 0xc0ffee in reference mode; the live engine reseeds from
+time/pid. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
 Ten exponential oscillator pitch checks additionally cover detune ramps,

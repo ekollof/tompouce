@@ -1235,10 +1235,11 @@ against the real web player. Acid seeds the supersaw worklet and renders one
 event. The Volume widget is DOM-only and skipped on both sides, so that case
 checks call neutralization and gain shaping, not a value mapping.
 `prebake-stxt-wavetable` measures 0.999712 correlation and 1.00037 RMS ratio
-over 2 s with the seeded room. Ten `wt-sample-` cases cover plain playback,
-wt/LFO scanning, triangle and sine LFOs, static `bendp` warp, asym warp
-envelopes, warp-rate LFOs, unison/spread, `wtsync`, position envelopes and
-fractional onsets. Their correlations are 0.999999+ and RMS
+over 2 s with the seeded room. Thirteen `wt-sample-` cases cover plain
+playback, wt/LFO scanning, triangle and sine LFOs, static `bendp` warp, asym
+warp envelopes, warp-rate LFOs, unison/spread, `wtsync`, position envelopes,
+fractional onsets and seeded `wtphaserand` (explicit, default-unison and
+two-event sequences). Their correlations are 0.999999+ and RMS
 ratios 1.0002–1.0004, all under the same 0.99 and 0.85–1.15 gates.
 Both players use the vendored public-domain
 `tests/fixtures/uzu-wavetables/wt_echoes.wav` for these cases.

@@ -1339,7 +1339,7 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
             ev->wt_spread=control(value,"spread",.7,0,1);
             ev->wt_detune=control(value,"detune",0,-9600,9600);
             ev->wt_phase_rand=number_control(value,"wtphaserand") ?
-                (control(value,"wtphaserand",0,0,1)>0) : ev->wt_voices>1;
+                (control(value,"wtphaserand",0,0,1)>0 ? 1 : 0) : ev->wt_voices>1 ? 1 : 0;
             /* Each selected AKWF file is one cycle. Its length, not the
                manifest's nominal recording note, sets exact oscillator pitch. */
             ev->smp_speed*=length/SR*midi_to_freq(smp_base_midi(ev->smp));

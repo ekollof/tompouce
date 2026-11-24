@@ -78,7 +78,17 @@ int audio_set_output_gain(double value) {
 double audio_get_output_gain(void) {
     return atomic_load_explicit(&output_gain_units,memory_order_relaxed)/1000000.0;
 }
-void audio_set_reference_mode(int mode) { atomic_store(&reference_mode,mode); }
+/* Wavetable phase randomization. Reference renders and the compare harness
+   use the same LCG seed; the live engine reseeds from time/pid in audio_init. */
+static uint32_t wt_random_state = 0xc0ffeeu;
+static double wt_random_next(void) {
+    wt_random_state = wt_random_state * 1664525u + 1013904223u;
+    return wt_random_state / 4294967296.0;
+}
+void audio_set_reference_mode(int mode) {
+    if (mode) wt_random_state = 0xc0ffeeu;
+    atomic_store(&reference_mode,mode);
+}
 int audio_reference_mode(void) { return atomic_load(&reference_mode); }
 static unsigned long audio_block_frames = 256;
 
@@ -1489,7 +1499,11 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->wt_sample_spread = ev->wt_spread;
     v->wt_sample_voices = ev->wt_voices > 0 ? ev->wt_voices : 1;
     v->wt_sample_phase_rand = ev->wt_phase_rand;
-    for (int i = 0; i < WT_SAMPLE_VOICES; i++) v->wt_sample_phase[i] = 0;
+    int phase_voices = v->wt_sample_voices > 0 ? v->wt_sample_voices : 1;
+    if (v->wt_sample_frames > 0)
+        for (int i = 0; i < phase_voices; i++)
+            v->wt_sample_phase[i] = wt_random_next() * v->wt_sample_phase_rand;
+    for (int i = phase_voices; i < WT_SAMPLE_VOICES; i++) v->wt_sample_phase[i] = 0;
     v->wt_sample_lfo_phase = v->start_time * v->wt_sample_lfo_hz;
     v->wt_sample_lfo_phase -= floor(v->wt_sample_lfo_phase);
     v->wt_sample_warp_lfo_phase = v->start_time * v->wt_sample_warp_lfo_hz;
@@ -3625,6 +3639,8 @@ void audio_init(void) {
     atomic_store(&created_orbits,0);
     memset(web_duck,0,sizeof(web_duck));
     playing = 1;
+    uint32_t live_seed = (uint32_t)(now_seconds()*1000000.0) ^ (uint32_t)getpid();
+    wt_random_state = live_seed ? live_seed : 1u;
     silent_clock=!audio_output_start(render_output,audio_block_frames);
     if (silent_clock) silent_clock_origin=now_seconds()-audio_time;
 }

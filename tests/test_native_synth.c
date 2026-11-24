@@ -364,6 +364,15 @@ int main(void) {
         "note(60).s('sine').K(audioin().mul(.5).out())",
     };
     for (size_t i=0;i<sizeof(graphs)/sizeof(*graphs);i++) { AudioEvent event=prepare(graphs[i]); render(&event); native_synth_release(event.native_synth); }
+    AudioEvent feedback=prepare("note(60).K(()=>{ const x=sine(sFreq); return x.sub(y=>y.mul(.1)).mul(.1).out(); })");
+    NativeSynthState *feedback_state=native_synth_state_new(feedback.native_synth);
+    assert(feedback_state);
+    for (int i=0;i<2048;i++) {
+        double fl,fr;
+        assert(native_synth_process(feedback_state,i/SR,2,feedback.freq,0,0,0,&fl,&fr));
+        assert(isfinite(fl) && isfinite(fr));
+    }
+    native_synth_state_free(feedback_state); native_synth_release(feedback.native_synth);
     AudioEvent effect=prepare("note(60).K(audioin().mul(.5).out())");
     playing=1; audio_time=0; audio_trigger_event(&effect);
     VoiceMix mix={0}; mix_graph_effect(&voices[0],.25,-.5,&mix);

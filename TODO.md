@@ -644,19 +644,17 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 
 ## Prebake coverage
 
-- [x] Switch Angel helper reference coverage. The gate now compares **89**
+- [x] Switch Angel helper reference coverage. The gate now compares **90**
       cases after adding `toMajorKey`, `key_to_cc_value_for_autotune`, `sq`,
-      `irando`, `roller`, `comb`, `bend` and `disperse`; `getCue` is exercised
-      through the existing `cue`/`oncue` cases. `comb`/`disperse` compare after
-      ignoring native's internal `_fxSteps` replay plan, and `roller` uses a
-      1e-12 tolerance for a 1e-16 delay-feedback difference. `bend` passes.
-      `spinor` is the remaining helper and is tracked separately below.
-- [ ] `spinor` zero-delay Kabelsalat feedback. `spinor(1)` builds
-      `audioin().sub(x => x.bpf(sine(.13).mul(S(rand))))`; native's graph
-      compiler rejects the cycle with "Kabelsalat feedback requires a delay"
-      while the deployed REPL accepts it. Decide whether to add a bounded
-      one-sample feedback state for `.sub(fn)` graphs or keep the helper
-      unsupported with an explicit warning; do not silently substitute.
+      `irando`, `roller`, `comb`, `bend`, `disperse` and `spinor`; `getCue` is
+      exercised through the existing `cue`/`oncue` cases. `comb`/`disperse`
+      compare after ignoring native's internal `_fxSteps` replay plan, and
+      `roller` uses a 1e-12 tolerance for a 1e-16 delay-feedback difference.
+- [x] `spinor` zero-delay Kabelsalat feedback. Native graph back-edges are now
+      compiled as bounded one-sample feedback (at most 32 edges); only a
+      delayed node's first input keeps the existing delay line. `spinor(1)`
+      is back in the 90-case reference gate, and `test_native_synth` renders a
+      `.sub(fn)` feedback graph for 2,048 samples with finite output.
 - [ ] Custom Switch Angel `UISlider` widgets. Only the active `Volume`
       callback is mapped (to F4 output volume). Any other callback, including
       the commented `djfilt` example that uses `document` and

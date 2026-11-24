@@ -104,6 +104,7 @@ for(const test of [
   {name:'glitch',code:'note("60 64").pan(.5).glitch(.25)',random:true,numericTolerance:1e-12},
   {name:'irando',code:'n(irando("0 4 7"))',cycles:4,random:true,numericTolerance:1e-12},
   {name:'roller',code:'roller(1)',numericTolerance:1e-12},
+  {name:'spinor',code:'spinor(1)'},
   {name:'comb',code:'note(60).comb(50)',cycles:2},
   {name:'bend',code:'note(60).bend("<0 2>","0.1","0.3")',cycles:2},
   {name:'disperse',code:'note(60).disperse(.4,.9,.05,.5)',cycles:2},

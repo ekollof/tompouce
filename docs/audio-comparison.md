@@ -1210,9 +1210,12 @@ machine, not permanent baselines or guarantees under arbitrary host contention.
 
 ## Prebake helpers and oscillator pitch envelopes
 
-The prebake reference gate compares 89 setup/helper/API cases against the
+The prebake reference gate compares 90 setup/helper/API cases against the
 deployed transpiler and native QuickJS. Multi-cycle cases cover arrangements,
-cueing, sample timing and stateful glide. Ten branch cases check solo labels,
+cueing, sample timing and stateful glide. The pinned `spinor` helper now
+compiles its zero-delay `.sub(fn)` feedback as bounded one-sample state (delay
+feedback still uses the delay line); `comb` and `disperse` compare after
+ignoring native's internal `_fxSteps` replay plan. Ten branch cases check solo labels,
 muting, replacement, query-time identity and `each`/`all` transforms against
 the actual REPL. Existing exact checks remain exact;
 new floating-point text-synth/random/glide/frequency cases allow 1e-12 absolute

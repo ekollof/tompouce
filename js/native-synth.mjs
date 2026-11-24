@@ -7,8 +7,10 @@ import * as kabel from '@kabelsalat/lib';
  * Build a native Kabelsalat source or effect using Strudel's K(...) source
  * transform. sFreq is the event frequency and sGate follows its note gate.
  * Include audioin() for an effect on the existing sound; otherwise the graph
- * is the sound source. Feedback needs a delay. Device input, custom UGens,
- * MIDI/mouse graph nodes and arbitrary JavaScript nodes are unavailable.
+ * is the sound source. Delay feedback uses the delay line; other bounded
+ * back-edges read the previous sample's value (one-sample feedback). Device
+ * input, custom UGens, MIDI/mouse graph nodes and arbitrary JavaScript nodes
+ * are unavailable.
  * @name K
  * @param {expression | function} graph Kabelsalat graph, at most 256 native operations
  * @example
@@ -117,13 +119,21 @@ function graph(code, frequency, inputs=[]) {
   visit(root);
   if (!ordered.some(n=>n.type==='output')) throw new Error('Kabelsalat requires .out()');
   const ids=new Map(ordered.map((n,i)=>[n,i]));
+  let feedbackEdges=0;
   const ops=ordered.map((n,i)=>{
     const ins=n.ins.map(x=>ids.get(x));
-    if (ins.some((id,k)=>id>=i && !(n.type==='delay' && k===0))) throw new Error('Kabelsalat feedback requires a delay');
+    let fb=0;
+    for (let k=0;k<ins.length;k++) if (ins[k]>=i) {
+      /* A delayed node's first input is its existing delay tap. Other
+         back-edges are bounded one-sample feedback state. */
+      if (n.type==='delay' && k===0) continue;
+      fb|=1<<k;
+      if (++feedbackEdges>32) throw new Error('Kabelsalat feedback is too large');
+    }
     if (n.type==='n' && (typeof n.value!=='number' || !Number.isFinite(n.value))) throw new Error('Kabelsalat constants must be finite numbers');
     if (n.type==='output' && (!n.ins[1] || n.ins[1].type!=='n' || ![0,1].includes(n.ins[1].value)))
       throw new Error('Native Kabelsalat outputs are channels 0 and 1');
-    return {op:n.type,ins,value:n.value??0};
+    return {op:n.type,ins,value:n.value??0,...(fb?{fb}:{})};
   });
   const result={kind:'graph',ops,result:ops.length-1,effect:ordered.some(n=>n.type==='audioin')};
   if (graphs.size>=256) graphs.delete(graphs.keys().next().value);

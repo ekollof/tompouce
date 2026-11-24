@@ -137,6 +137,9 @@ Use `git diff --check -- ':!js/dist/runtime.js'` for authored whitespace checks.
   Preserve fresh outputs, builtin/prototype fallbacks and bounded native work.
   V8 assessment tools are trusted-corpus diagnostics; Node VM contexts are not
   confinement and must not be exposed as a production untrusted-code backend.
+  `js/native-synth.mjs` and `src/native_synth.c` compile K() graphs; bounded
+  graph back-edges read one-sample feedback state, while a delayed node's first
+  input keeps the delay line. Prepare graph state outside the audio callback.
 - `src/track.c` owns source/program changes; `src/scheduler.c` owns generation,
   transport, accepted events and history. `src/js_audio.c` prepares native events
   from haps. `current_code` is heap-owned through `current_code_set`; compiled

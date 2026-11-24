@@ -33,7 +33,7 @@ static const char *const names[]={"n","time","nativeGate","audioin","exit","poly
  "byteTime","nan","+","-","*","/","%","**","&","|","^","<<",">>",">>>","<","<=",">",">=",
  "==","!=","===","!==","&&","||","unary+","unary-","unary~","unary!","sqrt","log2","log10","trunc"};
 _Static_assert(sizeof(names)/sizeof(*names)==N_TYPES,"native opcode table");
-typedef struct { int type, count; unsigned in[NS_INPUTS], delay_at, delay_size; double value; } NativeOp;
+typedef struct { int type, count; unsigned in[NS_INPUTS], delay_at, delay_size, fb; double value; } NativeOp;
 struct NativeSynth {
     atomic_uint refs;
     int kind, count, result, effect, restart, envelope;
@@ -48,7 +48,7 @@ struct NativeSynthState {
     unsigned frame, crush, repeat, jump;
     unsigned byte_wait;
     int byte_started;
-    double reg[NS_OPS], memory[NS_OPS][6], outputs[2], sources[16];
+    double reg[NS_OPS], prev[NS_OPS], memory[NS_OPS][6], outputs[2], sources[16];
     double z[20], phase, modulation_time, last, start_frequency, start_slide;
     unsigned length;
     float delay[];
@@ -155,16 +155,24 @@ const NativeSynth *native_synth_prepare(const cJSON *value,double frequency,doub
         for (int i=0;i<temp.count;i++) {
             NativeOp *op=&temp.ops[i]; const cJSON *entry=cJSON_GetArrayItem(ops,i);
             const cJSON *name=cJSON_GetObjectItemCaseSensitive(entry,"op"), *ins=cJSON_GetObjectItemCaseSensitive(entry,"ins"),
-                *v=cJSON_GetObjectItemCaseSensitive(entry,"value");
+                *v=cJSON_GetObjectItemCaseSensitive(entry,"value"), *fb=cJSON_GetObjectItemCaseSensitive(entry,"fb");
             if (!cJSON_IsString(name) || !cJSON_IsArray(ins) || (op->count=cJSON_GetArraySize(ins))>NS_INPUTS ||
                 !cJSON_IsNumber(v) || !isfinite(v->valuedouble)) return NULL;
             op->type=-1; op->value=v->valuedouble;
+            if (fb) {
+                if (!cJSON_IsNumber(fb) || !isfinite(fb->valuedouble) || fb->valuedouble<0 ||
+                    fb->valuedouble!=floor(fb->valuedouble) || fb->valuedouble>65535) return NULL;
+                op->fb=(unsigned)fb->valueint;
+                if (op->count<16 && op->fb>=(1u<<op->count)) return NULL;
+            }
             for (int j=0;j<N_TYPES;j++) if (!strcmp(name->valuestring,names[j])) { op->type=j; break; }
             if (op->type<0) return NULL;
             for (int j=0;j<op->count;j++) {
                 const cJSON *ref=cJSON_GetArrayItem(ins,j);
                 if (!cJSON_IsNumber(ref) || !isfinite(ref->valuedouble) || ref->valuedouble!=floor(ref->valuedouble) ||
-                    ref->valuedouble<0 || ref->valuedouble>=temp.count || (ref->valuedouble>=i && !(op->type==N_DELAY && j==0))) return NULL;
+                    ref->valuedouble<0 || ref->valuedouble>=temp.count ||
+                    (ref->valuedouble>=i && !(op->type==N_DELAY && j==0) &&
+                     !(op->fb&(1u<<j)))) return NULL;
                 op->in[j]=(unsigned)ref->valueint;
             }
             if (op->type==N_DELAY) {
@@ -250,7 +258,9 @@ static double zzfx_sample(NativeSynthState *s) {
 }
 
 static double get(const NativeOp *op,const NativeSynthState *s,int index,double fallback) {
-    return index<op->count?s->reg[op->in[index]]:fallback;
+    if (index>=op->count) return fallback;
+    unsigned id=op->in[index];
+    return op->fb&(1u<<index)?s->prev[id]:s->reg[id];
 }
 static double blep(double t,double dt) {
     dt=fabs(dt); if (dt<=0) return 0;
@@ -390,6 +400,8 @@ int native_synth_process(NativeSynthState *s,double age,double gate,double frequ
         const NativeOp *op=&p->ops[i];
         s->delay[op->delay_at+s->frame%op->delay_size]=(float)get(op,s,0,0);
     }
+    if (p->kind==3)
+        for (int i=0;i<p->count;i++) s->prev[i]=s->reg[i];
     if (p->kind==2) *left=*right=((uint32_js(s->reg[p->result])&255)/127.5-1)*.2;
     else { *left=s->outputs[0]; *right=s->outputs[1]; }
     (void)input_r;

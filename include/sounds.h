@@ -1,7 +1,7 @@
 #ifndef SOUNDS_H
 #define SOUNDS_H
 #include "lv2_host.h"
-enum { SOUND_SAMPLES, SOUND_MACHINES, SOUND_SYNTHS, SOUND_WAVETABLES, SOUND_LV2, SOUND_USER, SOUND_IMPORT, SOUND_CATEGORIES };
+enum { SOUND_SAMPLES, SOUND_MACHINES, SOUND_SYNTHS, SOUND_WAVETABLES, SOUND_LV2, SOUND_USER, SOUND_IMPORT, SOUND_PREBAKES, SOUND_CATEGORIES };
 typedef struct { char name[64]; char uri[LV2_URI_MAX]; int category, slots, pitched; } SoundInfo;
 const char *sounds_category(int category);
 int sounds_search(int category, const char *query, SoundInfo *out, int capacity);

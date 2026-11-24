@@ -21,9 +21,9 @@ attribution under `$XDG_CONFIG_HOME/tompouce/prebakes/switchangel.strudel`
 never overwritten. The downloaded script is not redistributed in Tompouce's
 repository; upstream currently declares no redistribution license.
 
-Downloading installs the file without enabling it. Restart Tompouce after
-installing a version that adds prebake support, then use the activation line
-below and press F5.
+Downloading installs the file without enabling it. After installing, press
+`F6`, switch to **prebakes** with `Left`/`Right`, and press `Enter` on
+`switchangel.strudel` to enable it (or use the activation line below).
 
 Enable it for a song:
 
@@ -102,6 +102,28 @@ pinned starter defines `window.voc` next to `register('voc')`; both call forms
 remain available. Its compact `.bank('tr909')` example resolves through the
 installed `RolandTR909` drum-machine directory, with `bd`, `hh`, `sd` and `cp`
 pieces checked by `test_websamp`.
+
+## Enable from F6
+
+Press `F6`, use `Left`/`Right` to select **prebakes**, then press `Enter` on a
+file to toggle it on or off. The pane lists regular `.strudel`, `.js` and
+`.mjs` files in `$XDG_CONFIG_HOME/tompouce/prebakes/` (normally
+`~/.config/tompouce/prebakes/`) and shows `[on]`/`[off]` for each. The query
+field filters the list.
+
+The pane writes only `$XDG_CONFIG_HOME/tompouce/prebakes/enabled`, one
+filename per line. Enabled files load automatically before every evaluation,
+so the source can call their helpers directly:
+
+```js
+lead().doubletime()
+```
+
+No `await loadPrebake(...)` line is needed. Press `F5` after toggling to apply
+the new setup to the current program. `prebake.strudel` remains the always-on
+setup file and is not listed in the pane; use it for one-off setup or
+`loadPrebake` calls. Put additional files in the directory or install the
+starter with `--install-prebake`, then reopen or refresh F6.
 
 ## Your own files
 

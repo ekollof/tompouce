@@ -11,6 +11,7 @@
 #include "mcp.h"
 #include "companion.h"
 #include "sounds.h"
+#include "prebake_store.h"
 #include "wavetable.h"
 #include "banks.h"
 #include "sampler.h"
@@ -176,6 +177,8 @@ static char search_path[1024] = {0}; /* "" = global flat search */
 static int search_category = -1;
 static unsigned search_revision;
 static SoundBrowserRow search_rows[256];
+static PrebakeEntry prebake_entries[PREBAKE_STORE_MAX];
+static int prebake_n;
 /* Mouse hits use the rendered layout, including wrapped tabs and scroll. */
 static int search_list_row, search_list_top, search_list_visible, search_list_count;
 static int file_mode = 0; /* 0 off, 1 save picker, 2 load picker */
@@ -3035,6 +3038,13 @@ static void search_refresh(void) {
     search_revision = revision;
     if (search_category == SOUND_IMPORT) {
         search_ndirs = search_ndirs_total = 0;
+    } else if (search_category == SOUND_PREBAKES) {
+        prebake_n = prebake_store_list(search_buf, prebake_entries, PREBAKE_STORE_MAX);
+        if (prebake_n < 0) {
+            prebake_n = 0;
+            snprintf(status_msg,sizeof(status_msg),"prebakes: unsafe or unreadable directory");
+        }
+        search_ndirs = search_ndirs_total = prebake_n;
     } else {
         search_ndirs_total = sounds_browse(search_category,search_path,search_buf,search_rows,256);
         if (search_ndirs_total < 0) search_ndirs_total = 0;
@@ -3066,6 +3076,20 @@ static int search_row_target(void) {
 }
 
 static void search_descend_or_use(void) {
+    if (search_category == SOUND_PREBAKES) {
+        int t = search_row_target();
+        if (t < 0 || t >= prebake_n) return;
+        int enabled = prebake_entries[t].enabled;
+        int result = prebake_store_set_enabled(prebake_entries[t].name, !enabled);
+        if (result < 0)
+            snprintf(status_msg,sizeof(status_msg),"cannot update prebake list");
+        else {
+            snprintf(status_msg,sizeof(status_msg),"%s %s (F5 evaluates)",
+                enabled ? "disabled" : "enabled", prebake_entries[t].name);
+            search_dirty = 1;
+        }
+        return;
+    }
     if (search_category == SOUND_IMPORT) {
         if (companion_import_folder(search_buf)) {
             search_category = SOUND_USER; search_buf[0] = 0; search_len = 0; search_sel = 0; search_dirty = 1;
@@ -3217,7 +3241,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     if (h < 7 || w < 12) return;
     terminal_box(r0, c0, h, w);
     terminal_move(r0, c0+2);
-    if (search_path[0]) {
+    if (search_category == SOUND_PREBAKES) {
+        terminal_write(" prebakes (F6:close) ");
+    } else if (search_path[0]) {
         char title[120]; snprintf(title,sizeof(title)," bank: %.95s ",search_path);
         draw_text(r0,c0+2,title,w-4,0);
     } else if (search_category != SOUND_CATEGORIES) {
@@ -3258,7 +3284,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
     int list_row = info_row+1;
     int visible = r0+h-1-list_row;
     char info[256];
-    if (search_category == SOUND_IMPORT) snprintf(info,sizeof(info),"folder path or github:user/repo bank; WAV/MP3/FLAC, 8 MiB/file; strudel.json banks ok");
+    if (search_category == SOUND_PREBAKES) snprintf(info,sizeof(info),
+        "%d prebake%s; Enter: enable/disable",prebake_n,prebake_n==1?"":"s");
+    else if (search_category == SOUND_IMPORT) snprintf(info,sizeof(info),"folder path or github:user/repo bank; WAV/MP3/FLAC, 8 MiB/file; strudel.json banks ok");
     else if (search_category == SOUND_LV2) snprintf(info,sizeof(info),"%d LV2 plugin%s; Left/Right: category",
         search_ndirs_total,search_ndirs_total==1?"":"s");
     else if (search_category != SOUND_CATEGORIES) snprintf(info,sizeof(info),"%d sounds; Left/Right: category",search_ndirs_total);
@@ -3280,7 +3308,12 @@ static void draw_search_at(int r0, int c0, int h, int w) {
         int idx = top + r;
         if (idx >= nrows) { blank_inner(list_row+r, c0+1, w-2); continue; }
         char b[256];
-        if (search_path[0] && idx == 0) {
+        if (search_category == SOUND_PREBAKES) {
+            if (idx < prebake_n)
+                snprintf(b,sizeof(b),"[%s] %.200s",prebake_entries[idx].enabled?"on":"off",
+                    prebake_entries[idx].name);
+            else b[0] = 0;
+        } else if (search_path[0] && idx == 0) {
             snprintf(b, sizeof(b), "%s", "..");
         } else {
             int di = idx - (search_path[0] ? 1 : 0);
@@ -3297,7 +3330,9 @@ static void draw_search_at(int r0, int c0, int h, int w) {
         if (idx == search_sel) terminal_style_reset();
         if (used < w - 2) blank_inner(list_row+r, c0+1+used, w-2-used);
     }
-    const char *foot = search_category == SOUND_IMPORT ? "Enter:import  Left/Right:category" : search_ndirs_total > search_ndirs
+    const char *foot = search_category == SOUND_PREBAKES
+        ? "Enter:toggle  Left/Right:category  ~/.config/tompouce/prebakes"
+        : search_category == SOUND_IMPORT ? "Enter:import  Left/Right:category" : search_ndirs_total > search_ndirs
         ? "...more (refine query)"
         : "Enter:open/insert Tab:insert bank Bs:up";
     int fu = draw_text(r0+h-1, c0+1, foot, w-2, 0);
@@ -3438,7 +3473,7 @@ static const DocLine cheat[] = {
     {3, "F2                Open AI / application command prompt"},
     {3, "F3                Toggle vi editing mode"},
     {3, "F4                Toggle engine / editor diagnostics"},
-    {3, "F6                Open / close the sound browser"},
+    {3, "F6                Open / close the sound and prebake browser"},
     {3, "F9                Toggle the song track list"},
     {3, "F10 / F11         Narrow / widen the editor pane"},
     {3, "F12               Fullscreen piano roll + scope (Esc returns)"},
@@ -3526,12 +3561,12 @@ static const DocLine cheat[] = {
     {3, ":tutor            Open Strudeltutor lessons"},
     {3, ":evaluate         Evaluate editor buffer"},
     {0, ""},
-    {1, "Sound browser (F6)"},
+    {1, "Sound / prebake browser (F6)"},
     {3, "Type / Backspace  Filter / erase query"},
     {3, "Left / Right      Switch sound categories"},
-    {3, "Up / Down         Select sound or bank"},
+    {3, "Up / Down         Select sound, bank or prebake"},
     {3, "PgUp / PgDn       Move selection by ten rows"},
-    {3, "Enter             Open bank / insert selected sound"},
+    {3, "Enter             Open bank / insert sound / toggle prebake"},
     {3, "Tab               Insert bank pattern / use selection"},
     {3, "Empty Backspace   Leave bank / return to All category"},
     {3, "Esc / F6          Close browser without inserting"},
@@ -3870,7 +3905,7 @@ static void draw_input(void) {
     char buf[sizeof(input_buf)+8];
     int used;
     if (input_mode) snprintf(buf,sizeof(buf),"%s%s",input_mode==2?":":"AI> ",input_buf+prompt_view_start());
-    else snprintf(buf,sizeof(buf),vi_mode?"Type code. :commands F2=AI prompt F1=help F6=sounds.":"Type code. F2=prompt (/companion) F1=help F4=state F6=sounds.");
+    else snprintf(buf,sizeof(buf),vi_mode?"Type code. :commands F2=AI prompt F1=help F6=sounds/prebakes.":"Type code. F2=prompt (/companion) F1=help F4=state F6=sounds/prebakes.");
     used=draw_text(rows-2,0,buf,cols,0);
     if (used<cols) blank_inner(rows-2,used,cols-used);
     snprintf(buf,sizeof(buf),input_mode==2?"Enter runs command. Tab/Shift+Tab complete. Esc cancels.":"Enter submits prompt. Esc cancels.");
@@ -4797,7 +4832,8 @@ void tui_run(void) {
                 break;
             case 9: {
                 int t = search_row_target();
-                if (t >= 0 && t < search_ndirs && search_rows[t].kind==SOUND_ROW_BANK) {
+                if (search_category != SOUND_PREBAKES && t >= 0 && t < search_ndirs &&
+                    search_rows[t].kind==SOUND_ROW_BANK) {
                     search_use_bank(search_dirs[t]);
                     search_mode = 0;
                 } else search_descend_or_use();

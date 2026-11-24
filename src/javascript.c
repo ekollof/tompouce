@@ -3,6 +3,7 @@
 #include "common.h"
 #include "slider.h"
 #include "midi.h"
+#include "prebake_store.h"
 #include "websamp.h"
 #include "rational.h"
 #include "signal_wave.h"
@@ -996,12 +997,38 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
     JSContext *ctx = p->context;
     size_t prebake_length=0;
     char *prebake=config_script_source(ctx,"prebake.strudel",1,&prebake_length);
-    p->prebake_bytes=prebake_length;
     if (!prebake && JS_HasException(ctx)) {
         JSValue failure=JS_GetException(ctx);
         exception_text(ctx,failure,error,n); JS_FreeValue(ctx,failure);
         javascript_free(p); return NULL;
     }
+    size_t enabled_length=0;
+    char *enabled=NULL;
+    if (prebake_store_enabled_source(&enabled,&enabled_length)<0) {
+        snprintf(error,(size_t)n,"enabled prebakes: unsafe or unreadable list");
+        free(prebake); javascript_free(p); return NULL;
+    }
+    if (enabled && !enabled_length) { free(enabled); enabled=NULL; }
+    if (enabled && enabled_length) {
+        size_t total=prebake_length+1+enabled_length;
+        if (total>1024*1024) {
+            free(enabled); free(prebake);
+            snprintf(error,(size_t)n,"prebake setup exceeds 1 MiB");
+            javascript_free(p); return NULL;
+        }
+        char *combined=malloc(total+1);
+        if (!combined) {
+            free(enabled); free(prebake); javascript_free(p); return NULL;
+        }
+        size_t used=0;
+        if (prebake_length) { memcpy(combined,prebake,prebake_length); used=prebake_length; }
+        combined[used++]='\n';
+        memcpy(combined+used,enabled,enabled_length); used+=enabled_length;
+        combined[used]=0;
+        free(prebake); free(enabled);
+        prebake=combined; prebake_length=used;
+    }
+    p->prebake_bytes=prebake_length;
     JSValue fn = global_function(ctx, "__compile");
     JSValue args[3] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120),
         JS_NewStringLen(ctx,prebake?prebake:"",prebake_length)};

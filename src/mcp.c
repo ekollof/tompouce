@@ -365,7 +365,10 @@ static char *sound_catalog_json(const cJSON *args) {
         (limit && (!cJSON_IsNumber(limit) || !isfinite(limit->valuedouble) || limit->valuedouble < 1 || limit->valuedouble > 256 || floor(limit->valuedouble) != limit->valuedouble))) return NULL;
     int cat = -1, start = offset ? offset->valueint : 0, maximum = limit ? limit->valueint : 100;
     if (category && strcmp(category->valuestring,"all")) {
-        for (int i = 0; i < SOUND_CATEGORIES; i++) if (!strcmp(category->valuestring,sounds_category(i))) cat = i;
+        for (int i = 0; i < SOUND_CATEGORIES; i++) {
+            if (i == SOUND_PREBAKES) continue;
+            if (!strcmp(category->valuestring,sounds_category(i))) cat = i;
+        }
         if (cat < 0) return NULL;
     }
     SoundInfo *rows = calloc(4096,sizeof(*rows));
@@ -374,6 +377,7 @@ static char *sound_catalog_json(const cJSON *args) {
     if (!cJSON_AddItemToObject(result,"items",items)) { cJSON_Delete(items); cJSON_Delete(categories); cJSON_Delete(result); free(rows); return NULL; }
     if (!cJSON_AddItemToObject(result,"categories",categories)) { cJSON_Delete(categories); cJSON_Delete(result); free(rows); return NULL; }
     for (int i = 0; i < SOUND_CATEGORIES; i++) {
+        if (i == SOUND_PREBAKES) continue;
         cJSON *name = cJSON_CreateString(sounds_category(i));
         if (!name || !cJSON_AddItemToArray(categories,name)) { cJSON_Delete(name); cJSON_Delete(result); free(rows); return NULL; }
     }

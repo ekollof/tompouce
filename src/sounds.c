@@ -13,7 +13,7 @@
 #include <cjson/cJSON.h>
 
 const char *sounds_category(int category) {
-    static const char *names[] = {"samples","drum-machines","synths","wavetables","lv2 plugins","user","import-sounds"};
+    static const char *names[] = {"samples","drum-machines","synths","wavetables","lv2 plugins","user","import-sounds","prebakes"};
     return category >= 0 && category < SOUND_CATEGORIES ? names[category] : "all";
 }
 

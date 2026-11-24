@@ -54,7 +54,7 @@ def gm_supported():
     return GM_SUPPORTED
 
 
-def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None, simd=None, output_volume=False, lv2=False):
+def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, observed=None, companion=None, import_sounds=False, persisted_vi=None, application="tompouce", graphics=None, load_song=False, theme=False, manifest=False, mouse_pixels=False, mouse=True, command_files=False, saved_file=None, tutor_existing=None, tutor_saved=False, live_slider=False, transport=None, source_state=None, simd=None, output_volume=False, lv2=False, prebakes=False):
     if CASE_FILTER and CASE_FILTER not in name:
         return
     if name.startswith('GM synth') and not gm_supported():
@@ -114,7 +114,12 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             os.mkdir(folder)
             with open(folder + '/kick.wav', 'wb') as file:
                 file.write(audio())
-            keys = b'\x1b[17~\x1b[D\x1b[D\x1b[200~' + folder.encode() + b'\x1b[201~\r'
+            keys = b'\x1b[17~\x1b[D\x1b[D\x1b[D\x1b[200~' + folder.encode() + b'\x1b[201~\r'
+        if prebakes:
+            directory = root + '/' + application + '/prebakes'
+            os.makedirs(directory, exist_ok=True)
+            with open(directory + '/helpers.strudel', 'w') as file:
+                file.write("window.paneHelper=()=>note(64);\n")
         if command_files:
             os.mkdir(root+'/songs')
             for path in ('Existing.json','songs/My song.json'):
@@ -417,6 +422,9 @@ def check(name, code, keys=b"", expected=None, vi=False, stop_signal=None, obser
             if name == 'disable inline visuals':
                 with open(root + '/' + application + '/config.json') as file:
                     assert json.load(file)['inline_visuals'] is False
+            if prebakes and 'toggle' in name:
+                with open(root + '/' + application + '/prebakes/enabled') as file:
+                    assert file.read() == 'helpers.strudel\n', (name, 'enabled list not written')
             if persisted_vi is not None:
                 with open(root + '/' + application + '/config.json') as file:
                     assert json.load(file)['vi_mode'] is persisted_vi
@@ -767,6 +775,16 @@ check("categorized sound search and insertion", "", b'\x1b[17~supersaw\r',
       expected='note("c4").s("supersaw")')
 check("sound category navigation", "", b'\x1b[17~\x1b[C\x1b[C\x1b[Csine\r',
       expected='note("c4").s("sine")')
+check("prebake pane toggle", "note('c4').gain(0)",
+      [b'\x1b[17~', .2, b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05,
+       b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05,
+       b'\x1b[C', .1, b'\r', .2, b'\x1b'],
+      expected="note('c4').gain(0)", observed=b'enabled helpers.strudel', prebakes=True)
+check("prebake pane enables helper", "paneHelper()",
+      [b'\x1b[17~', .2, b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05,
+       b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05, b'\x1b[C', .05,
+       b'\x1b[C', .1, b'\r', .2, b'\x1b', .2, b'\x1b[15~'],
+      expected="paneHelper()", transport=True, prebakes=True)
 check("GM synth search and insertion", "", b'\x1b[17~gm_flute\r', expected='note("c4").s("gm_flute")')
 check("GM synth category", "", b'\x1b[17~\x1b[C\x1b[C\x1b[Cgm_acoustic_bass\r',
       expected='note("c4").s("gm_acoustic_bass")')

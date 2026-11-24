@@ -44,6 +44,9 @@ Build: `cmake --build build --clean-first` must finish with zero warnings under
       `drum ... | bank <dir>` line); `Esc`/`F6` closes.
 - [ ] While indexing, pane shows `indexing... N files`; `TOMPOUCE_BANKS`
       override is honored when set.
+- [ ] F6 **prebakes** lists `.strudel`/`.js`/`.mjs` setup files, marks them
+      `[on]`/`[off]`, and Enter toggles the enabled list; F5 loads the new
+      setup, so source needs no `await loadPrebake(...)` line.
 - [ ] Second launch loads the index from LevelDB in ~ms (console shows
       `banks index loaded`); touching a bank dir triggers a rescan.
 

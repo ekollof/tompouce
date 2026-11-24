@@ -2,6 +2,7 @@
 #include "js_audio.h"
 #include "audio.h"
 #include "slider.h"
+#include "prebake_store.h"
 #include "common.h"
 #include <assert.h>
 #include <math.h>
@@ -297,6 +298,47 @@ static void test_prebake(void) {
     assert(!rmdir(root));
     if (saved) { assert(!setenv("XDG_CONFIG_HOME",saved,1)); free(saved); }
     else assert(!unsetenv("XDG_CONFIG_HOME"));
+}
+
+/* F6's prebake pane writes the enabled list; compile must load those files
+   before the song without an explicit await line. */
+static void test_enabled_prebake_set(void) {
+    char root[]="/tmp/tompouce-enabled-XXXXXX", path[700], config[512], prebakes[512];
+    assert(mkdtemp(root));
+    const char *previous=getenv("XDG_CONFIG_HOME");
+    char *saved=previous?strdup(previous):NULL;
+    assert(!previous || saved);
+    assert(!setenv("XDG_CONFIG_HOME",root,1));
+    snprintf(config,sizeof(config),"%s/tompouce",root); assert(!mkdir(config,0700));
+    snprintf(prebakes,sizeof(prebakes),"%s/prebakes",config); assert(!mkdir(prebakes,0700));
+    snprintf(path,sizeof(path),"%s/helpers.strudel",prebakes);
+    write_module(path,"window.autoLead=()=>note(65);");
+    snprintf(path,sizeof(path),"%s/enabled",prebakes);
+    write_module(path,"helpers.strudel\n");
+    JsProgram *program=NULL;
+    cJSON *haps=query("autoLead()",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==65);
+    cJSON_Delete(haps); javascript_free(program);
+    PrebakeEntry entries[4];
+    assert(prebake_store_list("",&entries[0],4)==1);
+    assert(entries[0].enabled && !strcmp(entries[0].name,"helpers.strudel"));
+    assert(prebake_store_set_enabled("helpers.strudel",0)==1);
+    assert(prebake_store_list("",&entries[0],4)==1 && !entries[0].enabled);
+    char error[512]; cJSON *metadata=NULL;
+    program=javascript_compile("autoLead()",120,&metadata,error,sizeof(error));
+    assert(!program);
+    assert(prebake_store_set_enabled("helpers.strudel",1)==1);
+    haps=query("autoLead()",&program);
+    assert(haps && cJSON_GetArraySize(haps)==1);
+    cJSON_Delete(haps); javascript_free(program);
+    assert(prebake_store_set_enabled("../escape",1)==-1);
+    if (saved) { assert(!setenv("XDG_CONFIG_HOME",saved,1)); free(saved); }
+    else assert(!unsetenv("XDG_CONFIG_HOME"));
+    snprintf(path,sizeof(path),"%s/helpers.strudel",prebakes); assert(!unlink(path));
+    snprintf(path,sizeof(path),"%s/enabled",prebakes); assert(!unlink(path));
+    assert(!rmdir(prebakes)); assert(!rmdir(config)); assert(!rmdir(root));
 }
 
 static void test_local_modules(void) {
@@ -1110,6 +1152,7 @@ int main(int argc, char **argv) {
     test_visual_highlight_mapping();
     test_local_modules();
     test_prebake();
+    test_enabled_prebake_set();
     test_midi_manifest();
     test_oneshot_grid();
     test_switchangel_fx();

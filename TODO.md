@@ -661,20 +661,21 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       `getSuperdoughAudioController()`, has no mapping. Decide whether to
       support a confined widget facade or make the unsupported path fail
       explicitly instead of a silent no-op.
-- [ ] `roller2`'s `bstab` sample. No public installed manifest provides it;
-      the native profile rejects that hap with the sample-unavailable warning
-      while `supersaw`/`white` continue. Track a manifest/licensing path or a
-      documented user-provided sample directory; do not substitute `stab`.
+- [ ] Missing starter sample/wavetable assets. `roller2`'s `bstab` and
+      `stxt`'s generated `wt_digital_echoes` are absent from public installed
+      manifests; native rejects the `bstab` hap and cannot render `stxt` PCM.
+      Track a manifest/licensing path or documented user-provided directories;
+      do not substitute unrelated sounds.
 - [ ] Browser-only starter helpers. `document`, `bmod`, `FX` and arbitrary
       `getSuperdoughAudioController()` access are unavailable in the sandbox.
       Either add confined facades where semantics are well-defined or record
       each as an intentional ceiling with one observable warning; do not add
       silent fallbacks.
-- [ ] Prebake PCM breadth. Only `prebake-glide`, `prebake-accent` and
-      `prebake-delay` have audio gates. Add reference audio cases for
-      `trancegate`, `tgate`, `acid`, `stxt`, `humanize`, `glitch`, `fmtime`,
-      `strum` and the active `Volume` slider at a nonzero setting, using the
-      existing correlation/RMS thresholds.
+- [x] Prebake PCM breadth. Eleven `prebake-` audio gates now cover glide,
+      accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum
+      and a 0.5 Volume setting at the unchanged thresholds. Acid seeds the
+      supersaw worklet and renders one event. `stxt` remains event-only and is
+      tracked with the missing assets above.
 - [ ] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
       covered through an owned ALSA receiver; pitch bend, aftertouch, clock and
       multi-device/port routing remain unmeasured. Keep physical DIN/USB output

@@ -163,9 +163,12 @@ Existing exact event checks remain exact. New text-synth/random/glide and freque
 checks allow at most 1e-12 absolute numeric error, with exact structure and
 event counts. Helper-specific delay, velocity and postgain checks disable the
 gain curve to inspect their raw controls. Gain shaping keeps its separate
-browser audio gates. Three more audio gates cover glide, accent and delay
-with the complete pinned starter, using the existing 0.99 correlation and
-0.85–1.15 gain limits. Glide additionally exposed and fixed pitch-envelope
+browser audio gates. Eleven audio gates cover glide, accent, delay,
+trancegate, tgate, acid, humanize, glitch, fmtime, strum and a 0.5 Volume
+setting with the complete pinned starter, using the existing 0.99 correlation
+and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and renders one
+event. `stxt` remains event-only: its generated `wt_digital_echoes` wavetable
+is not installed, so the native renderer cannot produce PCM for it. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
 Ten exponential oscillator pitch checks additionally cover detune ramps,

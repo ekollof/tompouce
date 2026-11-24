@@ -441,6 +441,14 @@ try {
       sound:'sine',cycles:1,cps:.5,window:2,correlation:.99})),
     { name: 'prebake-accent', code: `note("60 64").s('sawtooth').lpf(1200).lpenv(2).velocity(.5).accent(2).gain(.4)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
     { name: 'prebake-delay', code: `note(69).s('sine').gain(.5).clip(.1).dly(.5).delaytime(.075)`,sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-trancegate', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("c3*8").s('sawtooth').gain(.5).trancegate(.4,3,1)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
+    { name: 'prebake-tgate', code: `note("c3*8").s('sawtooth').gain(.5).tgate(.5,2,1)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-acid', code: `note('c3').s('sine').gain(.5).acid()`, sound:'supersaw',seedSupersaw:true,cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-humanize', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60*4").s('sine').gain(.5).humanize(.5)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
+    { name: 'prebake-glitch', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60 64").s('sine').gain(.5).pan(.5).glitch(.25)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
+    { name: 'prebake-fmtime', code: `note("60*4").s('sine').gain(.5).fmtime(2,4)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-strum', code: `note("c3,e3,g3").s('sine').gain(.5).strum(.05)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'prebake-volume-half', code: `note(69).s('sine').gain(.5)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,volume:.5 },
     { name: 'sine-gaincurve-velocity', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).velocity(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-velocity-above-one', code: `note(69).s('sine').gain(.4).velocity(2)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'sine-gaincurve-delay', code: `setGainCurve(x=>x*x); note(69).s('sine').gain(.5).clip(.1).delay(.5).delaytime(.075).delayfeedback(.5)`, sound: 'sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
@@ -530,6 +538,11 @@ try {
     await evaluate(transpiler.outputFiles[0].text);
     const request = path.join(out, `${spec.name}.json`), native = path.join(out, `${spec.name}-native${spec.eventsOnly?'-events.json':'.f32'}`);
     await fs.writeFile(request, JSON.stringify(spec, null, 2));
+    const prebakeSource = spec.prebake ? (spec.volume===undefined ? starter :
+      starter.replace(/'Volume',\s*\.8/, `'Volume', ${spec.volume}`)) : null;
+    if (prebakeSource)
+      await fs.writeFile(path.join(prebakeRoot,'tompouce/prebake.strudel'),
+        '// tompouce-prebake: switchangel\n'+prebakeSource,{mode:0o600});
     const rendered = spawnSync(renderer, [request, native], { encoding: 'utf8', timeout: 120000,
       env:{...nativeEnvironment,...(spec.fixture?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{}),
         ...(spec.eventsOnly?{HOME:bakeryHome,XDG_CONFIG_HOME:bakeryHome,XDG_CACHE_HOME:bakeryHome}:{})} });
@@ -573,7 +586,7 @@ try {
     if (rendered.status !== 0) throw new Error(rendered.stderr || String(rendered.error));
     const captured = await evaluate(`(async()=>{
       const spec=${JSON.stringify(spec)};
-      if(spec.prebake)await evaluate(${JSON.stringify(starter??'')},__comparisonTranspiler.transpiler,{addReturn:false});
+      if(spec.prebake)await evaluate(${JSON.stringify(prebakeSource??'')},__comparisonTranspiler.transpiler,{addReturn:false});
       if(spec.fixture){const bytes=Uint8Array.from(atob(spec.mono?${JSON.stringify(monoFixture.toString('base64'))}:${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.sound]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.fixtureIR){const bytes=Uint8Array.from(atob(${JSON.stringify(monoFixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.fixtureIR]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}

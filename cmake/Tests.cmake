@@ -288,6 +288,10 @@ add_custom_target(compare-audio
     COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_RENDER_AUDIO=$<TARGET_FILE:render_audio>"
         node scripts/compare-audio.mjs
     DEPENDS render_audio WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+add_custom_target(test-wtphaserand-randomness
+    COMMAND "${CMAKE_COMMAND}" -E env "TOMPOUCE_RENDER_AUDIO=$<TARGET_FILE:render_audio>"
+        node scripts/wtphaserand-randomness-qa.mjs
+    DEPENDS render_audio WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-examples COMMAND $<TARGET_FILE:test_examples> DEPENDS test_examples
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-tui

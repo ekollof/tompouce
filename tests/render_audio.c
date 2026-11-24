@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
     }
     qsort(events,(size_t)used,sizeof(*events),compare_events);
     int seed_supersaw=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request,"seedSupersaw"));
+    int live_random=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request,"liveRandom"));
     if (seed_supersaw && (used!=1 || events[0].inst!=INST_SUPERSAW)) {
         fprintf(stderr,"seeded supersaw comparison requires one supersaw event\n");
         free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1;
@@ -112,6 +113,7 @@ int main(int argc, char **argv) {
     FILE *output = fopen(argv[2],"wb");
     if (!output) { free(events); cJSON_Delete(haps); cJSON_Delete(metadata); javascript_free(program); cJSON_Delete(request); return 1; }
     playing = 1; audio_set_reference_mode(1);
+    if (live_random) audio_live_randomize();
     long frames = lround(cycles->valuedouble/cps->valuedouble*SR);
     int next = 0, ok = 1;
     for (long frame = 0; frame < frames; frame++) {

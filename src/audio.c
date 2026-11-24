@@ -89,6 +89,12 @@ void audio_set_reference_mode(int mode) {
     if (mode) wt_random_state = 0xc0ffeeu;
     atomic_store(&reference_mode,mode);
 }
+void audio_live_randomize(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) { now.tv_sec = 0; now.tv_nsec = 0; }
+    uint32_t seed = (uint32_t)now.tv_sec * 1000000u ^ (uint32_t)now.tv_nsec ^ (uint32_t)getpid();
+    wt_random_state = seed ? seed : 1u;
+}
 int audio_reference_mode(void) { return atomic_load(&reference_mode); }
 static unsigned long audio_block_frames = 256;
 
@@ -3639,8 +3645,7 @@ void audio_init(void) {
     atomic_store(&created_orbits,0);
     memset(web_duck,0,sizeof(web_duck));
     playing = 1;
-    uint32_t live_seed = (uint32_t)(now_seconds()*1000000.0) ^ (uint32_t)getpid();
-    wt_random_state = live_seed ? live_seed : 1u;
+    audio_live_randomize();
     silent_clock=!audio_output_start(render_output,audio_block_frames);
     if (silent_clock) silent_clock_origin=now_seconds()-audio_time;
 }

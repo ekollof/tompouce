@@ -4,6 +4,9 @@
 extern float *out_target_buffers[]; /* set by the output backend per render */
 void audio_set_csound(CsoundProgram *program);
 void audio_set_reference_mode(int on);
+/* Reseed live wavetable phase randomization from the current time and PID.
+   Reference renders call audio_set_reference_mode(1) instead for a fixed seed. */
+void audio_live_randomize(void);
 #include "common.h"
 #include "event.h"
 

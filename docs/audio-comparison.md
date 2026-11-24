@@ -1247,7 +1247,18 @@ Unseeded live `wtphaserand` cannot be sample-locked: the site worklet calls its
 own `Math.random()` and native reseeds its LCG from time/PID. Both are uniform;
 `test_audio` measures the native live-style stream over 100000 draws
 (mean 0.501221, variance 0.083511, min 0.000004, max 0.999995, against the
-ideal 0.5 and 0.083333). The seeded phase gates pin both streams to 0xc0ffee
+ideal 0.5 and 0.083333).
+`scripts/wtphaserand-randomness-qa.mjs` renders the unseeded three-voice
+wavetable pattern 16 times on both players and compares distributions:
+native RMS mean 0.054041 (sd 0.000493) versus site 0.053546 (sd 0.000699),
+relative mean difference 0.914%; native peak mean 0.164367 (sd 0.020267)
+versus site 0.166624 (sd 0.020853), difference 1.355%. Both produced 16
+distinct renders and their RMS/peak ranges overlap. The QA bound requires both
+sides to vary, RMS means within 5%, peak means within 10% (peak is
+phase-sensitive), and ranges to overlap. Two 16-run samples measured
+0.914%/1.355% and 0.591%/4.785% RMS/peak mean differences. Run it with
+`TOMPOUCE_QA_RUNS=16 node scripts/wtphaserand-randomness-qa.mjs /tmp/tompouce-wtphaserand-qa`.
+This is statistical equivalence, not sample-exact live PCM. The seeded phase gates pin both streams to 0xc0ffee
 for exact phase ordering, so this is a statistical-equivalence ceiling rather
 than a sample-exact PCM claim for unseeded runs.
 Nine `pitch-envelope-` cases independently cover native pitch ADSR defaults,

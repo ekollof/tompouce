@@ -739,8 +739,8 @@ static void test_midi_unconnected_output(void) {
     assert(engine>=0);
     int index=midi_output_index(out,engine,snd_seq_client_id(out),port);
     assert(index>=0);
-    /* A connected subscriber wins over the unconnected IAC-named output; the
-       web would pick the output, but native keeps aconnect/Midi-Bridge routes. */
+    /* A subscribed Midi-Bridge wins over the unconnected IAC-named output;
+       other subscribers do not override the web default. */
     snd_seq_t *subscriber=NULL;
     int subscriber_port=-1;
     int subscribed=switchangel_receiver(&subscriber,&subscriber_port);
@@ -804,7 +804,7 @@ static void test_midi_unconnected_output(void) {
     assert(default_selected);
     snd_seq_close(out);
     midi_shutdown();
-    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index; subscribers keep the default");
+    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index; Midi-Bridge keeps the default");
 }
 
 static void test_midi_input_stores(void) {
@@ -1442,7 +1442,7 @@ static void switchangel_fixture(char *path, size_t size) {
 /* Owned ALSA receiver subscribed to this process's single output port. */
 static int switchangel_receiver(snd_seq_t **receiver, int *rport) {
     if (snd_seq_open(receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)<0) return 0;
-    snd_seq_set_client_name(*receiver,"tompouce-tout-qa");
+    snd_seq_set_client_name(*receiver,"Midi-Bridge-tout-qa");
     *rport=snd_seq_create_simple_port(*receiver,"owned receiver",
         SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
     if (*rport<0) return 0;

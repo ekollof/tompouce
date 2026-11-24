@@ -20,9 +20,9 @@ void midi_note_for(int chan, int note, int vel, double duration);
 void midi_notes_for(const unsigned char *channels, int count, int note, int vel, double duration);
 /* Explicit WebMIDI-style midiport selector: name substring (case-sensitive,
    matching an ALSA client or port name) or a zero-based index into writable
-   MIDI-generic ALSA outputs. NULL/empty prefers an IAC-named subscriber, else
-   the first subscriber, then the IAC/first output. "*" is a native broadcast
-   opt-in. No match drops. */
+   MIDI-generic ALSA outputs. NULL/empty prefers a subscribed Midi-Bridge/
+   aconnect destination, else the IAC-named or first output. "*" is a native
+   broadcast opt-in. No match drops. */
 void midi_note_for_port(int chan, int note, int vel, double duration, const char *port);
 void midi_notes_for_port(const unsigned char *channels, int count, int note, int vel,
     double duration, const char *port);

@@ -1427,12 +1427,12 @@ Its receiver subscribes only to the output client identified by this process's
 PID and client/port names. It receives an ordered three-channel note fan-out,
 including a duplicate channel, then all three 20 ms note-offs before 30 ms of
 synthetic audio time. It also receives pitch bend, channel aftertouch and
-clock/start/stop, and distinguishes the default IAC/first subscriber selection
-from explicit `midiport` selection and `"*"` broadcast across two subscribers;
-an unmatched selector drops without sending. A separate receiver with no ALSA
-subscription proves named and numeric selectors and the output-list fallback
-use the writable MIDI-generic output list; a connected subscriber wins over an
-unconnected IAC-named output, documenting the native deviation.
+clock/start/stop, and distinguishes the default Midi-Bridge/IAC/first-output
+selection from explicit `midiport` selection and `"*"` broadcast across two
+subscribers; an unmatched selector drops without sending. A separate receiver
+with no ALSA subscription proves named and numeric selectors and the output-list
+fallback use the writable MIDI-generic output list; a Midi-Bridge subscriber
+wins over an unconnected IAC-named output.
 The callback is paced in 128-frame steps. Queue-pressure
 tests prove that insufficient off capacity rejects the entire note fan-out,
 while the remaining scalar slot remains usable. No external MIDI device or

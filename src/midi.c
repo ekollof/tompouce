@@ -96,26 +96,26 @@ static int midi_running = 0;
 static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
-/* Default selection keeps native `aconnect`/PipeWire Midi-Bridge workflows
-   working: an IAC-named subscriber, else the first subscriber. The web instead
-   picks from its output list; this native preference is documented and tested
-   because ALSA integrations subscribe to the out port rather than appearing as
-   writable destinations. If nothing is subscribed, fall through to the
-   WebMIDI-style output list below. */
-static int midi_subscriber_destination(snd_seq_addr_t *dest) {
+/* Native integrations that receive through an ALSA subscription rather than a
+   writable destination. PipeWire's Midi-Bridge and explicit aconnect sessions
+   are subscribed; the web instead picks from its output list. Prefer only a
+   bridge/aconnect subscriber, then fall through to the web default output
+   list. Other subscribers do not override the web choice. */
+static int midi_subscriber_scan(int bridge_only, snd_seq_addr_t *dest) {
     snd_seq_query_subscribe_t *query;
     snd_seq_query_subscribe_alloca(&query);
     snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
     snd_seq_query_subscribe_set_root(query, &me);
     snd_seq_query_subscribe_set_type(query, SND_SEQ_QUERY_SUBS_READ);
-    snd_seq_addr_t first = {0, 0};
-    int have_first = 0;
     for (int index = 0; index < 1024; index++) {
         snd_seq_query_subscribe_set_index(query, index);
         if (snd_seq_query_port_subscribers(seq, query) < 0) break;
         const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
         if (!address) continue;
-        if (!have_first) { first = *address; have_first = 1; }
+        if (!bridge_only) {
+            *dest = *address;
+            return 1;
+        }
         snd_seq_client_info_t *client;
         snd_seq_client_info_alloca(&client);
         const char *client_name = NULL;
@@ -126,15 +126,17 @@ static int midi_subscriber_destination(snd_seq_addr_t *dest) {
         const char *port_name = NULL;
         if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0)
             port_name = snd_seq_port_info_get_name(info);
-        if ((client_name && strstr(client_name, "IAC")) ||
-            (port_name && strstr(port_name, "IAC"))) {
+        if ((client_name && (strstr(client_name, "Midi-Bridge") ||
+                             strstr(client_name, "midi-bridge") ||
+                             strstr(client_name, "PipeWire") ||
+                             strstr(client_name, "aconnect"))) ||
+            (port_name && (strstr(port_name, "Midi-Bridge") ||
+                           strstr(port_name, "midi-bridge") ||
+                           strstr(port_name, "PipeWire") ||
+                           strstr(port_name, "aconnect")))) {
             *dest = *address;
             return 1;
         }
-    }
-    if (have_first) {
-        *dest = first;
-        return 1;
     }
     return 0;
 }
@@ -142,8 +144,8 @@ static int midi_subscriber_destination(snd_seq_addr_t *dest) {
 /* Resolve a WebMIDI-style selector against ALSA MIDI destinations. The output
    list is every writable MIDI-generic port, not just current subscribers, so
    numeric indices match a WebMIDI output list. An empty selector prefers a
-   name containing "IAC", else the first output, matching the web default;
-   "*" is a native broadcast opt-in handled by the callers. */
+   Midi-Bridge/aconnect subscriber, otherwise a name containing "IAC", else the
+   first output, then the first subscriber. "*" is a native broadcast opt-in. */
 static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     if (!seq || seq_port < 0) return 0;
     int default_select = !selector || !*selector;
@@ -154,7 +156,7 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         if (end && !*end && value >= 0 && value < 4096) wanted = (int)value;
         else return 0;
     }
-    if (default_select && midi_subscriber_destination(dest)) return 1;
+    if (default_select && midi_subscriber_scan(1, dest)) return 1;
     int own = snd_seq_client_id(seq), index = 0;
     snd_seq_addr_t first = {0, 0};
     int have_first = 0;
@@ -202,6 +204,7 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         *dest = first;
         return 1;
     }
+    if (default_select && midi_subscriber_scan(0, dest)) return 1;
     return 0;
 }
 

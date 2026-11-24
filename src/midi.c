@@ -97,11 +97,10 @@ static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
 /* Native integrations that receive through an ALSA subscription rather than a
-   writable destination. PipeWire's Midi-Bridge and explicit aconnect sessions
-   are subscribed; the web instead picks from its output list. Prefer only a
-   bridge/aconnect subscriber, then fall through to the web default output
-   list. Other subscribers do not override the web choice. */
-static int midi_subscriber_scan(int bridge_only, snd_seq_addr_t *dest) {
+   writable destination. Explicit string selectors may match these by client or
+   port name (for example "Midi-Bridge"); the default output choice still uses
+   the WebMIDI-style writable list. */
+static int midi_subscriber_match(const char *selector, snd_seq_addr_t *dest) {
     snd_seq_query_subscribe_t *query;
     snd_seq_query_subscribe_alloca(&query);
     snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
@@ -112,7 +111,7 @@ static int midi_subscriber_scan(int bridge_only, snd_seq_addr_t *dest) {
         if (snd_seq_query_port_subscribers(seq, query) < 0) break;
         const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
         if (!address) continue;
-        if (!bridge_only) {
+        if (!selector) {
             *dest = *address;
             return 1;
         }
@@ -126,14 +125,8 @@ static int midi_subscriber_scan(int bridge_only, snd_seq_addr_t *dest) {
         const char *port_name = NULL;
         if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0)
             port_name = snd_seq_port_info_get_name(info);
-        if ((client_name && (strstr(client_name, "Midi-Bridge") ||
-                             strstr(client_name, "midi-bridge") ||
-                             strstr(client_name, "PipeWire") ||
-                             strstr(client_name, "aconnect"))) ||
-            (port_name && (strstr(port_name, "Midi-Bridge") ||
-                           strstr(port_name, "midi-bridge") ||
-                           strstr(port_name, "PipeWire") ||
-                           strstr(port_name, "aconnect")))) {
+        if ((client_name && strstr(client_name, selector)) ||
+            (port_name && strstr(port_name, selector))) {
             *dest = *address;
             return 1;
         }
@@ -144,8 +137,9 @@ static int midi_subscriber_scan(int bridge_only, snd_seq_addr_t *dest) {
 /* Resolve a WebMIDI-style selector against ALSA MIDI destinations. The output
    list is every writable MIDI-generic port, not just current subscribers, so
    numeric indices match a WebMIDI output list. An empty selector prefers a
-   Midi-Bridge/aconnect subscriber, otherwise a name containing "IAC", else the
-   first output, then the first subscriber. "*" is a native broadcast opt-in. */
+   name containing "IAC", else the first output, then the first subscriber.
+   Explicit names prefer subscribed destinations such as PipeWire's bridge,
+   then writable outputs. "*" is a native broadcast opt-in. */
 static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     if (!seq || seq_port < 0) return 0;
     int default_select = !selector || !*selector;
@@ -156,7 +150,7 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         if (end && !*end && value >= 0 && value < 4096) wanted = (int)value;
         else return 0;
     }
-    if (default_select && midi_subscriber_scan(1, dest)) return 1;
+    if (!default_select && wanted < 0 && midi_subscriber_match(selector, dest)) return 1;
     int own = snd_seq_client_id(seq), index = 0;
     snd_seq_addr_t first = {0, 0};
     int have_first = 0;
@@ -204,7 +198,7 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         *dest = first;
         return 1;
     }
-    if (default_select && midi_subscriber_scan(0, dest)) return 1;
+    if (default_select && midi_subscriber_match(NULL, dest)) return 1;
     return 0;
 }
 
@@ -219,7 +213,7 @@ static void midi_missing_port(const char *selector) {
         if (!*name)
             log_console("midi: no MIDI outputs; message dropped");
         else
-            log_console("midi: midiport \"%.127s\" not found among outputs; message dropped", name);
+            log_console("midi: midiport \"%.127s\" not found among outputs or subscribers; message dropped", name);
         snprintf(reported, sizeof(reported), "%.127s", name);
         reported_at = now;
     }

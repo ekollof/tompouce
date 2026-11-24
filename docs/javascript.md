@@ -1083,12 +1083,11 @@ CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 array forms) all send through ALSA. `midiport` selects a native ALSA
 client or port by case-sensitive name substring, or a zero-based index into
 the writable MIDI-generic output list. `.midi('name')` sets the same default
-for the pattern. Omitting it prefers a subscribed PipeWire Midi-Bridge or
-aconnect destination; otherwise the first IAC-named writable output, else the
-first writable output, and only when no output exists the first subscriber.
-The bridge/aconnect preference is a documented native deviation: those routes
-subscribe to the out port instead of appearing as writable outputs. Other
-subscribers do not override the web's output-list default. `"*"` is a
+for the pattern. Omitting it prefers the first IAC-named writable output,
+otherwise the first writable output, and only when no output exists the first
+subscriber, matching the web's default choice. Explicit string names prefer a
+subscribed destination such as PipeWire's `Midi-Bridge` before writable
+outputs, which is how native `aconnect`/Carla routes are selected. `"*"` is a
 native-only broadcast opt-in, and an unmatched selector drops the message like
 the web's missing-device branch. Named and numeric selectors use the writable
 MIDI-generic output ordering of a WebMIDI output list, including outputs that

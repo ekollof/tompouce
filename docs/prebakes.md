@@ -88,10 +88,10 @@ and no `bstab` token. Its `supersaw` and `white` voices start as soon as
 preparation of the missing hap completes. External MIDI is covered for the
 starter's `voc` path: `voc` sends `.midi('tout')`, and `test_midi` names its
 owned receiver to match that selector, then delivers its note and CC 34
-through the subscribed ALSA port. Omitting `midiport` prefers a subscribed
-Midi-Bridge/aconnect destination, else the first IAC-named output, else the
-first output; other subscribers do not override the web default. Named and
-numeric selectors use the writable MIDI-generic output list. `'*'` broadcasts
+through the subscribed ALSA port. Omitting `midiport` uses the IAC-named
+writable output, else the first output, matching the web default; explicit
+names prefer subscribed routes such as PipeWire's bridge. Named and numeric
+selectors use the writable MIDI-generic output list. `'*'` broadcasts
 to every subscriber as a native opt-in. Calling an
 unavailable API retains its error; the native profile does not substitute a
 different sound for it.

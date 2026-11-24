@@ -167,7 +167,7 @@ def main():
                    TOMPOUCE_MIDI_CLIENT=midi_client,
                    TOMPOUCE_CARLA_ROOT=str(project.parent),
                    TOMPOUCE_CARLA="/usr/bin/carla")
-        code = (f"note(\"c4 ~ c4 ~\").ccn(7).ccv(0.8).midi()"
+        code = (f"note(\"c4 ~ c4 ~\").ccn(7).ccv(0.8).midi('PipeWire')"
                 f".carla('managed.carxp','{target}').gain(.8)")
         engine_log = (root / "engine.log").open("wb")
         engine = subprocess.Popen([

@@ -10,7 +10,7 @@ Each row names the gate or measurement that keeps the bound from drifting.
 
 | Area | Web behavior | Native behavior | Gate / measured bound | Status |
 | --- | --- | --- | --- | --- |
-| Default MIDI destination | Picks the IAC-named WebMIDI output, else the first output. | Picks a subscribed Midi-Bridge/`aconnect` destination first, else the IAC-named writable output, else the first writable output, else the first subscriber. | `test_midi` checks bridge preference, IAC/first-output fallback, and unsubscribed outputs. `managed_carla` passes through its Midi-Bridge subscription. | **Accepted native extension.** ALSA/PipeWire routes subscribe to the out port instead of appearing as writable outputs; selecting an arbitrary output broke `managed_carla` with `peak=0`. Named and numeric selectors still use the WebMIDI-style output list. |
+| Default MIDI destination | Picks the IAC-named WebMIDI output, else the first output. | Picks the IAC-named writable output, else the first writable output, then the first subscriber if no output exists. Explicit names prefer subscribed destinations before writable outputs. | `test_midi` checks the IAC/first-output default, explicit Midi-Bridge/PipeWire subscriber selection, and unsubscribed outputs. `managed_carla` passes with `.midi('PipeWire')`. | **Web-compatible default.** Explicit subscriber names are a native extension needed for PipeWire/`aconnect`; the no-selector path now follows the web output list. |
 | Numeric `midiport` | Indexes the browser's WebMIDI output objects. | Indexes writable `MIDI_GENERIC` ALSA ports, including ports with no ALSA subscription. | `test_midi` computes a receiver's index from the same list and delivers by `#index`; a receiver with no subscription receives by name and index. | **Accepted mapping.** The list order is ALSA's, not the browser's; names are the portable selector. |
 | MIDI input stores | Each device has isolated stores; every message byte is filed into the CC store. | Senders are merged; CC, note and bend paths stay separate. | `scripts/midi-input-reference-qa.mjs` / `test-midi-input-reference-web`, plus `test_midi`. | **Accepted.** Matching per-device isolation would break the merged semantics native gates depend on. |
 | Live `wtphaserand` | The wavetable worklet calls its own `Math.random()`. | A time/PID-seeded LCG initializes each voice phase. | Seeded `wt-sample-phaserand-*` cases gate exact draw ordering at `0xc0ffee`. `test-wtphaserand-randomness` compares 16 unseeded renders per side: latest RMS mean difference 0.185%, peak 2.11%; earlier samples 0.914%/1.355% and 0.591%/4.785%. Bound: 5% RMS mean, 10% peak mean, both sides vary, ranges overlap. | **Bounded statistical equivalence.** Unseeded live phases cannot be sample-locked; no sample-exact live PCM claim. |
@@ -24,13 +24,13 @@ Each row names the gate or measurement that keeps the bound from drifting.
 
 ## Closing the default-MIDI question
 
-The Midi-Bridge preference is intentionally retained rather than forced to the
-web output-list default. The experiment that removed it produced silence in
-`managed_carla` because its Carla synth is reached through a PipeWire
-`Midi-Bridge` subscription, not through a writable ALSA destination. The
-current rule is narrow: only a Midi-Bridge or `aconnect` subscriber takes
-priority; other subscribers do not override the IAC/first-output choice.
-`test_midi` gates both sides of that preference.
+The no-selector default is now the web's IAC/first-output choice. PipeWire's
+Midi-Bridge and explicit `aconnect` sessions are not writable outputs, so
+`managed_carla` selects its route explicitly with `.midi('PipeWire')`.
+Explicit string selectors search subscribed destinations before writable
+outputs; numeric selectors and the default use the WebMIDI-style output list.
+`test_midi` gates both the web default and the explicit subscriber path, and
+`managed_carla` gates the end-to-end PipeWire route.
 
 ## Hardware request
 

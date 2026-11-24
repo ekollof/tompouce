@@ -709,14 +709,14 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       covered through an owned ALSA receiver, with the receiver named to match
       the starter's `midi('tout')` selector. `test_midi` also receives pitch
       bend (value 4096), channel aftertouch (77) and clock/start/stop
-      transport; two owned subscribers distinguish the default Midi-Bridge/
-      IAC/first-output selection, `midiport`-selected CC and note-on/off
-      routing, and `"*"` broadcast; an unmatched selector drops. An
-      unsubscribed receiver checks named/numeric output-list routing and the
-      output-list fallback; a Midi-Bridge subscriber wins over an unconnected
-      IAC-named output, so `managed_carla` keeps its Midi-Bridge route.
-      Physical DIN/USB note-off timing remains in the separate hardware-blocked
-      community follow-up.
+      transport; two owned subscribers distinguish the IAC/first-output
+      default, `midiport`-selected CC and note-on/off routing, and `"*"`
+      broadcast; an unmatched selector drops. An unsubscribed receiver checks
+      named/numeric output-list routing and the output-list fallback; explicit
+      names reach a Midi-Bridge/PipeWire subscriber that is not a writable
+      output, so `managed_carla` selects `.midi('PipeWire')` while the default
+      stays web-compatible. Physical DIN/USB note-off timing remains in the
+      separate hardware-blocked community follow-up.
 
 ## Render and SIMD performance
 

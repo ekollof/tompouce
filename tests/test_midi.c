@@ -739,8 +739,9 @@ static void test_midi_unconnected_output(void) {
     assert(engine>=0);
     int index=midi_output_index(out,engine,snd_seq_client_id(out),port);
     assert(index>=0);
-    /* A subscribed Midi-Bridge wins over the unconnected IAC-named output;
-       other subscribers do not override the web default. */
+    /* The IAC-named writable output is the web-compatible default even when a
+       Midi-Bridge subscriber is present; the bridge stays reachable by its
+       explicit name. */
     snd_seq_t *subscriber=NULL;
     int subscriber_port=-1;
     int subscribed=switchangel_receiver(&subscriber,&subscriber_port);
@@ -749,7 +750,7 @@ static void test_midi_unconnected_output(void) {
         int got=0; double first=monotonic();
         while (!got && monotonic()-first<1) {
             snd_seq_event_t *event=NULL;
-            while (snd_seq_event_input(subscriber,&event)>=0 && event)
+            while (snd_seq_event_input(out,&event)>=0 && event)
                 if (event->type==SND_SEQ_EVENT_CONTROLLER &&
                     event->data.control.param==81 && event->data.control.value==71) got=1;
             if (!got) usleep(2000);
@@ -758,12 +759,22 @@ static void test_midi_unconnected_output(void) {
         int leaked=0; first=monotonic();
         while (monotonic()-first<.05) {
             snd_seq_event_t *event=NULL;
-            while (snd_seq_event_input(out,&event)>=0 && event)
+            while (snd_seq_event_input(subscriber,&event)>=0 && event)
                 if (event->type==SND_SEQ_EVENT_CONTROLLER &&
                     event->data.control.param==81) leaked=1;
             usleep(2000);
         }
         assert(!leaked);
+        midi_cc_port(4,85,75,"Midi-Bridge");
+        int explicit_bridge=0; first=monotonic();
+        while (!explicit_bridge && monotonic()-first<1) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(subscriber,&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==85 && event->data.control.value==75) explicit_bridge=1;
+            if (!explicit_bridge) usleep(2000);
+        }
+        assert(explicit_bridge);
         snd_seq_close(subscriber);
     }
     /* No snd_seq_connect_from: the port is a WebMIDI-style output, not an
@@ -804,7 +815,7 @@ static void test_midi_unconnected_output(void) {
     assert(default_selected);
     snd_seq_close(out);
     midi_shutdown();
-    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index; Midi-Bridge keeps the default");
+    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index; IAC default and explicit Midi-Bridge differ");
 }
 
 static void test_midi_input_stores(void) {

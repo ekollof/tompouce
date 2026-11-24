@@ -692,10 +692,13 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       a 0.5 Volume setting and `stxt` at the unchanged thresholds. Acid seeds
       the supersaw worklet and renders one event. Ten `wt-sample-` gates cover
       the multi-frame wavetable oscillator separately.
-- [ ] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
-      covered through an owned ALSA receiver; pitch bend, aftertouch, clock and
-      multi-device/port routing remain unmeasured. Keep physical DIN/USB output
-      timing in the separate hardware-blocked item.
+- [x] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
+      covered through an owned ALSA receiver. `test_midi` now also receives
+      pitch bend (value 4096), channel aftertouch (77) and clock/start/stop
+      transport, and two owned subscribers both receive the same broadcast CC.
+      `midiport` stays an intentional ALSA broadcast rather than per-port
+      selection. Physical DIN/USB note-off timing remains in the separate
+      hardware-blocked community follow-up.
 
 ## Render and SIMD performance
 

@@ -110,7 +110,9 @@ without touching the user's session or routing.
 ### Physical USB/DIN output timing (community follow-up)
 
 The host-side MIDI dispatcher, channel fan-out and note-off deadlines are
-covered by `test_midi`, which uses an owned ALSA sequencer receiver. Physical
+covered by `test_midi`, which uses an owned ALSA sequencer receiver for note
+fan-out, pitch bend, channel aftertouch, clock/start/stop and two subscribers
+receiving the same broadcast CC. Physical
 USB/DIN transport and device response timing remain unmeasured here: this box
 has a Behringer UMC404HD (`16:0`) with MIDI I/O, but no receiving synth and no
 DIN OUT→IN cable, and an owned ALSA loopback cannot observe hardware or driver

@@ -1425,7 +1425,9 @@ are rejected with a warning and tested separately from the web gate.
 Its receiver subscribes only to the output client identified by this process's
 PID and client/port names. It receives an ordered three-channel note fan-out,
 including a duplicate channel, then all three 20 ms note-offs before 30 ms of
-synthetic audio time. The callback is paced in 128-frame steps. Queue-pressure
+synthetic audio time. It also receives pitch bend, channel aftertouch and
+clock/start/stop, and two owned subscribers receive the same broadcast CC.
+The callback is paced in 128-frame steps. Queue-pressure
 tests prove that insufficient off capacity rejects the entire note fan-out,
 while the remaining scalar slot remains usable. No external MIDI device or
 audio device is opened by this loopback fixture. This establishes the local

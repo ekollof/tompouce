@@ -484,6 +484,85 @@ static void test_channel_note_off_loopback(void) {
     puts("channel fan-out reaches owned ALSA receiver in order; every 20ms note-off arrives before 30ms of audio time");
 }
 
+static void test_external_message_breadth(void) {
+    midi_shutdown(); midi_init();
+    if (!midi_ready()) { puts("SKIP external message breadth: no ALSA sequencer"); return; }
+    snd_seq_t *receivers[2]={NULL,NULL};
+    int ports[2]={-1,-1};
+    for (int i=0;i<2;i++) {
+        assert(snd_seq_open(&receivers[i],"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
+        char name[64];
+        snprintf(name,sizeof(name),"tompouce-message-breadth-%d",i);
+        snd_seq_set_client_name(receivers[i],name);
+        ports[i]=snd_seq_create_simple_port(receivers[i],"owned receiver",
+            SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+        assert(ports[i]>=0);
+    }
+    int sender=-1,sender_port=-1;
+    snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client,-1);
+    while (snd_seq_query_next_client(receivers[0],client)>=0) {
+        if (snd_seq_client_info_get_pid(client)!=(int)getpid() ||
+            strcmp(snd_seq_client_info_get_name(client),"tompouce")) continue;
+        snd_seq_port_info_t *info; snd_seq_port_info_alloca(&info);
+        snd_seq_port_info_set_client(info,snd_seq_client_info_get_client(client));
+        snd_seq_port_info_set_port(info,-1);
+        while (snd_seq_query_next_port(receivers[0],info)>=0)
+            if (!strcmp(snd_seq_port_info_get_name(info),"out")) {
+                assert(sender<0);
+                sender=snd_seq_client_info_get_client(client);
+                sender_port=snd_seq_port_info_get_port(info);
+            }
+    }
+    assert(sender>=0);
+    for (int i=0;i<2;i++)
+        assert(snd_seq_connect_from(receivers[i],ports[i],sender,sender_port)>=0);
+    /* Channel messages are fixed broadcasts, so every subscriber sees bend,
+       aftertouch and transport once. */
+    midi_bend(2,4096);
+    midi_touch(2,77);
+    midi_transport(1); midi_transport(2); midi_transport(4);
+    int bend=0,touch=0,clock=0,start=0,stop=0;
+    double first=monotonic();
+    while ((!bend || !touch || !clock || !start || !stop) && monotonic()-first<2) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(receivers[0],&event)>=0 && event) {
+            switch (event->type) {
+            case SND_SEQ_EVENT_PITCHBEND:
+                assert(event->data.control.channel==2 && event->data.control.value==4096);
+                bend++; break;
+            case SND_SEQ_EVENT_CHANPRESS:
+                assert(event->data.control.channel==2 && event->data.control.value==77);
+                touch++; break;
+            case SND_SEQ_EVENT_CLOCK: clock++; break;
+            case SND_SEQ_EVENT_START: start++; break;
+            case SND_SEQ_EVENT_STOP: stop++; break;
+            default: break;
+            }
+        }
+        if (!bend || !touch || !clock || !start || !stop) usleep(2000);
+    }
+    assert(bend && touch && clock && start && stop);
+    /* Two owned subscribers both receive the same broadcast CC. */
+    midi_cc(4,74,64);
+    int seen[2]={0,0};
+    first=monotonic();
+    while ((!seen[0] || !seen[1]) && monotonic()-first<2) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.channel==4 && event->data.control.param==74 &&
+                    event->data.control.value==64) seen[i]=1;
+        }
+        if (!seen[0] || !seen[1]) usleep(2000);
+    }
+    assert(seen[0] && seen[1]);
+    for (int i=0;i<2;i++) snd_seq_close(receivers[i]);
+    midi_shutdown();
+    puts("bend, aftertouch and transport reach an owned receiver; two subscribers receive the same broadcast CC");
+}
+
 static void test_midi_input_stores(void) {
     MidiHeldKey keys[300];
     assert(midi_cc_value(120,0)==0 && midi_cc_value(120,3)==0);
@@ -1516,6 +1595,7 @@ int main(int argc, char **argv) {
     test_switchangel_external_device();
     test_short_gate_and_bounds();
     test_channel_note_off_loopback();
+    test_external_message_breadth();
     test_note_off_under_load();
     event_queue_clear();
     midi_shutdown();

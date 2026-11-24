@@ -666,11 +666,14 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       manifests; native rejects the `bstab` hap and cannot render `stxt` PCM.
       Track a manifest/licensing path or documented user-provided directories;
       do not substitute unrelated sounds.
-- [ ] Browser-only starter helpers. `document`, `bmod`, `FX` and arbitrary
-      `getSuperdoughAudioController()` access are unavailable in the sandbox.
-      Either add confined facades where semantics are well-defined or record
-      each as an intentional ceiling with one observable warning; do not add
-      silent fallbacks.
+- [x] Browser-only starter helpers. `bmod` and `FX` are core pattern APIs and
+      are already reference-gated by the starter's `bend`, `comb`, `disperse`
+      and `spinor` cases. `document`, `navigator`, `localStorage` and
+      `getSuperdoughAudioController` stay undefined so `typeof` feature
+      detection is unchanged; a real bare use aborts setup with a message that
+      names the helper and its missing facade. `test_javascript` covers the
+      feature-detection and both error paths. The commented `djfilt`
+      controller example remains an intentional ceiling.
 - [x] Prebake PCM breadth. Eleven `prebake-` audio gates now cover glide,
       accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum
       and a 0.5 Volume setting at the unchanged thresholds. Acid seeds the

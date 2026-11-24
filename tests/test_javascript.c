@@ -258,6 +258,21 @@ static void test_prebake(void) {
     assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
         cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==1);
     cJSON_Delete(haps); javascript_free(program);
+    /* Browser-only globals stay undefined so `typeof` feature detection sees no
+       DOM, while a real bare use names the unsupported helper. */
+    write_module(path,"window.preDOM=typeof document");
+    haps=query("note(preDOM==='undefined'?60:62)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==60);
+    cJSON_Delete(haps); javascript_free(program);
+    write_module(path,"window.preDOMSlider=document.getElementById('pre')");
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    if (program || !strstr(error,"browser-only helper 'document'")) fprintf(stderr,"document rejection: %s\n",error);
+    assert(!program && strstr(error,"browser-only helper 'document'"));
+    write_module(path,"window.preController=getSuperdoughAudioController()");
+    program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
+    assert(!program && strstr(error,"browser-only helper 'getSuperdoughAudioController'"));
     write_module(path,"register('oops',");
     program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
     assert(!program && !metadata && strstr(error,"prebake.strudel"));

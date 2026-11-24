@@ -3,6 +3,14 @@ import {parse} from 'acorn';
 let baseDefaults=new Map(), defaults=new Map(), gainCurve=null, loaded=new Map();
 let transpile, log;
 let setupDepth=0;
+/* Browser-only globals stay undefined so `typeof` feature detection keeps
+   working. A real bare use is reported by name instead of a raw ReferenceError. */
+const browserOnlyHelpers=new Map([
+  ['document','DOM widgets and layout'],
+  ['navigator','browser environment'],
+  ['localStorage','browser storage'],
+  ['getSuperdoughAudioController','the Superdough audio node graph'],
+]);
 export const isPrebaking=()=>setupDepth>0;
 const originalDefaults={s:'triangle',gain:.8,postgain:1,density:'.03',ftype:'12db',fanchor:0,
   resonance:1,hresonance:1,bandq:1,channels:[1,2],phaserdepth:.75,shapevol:1,distortvol:1,
@@ -107,6 +115,13 @@ export async function runPrebake(code,name='prebake.strudel') {
     let output=setup.output;
     for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))output=output.slice(0,start)+text+output.slice(end);
     await Function(`"use strict";return (async()=>{${output}\n})()`)();
-  }catch(error){throw new Error(`${name}: ${error?.message ?? error}`);}
+  }catch(error){
+    const missing=error instanceof ReferenceError &&
+      /^'([A-Za-z_$][\w$]*)' is not defined$/.exec(error.message);
+    if(missing && browserOnlyHelpers.has(missing[1]))throw new Error(
+      `${name}: browser-only helper '${missing[1]}' is unavailable in the terminal sandbox `+
+      `(${browserOnlyHelpers.get(missing[1])} has no native facade)`);
+    throw new Error(`${name}: ${error?.message ?? error}`);
+  }
   finally{setupDepth--;}
 }

@@ -72,7 +72,13 @@ and `encodeInto`; it supplies no DOM APIs. The public
 `getFrequencyFromValue` pitch helper follows the web's note/frequency fallbacks.
 This does not establish compatibility for every helper: browser DOM controls,
 unavailable samples/synths and other bank-specific examples still require
-their own support. The pinned `roller2` helper's `bstab` sample is not part of
+their own support. `bmod` and `FX` are core pattern APIs and work here; the
+`switchangel-bend`, `switchangel-comb`, `switchangel-disperse` and
+`switchangel-spinor` reference cases exercise them. `document`,
+`navigator`, `localStorage` and `getSuperdoughAudioController` stay undefined
+so `typeof` feature detection keeps working, and a real use aborts setup with
+a message naming the browser-only helper and its missing facade.
+The pinned `roller2` helper's `bstab` sample is not part of
 the public installed manifests; the native profile keeps the name and rejects
 that hap with the normal sample-unavailable warning instead of substituting
 the unrelated `stab` bank. Its `supersaw` and `white` voices start as soon as
@@ -150,7 +156,7 @@ not replace the playing program.
 | A setup edit has no effect | Press F5 to create a fresh runtime; old accepted programs retain their original helpers. |
 | Sound levels change after enabling Switch Angel | Its quadratic curve and gain defaults are intentional; adjust the song's explicit gain. |
 | Everything stays silent after muting | Check F4 Volume or enter `/volume 1`. This level survives song changes and reevaluation. |
-| `document`, `bmod` or `FX` is unavailable | The helper requires a browser or an unsupported audio API. Only the starter's known Volume widget is mapped; see the limitations above. |
+| `document` or `getSuperdoughAudioController` is unavailable | The helper is browser-only and has no native facade; the setup error names it. Only the starter's known Volume widget is mapped. `bmod` and `FX` are supported. |
 
 ## Verification
 
@@ -194,5 +200,8 @@ helper registering an `.FX(...)` stage carries that stage on the query event,
 and `test_switchangel_humanize` checks the pinned humanize helper's onset and
 velocity bounds with a deterministic random source. `test_switchangel_bmod`
 checks a pinned-style helper attaches a bus modulation entry to the query event.
+`test_javascript` also checks that `typeof document` still reports `undefined`,
+while bare `document` and `getSuperdoughAudioController` uses name the
+browser-only helper in the setup error.
 Bank-specific sounds, additional pitch/FM combinations and external devices
 remain separate checks rather than claims established by this matrix.

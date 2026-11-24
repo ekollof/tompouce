@@ -1429,7 +1429,9 @@ including a duplicate channel, then all three 20 ms note-offs before 30 ms of
 synthetic audio time. It also receives pitch bend, channel aftertouch and
 clock/start/stop, and distinguishes the default IAC/first selection from
 explicit `midiport` selection and `"*"` broadcast across two subscribers; an
-unmatched selector drops without sending.
+unmatched selector drops without sending. A separate receiver with no ALSA
+subscription proves named and numeric selectors use the writable MIDI-generic
+output list, including the numeric index computed from that list.
 The callback is paced in 128-frame steps. Queue-pressure
 tests prove that insufficient off capacity rejects the entire note fan-out,
 while the remaining scalar slot remains usable. No external MIDI device or

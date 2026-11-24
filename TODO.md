@@ -703,8 +703,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       bend (value 4096), channel aftertouch (77) and clock/start/stop
       transport; two owned subscribers distinguish the default IAC/first
       selection, `midiport`-selected CC and note-on/off routing, and `"*"`
-      broadcast; an unmatched selector drops. Physical DIN/USB note-off timing
-      remains in the separate hardware-blocked community follow-up.
+      broadcast; an unmatched selector drops. An unsubscribed receiver checks
+      that named and numeric selectors use the writable MIDI-generic output
+      list, with the numeric index computed from that list. Physical DIN/USB
+      note-off timing remains in the separate hardware-blocked community
+      follow-up.
 
 ## Render and SIMD performance
 

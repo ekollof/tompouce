@@ -19,8 +19,9 @@ void midi_note_for(int chan, int note, int vel, double duration);
    atomically before sending any note-on; count is bounded to 16. */
 void midi_notes_for(const unsigned char *channels, int count, int note, int vel, double duration);
 /* Explicit WebMIDI-style midiport selector: name substring (case-sensitive,
-   matching a subscribed ALSA client or port name) or a zero-based subscriber
-   index. NULL/empty keeps the default broadcast. No match drops the message. */
+   matching an ALSA client or port name) or a zero-based index into writable
+   MIDI-generic ALSA outputs. NULL/empty uses the web default (IAC first,
+   else first output). "*" is a native broadcast opt-in. No match drops. */
 void midi_note_for_port(int chan, int note, int vel, double duration, const char *port);
 void midi_notes_for_port(const unsigned char *channels, int count, int note, int vel,
     double duration, const char *port);

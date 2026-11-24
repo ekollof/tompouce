@@ -96,11 +96,51 @@ static int midi_running = 0;
 static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
-/* Resolve a WebMIDI-style selector against this output port's subscribers.
-   An empty selector mirrors WebMidi's default: a name containing "IAC", else
-   the first subscriber. Numeric selectors (#N) are zero-based subscriber
-   indices; strings match subscribed client/port names. "*" is a native
-   opt-in broadcast handled by the callers. */
+/* Default selection keeps native `aconnect` subscribers working: an
+   IAC-named subscriber, else the first subscriber. If none are connected,
+   fall back to the WebMIDI-style output list below. */
+static int midi_subscriber_destination(snd_seq_addr_t *dest) {
+    snd_seq_query_subscribe_t *query;
+    snd_seq_query_subscribe_alloca(&query);
+    snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
+    snd_seq_query_subscribe_set_root(query, &me);
+    snd_seq_query_subscribe_set_type(query, SND_SEQ_QUERY_SUBS_READ);
+    snd_seq_addr_t first = {0, 0};
+    int have_first = 0;
+    for (int index = 0; index < 1024; index++) {
+        snd_seq_query_subscribe_set_index(query, index);
+        if (snd_seq_query_port_subscribers(seq, query) < 0) break;
+        const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
+        if (!address) continue;
+        if (!have_first) { first = *address; have_first = 1; }
+        snd_seq_client_info_t *client;
+        snd_seq_client_info_alloca(&client);
+        const char *client_name = NULL;
+        if (snd_seq_get_any_client_info(seq, address->client, client) == 0)
+            client_name = snd_seq_client_info_get_name(client);
+        snd_seq_port_info_t *info;
+        snd_seq_port_info_alloca(&info);
+        const char *port_name = NULL;
+        if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0)
+            port_name = snd_seq_port_info_get_name(info);
+        if ((client_name && strstr(client_name, "IAC")) ||
+            (port_name && strstr(port_name, "IAC"))) {
+            *dest = *address;
+            return 1;
+        }
+    }
+    if (have_first) {
+        *dest = first;
+        return 1;
+    }
+    return 0;
+}
+
+/* Resolve a WebMIDI-style selector against ALSA MIDI destinations. The output
+   list is every writable MIDI-generic port, not just current subscribers, so
+   numeric indices match a WebMIDI output list. An empty selector prefers a
+   name containing "IAC", else the first output; "*" is a native broadcast
+   opt-in handled by the callers. */
 static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     if (!seq || seq_port < 0) return 0;
     int default_select = !selector || !*selector;
@@ -108,47 +148,51 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
     if (!default_select && selector[0] == '#') {
         char *end = NULL;
         long value = strtol(selector + 1, &end, 10);
-        if (end && !*end && value >= 0 && value < 1024) wanted = (int)value;
+        if (end && !*end && value >= 0 && value < 4096) wanted = (int)value;
         else return 0;
     }
+    if (default_select && midi_subscriber_destination(dest)) return 1;
+    int own = snd_seq_client_id(seq), index = 0;
     snd_seq_addr_t first = {0, 0};
     int have_first = 0;
-    snd_seq_query_subscribe_t *query;
-    snd_seq_query_subscribe_alloca(&query);
-    snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
-    snd_seq_query_subscribe_set_root(query, &me);
-    snd_seq_query_subscribe_set_type(query, SND_SEQ_QUERY_SUBS_READ);
-    for (int index = 0; index < 1024; index++) {
-        snd_seq_query_subscribe_set_index(query, index);
-        if (snd_seq_query_port_subscribers(seq, query) < 0) break;
-        const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
-        if (!address) continue;
-        if (!default_select && wanted >= 0) {
-            if (index == wanted) { *dest = *address; return 1; }
-            continue;
-        }
-        char client_name[128] = "", port_name[128] = "";
-        snd_seq_client_info_t *client;
-        snd_seq_client_info_alloca(&client);
-        if (snd_seq_get_any_client_info(seq, address->client, client) == 0 &&
-            snd_seq_client_info_get_name(client))
-            snprintf(client_name, sizeof(client_name), "%s", snd_seq_client_info_get_name(client));
+    snd_seq_client_info_t *client;
+    snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client, -1);
+    while (snd_seq_query_next_client(seq, client) >= 0) {
+        int c = snd_seq_client_info_get_client(client);
+        if (c == own || c == SND_SEQ_CLIENT_SYSTEM) continue;
+        const char *client_name = snd_seq_client_info_get_name(client);
         snd_seq_port_info_t *info;
         snd_seq_port_info_alloca(&info);
-        if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0 &&
-            snd_seq_port_info_get_name(info))
-            snprintf(port_name, sizeof(port_name), "%s", snd_seq_port_info_get_name(info));
-        if (default_select) {
-            if (!have_first) { first = *address; have_first = 1; }
-            if (strstr(client_name, "IAC") || strstr(port_name, "IAC")) {
-                *dest = *address;
+        snd_seq_port_info_set_client(info, c);
+        snd_seq_port_info_set_port(info, -1);
+        while (snd_seq_query_next_port(seq, info) >= 0) {
+            unsigned caps = snd_seq_port_info_get_capability(info);
+            unsigned type = snd_seq_port_info_get_type(info);
+            if (!(caps & SND_SEQ_PORT_CAP_WRITE) ||
+                !(type & SND_SEQ_PORT_TYPE_MIDI_GENERIC)) continue;
+            const char *port_name = snd_seq_port_info_get_name(info);
+            snd_seq_addr_t address = {(unsigned)c, (unsigned)snd_seq_port_info_get_port(info)};
+            if (default_select) {
+                if (!have_first) { first = address; have_first = 1; }
+                if ((client_name && strstr(client_name, "IAC")) ||
+                    (port_name && strstr(port_name, "IAC"))) {
+                    *dest = address;
+                    return 1;
+                }
+                continue;
+            }
+            if (wanted >= 0) {
+                if (index == wanted) { *dest = address; return 1; }
+                index++;
+                continue;
+            }
+            if ((client_name && strstr(client_name, selector)) ||
+                (port_name && strstr(port_name, selector))) {
+                *dest = address;
                 return 1;
             }
-            continue;
-        }
-        if (strstr(client_name, selector) || strstr(port_name, selector)) {
-            *dest = *address;
-            return 1;
+            index++;
         }
     }
     if (default_select && have_first) {
@@ -167,9 +211,9 @@ static void midi_missing_port(const char *selector) {
     double now = audio_time_now();
     if (strcmp(reported, name) || now - reported_at >= 1) {
         if (!*name)
-            log_console("midi: no MIDI subscribers; message dropped");
+            log_console("midi: no MIDI outputs; message dropped");
         else
-            log_console("midi: midiport \"%.127s\" not found among subscribers; message dropped", name);
+            log_console("midi: midiport \"%.127s\" not found among outputs; message dropped", name);
         snprintf(reported, sizeof(reported), "%.127s", name);
         reported_at = now;
     }

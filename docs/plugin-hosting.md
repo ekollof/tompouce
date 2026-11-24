@@ -113,7 +113,9 @@ The host-side MIDI dispatcher, channel fan-out and note-off deadlines are
 covered by `test_midi`, which uses an owned ALSA sequencer receiver for note
 fan-out, pitch bend, channel aftertouch, clock/start/stop, the IAC/first
 default, `midiport`-selected routing, `"*"` broadcast across two subscribers,
-and unmatched-selector drop. Physical
+and unmatched-selector drop. A receiver with no ALSA subscription also checks
+that named and numeric selectors address the writable MIDI-generic output
+list. Physical
 USB/DIN transport and device response timing remain unmeasured here: this box
 has a Behringer UMC404HD (`16:0`) with MIDI I/O, but no receiving synth and no
 DIN OUT→IN cable, and an owned ALSA loopback cannot observe hardware or driver

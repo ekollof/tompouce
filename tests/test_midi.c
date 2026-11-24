@@ -344,7 +344,7 @@ static void test_note_off_under_load(void) {
     assert(snd_seq_open(&receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
     snd_seq_set_client_name(receiver,"tompouce-noteoff-load-qa");
     int port=snd_seq_create_simple_port(receiver,"owned receiver",
-        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
     assert(port>=0);
     snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
     snd_seq_client_info_set_client(client,-1);
@@ -431,7 +431,7 @@ static void test_channel_note_off_loopback(void) {
     assert(snd_seq_open(&receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
     snd_seq_set_client_name(receiver,"tompouce-channel-timing-qa");
     int port=snd_seq_create_simple_port(receiver,"owned receiver",
-        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
     assert(port>=0);
     snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
     snd_seq_client_info_set_client(client,-1);
@@ -484,6 +484,45 @@ static void test_channel_note_off_loopback(void) {
     puts("channel fan-out reaches owned ALSA receiver in order; every 20ms note-off arrives before 30ms of audio time");
 }
 
+static int midi_web_client_id(snd_seq_t *seq) {
+    snd_seq_client_info_t *client;
+    snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client, -1);
+    while (snd_seq_query_next_client(seq, client) >= 0) {
+        if (snd_seq_client_info_get_pid(client) == (int)getpid() &&
+            !strcmp(snd_seq_client_info_get_name(client), "tompouce"))
+            return snd_seq_client_info_get_client(client);
+    }
+    return -1;
+}
+
+/* Same WebMIDI-style output list the engine uses: writable MIDI-generic ports,
+   excluding the engine's own client and the ALSA system client. */
+static int midi_output_index(snd_seq_t *seq, int engine, int target_client, int target_port) {
+    int index = 0;
+    snd_seq_client_info_t *client;
+    snd_seq_client_info_alloca(&client);
+    snd_seq_client_info_set_client(client, -1);
+    while (snd_seq_query_next_client(seq, client) >= 0) {
+        int c = snd_seq_client_info_get_client(client);
+        if (c == engine || c == SND_SEQ_CLIENT_SYSTEM) continue;
+        snd_seq_port_info_t *info;
+        snd_seq_port_info_alloca(&info);
+        snd_seq_port_info_set_client(info, c);
+        snd_seq_port_info_set_port(info, -1);
+        while (snd_seq_query_next_port(seq, info) >= 0) {
+            unsigned caps = snd_seq_port_info_get_capability(info);
+            unsigned type = snd_seq_port_info_get_type(info);
+            if (!(caps & SND_SEQ_PORT_CAP_WRITE) ||
+                !(type & SND_SEQ_PORT_TYPE_MIDI_GENERIC)) continue;
+            if (c == target_client && snd_seq_port_info_get_port(info) == target_port)
+                return index;
+            index++;
+        }
+    }
+    return -1;
+}
+
 static void test_external_message_breadth(void) {
     midi_shutdown(); midi_init();
     if (!midi_ready()) { puts("SKIP external message breadth: no ALSA sequencer"); return; }
@@ -495,7 +534,7 @@ static void test_external_message_breadth(void) {
         snprintf(name,sizeof(name),"tompouce-%smessage-breadth-%d",i?"IAC-":"",i);
         snd_seq_set_client_name(receivers[i],name);
         ports[i]=snd_seq_create_simple_port(receivers[i],"owned receiver",
-            SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+            SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
         assert(ports[i]>=0);
     }
     int sender=-1,sender_port=-1;
@@ -588,9 +627,14 @@ static void test_external_message_breadth(void) {
         if (!selected[0]) usleep(2000);
     }
     assert(selected[0] && !selected[1]);
-    /* Numeric selectors use the subscriber index, distinct from a name
-       that happens to contain digits. */
-    midi_cc_port(4,77,67,"#0");
+    /* Numeric selectors index the same writable MIDI-generic output list that
+       WebMIDI exposes, independent of ALSA subscription state. */
+    int numeric_index=midi_output_index(receivers[0],sender,
+        snd_seq_client_id(receivers[0]),ports[0]);
+    assert(numeric_index>=0);
+    char numeric_selector[16];
+    snprintf(numeric_selector,sizeof(numeric_selector),"#%d",numeric_index);
+    midi_cc_port(4,77,67,numeric_selector);
     int numeric[2]={0,0};
     first=monotonic();
     while (!numeric[0] && monotonic()-first<1) {
@@ -677,6 +721,49 @@ static void test_external_message_breadth(void) {
     for (int i=0;i<2;i++) snd_seq_close(receivers[i]);
     midi_shutdown();
     puts("bend, aftertouch and transport reach the IAC-preferring default; named/indexed and broadcast routing are distinct");
+}
+
+static void test_midi_unconnected_output(void) {
+    midi_shutdown(); midi_init();
+    if (!midi_ready()) { puts("SKIP unconnected MIDI output: no ALSA sequencer"); return; }
+    snd_seq_t *out=NULL;
+    assert(snd_seq_open(&out,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
+    snd_seq_set_client_name(out,"tompouce-webmidi-qa");
+    int port=snd_seq_create_simple_port(out,"dest",
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,
+        SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
+    assert(port>=0);
+    int engine=midi_web_client_id(out);
+    assert(engine>=0);
+    int index=midi_output_index(out,engine,snd_seq_client_id(out),port);
+    assert(index>=0);
+    /* No snd_seq_connect_from: the port is a WebMIDI-style output, not an
+       ALSA subscriber. */
+    midi_cc_port(4,82,72,"tompouce-webmidi-qa");
+    int named=0; double first=monotonic();
+    while (!named && monotonic()-first<1) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(out,&event)>=0 && event)
+            if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                event->data.control.param==82 && event->data.control.value==72) named=1;
+        if (!named) usleep(2000);
+    }
+    assert(named);
+    char selector[16];
+    snprintf(selector,sizeof(selector),"#%d",index);
+    midi_cc_port(4,83,73,selector);
+    int indexed=0; first=monotonic();
+    while (!indexed && monotonic()-first<1) {
+        snd_seq_event_t *event=NULL;
+        while (snd_seq_event_input(out,&event)>=0 && event)
+            if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                event->data.control.param==83 && event->data.control.value==73) indexed=1;
+        if (!indexed) usleep(2000);
+    }
+    assert(indexed);
+    snd_seq_close(out);
+    midi_shutdown();
+    puts("unsubscribed MIDI outputs are addressable by name and WebMIDI-style index");
 }
 
 static void test_midi_input_stores(void) {
@@ -930,7 +1017,7 @@ static void test_midi_restore_loopback(void) {
     snd_seq_t *observer = NULL;
     assert(snd_seq_open(&observer, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) >= 0);
     int observer_port = snd_seq_create_simple_port(observer, "unrelated output",
-        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_APPLICATION);
+        SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
     assert(observer_port >= 0);
     assert(snd_seq_connect_from(observer, observer_port, engine.client, engine.port) >= 0);
     assert(midi_restore_sender("tompouce-midi-restore") == 2);
@@ -1316,7 +1403,7 @@ static int switchangel_receiver(snd_seq_t **receiver, int *rport) {
     if (snd_seq_open(receiver,"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)<0) return 0;
     snd_seq_set_client_name(*receiver,"tompouce-tout-qa");
     *rport=snd_seq_create_simple_port(*receiver,"owned receiver",
-        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
+        SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_MIDI_GENERIC|SND_SEQ_PORT_TYPE_APPLICATION);
     if (*rport<0) return 0;
     int sender=-1,sender_port=-1;
     snd_seq_client_info_t *client; snd_seq_client_info_alloca(&client);
@@ -1726,6 +1813,7 @@ int main(int argc, char **argv) {
     test_short_gate_and_bounds();
     test_channel_note_off_loopback();
     test_external_message_breadth();
+    test_midi_unconnected_output();
     test_note_off_under_load();
     event_queue_clear();
     midi_shutdown();

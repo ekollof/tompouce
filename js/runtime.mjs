@@ -680,13 +680,13 @@ globalThis.midikeys = async (input) => {
 /* Dominant MIDI output, mirroring the web routing (local audio bypassed,
    channel from midichan defaulting to 1). The port argument selects a native
    ALSA subscriber by name substring or zero-based index, like WebMIDI's
-   output list; omitting it prefers an IAC-named subscriber, else the first.
-   An options object may carry midichannel as a default when the hap sets no
-   midichan. */
+   output list; omitting it prefers an IAC-named subscriber, else the first,
+   then the first output. An options object may carry midichannel as a default
+   when the hap sets no midichan. */
 /**
- * Send MIDI notes instead of local audio. A port name selects a subscribed
- * native ALSA client/port; omitting it prefers an IAC-named subscriber, else
- * the first. Pass "*" to broadcast to every subscriber.
+ * Send MIDI notes instead of local audio. A port name selects a native ALSA
+ * client/port; omitting it prefers an IAC-named subscriber, else the first,
+ * then the first output. Pass "*" to broadcast to every subscriber.
  * Set the channel with midichan(), defaulting to channel 1.
  * @name midi
  * @param {string | number | object} port optional port selector or settings object

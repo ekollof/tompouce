@@ -651,6 +651,35 @@ static void test_switchangel_roller2_missing_sample(void) {
     puts("Switch Angel roller2 rejects only bstab and keeps supersaw/white");
 }
 
+/* Live phase randomization cannot be sample-locked: the site worklet calls
+   Math.random() and native reseeds from time/PID. Both are uniform; this
+   measures the native distribution and records the statistical-only ceiling
+   in docs/audio-comparison.md. Seeded wt-sample-phaserand gates cover exact
+   draw ordering separately. */
+static void test_wavetable_phase_random_distribution(void) {
+    uint32_t saved=wt_random_state;
+    wt_random_state=0x12345678u;
+    const int draws=100000;
+    double sum=0, squares=0, low=1, high=0;
+    for (int i=0;i<draws;i++) {
+        double value=wt_random_next();
+        assert(value>=0 && value<1);
+        sum+=value;
+        squares+=value*value;
+        if (value<low) low=value;
+        if (value>high) high=value;
+    }
+    double mean=sum/draws;
+    double variance=squares/draws-mean*mean;
+    fprintf(stderr,"wavetable phase RNG: mean=%.6f variance=%.6f min=%.6f max=%.6f\n",
+        mean,variance,low,high);
+    assert(mean>.498 && mean<.502);
+    assert(variance>.0825 && variance<.0845);
+    assert(low<.001 && high>.999);
+    wt_random_state=saved;
+    puts("wavetable phase RNG is uniform over 100000 live-style draws");
+}
+
 static void test_live_scope_attachment(void) {
     const char *code="stack(note(60).s('sine').gain(.1),note(72).s('sine').gain(.2))";
     const char *editor="stack(note(60).s('sine').gain(.1)._scope(),note(72).s('sine').gain(.2))";
@@ -1395,6 +1424,7 @@ int main(void) {
     bench_procedural_hh();
     test_failed_source_siblings();
     test_switchangel_roller2_missing_sample();
+    test_wavetable_phase_random_distribution();
     test_analyser_controls_do_not_warn();
     test_generic_lfo_warns();
     test_generic_cutoff_lfo();

@@ -1243,6 +1243,13 @@ two-event sequences). Their correlations are 0.999999+ and RMS
 ratios 1.0002–1.0004, all under the same 0.99 and 0.85–1.15 gates.
 Both players use the vendored public-domain
 `tests/fixtures/uzu-wavetables/wt_echoes.wav` for these cases.
+Unseeded live `wtphaserand` cannot be sample-locked: the site worklet calls its
+own `Math.random()` and native reseeds its LCG from time/PID. Both are uniform;
+`test_audio` measures the native live-style stream over 100000 draws
+(mean 0.501221, variance 0.083511, min 0.000004, max 0.999995, against the
+ideal 0.5 and 0.083333). The seeded phase gates pin both streams to 0xc0ffee
+for exact phase ordering, so this is a statistical-equivalence ceiling rather
+than a sample-exact PCM claim for unseeded runs.
 Nine `pitch-envelope-` cases independently cover native pitch ADSR defaults,
 partial/zero segment settings, sustain-based anchors, short gates, late and
 fractional onsets, and vibrato. These retain the existing 0.99 correlation and

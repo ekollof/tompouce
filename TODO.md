@@ -684,6 +684,9 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       default-unison and two-event sequences. The compare harness seeds the
       site worklet's own `Math.random` with 0xc0ffee, and reference mode resets
       the native LCG to the same seed; the live engine reseeds per session.
+      `test_audio` measures the native live-style stream over 100000 draws
+      (mean 0.501221, variance 0.083511, min 0.000004, max 0.999995), recording
+      statistical equivalence rather than sample-exact unseeded PCM.
 - [x] Browser-only starter helpers. `bmod` and `FX` are core pattern APIs and
       are already reference-gated by the starter's `bend`, `comb`, `disperse`
       and `spinor` cases. `document`, `navigator`, `localStorage` and

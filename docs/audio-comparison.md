@@ -1230,8 +1230,10 @@ unchanged.
 
 Eleven `prebake-` PCM cases fetch the pinned Switch Angel starter into an owned
 fixture config and compare glide, accent, delay, trancegate, tgate, acid,
-humanize, glitch, fmtime, strum and a 0.5 Volume setting against the real web
-player. Acid seeds the supersaw worklet and renders one event. `stxt` stays
+humanize, glitch, fmtime, strum and a 0.5 Volume initialization against the
+real web player. Acid seeds the supersaw worklet and renders one event. The
+Volume widget is DOM-only and skipped on both sides, so that case checks call
+neutralization and gain shaping, not a value mapping. `stxt` stays
 event-only because its generated `wt_digital_echoes` wavetable is not in the
 installed manifests, so the native renderer cannot produce its PCM.
 Nine `pitch-envelope-` cases independently cover native pitch ADSR defaults,

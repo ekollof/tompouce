@@ -32,11 +32,17 @@ await loadPrebake('switchangel.strudel')
 note("c3 e3 g3").s('sawtooth').acidenv(.4).gain(.5)
 ```
 
-The starter's browser **Volume** widget maps to Tompouce's **F4 Volume** slider.
-Drag its bar, use the mouse wheel over its row, or click it and use Left/Right
-or Ctrl+Left/Right for 1% steps. Escape returns focus to the editor. From the
-F2 prompt, `/volume .5` sets the output to half amplitude, `/volume 0` mutes,
-and `/volume 1` restores unity. `/volume` reports the current setting.
+The starter's browser **Volume** widget is represented by Tompouce's **F4 Volume**
+slider; the DOM widget call is skipped in the terminal. Non-Volume
+`window.UISlider` calls in the pinned starter are also skipped, with a console
+warning naming the widget, instead of aborting setup on the missing DOM. Other
+custom browser `UISlider` callbacks in user prebakes are not mapped and still
+report their normal error.
+
+Drag the F4 bar, use the mouse wheel over its row, or click it and use
+Left/Right or Ctrl+Left/Right for 1% steps. Escape returns focus to the editor.
+From the F2 prompt, `/volume .5` sets the output to half amplitude, `/volume 0`
+mutes, and `/volume 1` restores unity. `/volume` reports the current setting.
 Alt+Up/Down raises/lowers output volume by 1% from any pane, even with F4 closed.
 
 This is linear attenuation on Tompouce's final stereo output, after voices,
@@ -48,7 +54,7 @@ reevaluate music. External MIDI devices are unaffected.
 The level starts at unity and persists across evaluations and song changes
 for the current process; restarting restores unity. Loading the prebake keeps
 the current output level. The slider remains available in F4 without a
-prebake. Other custom browser `UISlider` callbacks are not mapped automatically.
+prebake.
 
 Its gain defaults and quadratic gain curve are active: `.gain(.5)` becomes
 `.25` before velocity is applied. Enabling the starter can therefore change
@@ -165,9 +171,11 @@ event counts. Helper-specific delay, velocity and postgain checks disable the
 gain curve to inspect their raw controls. Gain shaping keeps its separate
 browser audio gates. Eleven audio gates cover glide, accent, delay,
 trancegate, tgate, acid, humanize, glitch, fmtime, strum and a 0.5 Volume
-setting with the complete pinned starter, using the existing 0.99 correlation
-and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and renders one
-event. `stxt` remains event-only: its generated `wt_digital_echoes` wavetable
+initialization with the complete pinned starter, using the existing 0.99
+correlation and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and
+renders one event. The Volume widget is DOM-only and is skipped on both sides,
+so that case checks call neutralization and gain shaping, not a value mapping.
+`stxt` remains event-only: its generated `wt_digital_echoes` wavetable
 is not installed, so the native renderer cannot produce PCM for it. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.

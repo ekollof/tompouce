@@ -240,9 +240,24 @@ static void test_prebake(void) {
     cJSON_Delete(haps); javascript_free(program);
     haps=query("preLead()",&program); assert(cJSON_GetArraySize(haps)==1);
     cJSON_Delete(haps); javascript_free(program);
-    write_module(path,"// tompouce-prebake: switchangel\nwindow.UISlider=()=>{throw Error('unsupported widget')};window.UISlider(()=>{},'Other',.5)");
+    write_module(path,"window.UISlider=()=>{throw Error('unsupported widget')};window.UISlider(()=>{},'Other',.5)");
     program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
     assert(!program && strstr(error,"unsupported widget"));
+    /* The pinned starter's extra browser widgets are ignored with a warning
+       instead of aborting setup on the missing DOM. */
+    write_module(path,"// tompouce-prebake: switchangel\nwindow.UISlider=()=>{throw Error('unsupported widget')};window.UISlider(()=>{},'Other',.5);window.preUI=1");
+    int ui_logged=console_count_get();
+    haps=query("note(preUI)",&program);
+    int ui_warned=0;
+    for (int i=ui_logged;i<console_count_get();i++) {
+        const char *line=console_line(i);
+        if (line && strstr(line,"Switch Angel UI slider") && strstr(line,"browser-only")) ui_warned=1;
+    }
+    assert(ui_warned);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetArrayItem(haps,0),"value"),"note")->valueint==1);
+    cJSON_Delete(haps); javascript_free(program);
     write_module(path,"register('oops',");
     program=javascript_compile("note(60)",120,&metadata,error,sizeof(error));
     assert(!program && !metadata && strstr(error,"prebake.strudel"));

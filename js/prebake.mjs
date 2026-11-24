@@ -80,10 +80,12 @@ export async function runPrebake(code,name='prebake.strudel') {
       for(const statement of [...ast.body].reverse()) {
         const call=statement.expression, callee=call?.callee;
         if(call?.type==='CallExpression' && callee?.type==='MemberExpression' &&
-           !callee.computed && callee.object?.name==='window' && callee.property?.name==='UISlider' &&
-           call.arguments[1]?.type==='Literal' && call.arguments[1].value==='Volume') {
+           !callee.computed && callee.object?.name==='window' && callee.property?.name==='UISlider') {
+          const id=call.arguments[1]?.type==='Literal' && typeof call.arguments[1].value==='string'
+            ? call.arguments[1].value : null;
           code=code.slice(0,statement.start)+code.slice(statement.start,statement.end).replace(/[^\n]/g,' ')+code.slice(statement.end);
-          log('Switch Angel Volume mapped to F4 output volume (/volume 0..1)');
+          if(id==='Volume')log('Switch Angel Volume mapped to F4 output volume (/volume 0..1)');
+          else log(`Switch Angel UI slider ${id?`'${id}'`:'(unnamed)'} is browser-only; ignored in the terminal`);
         }
       }
     }

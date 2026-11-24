@@ -655,12 +655,12 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       delayed node's first input keeps the existing delay line. `spinor(1)`
       is back in the 90-case reference gate, and `test_native_synth` renders a
       `.sub(fn)` feedback graph for 2,048 samples with finite output.
-- [ ] Custom Switch Angel `UISlider` widgets. Only the active `Volume`
-      callback is mapped (to F4 output volume). Any other callback, including
-      the commented `djfilt` example that uses `document` and
-      `getSuperdoughAudioController()`, has no mapping. Decide whether to
-      support a confined widget facade or make the unsupported path fail
-      explicitly instead of a silent no-op.
+- [x] Custom Switch Angel `UISlider` widgets. Non-Volume `window.UISlider`
+      calls in the pinned starter are neutralized with a console warning that
+      names the widget, instead of aborting setup on the missing DOM. The
+      Volume call stays skipped and F4 remains the output control. Arbitrary
+      user prebakes without the starter marker still fail on DOM use.
+      `test_javascript` covers the starter warning path and the user failure.
 - [ ] Missing starter sample/wavetable assets. `roller2`'s `bstab` and
       `stxt`'s generated `wt_digital_echoes` are absent from public installed
       manifests; native rejects the `bstab` hap and cannot render `stxt` PCM.

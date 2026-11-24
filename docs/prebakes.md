@@ -181,8 +181,13 @@ initialization with the complete pinned starter, using the existing 0.99
 correlation and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and
 renders one event. The Volume widget is DOM-only and is skipped on both sides,
 so that case checks call neutralization and gain shaping, not a value mapping.
-`stxt` remains event-only: its generated `wt_digital_echoes` wavetable
-is not installed, so the native renderer cannot produce PCM for it. Glide additionally exposed and fixed pitch-envelope
+`stxt` keeps an exact event gate. Its generated `wt_digital_echoes` sample is
+a three-frame wavetable from the public uzu catalog; native resolves and renders
+it, but the site's dedicated wavetable oscillator scans frames with `wt` and
+`warp`, while the sample path treats the file as one cycle.
+`diag-prebake-stxt-wavetable` records that difference: correlation -0.0368 and
+RMS ratio 5.23 over the same 2 s window, with native peak 0.234 and browser
+peak 0.046. It remains diagnostic, not a gate. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
 Ten exponential oscillator pitch checks additionally cover detune ramps,

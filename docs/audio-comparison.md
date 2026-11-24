@@ -1233,9 +1233,14 @@ fixture config and compare glide, accent, delay, trancegate, tgate, acid,
 humanize, glitch, fmtime, strum and a 0.5 Volume initialization against the
 real web player. Acid seeds the supersaw worklet and renders one event. The
 Volume widget is DOM-only and skipped on both sides, so that case checks call
-neutralization and gain shaping, not a value mapping. `stxt` stays
-event-only because its generated `wt_digital_echoes` wavetable is not in the
-installed manifests, so the native renderer cannot produce its PCM.
+neutralization and gain shaping, not a value mapping. `stxt` keeps an exact
+event gate. Its `wt_digital_echoes` sample is a public three-frame wavetable
+that native resolves and renders, but the site's wavetable oscillator scans
+frames while the native sample path treats the file as one cycle.
+`diag-prebake-stxt-wavetable` records that difference (correlation -0.0368,
+RMS ratio 5.23, peaks 0.234 native and 0.046 browser over 2 s) and stays
+diagnostic. Both players use the vendored public-domain
+`tests/fixtures/uzu-wavetables/wt_echoes.wav` for it.
 Nine `pitch-envelope-` cases independently cover native pitch ADSR defaults,
 partial/zero segment settings, sustain-based anchors, short gates, late and
 fractional onsets, and vibrato. These retain the existing 0.99 correlation and

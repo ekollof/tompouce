@@ -661,11 +661,21 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       Volume call stays skipped and F4 remains the output control. Arbitrary
       user prebakes without the starter marker still fail on DOM use.
       `test_javascript` covers the starter warning path and the user failure.
-- [ ] Missing starter sample/wavetable assets. `roller2`'s `bstab` and
-      `stxt`'s generated `wt_digital_echoes` are absent from public installed
-      manifests; native rejects the `bstab` hap and cannot render `stxt` PCM.
-      Track a manifest/licensing path or documented user-provided directories;
-      do not substitute unrelated sounds.
+- [x] Starter sample/wavetable assets. `bstab` stays absent from public
+      manifests and keeps the already-tested per-hap rejection without
+      substituting `stab`. `stxt`'s `wt_digital_echoes` resolves from the
+      installed uzu-wavetables catalog and native renders its PCM;
+      `tests/fixtures/uzu-wavetables/` vendors the public-domain
+      3x2048-frame file for reproducible comparison.
+- [ ] Multi-frame wavetable oscillator parity. The site runs `wt_*` samples
+      through a dedicated wavetable oscillator that scans 2048-frame tables
+      with `wt`, `warp`, voice spread and scheduled position LFOs. Native's
+      sample path treats the file as a single cycle, which matches one-frame
+      AKWF tables but not stacked tables. `diag-prebake-stxt-wavetable`
+      measures correlation -0.0368 and RMS ratio 5.23 (peaks 0.234/0.046)
+      against the deployed player. Implementing the worklet semantics is
+      required before this diagnostic can become a gate; it is not an asset
+      problem.
 - [x] Browser-only starter helpers. `bmod` and `FX` are core pattern APIs and
       are already reference-gated by the starter's `bend`, `comb`, `disperse`
       and `spinor` cases. `document`, `navigator`, `localStorage` and
@@ -677,8 +687,8 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 - [x] Prebake PCM breadth. Eleven `prebake-` audio gates now cover glide,
       accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum
       and a 0.5 Volume setting at the unchanged thresholds. Acid seeds the
-      supersaw worklet and renders one event. `stxt` remains event-only and is
-      tracked with the missing assets above.
+      supersaw worklet and renders one event. `stxt`'s event contract stays
+      exact; its PCM bound is the wavetable item above.
 - [ ] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
       covered through an owned ALSA receiver; pitch bend, aftertouch, clock and
       multi-device/port routing remain unmeasured. Keep physical DIN/USB output

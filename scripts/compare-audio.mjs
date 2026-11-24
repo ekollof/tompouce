@@ -32,6 +32,13 @@ monoFixture.writeUInt32LE(88200,28);monoFixture.writeUInt16LE(2,32);monoFixture.
 for(let i=0;i<44100;i++)monoFixture.writeInt16LE(fixture.readInt16LE(44+i*4),44+i*2);
 await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/mono.wav'),monoFixture);
 await fs.writeFile(path.join(fixtureRoot,'Dirt-Samples/strudel.json'),JSON.stringify({stretch_fixture:['stretch.wav'],mono_fixture:['mono.wav']}));
+// The starter's stxt picks wt_digital_echoes for its documented text. The
+// vendored public-domain wavetable lets both players use identical bytes.
+const wavetableFixture=await fs.readFile('tests/fixtures/uzu-wavetables/wt_echoes.wav');
+await fs.mkdir(path.join(fixtureRoot,'uzu-wavetables'),{recursive:true});
+await fs.writeFile(path.join(fixtureRoot,'uzu-wavetables/wt_echoes.wav'),wavetableFixture);
+await fs.writeFile(path.join(fixtureRoot,'uzu-wavetables/strudel.json'),
+  JSON.stringify({wt_digital_echoes:['wt_echoes.wav']}));
 const nativeEnvironment={...process.env};
 if (!nativeEnvironment.TOMPOUCE_BANKS && !nativeEnvironment.STRUDELTERM_BANKS) {
   for (const candidate of ['assets/banks',path.join(os.homedir(),'.local/lib/tompouce/assets/banks')]) {
@@ -444,6 +451,7 @@ try {
     { name: 'prebake-trancegate', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("c3*8").s('sawtooth').gain(.5).trancegate(.4,3,1)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
     { name: 'prebake-tgate', code: `note("c3*8").s('sawtooth').gain(.5).tgate(.5,2,1)`, sound:'sawtooth',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
     { name: 'prebake-acid', code: `note('c3').s('sine').gain(.5).acid()`, sound:'supersaw',seedSupersaw:true,cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
+    { name: 'diag-prebake-stxt-wavetable', code: `note(60).gain(.5).stxt('tompouce')`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:2,correlation:null,prebake:true },
     { name: 'prebake-humanize', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60*4").s('sine').gain(.5).humanize(.5)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
     { name: 'prebake-glitch', code: `let qaSeed=0xc0ffee; Math.random=()=>((qaSeed=(Math.imul(qaSeed,1664525)+1013904223)>>>0)/4294967296); note("60 64").s('sine').gain(.5).pan(.5).glitch(.25)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true,freshRender:true },
     { name: 'prebake-fmtime', code: `note("60*4").s('sine').gain(.5).fmtime(2,4)`, sound:'sine',cycles:1,cps:.5,window:2,correlation:.99,prebake:true },
@@ -544,7 +552,7 @@ try {
       await fs.writeFile(path.join(prebakeRoot,'tompouce/prebake.strudel'),
         '// tompouce-prebake: switchangel\n'+prebakeSource,{mode:0o600});
     const rendered = spawnSync(renderer, [request, native], { encoding: 'utf8', timeout: 120000,
-      env:{...nativeEnvironment,...(spec.fixture?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{}),
+      env:{...nativeEnvironment,...(spec.fixture||spec.wavetable?{TOMPOUCE_BANKS:fixtureRoot}:{}),...(spec.prebake?{XDG_CONFIG_HOME:prebakeRoot}:{}),
         ...(spec.eventsOnly?{HOME:bakeryHome,XDG_CONFIG_HOME:bakeryHome,XDG_CACHE_HOME:bakeryHome}:{})} });
     if (spec.eventsOnly) {
       const result={...spec,codeSha256:hash(spec.code),mode:'events',passed:false};
@@ -589,6 +597,7 @@ try {
       if(spec.prebake)await evaluate(${JSON.stringify(prebakeSource??'')},__comparisonTranspiler.transpiler,{addReturn:false});
       if(spec.fixture){const bytes=Uint8Array.from(atob(spec.mono?${JSON.stringify(monoFixture.toString('base64'))}:${JSON.stringify(fixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.sound]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.fixtureIR){const bytes=Uint8Array.from(atob(${JSON.stringify(monoFixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({[spec.fixtureIR]:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
+      if(spec.wavetable){const bytes=Uint8Array.from(atob(${JSON.stringify(wavetableFixture.toString('base64'))}),c=>c.charCodeAt(0));await samples({wt_digital_echoes:[URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}))]})}
       if(spec.randomSeed!==undefined){let seed=spec.randomSeed>>>0;Math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}}
       const {pattern}=await evaluate(spec.code,__comparisonTranspiler.transpiler);
       let selected=spec.sound?pattern.filterValues(v=>v.s===spec.sound):pattern;

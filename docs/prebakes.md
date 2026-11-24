@@ -85,7 +85,9 @@ the unrelated `stab` bank. Its `supersaw` and `white` voices start as soon as
 preparation of the missing hap completes. External MIDI is covered for the
 starter's `voc` path: `voc` sends `.midi('tout')`, and `test_midi` names its
 owned receiver to match that selector, then delivers its note and CC 34
-through the subscribed ALSA port. Omitting `midiport` broadcasts. Calling an
+through the subscribed ALSA port. Omitting `midiport` uses the web default:
+the first IAC-named subscriber, else the first subscriber. `'*'` broadcasts
+to every subscriber as a native opt-in. Calling an
 unavailable API retains its error; the native profile does not substitute a
 different sound for it.
 

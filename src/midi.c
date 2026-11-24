@@ -97,18 +97,22 @@ static OffEv offs[MIDI_MAX_OFFS];
 static int n_offs = 0;
 
 /* Resolve a WebMIDI-style selector against this output port's subscribers.
-   Numeric selectors are zero-based subscriber indices; strings are matched
-   against the subscribed client and port names, like WebMidi's includes(). */
+   An empty selector mirrors WebMidi's default: a name containing "IAC", else
+   the first subscriber. Numeric selectors (#N) are zero-based subscriber
+   indices; strings match subscribed client/port names. "*" is a native
+   opt-in broadcast handled by the callers. */
 static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
-    if (!selector || !*selector || !seq || seq_port < 0) return 0;
+    if (!seq || seq_port < 0) return 0;
+    int default_select = !selector || !*selector;
     int wanted = -1;
-    const char *p = selector;
-    if (*p == '#') {
+    if (!default_select && selector[0] == '#') {
         char *end = NULL;
-        long value = strtol(p + 1, &end, 10);
+        long value = strtol(selector + 1, &end, 10);
         if (end && !*end && value >= 0 && value < 1024) wanted = (int)value;
         else return 0;
     }
+    snd_seq_addr_t first = {0, 0};
+    int have_first = 0;
     snd_seq_query_subscribe_t *query;
     snd_seq_query_subscribe_alloca(&query);
     snd_seq_addr_t me = {(unsigned)snd_seq_client_id(seq), (unsigned)seq_port};
@@ -119,7 +123,7 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         if (snd_seq_query_port_subscribers(seq, query) < 0) break;
         const snd_seq_addr_t *address = snd_seq_query_subscribe_get_addr(query);
         if (!address) continue;
-        if (wanted >= 0) {
+        if (!default_select && wanted >= 0) {
             if (index == wanted) { *dest = *address; return 1; }
             continue;
         }
@@ -134,10 +138,22 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
         if (snd_seq_get_any_port_info(seq, address->client, address->port, info) == 0 &&
             snd_seq_port_info_get_name(info))
             snprintf(port_name, sizeof(port_name), "%s", snd_seq_port_info_get_name(info));
+        if (default_select) {
+            if (!have_first) { first = *address; have_first = 1; }
+            if (strstr(client_name, "IAC") || strstr(port_name, "IAC")) {
+                *dest = *address;
+                return 1;
+            }
+            continue;
+        }
         if (strstr(client_name, selector) || strstr(port_name, selector)) {
             *dest = *address;
             return 1;
         }
+    }
+    if (default_select && have_first) {
+        *dest = first;
+        return 1;
     }
     return 0;
 }
@@ -147,10 +163,14 @@ static int midi_destination_for(const char *selector, snd_seq_addr_t *dest) {
 static void midi_missing_port(const char *selector) {
     static char reported[MIDI_PORT_NAME];
     static double reported_at;
+    const char *name = selector ? selector : "";
     double now = audio_time_now();
-    if (strcmp(reported, selector) || !isfinite(reported_at) || now - reported_at >= 1) {
-        log_console("midi: midiport \"%.127s\" not found among subscribers; message dropped", selector);
-        snprintf(reported, sizeof(reported), "%.127s", selector);
+    if (strcmp(reported, name) || now - reported_at >= 1) {
+        if (!*name)
+            log_console("midi: no MIDI subscribers; message dropped");
+        else
+            log_console("midi: midiport \"%.127s\" not found among subscribers; message dropped", name);
+        snprintf(reported, sizeof(reported), "%.127s", name);
         reported_at = now;
     }
 }
@@ -165,10 +185,11 @@ static int send_raw_port(int on, int ch, int note, int vel, const char *port) {
     else snd_seq_ev_set_noteoff(&ev, ch, note, vel);
     snd_seq_ev_set_source(&ev, seq_port);
     snd_seq_addr_t dest;
-    if (port && *port) {
+    if (port && !strcmp(port, "*")) snd_seq_ev_set_subs(&ev);
+    else {
         if (!midi_destination_for(port, &dest)) { midi_missing_port(port); return 0; }
         snd_seq_ev_set_dest(&ev, dest.client, dest.port);
-    } else snd_seq_ev_set_subs(&ev);
+    }
     snd_seq_ev_set_direct(&ev);
     snd_seq_event_output(seq, &ev);
     snd_seq_drain_output(seq);
@@ -320,7 +341,7 @@ void midi_notes_for_port(const unsigned char *channels,int count,int note,int ve
     pthread_mutex_lock(&midi_lock);
     const char *selector = port && *port ? port : "";
     snd_seq_addr_t dest;
-    if (midi_ok && *selector && !midi_destination_for(selector,&dest)) {
+    if (midi_ok && *selector && strcmp(selector,"*") && !midi_destination_for(selector,&dest)) {
         midi_missing_port(selector);
         pthread_mutex_unlock(&midi_lock);
         return;
@@ -355,10 +376,11 @@ void midi_notes_for_port(const unsigned char *channels,int count,int note,int ve
 static void send_fixed_locked(snd_seq_event_t *ev, const char *port) {
     snd_seq_ev_set_source(ev, seq_port);
     snd_seq_addr_t dest;
-    if (port && *port) {
+    if (port && !strcmp(port, "*")) snd_seq_ev_set_subs(ev);
+    else {
         if (!midi_destination_for(port, &dest)) { midi_missing_port(port); return; }
         snd_seq_ev_set_dest(ev, dest.client, dest.port);
-    } else snd_seq_ev_set_subs(ev);
+    }
     snd_seq_ev_set_direct(ev);
     snd_seq_event_output(seq, ev);
     snd_seq_drain_output(seq);

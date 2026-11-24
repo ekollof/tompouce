@@ -533,8 +533,8 @@ and measured divergences are recorded in the archive.
       `test_midi` loads a confined fixture of the pinned CC 34 helpers,
       checks note+CC and pitch-less CC-only events, verifies the helper's
       key mapping (`f#` 0, `g` 13, `c` 64, `a` 38), and delivers note/CC 34
-      through an owned ALSA receiver while
-      the native single output broadcasts `.midi('tout')` to subscribers.
+      through an owned ALSA receiver while `.midi('tout')` selects that named
+      subscriber.
       Earlier `test_oneshot_grid`, `test_switchangel_fx`,
       `test_switchangel_humanize` and `test_switchangel_bmod` remain. An
       owned engine also loaded the real pinned starter with its installer
@@ -697,10 +697,10 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       covered through an owned ALSA receiver, with the receiver named to match
       the starter's `midi('tout')` selector. `test_midi` also receives pitch
       bend (value 4096), channel aftertouch (77) and clock/start/stop
-      transport; two owned subscribers distinguish broadcast CC from
-      `midiport`-selected CC and note-on/off routing, and an unmatched selector
-      drops. Physical DIN/USB note-off timing remains in the separate
-      hardware-blocked community follow-up.
+      transport; two owned subscribers distinguish the default IAC/first
+      selection, `midiport`-selected CC and note-on/off routing, and `"*"`
+      broadcast; an unmatched selector drops. Physical DIN/USB note-off timing
+      remains in the separate hardware-blocked community follow-up.
 
 ## Render and SIMD performance
 

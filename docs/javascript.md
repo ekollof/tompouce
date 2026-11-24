@@ -1083,11 +1083,11 @@ CC (`ccn` number 0..127 or a WebMidi controller name such as `brightness`, with
 array forms) all send through ALSA. `midiport` selects a subscribed native
 ALSA client or port by case-sensitive name substring, or a zero-based
 subscriber index; `.midi('name')` sets the same default for the pattern.
-Omitting it broadcasts to every subscriber, and an unmatched selector drops
-the message like the web's missing-device branch. With no selector the web
-prefers an IAC port and then the first output; native deliberately broadcasts
-so existing `aconnect` subscribers keep receiving. Numeric selectors index the
-ALSA subscriber list; the web indexes its WebMIDI output list.
+Omitting it prefers the first subscriber whose name contains `IAC`, otherwise
+the first subscriber, matching the web's default output choice. `"*"` is a
+native-only broadcast opt-in, and an unmatched selector drops the message like
+the web's missing-device branch. Numeric selectors index the ALSA subscriber
+list; the web indexes its WebMIDI output list.
 A hap at cycle zero
 additionally sends transport start, as on the web. Sends run in web order
 (note, program, sysex, CC, NRPN, bend, touch, cycle-zero start,

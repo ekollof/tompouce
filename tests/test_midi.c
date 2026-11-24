@@ -492,7 +492,7 @@ static void test_external_message_breadth(void) {
     for (int i=0;i<2;i++) {
         assert(snd_seq_open(&receivers[i],"default",SND_SEQ_OPEN_INPUT,SND_SEQ_NONBLOCK)>=0);
         char name[64];
-        snprintf(name,sizeof(name),"tompouce-message-breadth-%d",i);
+        snprintf(name,sizeof(name),"tompouce-%smessage-breadth-%d",i?"IAC-":"",i);
         snd_seq_set_client_name(receivers[i],name);
         ports[i]=snd_seq_create_simple_port(receivers[i],"owned receiver",
             SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE,SND_SEQ_PORT_TYPE_APPLICATION);
@@ -517,8 +517,8 @@ static void test_external_message_breadth(void) {
     assert(sender>=0);
     for (int i=0;i<2;i++)
         assert(snd_seq_connect_from(receivers[i],ports[i],sender,sender_port)>=0);
-    /* Channel messages are fixed broadcasts, so every subscriber sees bend,
-       aftertouch and transport once. */
+    /* Without a selector the web prefers an IAC output, else the first.
+       Receiver 1 is named to be the IAC subscriber here. */
     midi_bend(2,4096);
     midi_touch(2,77);
     midi_transport(1); midi_transport(2); midi_transport(4);
@@ -526,7 +526,7 @@ static void test_external_message_breadth(void) {
     double first=monotonic();
     while ((!bend || !touch || !clock || !start || !stop) && monotonic()-first<2) {
         snd_seq_event_t *event=NULL;
-        while (snd_seq_event_input(receivers[0],&event)>=0 && event) {
+        while (snd_seq_event_input(receivers[1],&event)>=0 && event) {
             switch (event->type) {
             case SND_SEQ_EVENT_PITCHBEND:
                 assert(event->data.control.channel==2 && event->data.control.value==4096);
@@ -543,11 +543,11 @@ static void test_external_message_breadth(void) {
         if (!bend || !touch || !clock || !start || !stop) usleep(2000);
     }
     assert(bend && touch && clock && start && stop);
-    /* Two owned subscribers both receive the same broadcast CC. */
+    /* Default selection reaches the IAC subscriber only. */
     midi_cc(4,74,64);
     int seen[2]={0,0};
     first=monotonic();
-    while ((!seen[0] || !seen[1]) && monotonic()-first<2) {
+    while (!seen[1] && monotonic()-first<2) {
         for (int i=0;i<2;i++) {
             snd_seq_event_t *event=NULL;
             while (snd_seq_event_input(receivers[i],&event)>=0 && event)
@@ -555,9 +555,24 @@ static void test_external_message_breadth(void) {
                     event->data.control.channel==4 && event->data.control.param==74 &&
                     event->data.control.value==64) seen[i]=1;
         }
-        if (!seen[0] || !seen[1]) usleep(2000);
+        if (!seen[1]) usleep(2000);
     }
-    assert(seen[0] && seen[1]);
+    assert(seen[1] && !seen[0]);
+    /* "*" is the explicit native broadcast opt-in. */
+    midi_cc_port(4,78,68,"*");
+    int broadcast[2]={0,0};
+    first=monotonic();
+    while ((!broadcast[0] || !broadcast[1]) && monotonic()-first<2) {
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.channel==4 && event->data.control.param==78 &&
+                    event->data.control.value==68) broadcast[i]=1;
+        }
+        if (!broadcast[0] || !broadcast[1]) usleep(2000);
+    }
+    assert(broadcast[0] && broadcast[1]);
     /* Explicit selector reaches only the matching subscriber. */
     midi_cc_port(4,75,65,"message-breadth-0");
     int selected[2]={0,0};
@@ -641,9 +656,27 @@ static void test_external_message_breadth(void) {
     }
     assert(scheduled[0] && !scheduled[1]);
     scheduler_shutdown(); audio_toggle_play(0); event_queue_clear();
+    /* The same default IAC/first selection applies to scheduler events. */
+    event_queue_clear(); audio_time=0; audio_toggle_play(1);
+    scheduler_init();
+    assert(track_load_from_code("note(60).ccn(79).ccv(.5).midi()"));
+    int defaults[2]={0,0};
+    first=monotonic();
+    while (!defaults[1] && monotonic()-first<5) {
+        pump_realtime(128);
+        for (int i=0;i<2;i++) {
+            snd_seq_event_t *event=NULL;
+            while (snd_seq_event_input(receivers[i],&event)>=0 && event)
+                if (event->type==SND_SEQ_EVENT_CONTROLLER &&
+                    event->data.control.param==79 && event->data.control.value==64)
+                    defaults[i]=1;
+        }
+    }
+    assert(defaults[1] && !defaults[0]);
+    scheduler_shutdown(); audio_toggle_play(0); event_queue_clear();
     for (int i=0;i<2;i++) snd_seq_close(receivers[i]);
     midi_shutdown();
-    puts("bend, aftertouch and transport reach an owned receiver; broadcast and selected CC/note routing are distinct");
+    puts("bend, aftertouch and transport reach the IAC-preferring default; named/indexed and broadcast routing are distinct");
 }
 
 static void test_midi_input_stores(void) {

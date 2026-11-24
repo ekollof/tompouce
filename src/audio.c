@@ -441,6 +441,7 @@ static int soa_kind_for(const Voice *v) {
 static int soa_bank_eligible(const Voice *v) {
     if (!v->active || v->retiring || v->stretch_buffer ||
         v->fx_stage_count>0) return 0;
+    if (v->wt_sample_frames>0) return 0;
     if (native_synth_effect(v->native_program)) return 0;
     if (!v->dsp.control.enabled) return 0;
     if (v->dsp.control.lfo_sample_rate) return 0;
@@ -1163,6 +1164,11 @@ void audio_prepare_room(AudioEvent *event) {
             stereo|=channels==2;
             if (stereo && frames>0 && !event->has_pan && !event->stretch_buffer && !event->native_synth)
                 connected=sample_connection_duration(event,frames);
+            if (event->wt_frames>0) {
+                double wt_duration=event->duration;
+                if (event->clip>0) wt_duration=fmin(60,wt_duration*event->clip);
+                connected=wt_duration+fmax(event->fx_release,event->rel+.01);
+            }
         }
         pthread_mutex_lock(&voice_lock);
         /* Sends are connected at preparation time, including future and
@@ -1228,7 +1234,8 @@ static void voice_onset(Voice *v) {
     if (v->dsp.control.enabled && v->smpbuf && !v->stretch_buffer) {
         double elapsed=fmax(0,audio_time-v->start_time);
         v->age=elapsed;
-        v->smppos+=elapsed*SR*v->smpstep*sample_pitch_ratio(v,audio_time);
+        if (v->wt_sample_frames==0)
+            v->smppos+=elapsed*SR*v->smpstep*sample_pitch_ratio(v,audio_time);
     }
     for (int i=0;i<N_PATTERN_SCOPES;i++) if (v->scope_mask&(1u<<i))
         pattern_scope_generation[i]=v->scope_generation;
@@ -1386,7 +1393,12 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->start_time = fmax(audio_time,ev->time);
     v->dsp.control.lfo_start_time = v->start_time;
     v->dsp_right.control.lfo_start_time = v->start_time;
-    v->note_off_time = v->start_time + (ev->duration > 0 ? ev->duration : 0.25);
+    /* Superdough's wavetable path applies clip to the already clipped hap
+       duration a second time (Zo: Z = min(e + clip*duration, ...)). */
+    double source_duration = ev->duration;
+    if (ev->wt_frames > 0)
+        source_duration = fmin(60, source_duration * (ev->clip > 0 ? ev->clip : 1));
+    v->note_off_time = v->start_time + (source_duration > 0 ? source_duration : 0.25);
     v->gate_end = v->note_off_time;
     v->phase = 0;
     v->age = 0;
@@ -1456,13 +1468,43 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->smpstep = 1.0;
     v->sample_pitch_quantum=-1; v->sample_pitch_ratio=1;
     v->smp_gate = ev->smp_gate;
+    v->wt_sample_frames = ev->wt_frames;
+    v->wt_sample_frame_len = ev->wt_frame_len;
+    v->wt_sample_position = ev->wt_position;
+    v->wt_sample_warp = ev->wt_warp;
+    v->wt_sample_warp_mode = ev->wt_warp_mode;
+    v->wt_sample_lfo_hz = ev->wt_lfo_hz;
+    v->wt_sample_lfo_depth = ev->wt_lfo_depth;
+    v->wt_sample_lfo_shape = ev->wt_lfo_shape;
+    v->wt_sample_lfo_skew = ev->wt_lfo_skew;
+    v->wt_sample_env_amount = ev->wt_env_amount;
+    for (int i = 0; i < 4; i++) v->wt_sample_env[i] = ev->wt_env[i];
+    v->wt_sample_warp_env_amount = ev->wt_warp_env_amount;
+    for (int i = 0; i < 4; i++) v->wt_sample_warp_env[i] = ev->wt_warp_env[i];
+    v->wt_sample_warp_lfo_hz = ev->wt_warp_lfo_hz;
+    v->wt_sample_warp_lfo_depth = ev->wt_warp_lfo_depth;
+    v->wt_sample_warp_lfo_shape = ev->wt_warp_lfo_shape;
+    v->wt_sample_warp_lfo_skew = ev->wt_warp_lfo_skew;
+    v->wt_sample_detune = ev->wt_detune;
+    v->wt_sample_spread = ev->wt_spread;
+    v->wt_sample_voices = ev->wt_voices > 0 ? ev->wt_voices : 1;
+    v->wt_sample_phase_rand = ev->wt_phase_rand;
+    for (int i = 0; i < WT_SAMPLE_VOICES; i++) v->wt_sample_phase[i] = 0;
+    v->wt_sample_lfo_phase = v->start_time * v->wt_sample_lfo_hz;
+    v->wt_sample_lfo_phase -= floor(v->wt_sample_lfo_phase);
+    v->wt_sample_warp_lfo_phase = v->start_time * v->wt_sample_warp_lfo_hz;
+    v->wt_sample_warp_lfo_phase -= floor(v->wt_sample_warp_lfo_phase);
+    if (v->wt_sample_frames > 0) {
+        double begin = (float)v->start_time;
+        v->source_begin = (floor(begin*SR/128)+1)*128/SR;
+    }
     v->stretch_factor = ev->stretch > 0 ? ev->stretch : 1;
     v->stretch_buffer=ev->stretch_buffer;
     stretch_retain(v->stretch_buffer);
     if (v->stretch_buffer) v->age=stretch_age_offset(v->stretch_buffer);
     if (ev->smp >= 0) {
         smp_get_stereo(ev->smp, &v->smpbuf, &v->smplen,&v->smp_channels);
-        if (ev->dsp.enabled && v->smp_channels == 2)
+        if (ev->dsp.enabled && (v->smp_channels == 2 || ev->wt_frames > 0))
             dsp_init(&v->dsp_right, &ev->dsp);
         if (v->smpbuf && v->smplen > 0 && ev->freq > 0) {
             double base = midi_to_freq(smp_base_midi(ev->smp));
@@ -2505,6 +2547,233 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     mix->right += de_r;
 }
 
+/* Superdough wavetable-oscillator-processor parity. Positions scan 2048-frame
+   tables; the site interpolates between frames and warps phase per sample. */
+static double wt_wrap(double x) { return x - floor(x); }
+static double wt_clamp(double x, double lo, double hi) {
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+static unsigned wt_hash(unsigned x) {
+    x = x + 2127912214u + (x << 12);
+    x = x ^ 3345072700u ^ (x >> 19);
+    x = x + 374761393u + (x << 5);
+    x = (x + 3550635116u) ^ (x << 9);
+    x = x + 4251993797u + (x << 3);
+    x = x ^ 3042594569u ^ (x >> 16);
+    return x;
+}
+static double wt_hash_unit(double x) {
+    double base = floor(x), fraction = x - base;
+    double a = (wt_hash((unsigned)(long long)base) >> 8) / 16777216.0;
+    double b = (wt_hash((unsigned)(long long)base + 1u) >> 8) / 16777216.0;
+    return a + (b - a) * fraction;
+}
+static double wt_brownian(double x) {
+    double scale = .5, sum = 0, total = 0, harmonic = 1;
+    for (int octave = 0; octave < 4; octave++) {
+        sum += scale * wt_hash_unit(x * harmonic);
+        total += scale;
+        scale *= .5;
+        harmonic *= 2;
+    }
+    return sum / total * 2 - 1;
+}
+static int wt_next_prime(int n) {
+    if (n < 2) return 2;
+    if ((n & 1) == 0) n++;
+    for (;; n += 2) {
+        int prime = 1;
+        for (int d = 3; d * d <= n; d += 2)
+            if (n % d == 0) { prime = 0; break; }
+        if (prime) return n;
+    }
+}
+static unsigned wt_reverse_bits(unsigned value, int bits) {
+    unsigned reversed = 0;
+    for (int i = 0; i < bits; i++) {
+        reversed = (reversed << 1) | (value & 1u);
+        value >>= 1;
+    }
+    return reversed;
+}
+static double wt_bits(double t, double low, double high) {
+    double exponent = high + (low - high) * t;
+    return round(pow(2, exponent));
+}
+static double wt_warp_phase(double t, double amount, int mode) {
+    switch (mode) {
+    case 1: { /* ASYM */
+        double pivot = .01 + .99 * amount;
+        return t < pivot ? .5 * t / pivot : .5 + .5 * (t - pivot) / (1 - pivot);
+    }
+    case 2: { /* MIRROR */
+        double asym = t < .01 + .99 * amount ? .5 * t / (.01 + .99 * amount)
+            : .5 + .5 * (t - .01 - .99 * amount) / (1 - .01 - .99 * amount);
+        return 1 - fabs(2 * asym - 1);
+    }
+    case 3: /* BENDP */
+        return pow(t, 1 + 3 * amount);
+    case 4: /* BENDM */
+        return pow(t, 1 / (1 + 3 * amount));
+    case 5: /* BENDMP */
+        return amount < .5 ? wt_warp_phase(t, 1 - 2 * amount, 3)
+                           : wt_warp_phase(t, 2 * amount - 1, 4);
+    case 6: /* SYNC */
+        return fmod(t * pow(16, amount * amount), 1);
+    case 7: { /* QUANT */
+        double steps = wt_bits(amount, 2, 12);
+        return round(t * steps) / steps;
+    }
+    case 8: { /* FOLD */
+        double folds = 1 + fmax(1, round(7 * amount));
+        return fabs((folds * t - floor(folds * t)) - .5) * 2;
+    }
+    case 9: { /* PWM */
+        double pivot = wt_clamp(.5 + .49 * (2 * amount - 1), 0, 1);
+        return t < pivot ? t / pivot * .5 : .5 + (t - pivot) / (1 - pivot) * .5;
+    }
+    case 10: /* ORBIT */
+        return wt_wrap(t + .5 * amount * sin(2 * M_PI * 3 * t));
+    case 11: { /* SPIN */
+        double steps = wt_bits(amount, 1, 6);
+        return wt_wrap(t + .5 * amount * sin(2 * M_PI * steps * t));
+    }
+    case 12: /* CHAOS */
+        return wt_clamp((1 - amount) * t + amount * (3.7 + .3 * amount) * t * (1 - t), 0, 1);
+    case 13: { /* PRIMES */
+        double steps = wt_next_prime((int)wt_bits(amount, 3, 12));
+        return round(t * steps) / steps;
+    }
+    case 14: { /* BINARY */
+        double exponent = 12 + (3 - 12) * amount;
+        int bits = (int)lround(exponent);
+        unsigned steps = 1u << bits;
+        return wt_reverse_bits((unsigned)lround(t * steps), bits) / (double)steps;
+    }
+    case 15: /* BROWNIAN */
+        return wt_wrap(t + .25 * amount * wt_brownian(64 * t));
+    case 16: { /* RECIPROCAL */
+        double amount2 = 2 + 4 * amount, near = t * amount2, far = t + (1 - t) * amount2;
+        return wt_clamp(far > 1e-12 ? near / far : 0, 0, 1);
+    }
+    case 17: { /* WORMHOLE */
+        double inner = wt_clamp(.8 * amount, 0, 1), lo = .5 * (1 - inner), hi = .5 * (1 + inner);
+        return t < lo ? t / lo * .5 : t > hi ? .5 * (1 + (t - hi) / (1 - hi)) : .5;
+    }
+    case 18: { /* LOGISTIC */
+        double value = t, rate = 3.6 + .4 * amount;
+        int iterations = 1 + (int)lround(2 * amount);
+        for (int i = 0; i < iterations; i++) value = rate * value * (1 - value);
+        return wt_clamp(value, 0, 1);
+    }
+    case 19: { /* SIGMOID */
+        double steep = 1 + 10 * amount, centered = t - .5;
+        double value = 1 / (1 + exp(-steep * centered));
+        double lo = 1 / (1 + exp(.5 * steep)), hi = 1 / (1 + exp(-.5 * steep));
+        return (value - lo) / (hi - lo);
+    }
+    case 20: /* FRACTAL */
+        return wt_wrap(t + .5 * sin(2 * M_PI * t) * amount);
+    default: /* NONE and FLIP leave phase unchanged. */
+        return t;
+    }
+}
+static double wt_frame_value(const Voice *v, int frame, double phase) {
+    int base = frame * v->wt_sample_frame_len;
+    int len = v->wt_sample_frame_len;
+    if (base >= v->smplen) return 0;
+    if (base + len > v->smplen) len = v->smplen - base;
+    if (len < 1) return 0;
+    double position = phase * len;
+    int index = (int)position;
+    if (index >= len || index < 0) index = 0;
+    int next = index + 1 < len ? index + 1 : 0;
+    double a = v->smpbuf[(size_t)(base + index) * 2];
+    double b = v->smpbuf[(size_t)(base + next) * 2];
+    return a + (b - a) * (position - index);
+}
+static double wt_lfo_value(double phase, int shape, double skew) {
+    switch (shape) {
+    case 1: return sin(2 * M_PI * phase) * .5 + .5;
+    case 2: return phase;
+    case 3: return 1 - phase;
+    case 4: return phase >= skew ? 0 : 1;
+    default: return phase >= skew ? 1 / (1 - skew) - phase / (1 - skew) : phase / skew;
+    }
+}
+static double wt_env_value(double age, double gate, double amount, const double env[4]) {
+    double attack = env[0], decay = env[1], sustain = env[2], release = env[3];
+    double peak = amount, hold = amount * sustain;
+    double at_gate;
+    if (gate < attack) at_gate = attack > 0 ? peak * gate / attack : peak;
+    else if (gate < attack + decay) at_gate = peak + (hold - peak) * ((gate - attack) / decay);
+    else at_gate = hold;
+    if (age >= gate) {
+        double elapsed = age - gate;
+        if (release <= 0 || elapsed >= release) return 0;
+        return at_gate * (1 - elapsed / release);
+    }
+    if (age < attack) return attack > 0 ? peak * age / attack : peak;
+    if (age < attack + decay) return peak + (hold - peak) * ((age - attack) / decay);
+    return hold;
+}
+static void wt_sample_voice(Voice *v, double age, double gate, double *left, double *right) {
+    int frames = v->wt_sample_frames;
+    double position = v->wt_sample_position;
+    if (v->wt_sample_env_amount != 0)
+        position += wt_env_value(age, gate, v->wt_sample_env_amount, v->wt_sample_env);
+    if (v->wt_sample_lfo_depth > 0) {
+        double phase = v->wt_sample_lfo_phase;
+        double tri = wt_lfo_value(phase, v->wt_sample_lfo_shape, v->wt_sample_lfo_skew);
+        position += tri * v->wt_sample_lfo_depth;
+        v->wt_sample_lfo_phase = wt_wrap(phase + v->wt_sample_lfo_hz / SR);
+    }
+    position = wt_clamp(position, 0, 1);
+    double warp = v->wt_sample_warp;
+    if (v->wt_sample_warp_env_amount != 0)
+        warp += wt_env_value(age, gate, v->wt_sample_warp_env_amount, v->wt_sample_warp_env);
+    if (v->wt_sample_warp_lfo_depth > 0) {
+        double phase = v->wt_sample_warp_lfo_phase;
+        double value = wt_lfo_value(phase, v->wt_sample_warp_lfo_shape, v->wt_sample_warp_lfo_skew);
+        warp += value * v->wt_sample_warp_lfo_depth;
+        v->wt_sample_warp_lfo_phase = wt_wrap(phase + v->wt_sample_warp_lfo_hz / SR);
+    }
+    warp = wt_clamp(warp, 0, 1);
+    double frame_position = position * (frames - 1);
+    int frame = (int)floor(frame_position);
+    if (frame < 0) frame = 0;
+    if (frame > frames - 1) frame = frames - 1;
+    double blend = wt_clamp(frame_position - frame, 0, 1);
+    int next_frame = frame + 1 < frames ? frame + 1 : frames - 1;
+    int voices = v->wt_sample_voices > 0 ? v->wt_sample_voices : 1;
+    double gain = 1 / sqrt((double)voices);
+    double out_left = 0, out_right = 0;
+    for (int voice = 0; voice < voices; voice++) {
+        double spread = voices > 1 ?
+            ((double)voice / (voices - 1)) * v->wt_sample_detune - .5 * v->wt_sample_detune : 0;
+        double freq = v->freq * pow(2, spread / 12);
+        double phase = v->wt_sample_phase[voice];
+        if (!(phase >= 0 && phase < 1)) phase = 0;
+        double warped = wt_warp_phase(phase, warp, v->wt_sample_warp_mode);
+        double sample = wt_frame_value(v, frame, warped);
+        double following = wt_frame_value(v, next_frame, warped);
+        sample += (following - sample) * blend;
+        if (v->wt_sample_warp_mode == 21 && phase < warp) sample = -sample;
+        double pan = voices > 1 ? v->wt_sample_spread : 0;
+        double left_gain = sqrt(.5 - .5 * pan), right_gain = sqrt(.5 + .5 * pan);
+        if (voice & 1) {
+            double swap = left_gain;
+            left_gain = right_gain;
+            right_gain = swap;
+        }
+        out_left += sample * left_gain * gain;
+        out_right += sample * right_gain * gain;
+        v->wt_sample_phase[voice] = wt_wrap(phase + freq / SR);
+    }
+    *left = out_left;
+    *right = out_right;
+}
+
 static double source_value_impl(const Voice *v, double position, int channel) {
     if (v->dsp.control.p[DSP_LOOP] > 0) {
         double lo = v->smplen*v->dsp.control.p[DSP_LOOPBEGIN];
@@ -2733,6 +3002,39 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         smp_lim = (int)(V->smplen * V->smp_end);
                         if (smp_lim < 1) smp_lim = 1;
                     }
+                }
+                if (V->smpbuf && V->wt_sample_frames > 0) {
+                    /* The wavetable AudioWorklet emits from the next render
+                       quantum; its LFO and oscillator phases stay frozen until
+                       then while the gain envelope has already started. */
+                    if (audio_time + 1e-10 < V->source_begin) { V->age += dt; continue; }
+                    if (V->smp_gate && !V->released && audio_time >= V->note_off_time)
+                        V->released = 1;
+                    double g = 1.0;
+                    double gate = V->gate_end - V->start_time;
+                    if (V->dsp.control.enabled) {
+                        if (age >= gate) V->released = 1;
+                        g = dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
+                        if (age >= gate + V->vrel) { V->active = 0; continue; }
+                    } else if (V->smp_gate && V->released) {
+                        double r = V->vrel >= 0 ? V->vrel : 0.08;
+                        if (r < 0.005) r = 0.005;
+                        double rt = audio_time - V->note_off_time;
+                        if (rt >= r) { V->active = 0; continue; }
+                        g = 1.0 - rt / r;
+                    }
+                    double left, right;
+                    wt_sample_voice(V, age, gate, &left, &right);
+                    /* The site's wavetable gain envelope peaks at 0.3. */
+                    g *= cut_gain * .3;
+                    left *= V->amp * g;
+                    right *= V->amp * g;
+                    if (V->dsp.control.enabled)
+                        route_voice(V, dsp_process(&V->dsp, left, age, gate),
+                            dsp_process(&V->dsp_right, right, age, gate), vm);
+                    else route_voice(V, left, right, vm);
+                    V->age += dt;
+                    continue;
                 }
                 if (V->smpbuf && V->smppos >= 0.0 && (int)V->smppos < smp_lim) {
                     /* one-shot bank sample, mono center, linear interp.

@@ -667,15 +667,18 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       installed uzu-wavetables catalog and native renders its PCM;
       `tests/fixtures/uzu-wavetables/` vendors the public-domain
       3x2048-frame file for reproducible comparison.
-- [ ] Multi-frame wavetable oscillator parity. The site runs `wt_*` samples
-      through a dedicated wavetable oscillator that scans 2048-frame tables
-      with `wt`, `warp`, voice spread and scheduled position LFOs. Native's
-      sample path treats the file as a single cycle, which matches one-frame
-      AKWF tables but not stacked tables. `diag-prebake-stxt-wavetable`
-      measures correlation -0.0368 and RMS ratio 5.23 (peaks 0.234/0.046)
-      against the deployed player. Implementing the worklet semantics is
-      required before this diagnostic can become a gate; it is not an asset
-      problem.
+- [x] Multi-frame wavetable oscillator parity. Native slices `wt_*` samples
+      into 2048-sample frames (partial last frame; short files are one frame),
+      scans `wt` with frame interpolation, and implements all 21 site warp
+      modes, position and warp envelopes, position and warp-rate LFOs with
+      tri/sine/ramp/saw/square shapes and skew, `wtsync`/`warpsync`, and
+      unison/detune/spread with constant-power panning. It also reproduces the
+      worklet's first 128-sample quantum, the 0.3 wavetable gain peak and the
+      site's second `clip` application. `prebake-stxt-wavetable` gates at
+      0.999712/1.00037; ten `wt-sample-` gates are at 0.999999+/1.0002–1.0004.
+      Explicit `wtphaserand(0)` is gated; nonzero random phases come from the
+      site worklet's own `Math.random` and cannot be made deterministic from
+      the page realm.
 - [x] Browser-only starter helpers. `bmod` and `FX` are core pattern APIs and
       are already reference-gated by the starter's `bend`, `comb`, `disperse`
       and `spinor` cases. `document`, `navigator`, `localStorage` and
@@ -684,11 +687,11 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       names the helper and its missing facade. `test_javascript` covers the
       feature-detection and both error paths. The commented `djfilt`
       controller example remains an intentional ceiling.
-- [x] Prebake PCM breadth. Eleven `prebake-` audio gates now cover glide,
-      accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum
-      and a 0.5 Volume setting at the unchanged thresholds. Acid seeds the
-      supersaw worklet and renders one event. `stxt`'s event contract stays
-      exact; its PCM bound is the wavetable item above.
+- [x] Prebake PCM breadth. Twelve `prebake-` audio gates now cover glide,
+      accent, delay, trancegate, tgate, acid, humanize, glitch, fmtime, strum,
+      a 0.5 Volume setting and `stxt` at the unchanged thresholds. Acid seeds
+      the supersaw worklet and renders one event. Ten `wt-sample-` gates cover
+      the multi-frame wavetable oscillator separately.
 - [ ] Switch Angel external-device breadth. Note + CC 34 `voc` delivery is
       covered through an owned ALSA receiver; pitch bend, aftertouch, clock and
       multi-device/port routing remain unmeasured. Keep physical DIN/USB output

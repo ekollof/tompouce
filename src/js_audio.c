@@ -25,6 +25,50 @@ static const char *text_control(const cJSON *value, const char *name) {
     return cJSON_IsString(p) ? p->valuestring : "";
 }
 
+static int number_control(const cJSON *value, const char *name) {
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(value, name);
+    return cJSON_IsNumber(p) && isfinite(p->valuedouble);
+}
+
+static int any_number_control(const cJSON *value, const char *const *names, int count) {
+    for (int i = 0; i < count; i++)
+        if (number_control(value, names[i])) return 1;
+    return 0;
+}
+
+/* Superdough LFO shapes: tri/triangle, sine, ramp, saw, square. */
+static int lfo_shape_control(const cJSON *value, const char *name) {
+    static const char *const names[] = {"tri","triangle","sine","ramp","saw","square"};
+    static const int shapes[] = {0,0,1,2,3,4};
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(value, name);
+    if (cJSON_IsNumber(p) && isfinite(p->valuedouble)) {
+        int shape = (int)lround(p->valuedouble);
+        return shape >= 0 && shape <= 4 ? shape : 0;
+    }
+    if (!cJSON_IsString(p) || !p->valuestring) return 0;
+    for (int i = 0; i < (int)(sizeof(names)/sizeof(names[0])); i++)
+        if (!strcasecmp(p->valuestring, names[i])) return shapes[i];
+    return 0;
+}
+
+/* Superdough warpMode: numbers 0..21 or their uppercase names. */
+static int warp_mode_control(const cJSON *value, const char *name) {
+    static const char *const names[] = {
+        "NONE","ASYM","MIRROR","BENDP","BENDM","BENDMP","SYNC","QUANT",
+        "FOLD","PWM","ORBIT","SPIN","CHAOS","PRIMES","BINARY","BROWNIAN",
+        "RECIPROCAL","WORMHOLE","LOGISTIC","SIGMOID","FRACTAL","FLIP"
+    };
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(value, name);
+    if (cJSON_IsNumber(p) && isfinite(p->valuedouble)) {
+        int mode = (int)lround(p->valuedouble);
+        return mode >= 0 && mode < (int)(sizeof(names)/sizeof(names[0])) ? mode : 0;
+    }
+    if (!cJSON_IsString(p) || !p->valuestring) return 0;
+    for (int i = 0; i < (int)(sizeof(names)/sizeof(names[0])); i++)
+        if (!strcasecmp(p->valuestring, names[i])) return i;
+    return 0;
+}
+
 static const cJSON *duck_item(const cJSON *value, const char *name, int index) {
     const cJSON *item=cJSON_GetObjectItemCaseSensitive(value,name);
     if (cJSON_IsArray(item)) {
@@ -1001,9 +1045,11 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     ev->analyser_id = (int)round(control(v,"analyze",0,0,(double)N_ANALYSERS));
     ev->analyser_fft = (int)round(control(v,"fft",8,0,10));
     ev->time = origin + begin->valuedouble * seconds;
+    ev->cps = seconds > 0 ? 1 / seconds : 0;
     ev->duration = fmin(60,(end->valuedouble - begin->valuedouble) * seconds);
     double clip = control(v,"clip",1,0,64);
     if (clip == 0) clip=1; /* Superdough's clip || 1 fallback. */
+    ev->clip = clip;
     ev->duration = fmin(60,ev->duration * clip);
     ev->duration = control(v,"duration",ev->duration,.00001,60);
     /* Superdough multiplies velocity with no 0..1 cap. 16 matches the other amplitude stages. */
@@ -1248,6 +1294,52 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
             float *buffer; int length;
             smp_get(ev->smp,&buffer,&length);
             if (!buffer || length<1) return 0;
+            /* Superdough always slices wt_* samples into 2048-sample frames
+               (the last frame may be shorter). A single short AKWF cycle is
+               one frame with its own length. */
+            ev->wt_frame_len=2048;
+            ev->wt_frames=length>=2048 ? length/2048 : 1;
+            ev->wt_position=control(value,"wt",0,0,1);
+            ev->wt_warp=control(value,"warp",0,0,1);
+            ev->wt_warp_mode=warp_mode_control(value,"warpmode");
+            int wt_lfo_params=number_control(value,"wtrate") || number_control(value,"wtshape") ||
+                number_control(value,"wtskew") || number_control(value,"wtsync");
+            ev->wt_lfo_depth=number_control(value,"wtdepth") ?
+                control(value,"wtdepth",0,0,16) : wt_lfo_params ? .5 : 0;
+            if (number_control(value,"wtrate"))
+                ev->wt_lfo_hz=control(value,"wtrate",0,0,20000);
+            else if (number_control(value,"wtsync") && ev->cps>0)
+                ev->wt_lfo_hz=fabs(ev->cps)*control(value,"wtsync",0,-64,64);
+            else ev->wt_lfo_hz=ev->wt_lfo_depth>0 ? 1 : 0;
+            ev->wt_lfo_shape=lfo_shape_control(value,"wtshape");
+            ev->wt_lfo_skew=control(value,"wtskew",.5,.001,.999);
+            const char *wt_env_names[4]={"wtattack","wtdecay","wtsustain","wtrelease"};
+            const char *warp_env_names[4]={"warpattack","warpdecay","warpsustain","warprelease"};
+            const double wt_env_defaults[4]={0,.5,0,.1};
+            ev->wt_env_amount=number_control(value,"wtenv") ?
+                control(value,"wtenv",0,-16,16) :
+                any_number_control(value,wt_env_names,4) ? .5 : 0;
+            dsp_read_adsr(value,wt_env_names,wt_env_defaults,ev->wt_env);
+            ev->wt_warp_env_amount=number_control(value,"warpenv") ?
+                control(value,"warpenv",0,-16,16) :
+                any_number_control(value,warp_env_names,4) ? .5 : 0;
+            dsp_read_adsr(value,warp_env_names,wt_env_defaults,ev->wt_warp_env);
+            int warp_lfo_params=number_control(value,"warprate") || number_control(value,"warpshape") ||
+                number_control(value,"warpskew") || number_control(value,"warpsync");
+            ev->wt_warp_lfo_depth=number_control(value,"warpdepth") ?
+                control(value,"warpdepth",0,0,16) : warp_lfo_params ? .5 : 0;
+            if (number_control(value,"warprate"))
+                ev->wt_warp_lfo_hz=control(value,"warprate",0,0,20000);
+            else if (number_control(value,"warpsync") && ev->cps>0)
+                ev->wt_warp_lfo_hz=fabs(ev->cps)*control(value,"warpsync",0,-64,64);
+            else ev->wt_warp_lfo_hz=ev->wt_warp_lfo_depth>0 ? 1 : 0;
+            ev->wt_warp_lfo_shape=lfo_shape_control(value,"warpshape");
+            ev->wt_warp_lfo_skew=control(value,"warpskew",.5,.001,.999);
+            ev->wt_voices=(int)control(value,"unison",1,1,WT_SAMPLE_VOICES);
+            ev->wt_spread=control(value,"spread",.7,0,1);
+            ev->wt_detune=control(value,"detune",0,-9600,9600);
+            ev->wt_phase_rand=number_control(value,"wtphaserand") ?
+                (control(value,"wtphaserand",0,0,1)>0) : ev->wt_voices>1;
             /* Each selected AKWF file is one cycle. Its length, not the
                manifest's nominal recording note, sets exact oscillator pitch. */
             ev->smp_speed*=length/SR*midi_to_freq(smp_base_midi(ev->smp));
@@ -1418,7 +1510,11 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","lv2preset","lv2state","carlaProject","carlaTarget","color","colour","label","activeLabel","markcss",
             "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
-            "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",NULL};
+            "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",
+            "wt","warp","warpmode","wtrate","wtdepth","wtshape","wtskew","wtsync","wtdc",
+            "wtattack","wtdecay","wtsustain","wtrelease","wtenv","wtphaserand",
+            "warprate","warpdepth","warpshape","warpskew","warpsync","warpdc",
+            "warpattack","warpdecay","warpsustain","warprelease","warpenv",NULL};
         int implemented = 0;
         for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
         if (!implemented) javascript_warn_control(program,name);

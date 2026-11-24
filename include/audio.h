@@ -7,6 +7,8 @@ void audio_set_reference_mode(int on);
 #include "common.h"
 #include "event.h"
 
+#define WT_SAMPLE_VOICES 16
+
 typedef struct Voice {
     NativeSynthState *native_state;
     NativeSynthState *native_right;
@@ -85,6 +87,16 @@ typedef struct Voice {
     // wavetable state (valid when inst == INST_WT)
     int wt;
     double wtpos; // table position in [0, WT_SIZE)
+    /* Multi-frame sample wavetable (Superdough wt_* samples). */
+    int wt_sample_frames, wt_sample_frame_len;
+    double wt_sample_position, wt_sample_warp, wt_sample_lfo_hz, wt_sample_lfo_depth;
+    double wt_sample_detune, wt_sample_spread, wt_sample_lfo_skew;
+    double wt_sample_env_amount, wt_sample_env[4], wt_sample_warp_env_amount, wt_sample_warp_env[4];
+    double wt_sample_warp_lfo_hz, wt_sample_warp_lfo_depth, wt_sample_warp_lfo_skew;
+    int wt_sample_warp_mode, wt_sample_voices, wt_sample_phase_rand, wt_sample_lfo_shape;
+    int wt_sample_warp_lfo_shape;
+    double wt_sample_phase[WT_SAMPLE_VOICES];
+    double wt_sample_lfo_phase, wt_sample_warp_lfo_phase;
     // one-shot sample state (valid when smp >= 0)
     int smp;
     float *smpbuf;

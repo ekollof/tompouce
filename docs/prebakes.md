@@ -175,19 +175,20 @@ Existing exact event checks remain exact. New text-synth/random/glide and freque
 checks allow at most 1e-12 absolute numeric error, with exact structure and
 event counts. Helper-specific delay, velocity and postgain checks disable the
 gain curve to inspect their raw controls. Gain shaping keeps its separate
-browser audio gates. Eleven audio gates cover glide, accent, delay,
-trancegate, tgate, acid, humanize, glitch, fmtime, strum and a 0.5 Volume
-initialization with the complete pinned starter, using the existing 0.99
-correlation and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and
+browser audio gates. Twelve audio gates cover glide, accent, delay,
+trancegate, tgate, acid, humanize, glitch, fmtime, strum, a 0.5 Volume
+initialization and `stxt` with the complete pinned starter, using the existing
+0.99 correlation and 0.85–1.15 gain limits. Acid seeds the supersaw worklet and
 renders one event. The Volume widget is DOM-only and is skipped on both sides,
 so that case checks call neutralization and gain shaping, not a value mapping.
-`stxt` keeps an exact event gate. Its generated `wt_digital_echoes` sample is
-a three-frame wavetable from the public uzu catalog; native resolves and renders
-it, but the site's dedicated wavetable oscillator scans frames with `wt` and
-`warp`, while the sample path treats the file as one cycle.
-`diag-prebake-stxt-wavetable` records that difference: correlation -0.0368 and
-RMS ratio 5.23 over the same 2 s window, with native peak 0.234 and browser
-peak 0.046. It remains diagnostic, not a gate. Glide additionally exposed and fixed pitch-envelope
+`prebake-stxt-wavetable` matches at 0.999712 correlation and 1.00037 RMS ratio.
+Ten `wt-sample-` gates cover the multi-frame oscillator itself: 2048-sample
+frames with partial last frames, `wt` scanning, triangle/sine position LFOs,
+static `bendp` warp, asym warp envelopes, warp-rate LFOs, unison/detune/spread,
+`wtsync`, position envelopes and fractional onsets. They measure 0.999999+
+correlation and 1.0002–1.0004 RMS ratios. Both players use the vendored
+public-domain `wt_echoes.wav`, whose three frames make position scanning
+audible. Glide additionally exposed and fixed pitch-envelope
 defaults, minimum segment durations and first-quantum oscillator automation.
 Nine bare-REPL pitch/vibrato audio checks cover those changes independently.
 Ten exponential oscillator pitch checks additionally cover detune ramps,

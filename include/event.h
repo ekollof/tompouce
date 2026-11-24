@@ -76,8 +76,18 @@ typedef struct {
     OscOutputMessage osc;
     double time;        // absolute seconds
     double duration;    // seconds
+    double clip;        // Superdough clip fraction, 1 when unset
     int inst;           // for note tracks
     int wt;             // wavetable index when inst == INST_WT, else -1
+    /* Multi-frame wavetable sample oscillator (Superdough wt_* samples). */
+    int wt_frames, wt_frame_len; // 0 = plain sample playback
+    double wt_position, wt_warp, wt_lfo_hz, wt_lfo_depth;
+    double wt_detune, wt_spread, wt_lfo_skew;
+    double wt_env_amount, wt_env[4], wt_warp_env_amount, wt_warp_env[4];
+    double wt_warp_lfo_hz, wt_warp_lfo_depth, wt_warp_lfo_skew;
+    double cps;
+    int wt_warp_mode, wt_voices, wt_phase_rand, wt_lfo_shape;
+    int wt_warp_lfo_shape;
     int smp;            // sample id when track has bank, else -1
     int live_lv2;       // 0 = none, otherwise scheduler-owned live slot + 1
     char lv2_uri[256];

@@ -1073,6 +1073,14 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth-1)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtsync(.5).wtdepth(.4)"
+        ".lfo({control:'wtsync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WTRATE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4)"
         ".lfo({control:'wtdepth',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
@@ -1100,6 +1108,14 @@ static void test_analyser_controls(void) {
 
     haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
         ".lfo({control:'warprate',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPRATE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warpsync(.5).warpdepth(.3)"
+        ".lfo({control:'warpsync',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPRATE &&

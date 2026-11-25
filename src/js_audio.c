@@ -1056,6 +1056,8 @@ static const GenTarget gen_targets[] = {
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
     {"vowel", GEN_VOWEL, DSP_VOWEL, 1, "vowel"},
     {"detune", GEN_DETUNE, DSP_UNISON, 0, "spread-voice"},
+    {"delay", GEN_DELAY, DSP_DRY, 0, "delay-send"},
+    {"room", GEN_ROOM, DSP_ROOM, 0, "room-send"},
     {"wtrate", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
     {"wtsync", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
     {"wtdepth", GEN_WTDEPTH, DSP_UNISON, 0, "wt-voice"},
@@ -1106,7 +1108,7 @@ static double wt_rate_resolved(const cJSON *value, double cps, int iswarp, doubl
     return depth > 0 ? 1 : 0;
 }
 
-static const GenTarget *gen_target(const char *name, const cJSON *value, const char *sound) {
+static const GenTarget *gen_target(const char *name, const cJSON *value, const char *sound, const AudioEvent *ev) {
     for (int i = 0; gen_targets[i].name; i++) {
         if (strcmp(name, gen_targets[i].name)) continue;
         const char *need = gen_targets[i].need;
@@ -1131,6 +1133,10 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             int spread = (sound && !strcmp(sound, "supersaw")) ||
                 (sound && !strncmp(sound, "wt_", 3));
             if (spread) return &gen_targets[i];
+        } else if (!strcmp(need, "delay-send")) {
+            if (ev->delay_send > 0) return &gen_targets[i];
+        } else if (!strcmp(need, "room-send")) {
+            if (ev->dsp.p[DSP_ROOM] > 0) return &gen_targets[i];
         } else if (!strcmp(need, "wt-voice") || !strcmp(need, "warp-voice")) {
             /* The deployed wt/warp LFO node exists only on wavetable
                voices and only when its (defaulted) depth is nonzero. */
@@ -1200,7 +1206,7 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
             !strcmp(name,"bandf")?2:-1;
         int qtype=!strcmp(name,"resonance")?0:!strcmp(name,"hresonance")?1:
             !strcmp(name,"bandq")?2:-1;
-        const GenTarget *gent = gen_target(name, value, sound);
+        const GenTarget *gent = gen_target(name, value, sound, ev);
         /* Upstream only builds a pan node when the hap carries pan, only
            builds each filter node when its cutoff is set, and only builds
            effect nodes when their control is set; otherwise the connection
@@ -1228,6 +1234,8 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         /* The deployed detune node scales by the semitone spread, which
            native keeps outside the control array. */
         else if (gent && gent->gen == GEN_DETUNE) base = ev->dsp.supersaw_detune;
+        else if (gent && gent->gen == GEN_DELAY) base = ev->delay_send;
+        else if (gent && gent->gen == GEN_ROOM) base = ev->dsp.p[DSP_ROOM];
         else if (gent && gent->gen >= GEN_WTRATE && gent->gen <= GEN_WARPSHAPE) {
             /* Wavetable LFO bases replicate the connected worklet params:
                resolved rate, defaulted depth, raw skew (default .5) and

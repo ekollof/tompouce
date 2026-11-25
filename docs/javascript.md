@@ -298,6 +298,7 @@ Generic Strudel `.lfo()` modulation is implemented for gain, filter cutoff,
 source frequency (`s`), pan, tremolo rate/depth/skew/sync, coarse, crush,
 shape/shapevol, distort/distortvol/distorttype, vib/vibmod, pw/pwrate/pwsweep,
 vowel, detune, wavetable position/warp rate/depth/skew,
+delay send, room send,
 phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
 semantics: defaults `rate=1 depth=1 dcoffset=-0.5 triangle skew=.5 curve=1`,
 `depth` scaling by the target value (1 when the target is 0), `sync`
@@ -326,12 +327,14 @@ frequency modulation is still limited by onset/envelope modeling plus the
 naive native saw versus the browser's bandlimited oscillator (RMS ratios sit
 near 1.0, so this is not gain staging). Voices with active voice LFO slots
 bypass the SoA batch lanes and render per sample, since the lanes have no
-slot support. Remaining targets (delay/compressor params, dry/room/busgain,
-stretch, bus modulators) keep their static value and
+slot support. Remaining targets (delaytime/delayfeedback, compressor params,
+busgain, stretch, bus modulators) keep their static value and
 log one warning naming the unsupported target per program. Generic
-tremolophase and wtdc/warpdc match the deployed no-ops (the worklets
-expose `phaseoffset` and `dcoffset`, not `phase`/`dc`, so both sides render
-static); generic tremoloshape and wt/warp shape are recorded supersets
+tremolophase, wtdc/warpdc and dry match the deployed no-ops: `phase` and
+`dc` have no worklet params, and the dry gain node is wired but never
+registered, so both sides render static (`lfo-tremolophase-inert`,
+`lfo-wtdc-inert`, `lfo-warpdc-inert`, `lfo-dry-inert`); generic
+tremoloshape and wt/warp shape are recorded supersets
 (a float shape index crashes the deployed worklet to silence, while native
 steps the integer wave). Filter-specific
 `lp`/`hp`/`bp` LFO

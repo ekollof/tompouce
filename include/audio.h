@@ -43,7 +43,7 @@ typedef struct Voice {
        order in route_voice is unchanged, so PCM hashes stay identical. */
     double route_ll, route_lr, route_rl, route_rr, route_left, route_right;
     double route_dry, route_delay, route_room, route_room_size;
-    int route_dsp, route_cached, route_side_one, route_dry_one;
+    int route_dsp, route_cached, route_side_one;
     double waveform_gain;
     double start_time;
     double source_begin; /* source worklet's first active render quantum */

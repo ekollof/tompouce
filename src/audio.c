@@ -1504,7 +1504,6 @@ static void cache_routing(Voice *v) {
     v->route_left = left; v->route_right = right;
     v->route_delay = v->delay_send;
     v->route_side_one = left == 1 && right == 1;
-    v->route_dry_one = v->route_dry == 1;
     v->route_cached = 1;
 }
 
@@ -2393,6 +2392,7 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     double left=v->route_left, right=v->route_right;
     if (!v->route_side_one) { base_l*=left; base_r*=right; }
     double dry=v->route_dry;
+    double delay_use=v->route_delay+v->dsp.control.gen_lfo[GEN_DELAY];
     unsigned scope_mask=v->scope_mask;
     for (int i=0;scope_mask;i++,scope_mask>>=1)
         if ((scope_mask&1u) && v->scope_generation==pattern_scope_generation[i])
@@ -2403,16 +2403,16 @@ static void route_voice_fx(Voice *v, double l, double r, VoiceMix *mix) {
     target_add(v->out_target,base_l*dry,base_r*dry);
     if (v->out_target>0) return;
     mix->left += base_l*dry; mix->right += base_r*dry;
-    mix->delay_l += base_l*v->route_delay;
-    mix->delay_r += base_r*v->route_delay;
+    mix->delay_l += base_l*delay_use;
+    mix->delay_r += base_r*delay_use;
     if (v->route_dsp) {
-        double room=v->route_room;
-        if (v->fx_room_present && room > 0) {
+        double room=v->route_room+v->dsp.control.gen_lfo[GEN_ROOM];
+        if (v->fx_room_present && v->route_room > 0) {
             mix_fx_room(mix,base_l,base_r,room,v->route_room_size,
                 fx_room_gain(v));
         } else {
             mix->room_l += base_l*room; mix->room_r += base_r*room;
-            if (room > 0) mix->room_size=v->route_room_size;
+            if (v->route_room > 0) mix->room_size=v->route_room_size;
         }
     }
 }
@@ -2442,8 +2442,13 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         return;
     }
     /* Pan law and send constants are frozen at note-on; the multiplication
-       order below is identical to the original per-sample calculation. */
+       order below is identical to the original per-sample calculation.
+       Generic voice LFOs on dry/delay/room ride the per-sample offsets
+       below (voice slots bypass the SoA lanes, so only these scalar and
+       SIMD mix paths need them). */
     double in_l = l, in_r = r;
+    double delay_use = v->route_delay + v->dsp.control.gen_lfo[GEN_DELAY];
+    double room_use = v->route_room + v->dsp.control.gen_lfo[GEN_ROOM];
 #if defined(__SSE2__)
     /* Left and right are adjacent doubles and use the same pan/send math.
        Per-lane operations match the scalar path exactly; no cross-lane sum
@@ -2462,17 +2467,17 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
         __m128d side=_mm_set_pd(v->route_right,v->route_left);
         __m128d base=routed;
         if (!v->route_side_one) base=_mm_mul_pd(base,side);
-        __m128d dry=v->route_dry_one?base:
+        __m128d dry=v->route_dry==1?base:
             _mm_mul_pd(base,_mm_set1_pd(v->route_dry));
         _mm_storeu_pd(&mix->left,
             _mm_add_pd(_mm_loadu_pd(&mix->left),dry));
-        __m128d delayed=_mm_mul_pd(base,_mm_set1_pd(v->route_delay));
+        __m128d delayed=_mm_mul_pd(base,_mm_set1_pd(delay_use));
         _mm_storeu_pd(&mix->delay_l,
             _mm_add_pd(_mm_loadu_pd(&mix->delay_l),delayed));
         if (v->route_dsp) {
-            double room=v->route_room;
+            double room=room_use;
             __m128d roomed=_mm_mul_pd(base,_mm_set1_pd(room));
-            if (v->fx_room_present && room > 0) {
+            if (v->fx_room_present && v->route_room > 0) {
                 double pair[2];
                 _mm_storeu_pd(pair,base);
                 mix_fx_room(mix,pair[0],pair[1],room,v->route_room_size,
@@ -2480,7 +2485,7 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
             } else {
                 _mm_storeu_pd(&mix->room_l,
                     _mm_add_pd(_mm_loadu_pd(&mix->room_l),roomed));
-                if (room > 0) mix->room_size=v->route_room_size;
+                if (v->route_room > 0) mix->room_size=v->route_room_size;
             }
         }
         return;
@@ -2504,17 +2509,17 @@ static void route_voice_impl(Voice *v, double l, double r, VoiceMix *mix) {
     /* Named targets bypass the shared orbit/effect bus entirely; their dry
        source is carried by the target buffer, never by the default stream. */
     if (v->out_target>0) return;
-    mix->left += l*left*dry; mix->right += r*right*dry;
-    mix->delay_l += l*left*v->route_delay;
-    mix->delay_r += r*right*v->route_delay;
+    mix->left += l*left*v->route_dry; mix->right += r*right*v->route_dry;
+    mix->delay_l += l*left*delay_use;
+    mix->delay_r += r*right*delay_use;
     if (v->route_dsp) {
-        double room = v->route_room;
-        if (v->fx_room_present && room > 0) {
+        double room = room_use;
+        if (v->fx_room_present && v->route_room > 0) {
             mix_fx_room(mix,l*left,r*right,room,v->route_room_size,
                 fx_room_gain(v));
         } else {
             mix->room_l += l*left*room; mix->room_r += r*right*room;
-            if (room > 0) mix->room_size = v->route_room_size;
+            if (v->route_room > 0) mix->room_size = v->route_room_size;
         }
     }
 }

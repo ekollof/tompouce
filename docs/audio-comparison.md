@@ -611,7 +611,7 @@ LFOs hold static values for the onset quantum; this closes the FM phase gap:
 `s("saw").lfo().lpf(800)` gates at 1.0/1.0001, `s("sine").lfo()` at 1.0/1.0001,
 and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth/skew, coarse,
 crush, shape, distort, vibmod, pw/pwrate/pwsweep, vowel, detune,
-wavetable position/warp rate/depth/skew,
+wavetable position/warp rate/depth/skew, delay send, room send,
 every phaser param and postgain modulate the DSP
 path per sample and gate at the unchanged thresholds: `tremolo-static`
 0.99968/1.0002, `lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth`
@@ -631,10 +631,13 @@ path per sample and gate at the unchanged thresholds: `tremolo-static`
 `lfo-warpdepth` 0.9995/0.9997, `lfo-warpskew` 1.0/1.0002,
 `wtdc-static` 1.0/1.0003, `lfo-wtdc-inert` 1.0/1.0003,
 `warpdc-static` 1.0/1.0003, `warpdc-static-neg` 1.0/1.0002,
-`lfo-warpdc-inert` 1.0/1.0002 and
-`lfo-postgain` 1.0/1.0003. Generic tremolophase and wtdc/warpdc match the deployed
-no-op (`lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,
-`lfo-warpdc-inert` 1.0/1.0002); generic tremoloshape and wt/warp shape are
+`lfo-warpdc-inert` 1.0/1.0002, `dry-static` 1.0/1.0003,
+`lfo-dry-inert` 1.0/1.0003, `lfo-delay` 1.0/1.0004,
+`lfo-room` 1.0/0.9942 and
+`lfo-postgain` 1.0/1.0003. Generic tremolophase, wtdc/warpdc and dry match the deployed
+no-op (the `phase`/`dc` params do not exist and the dry node is never
+registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,
+`lfo-warpdc-inert` 1.0/1.0002, `lfo-dry-inert` 1.0/1.0003; generic tremoloshape and wt/warp shape are
 recorded supersets (native renders, the deployed float shape index
 crashes its worklet to silence, so they stay ungated). The
 compressor (static and generic) stays diagnostic: the native follower

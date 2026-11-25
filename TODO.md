@@ -546,11 +546,12 @@ and measured divergences are recorded in the archive.
       phase seeding (0.39 unseeded); seeded it gates at 1.0/1.0006, and
       the generic detune LFO (per-sample freqspread recompute) at
       1.0/1.0006. Generic wt/warp shape stays a recorded superset.
-      Missing generic targets: delay and compressor params, plus
-      dry/room/busgain, stretch and bmod. Delay/dry/room/busgain generics need a design
-      against the shared-sends architecture: upstream builds per-hap
-      wet/dry/mix nodes while native shares one orbit line, and send gain
-      is not wet gain under feedback. Generic `.env()` is parsed, validated and warned but never applied:
+      Newly gated since: dry send is inert (node wired but never
+      registered), while delay and room sends modulate per voice
+      (`dry-static`, `lfo-dry-inert`, `lfo-delay`, `lfo-room`).
+      Remaining: delaytime/delayfeedback (the shared line itself),
+      compressor params, busgain (no native send: static folds into voice
+      gain), stretch and bmod. Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

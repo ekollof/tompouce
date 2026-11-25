@@ -1051,10 +1051,14 @@ static const GenTarget gen_targets[] = {
     {"compressorRelease", GEN_COMPREL, DSP_COMPREL, 0, "compressor"},
     {"postgain", GEN_POSTGAIN, DSP_POST, 0, NULL},
     {"vibmod", GEN_VIBMOD, DSP_VIBMOD, 0, "vib"},
+    {"pw", GEN_PW, DSP_PW, 0, "pulse-voice"},
+    {"pwrate", GEN_PWRATE, DSP_PWRATE, 1, "pulse-voice"},
+    {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
+    {"vowel", GEN_VOWEL, DSP_VOWEL, 1, "vowel"},
     {NULL, 0, 0, 0, NULL}
 };
 
-static const GenTarget *gen_target(const char *name, const cJSON *value) {
+static const GenTarget *gen_target(const char *name, const cJSON *value, const char *sound) {
     for (int i = 0; gen_targets[i].name; i++) {
         if (strcmp(name, gen_targets[i].name)) continue;
         const char *need = gen_targets[i].need;
@@ -1063,6 +1067,16 @@ static const GenTarget *gen_target(const char *name, const cJSON *value) {
             if (cJSON_HasObjectItem(value,"tremolo") || cJSON_HasObjectItem(value,"tremolosync")) return &gen_targets[i];
         } else if (!strcmp(need, "phaserrate")) {
             if (cJSON_HasObjectItem(value,"phaserrate") && control(value,"phaserdepth",.75,0,16) > 0) return &gen_targets[i];
+        } else if (!strcmp(need, "pulse-voice")) {
+            /* The deployed pulsewidth nodes only exist on pulse-oscillator
+               voices, and the pw LFO node only when the (defaulted) sweep
+               is nonzero. */
+            if (!sound || strcmp(sound, "pulse")) return NULL;
+            if (!strcmp(name, "pw")) return &gen_targets[i];
+            const cJSON *sw = cJSON_GetObjectItemCaseSensitive(value, "pwsweep");
+            double sweep = cJSON_IsNumber(sw) && isfinite(sw->valuedouble) ? sw->valuedouble :
+                (cJSON_HasObjectItem(value, "pwrate") ? 0.3 : 0.0);
+            if (sweep != 0) return &gen_targets[i];
         } else if (cJSON_HasObjectItem(value,need)) return &gen_targets[i];
         return NULL;
     }
@@ -1127,7 +1141,7 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
             !strcmp(name,"bandf")?2:-1;
         int qtype=!strcmp(name,"resonance")?0:!strcmp(name,"hresonance")?1:
             !strcmp(name,"bandq")?2:-1;
-        const GenTarget *gent = gen_target(name, value);
+        const GenTarget *gent = gen_target(name, value, sound);
         /* Upstream only builds a pan node when the hap carries pan, only
            builds each filter node when its cutoff is set, and only builds
            effect nodes when their control is set; otherwise the connection
@@ -1141,6 +1155,17 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         else if (is_pan) base=ev->pan;
         else if (type>=0) base=ev->dsp.p[type*7];
         else if (qtype>=0) base=ev->dsp.p[qtype*7+1];
+        else if (gent && gent->gen == GEN_VOWEL) {
+            /* The deployed vowel LFO connects to all five formant
+               frequencies; the depth scales by the first formant, which
+               is also the connected AudioParam the range clamp reads.
+               Order matches the vowel table in dsp_init. */
+            static const double first[15] = {660,440,270,430,370,650,560,
+                500,250,400,600,500,600,700,500};
+            int vi = (int)ev->dsp.p[DSP_VOWEL];
+            if (vi < 0 || vi > 14) { ev->lfo_unsupported=1; continue; }
+            base = first[vi];
+        }
         else if (gent) base=ev->dsp.p[gent->base];
         /* The amGain tremolo node is constructed with the static gain, so a
            generic tremolodepth LFO scales by that value (0 becomes 1). */

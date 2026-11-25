@@ -418,47 +418,48 @@ static void fm_visit(DspState *s,unsigned node,unsigned char visited[8]) {
     s->fm_order[s->fm_count++]=node;
 }
 
+/* Web vowel topology: five parallel bandpasses with per-formant gains
+   and a makeup gain of 8 (packages/superdough/vowel.mjs). Q reaches 140,
+   past the user-facing resonance clamp, so formants use unclamped RBJ
+   bandpass coefficients identical to the WebAudio definition. */
+static const int vowel_freqs[15][5] = {
+    {660,1120,2750,3000,3350},{440,1800,2700,3000,3300},{270,1850,2900,3350,3590},
+    {430,820,2700,3000,3300},{370,630,2750,3000,3400},{650,1515,2400,3000,3350},
+    {560,900,2570,3000,3300},{500,1430,2300,3000,3300},{250,1750,2150,3200,3300},
+    {400,1460,2400,3000,3300},{600,1250,2100,3100,3500},{500,1240,2280,3000,3500},
+    {600,1480,2450,3200,3300},{700,1050,2500,3000,3300},{500,1080,2350,3000,3300}
+};
+static const double vowel_gains[15][5] = {
+    {1,.5012,.0708,.0631,.0126},{1,.1995,.1259,.1,.1},{1,.0631,.0631,.0158,.0158},
+    {1,.3162,.0501,.0794,.01995},{1,.1,.0708,.0316,.01995},{1,.5,.1008,.0631,.0126},
+    {1,.5,.0708,.0631,.0126},{1,.2,.0708,.0316,.01995},{1,.1,.0708,.0316,.01995},
+    {1,.2,.0708,.0316,.02995},{1,.3,.0608,.0316,.01995},{1,.1,.1708,.0216,.02995},
+    {1,.15,.0708,.0316,.02995},{1,.1,.0708,.0316,.02995},{1,.1,.0708,.0316,.02995}
+};
+static const int vowel_qs[15][5] = {
+    {80,90,120,130,140},{70,80,100,120,120},{40,90,100,120,120},
+    {40,80,100,120,120},{40,60,100,120,120},{80,90,120,130,140},
+    {80,90,120,130,140},{40,60,100,120,120},{40,60,100,120,120},
+    {40,60,100,120,120},{40,70,100,120,130},{40,60,100,120,120},
+    {40,60,100,120,120},{40,60,100,120,120},{40,60,100,120,120}
+};
+
 void dsp_init(DspState *s, const DspParams *p) {
     memset(s, 0, sizeof(*s));
     s->control = *p;
     s->noise_seed = 0x1234567u;
     s->compressor_gain = 1;
     s->pulse[0]=-M_PI;
-    /* Web vowel topology: five parallel bandpasses with per-formant gains
-       and a makeup gain of 8 (packages/superdough/vowel.mjs). Q reaches 140,
-       past the user-facing resonance clamp, so formants use unclamped RBJ
-       bandpass coefficients identical to the WebAudio definition. */
-    static const int freqs[15][5] = {
-        {660,1120,2750,3000,3350},{440,1800,2700,3000,3300},{270,1850,2900,3350,3590},
-        {430,820,2700,3000,3300},{370,630,2750,3000,3400},{650,1515,2400,3000,3350},
-        {560,900,2570,3000,3300},{500,1430,2300,3000,3300},{250,1750,2150,3200,3300},
-        {400,1460,2400,3000,3300},{600,1250,2100,3100,3500},{500,1240,2280,3000,3500},
-        {600,1480,2450,3200,3300},{700,1050,2500,3000,3300},{500,1080,2350,3000,3300}
-    };
-    static const double gains[15][5] = {
-        {1,.5012,.0708,.0631,.0126},{1,.1995,.1259,.1,.1},{1,.0631,.0631,.0158,.0158},
-        {1,.3162,.0501,.0794,.01995},{1,.1,.0708,.0316,.01995},{1,.5,.1008,.0631,.0126},
-        {1,.5,.0708,.0631,.0126},{1,.2,.0708,.0316,.01995},{1,.1,.0708,.0316,.01995},
-        {1,.2,.0708,.0316,.02995},{1,.3,.0608,.0316,.01995},{1,.1,.1708,.0216,.02995},
-        {1,.15,.0708,.0316,.02995},{1,.1,.0708,.0316,.02995},{1,.1,.0708,.0316,.02995}
-    };
-    static const int qs[15][5] = {
-        {80,90,120,130,140},{70,80,100,120,120},{40,90,100,120,120},
-        {40,80,100,120,120},{40,60,100,120,120},{80,90,120,130,140},
-        {80,90,120,130,140},{40,60,100,120,120},{40,60,100,120,120},
-        {40,60,100,120,120},{40,70,100,120,130},{40,60,100,120,120},
-        {40,60,100,120,120},{40,60,100,120,120},{40,60,100,120,120}
-    };
     int vowel = (int)p->p[DSP_VOWEL];
     if (vowel >= 0 && vowel < 15)
         for (int i = 0; i < 5; i++) {
-            double w = 2*M_PI*clamp(freqs[vowel][i],20,SR*.45)/SR;
-            double alpha = sin(w)/(2*qs[vowel][i]);
+            double w = 2*M_PI*clamp(vowel_freqs[vowel][i],20,SR*.45)/SR;
+            double alpha = sin(w)/(2*vowel_qs[vowel][i]);
             double a0 = 1+alpha, c = cos(w);
             s->formant[i].b0 = alpha/a0; s->formant[i].b1 = 0; s->formant[i].b2 = -alpha/a0;
             s->formant[i].a1 = -2*c/a0; s->formant[i].a2 = (1-alpha)/a0;
             s->formant[i].z1 = s->formant[i].z2 = 0;
-            s->formant_gain[i] = gains[vowel][i];
+            s->formant_gain[i] = vowel_gains[vowel][i];
         }
     /* Cache which per-sample paths can change the signal. The controls are a
        copy fixed for the voice's lifetime, so this is computed once here. */
@@ -839,6 +840,21 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         }
     }
     if (p[DSP_VOWEL] >= 0) {
+        double vg = s->control.gen_lfo[GEN_VOWEL];
+        if (vg != 0) {
+            /* A generic vowel LFO shifts every formant by the same Hz
+               offset, matching the deployed connection to all five
+               filter frequencies. */
+            int vowel = (int)p[DSP_VOWEL];
+            if (vowel >= 0 && vowel < 15)
+                for (int i = 0; i < 5; i++) {
+                    double w = 2*M_PI*clamp(vowel_freqs[vowel][i]+vg,20,SR*.45)/SR;
+                    double alpha = sin(w)/(2*vowel_qs[vowel][i]);
+                    double a0 = 1+alpha, c = cos(w);
+                    s->formant[i].b0 = alpha/a0; s->formant[i].b1 = 0; s->formant[i].b2 = -alpha/a0;
+                    s->formant[i].a1 = -2*c/a0; s->formant[i].a2 = (1-alpha)/a0;
+                }
+        }
         double sum = 0;
         for (int i = 0; i < 5; i++) sum += biquad(&s->formant[i], x)*s->formant_gain[i];
         x = sum*8;
@@ -1176,12 +1192,12 @@ int dsp_supports_control(const char *name) {
 
 double dsp_pulse(DspState *s,double frequency) {
     double *m=s->pulse;
-    double width=s->control.p[DSP_PW];
-    if (s->control.p[DSP_PWSWEEP]!=0) {
+    double width=s->control.p[DSP_PW]+s->control.gen_lfo[GEN_PW];
+    if (s->control.p[DSP_PWSWEEP]+s->control.gen_lfo[GEN_PWSWEEP]!=0) {
         double phase=s->pulse_lfo_phase;
         double tri=phase<.5?phase*2:2-phase*2;
-        width=(float)((float)width+(float)((tri-.5)*s->control.p[DSP_PWSWEEP]));
-        phase+=s->control.p[DSP_PWRATE]/SR;
+        width=(float)((float)width+(float)((tri-.5)*(s->control.p[DSP_PWSWEEP]+s->control.gen_lfo[GEN_PWSWEEP])));
+        phase+=(s->control.p[DSP_PWRATE]+s->control.gen_lfo[GEN_PWRATE])/SR;
         s->pulse_lfo_phase=phase-floor(phase);
     }
     unsigned frame=s->pulse_frame++%128;

@@ -536,14 +536,13 @@ and measured divergences are recorded in the archive.
       tremolophase match. Generic tremoloshape is a recorded superset:
       the deployed float shape index crashes its worklet to silence while
       native steps the integer wave. Newly gated since: shapevol,
-      distortvol, distorttype (amount, matching the deployed node) and
-      tremolosync. Missing generic targets, each needing a native DSP
-      modulation point: delay and compressor params, plus dry/room/busgain,
-      detune unison, vowel, stretch and bmod. Voice-local follow-ups need
-      static parity first (no static PCM gates yet): vib/vibmod (native
-      sine vs worklet waves), pw/pwrate/pwsweep (native sine/triangle vs
-      lfo-processor), detune freqspread (native supersaw width) and the
-      vowel formant bank. Delay/dry/room/busgain generics need a design
+      distortvol, distorttype (amount, matching the deployed node),
+      tremolosync, vibmod (cents domain), static + generic pw/pwrate/pwsweep,
+      and static + generic vowel (all five formants shift by the same Hz
+      offset). Detune static mismatches (0.39): native supersaw width vs
+      the deployed freqspread model. Missing generic targets: delay and
+      compressor params, plus dry/room/busgain, detune unison, stretch and
+      bmod. Delay/dry/room/busgain generics need a design
       against the shared-sends architecture: upstream builds per-hap
       wet/dry/mix nodes while native shares one orbit line, and send gain
       is not wet gain under feedback. Generic `.env()` is parsed, validated and warned but never applied:

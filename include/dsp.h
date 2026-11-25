@@ -6,6 +6,21 @@
    without masking. */
 #define DSP_CHORUS_LEN 1152
 #define DSP_SUPERSAW_VOICES 100
+
+/* Indices into DspParams.gen_lfo: per-sample generic-modulation offsets,
+   driven by voice LFO slots (see voice_lfo_step_all). */
+enum {
+    GEN_TREM_RATE, GEN_TREM_GAIN, GEN_TREM_SKEW, GEN_TREM_SHAPE,
+    GEN_COARSE, GEN_CRUSH, GEN_SHAPE, GEN_SHAPEVOL,
+    GEN_DISTORT, GEN_DISTVOL, GEN_DISTTYPE,
+    GEN_PHCENTER, GEN_PHSWEEP, GEN_PHDEPTH, GEN_PHRATE,
+    GEN_COMP, GEN_COMPRATIO, GEN_COMPKNEE, GEN_COMPATT, GEN_COMPREL,
+    GEN_POSTGAIN,
+    NGEN
+};
+
+/* Voice LFO slot targets for DSP-param modulation start here (see GEN_*). */
+#define GEN_TGT_BASE 12
 typedef struct DspPeriodic DspPeriodic;
 double dsp_periodic_gain(int waveform);
 
@@ -24,8 +39,11 @@ enum {
     DSP_COMP, DSP_COMPRATIO, DSP_COMPKNEE, DSP_COMPATT, DSP_COMPREL, DSP_PCURVE,
     DSP_CHORUS, DSP_SHAPEVOL,
     DSP_LPRATE, DSP_LPDEPTH, DSP_LPDEPTHFREQ, DSP_LPSHAPE, DSP_LPDC, DSP_LPSKEW,
+    DSP_LPCURVE,
     DSP_HPRATE, DSP_HPDEPTH, DSP_HPDEPTHFREQ, DSP_HPSHAPE, DSP_HPDC, DSP_HPSKEW,
+    DSP_HPCURVE,
     DSP_BPRATE, DSP_BPDEPTH, DSP_BPDEPTHFREQ, DSP_BPSHAPE, DSP_BPDC, DSP_BPSKEW,
+    DSP_BPCURVE,
     DSP_ROOMFADE, DSP_ROOMLP, DSP_ROOMDIM,
     DSP_FMBASE, /* 8 operators: index, ratio, A, D, S, R, envelope type, waveform */
     DSP_COUNT = DSP_FMBASE + 8 * 8
@@ -34,6 +52,7 @@ enum {
 typedef struct {
     int enabled;
     double p[DSP_COUNT];
+    double gen_lfo[NGEN]; /* per-sample generic-modulation offsets, voice-driven (see GEN_*) */
     double matrix[8][9]; /* source -> carrier (0) or operator (1..8) */
     double partials[32], phases[32];
     double supersaw_detune; /* total unison width in semitones, not pitch cents */
@@ -47,6 +66,7 @@ typedef struct {
     int n_partials;
     int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
     double lfo_start_time; /* absolute node start; -1 disables the quantum hold */
+    double q_lfo[3]; /* per-sample generic resonance offset, voice-driven */
 } DspParams;
 
 typedef struct {
@@ -70,6 +90,9 @@ typedef struct {
     unsigned fm_order[8], fm_count, fm_frame;
     unsigned fm_initial_frames;
     double phaser_z[6], phaser_feedback;
+    double phaser_lfo_phase; /* absolute worklet phase base (cycles) */
+    double phaser_fm_phase; /* accumulated generic-LFO rate offset (cycles) */
+    double trem_fm_phase; /* accumulated generic-LFO rate offset (cycles) */
     int lfo_switched;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;

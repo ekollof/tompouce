@@ -989,44 +989,312 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     if (ev->delay_time<=0 || ev->delay_fb==0) ev->delay_send=0;
 }
 
-/* Generic Strudel `.lfo()` modulation. Native supports the relative-depth
-   triangle gain path; other targets keep their static value and surface one
-   warning instead of silently misrendering. */
-static void read_generic_lfo(AudioEvent *ev, const cJSON *value) {
+/* Generic Strudel `.lfo()` modulation. Matches the deployed superdough
+   lfo-processor: defaults rate=1 depth=1 dcoffset=-.5 triangle skew=.5
+   curve=1; depth scales by the target value (1 when the target is 0);
+   frequency targets clamp the LFO output to [20-base, 24000-base] when the
+   base is >= 30 Hz. Unsupported targets keep their static value and surface
+   one warning instead of silently misrendering. */
+static double lfo_alias_number(const cJSON *entry, const char *a, const char *b,
+    const char *c, double initial, double lo, double hi) {
+    const char *names[3] = {a, b, c};
+    for (int i = 0; i < 3; i++) {
+        if (!names[i]) continue;
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(entry, names[i]);
+        if (cJSON_IsNumber(p) && isfinite(p->valuedouble))
+            return fmax(lo, fmin(hi, p->valuedouble));
+    }
+    return initial;
+}
+
+static int lfo_shape_number(const cJSON *entry) {
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(entry, "shape");
+    if (!p) p = cJSON_GetObjectItemCaseSensitive(entry, "sh");
+    if (cJSON_IsNumber(p) && isfinite(p->valuedouble)) {
+        int shape = (int)lround(p->valuedouble);
+        return shape >= 0 && shape <= 4 ? shape : 0;
+    }
+    if (cJSON_IsString(p) && p->valuestring) {
+        static const char *const names[] = {"tri","triangle","sine","ramp","saw","square"};
+        static const int shapes[] = {0,0,1,2,3,4};
+        for (int i = 0; i < 6; i++)
+            if (!strcasecmp(p->valuestring, names[i])) return shapes[i];
+    }
+    return 0;
+}
+
+/* Generic LFO targets that modulate DSP params through per-sample voice
+   offsets (see GEN_*). The node must exist upstream: its primary control
+   must be present in the hap, except postgain whose node always exists. */
+typedef struct { const char *name; int gen; int base; int freq; const char *need; } GenTarget;
+static const GenTarget gen_targets[] = {
+    {"tremolo", GEN_TREM_RATE, DSP_TREM, 1, "tremolo"},
+    {"tremolosync", GEN_TREM_RATE, DSP_TREM, 1, "tremolosync"},
+    {"tremolodepth", GEN_TREM_GAIN, DSP_TDEPTH, 0, "tremolo"},
+    {"tremoloskew", GEN_TREM_SKEW, DSP_TSKEW, 0, "tremolo"},
+    {"tremoloshape", GEN_TREM_SHAPE, DSP_TSHAPE, 0, "tremolo"},
+    {"coarse", GEN_COARSE, DSP_COARSE, 0, "coarse"},
+    {"crush", GEN_CRUSH, DSP_CRUSH, 0, "crush"},
+    {"shape", GEN_SHAPE, DSP_SHAPE, 0, "shape"},
+    {"shapevol", GEN_SHAPEVOL, DSP_SHAPEVOL, 0, "shape"},
+    {"distort", GEN_DISTORT, DSP_DISTORT, 0, "distort"},
+    {"distortvol", GEN_DISTVOL, DSP_DISTVOL, 0, "distort"},
+    {"distorttype", GEN_DISTORT, DSP_DISTORT, 0, "distort"},
+    {"phasercenter", GEN_PHCENTER, DSP_PHCENTER, 1, "phaserrate"},
+    {"phasersweep", GEN_PHSWEEP, DSP_PHSWEEP, 0, "phaserrate"},
+    {"phaserdepth", GEN_PHDEPTH, DSP_PHDEPTH, 0, "phaserrate"},
+    {"phaserrate", GEN_PHRATE, DSP_PHASER, 1, "phaserrate"},
+    {"compressor", GEN_COMP, DSP_COMP, 0, "compressor"},
+    {"compressorRatio", GEN_COMPRATIO, DSP_COMPRATIO, 0, "compressor"},
+    {"compressorKnee", GEN_COMPKNEE, DSP_COMPKNEE, 0, "compressor"},
+    {"compressorAttack", GEN_COMPATT, DSP_COMPATT, 0, "compressor"},
+    {"compressorRelease", GEN_COMPREL, DSP_COMPREL, 0, "compressor"},
+    {"postgain", GEN_POSTGAIN, DSP_POST, 0, NULL},
+    {NULL, 0, 0, 0, NULL}
+};
+
+static const GenTarget *gen_target(const char *name, const cJSON *value) {
+    for (int i = 0; gen_targets[i].name; i++) {
+        if (strcmp(name, gen_targets[i].name)) continue;
+        const char *need = gen_targets[i].need;
+        if (!need) return &gen_targets[i];
+        if (!strcmp(need, "tremolo")) {
+            if (cJSON_HasObjectItem(value,"tremolo") || cJSON_HasObjectItem(value,"tremolosync")) return &gen_targets[i];
+        } else if (!strcmp(need, "phaserrate")) {
+            if (cJSON_HasObjectItem(value,"phaserrate") && control(value,"phaserdepth",.75,0,16) > 0) return &gen_targets[i];
+        } else if (cJSON_HasObjectItem(value,need)) return &gen_targets[i];
+        return NULL;
+    }
+    return NULL;
+}
+
+static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sound) {
     const cJSON *lfo=cJSON_GetObjectItemCaseSensitive(value,"lfo");
     if (!cJSON_IsObject(lfo)) return;
+    /* The deployed renderer connects every entry and sums repeats on the
+       same target. Native keeps one slot per entry in encounter order (up
+       to LFO_SLOTS; further entries warn), and one LFO per filter type, so
+       scanning continues and later unsupported targets still warn instead
+       of vanishing silently. Sample routings use the detune fallback
+       (cents) exactly like the deployed getNodeParam frequency->detune
+       fallback. */
+    int filt_used=0;
+    /* Mirror the sample-resolution branch: oscillator, wavetable and native
+       sounds stay frequency-routed; everything else takes the deployed
+       detune fallback (cents). Procedural drums ignore voice LFOs in either
+       routing, and noteless sample playback has no oscillator pitch. */
+    int is_osc = sound && oscillator(sound) >= 0;
+    int wavetable = sound && !strncmp(sound,"wt_",3);
+    int sample_routed = sound && sound[0] && !is_osc && !wavetable &&
+        ev->inst != INST_NATIVE && ev->inst != INST_ADDITIVE;
     const cJSON *entry;
     cJSON_ArrayForEach(entry,lfo) {
         if (!entry->string || !strcmp(entry->string,"__ids") ||
             !cJSON_IsObject(entry)) continue;
         const cJSON *target=cJSON_GetObjectItemCaseSensitive(entry,"control");
         if (!cJSON_IsString(target) || !target->valuestring) continue;
-        double rate=control(entry,"rate",0,0,1000);
-        double depth=control(entry,"depth",0,-100,100);
-        double absolute=control(entry,"depthabs",0,-100000,100000);
-        if (!(rate>0) || (depth==0 && absolute==0)) continue;
-        const char *name=target->valuestring;
-        if (!strcmp(name,"gain") || !strcmp(name,"amp")) {
-            ev->lfo_tgt=2;
-            ev->lfo_wave=0;
-            ev->lfo_hz=rate;
-            ev->lfo_depth=(absolute?absolute:depth)/2;
-            return;
+        /* Route to a different node than the default chain when the web
+           would: sub-control modulation and non-main FX buses need node
+           graphs native does not reproduce. */
+        const cJSON *sub=cJSON_GetObjectItemCaseSensitive(entry,"subControl");
+        if (!sub) sub=cJSON_GetObjectItemCaseSensitive(entry,"sc");
+        const cJSON *fxi=cJSON_GetObjectItemCaseSensitive(entry,"fxi");
+        int fx_main = !cJSON_IsNumber(fxi) || fxi->valuedouble==0;
+        if (!fx_main) { ev->lfo_unsupported=1; continue; }
+        if ((cJSON_IsString(sub) && sub->valuestring && sub->valuestring[0]) ||
+            (cJSON_IsNumber(sub) && isfinite(sub->valuedouble))) {
+            ev->lfo_unsupported=1; continue;
         }
+        double rate=lfo_alias_number(entry,"rate","r",NULL,1,0,1000);
+        double sync=lfo_alias_number(entry,"sync","s",NULL,0,0,64);
+        if (cJSON_HasObjectItem(entry,"sync") || cJSON_HasObjectItem(entry,"s"))
+            rate=sync*ev->cps;
+        double depth=lfo_alias_number(entry,"depth","dep","dr",1,-100,100);
+        double absolute=lfo_alias_number(entry,"depthabs","da",NULL,0,-100000,100000);
+        double dc=lfo_alias_number(entry,"dcoffset","dc",NULL,-.5,-100,100);
+        double skew=lfo_alias_number(entry,"skew","sk",NULL,.5,.001,.999);
+        double curve=lfo_alias_number(entry,"curve","cu",NULL,1,.001,64);
+        double phaseoff=lfo_alias_number(entry,"phaseoffset",NULL,NULL,0,0,1);
+        if (!(rate>0)) continue;
+        const char *name=target->valuestring;
+        int is_gain=!strcmp(name,"gain") || !strcmp(name,"amp");
+        int is_source=!strcmp(name,"s") || !strcmp(name,"source") ||
+            !strcmp(name,"frequency") || !strcmp(name,"Freq") ||
+            !strcmp(name,"freq") || !strcmp(name,"note");
+        int is_pan=!strcmp(name,"pan");
         int type=!strcmp(name,"cutoff")?0:!strcmp(name,"hcutoff")?1:
             !strcmp(name,"bandf")?2:-1;
+        int qtype=!strcmp(name,"resonance")?0:!strcmp(name,"hresonance")?1:
+            !strcmp(name,"bandq")?2:-1;
+        const GenTarget *gent = gen_target(name, value);
+        /* Upstream only builds a pan node when the hap carries pan, only
+           builds each filter node when its cutoff is set, and only builds
+           effect nodes when their control is set; otherwise the connection
+           warns instead of modulating. */
+        if (is_pan && !ev->has_pan) { ev->lfo_unsupported=1; continue; }
+        if (qtype>=0 && !(ev->dsp.p[qtype*7]>0)) { ev->lfo_unsupported=1; continue; }
+        if (!is_gain && !is_source && !is_pan && qtype<0 && !gent && type<0) { ev->lfo_unsupported=1; continue; }
+        double base=0;
+        if (is_gain) base=ev->gain;
+        else if (is_source) base=sample_routed?1:ev->freq;
+        else if (is_pan) base=ev->pan;
+        else if (type>=0) base=ev->dsp.p[type*7];
+        else if (qtype>=0) base=ev->dsp.p[qtype*7+1];
+        else if (gent) base=ev->dsp.p[gent->base];
+        /* The amGain tremolo node is constructed with the static gain, so a
+           generic tremolodepth LFO scales by that value (0 becomes 1). */
+        if (gent && gent->gen == GEN_TREM_GAIN)
+            base = 1.0-base > 0 ? 1.0-base : 0.0;
+        /* The deployed phaser filter is constructed at center+282 Hz with
+           Q from depth, so generic phasercenter/phasedepth LFOs scale by
+           those node values. */
+        if (gent && gent->gen == GEN_PHCENTER) base += 282.0;
+        if (gent && gent->gen == GEN_PHDEPTH)
+            base = 2.0 - fmin(fmax(base*2.0, 0.0), 1.9);
+        if (!(base>0) && !(base<0)) {
+            if (is_gain || is_source) base=1;
+            else if (is_pan) base=1;
+            else if (qtype>=0) base=1;
+            else if (gent) base=1;
+            else if (type>=0 && !(base>0)) { ev->lfo_unsupported=1; continue; }
+        }
+        if (depth==0 && absolute==0) continue;
+        double scaled=absolute?absolute:depth*base;
+        double min, max;
+        if (is_source && !sample_routed && base>=30) { min=20-base; max=24000-base; }
+        else if (gent && gent->freq && base>=30) { min=20-base; max=24000-base; }
+        else { min=dc*scaled; max=dc*scaled+scaled; }
+        int shape=lfo_shape_number(entry);
+        /* Voice slots fill in encounter order; repeats on the same target
+           take their own slots and sum in the renderer, matching the
+           deployed node-per-entry graph. Filter frequency targets use the
+           DSP path below instead; resonance targets ride voice slots whose
+           offsets the DSP update reads per sample. */
+        if (is_gain || is_source || is_pan || qtype>=0 || gent) {
+            int slot=-1;
+            for (int i = 0; i < LFO_SLOTS; i++)
+                if (!ev->lfo[i].tgt) { slot=i; break; }
+            if (slot<0) { ev->lfo_unsupported=1; continue; }
+            int tgt=is_gain?2:is_source?(sample_routed?7:5):is_pan?8:qtype>=0?9+qtype:GEN_TGT_BASE+gent->gen;
+            /* The deployed node phases from cycle/cps (onset time divided by
+               tempo); retrig restarts from the phase offset instead. */
+            const cJSON *retrig=cJSON_GetObjectItemCaseSensitive(entry,"retrig");
+            if (!retrig) retrig=cJSON_GetObjectItemCaseSensitive(entry,"rt");
+            int retrigger=cJSON_IsNumber(retrig) && isfinite(retrig->valuedouble) &&
+                retrig->valuedouble>.5;
+            /* Upstream phases from cycle/cps; the offline render path passes
+               the onset time as cycle, so onset/cps matches the gated PCM.
+               Live transport offsets are approximated by the same base. */
+            ev->lfo[slot].tgt=tgt;
+            ev->lfo[slot].wave=shape;
+            ev->lfo[slot].hz=rate;
+            ev->lfo[slot].depth=scaled;
+            ev->lfo[slot].skew=skew;
+            ev->lfo[slot].curve=curve;
+            ev->lfo[slot].dc=dc;
+            ev->lfo[slot].phase=phaseoff;
+            ev->lfo[slot].min=min;
+            ev->lfo[slot].max=max;
+            ev->lfo[slot].timebase=(retrigger||!(ev->cps>0))?0:ev->time/ev->cps;
+            if (tgt>=9) ev->dsp.lfo_sample_rate=1;
+            continue;
+        }
         if (type>=0 && ev->dsp.p[type*7]>0) {
-            int p=DSP_LPRATE+type*6;
+            if (filt_used&(1<<type)) continue;
+            filt_used|=(1<<type);
+            int p=DSP_LPRATE+type*7;
             ev->dsp.p[p]=rate;
             ev->dsp.p[p+1]=absolute?0:depth;
             ev->dsp.p[p+2]=absolute;
-            ev->dsp.p[p+3]=1; /* triangle */
-            ev->dsp.p[p+4]=-.5;
-            ev->dsp.p[p+5]=.5;
+            ev->dsp.p[p+3]=shape==0?1:shape==1?0:shape==2?4:shape==3?3:2;
+            ev->dsp.p[p+4]=dc;
+            ev->dsp.p[p+5]=skew;
+            ev->dsp.p[p+6]=curve;
             ev->dsp.lfo_sample_rate=1;
-            return;
+            continue;
         }
         ev->lfo_unsupported=1;
+    }
+}
+
+/* Generic Strudel `.env()` modulation. Matches the deployed
+   envelope-processor: ADSR segments with warp curves, output
+   clamp(val*depth, min, max), depth scaled by the target value (1 when the
+   target is 0), same frequency-target clamp as the LFO path. Cutoff targets
+   stay unsupported for now (no per-sample generic envelope in the filter
+   path); other unsupported targets warn instead of silently misrendering. */
+static void read_generic_env(AudioEvent *ev, const cJSON *value, const char *sound) {
+    const cJSON *env=cJSON_GetObjectItemCaseSensitive(value,"env");
+    if (!cJSON_IsObject(env)) return;
+    int is_osc = sound && oscillator(sound) >= 0;
+    int wavetable = sound && !strncmp(sound,"wt_",3);
+    int sample_routed = sound && sound[0] && !is_osc && !wavetable &&
+        ev->inst != INST_NATIVE && ev->inst != INST_ADDITIVE;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry,env) {
+        if (!entry->string || !strcmp(entry->string,"__ids") ||
+            !cJSON_IsObject(entry)) continue;
+        const cJSON *target=cJSON_GetObjectItemCaseSensitive(entry,"control");
+        if (!cJSON_IsString(target) || !target->valuestring) continue;
+        const cJSON *sub=cJSON_GetObjectItemCaseSensitive(entry,"subControl");
+        if (!sub) sub=cJSON_GetObjectItemCaseSensitive(entry,"sc");
+        const cJSON *fxi=cJSON_GetObjectItemCaseSensitive(entry,"fxi");
+        int fx_main = !cJSON_IsNumber(fxi) || fxi->valuedouble==0;
+        if (!fx_main) { ev->env_unsupported=1; continue; }
+        if ((cJSON_IsString(sub) && sub->valuestring && sub->valuestring[0]) ||
+            (cJSON_IsNumber(sub) && isfinite(sub->valuedouble))) {
+            ev->env_unsupported=1; continue;
+        }
+        double attack=lfo_alias_number(entry,"attack","att","a",.005,0,30);
+        double decay=lfo_alias_number(entry,"decay","dec","d",.14,0,30);
+        double sustain=lfo_alias_number(entry,"sustain","sus","s",0,0,1);
+        double rel=lfo_alias_number(entry,"release","rel","r",.1,0,30);
+        double acurve=lfo_alias_number(entry,"acurve","ac",NULL,0,-1,1);
+        double dcurve=lfo_alias_number(entry,"dcurve","dc",NULL,0,-1,1);
+        double rcurve=lfo_alias_number(entry,"rcurve","rc",NULL,0,-1,1);
+        double depth=lfo_alias_number(entry,"depth","dep","dr",1,-100,100);
+        double absolute=lfo_alias_number(entry,"depthabs","da",NULL,0,-100000,100000);
+        const char *name=target->valuestring;
+        int is_gain=!strcmp(name,"gain") || !strcmp(name,"amp");
+        int is_source=!strcmp(name,"s") || !strcmp(name,"source") ||
+            !strcmp(name,"frequency") || !strcmp(name,"Freq") ||
+            !strcmp(name,"freq") || !strcmp(name,"note");
+        int is_pan=!strcmp(name,"pan");
+        if (is_pan && !ev->has_pan) { ev->env_unsupported=1; continue; }
+        if (!is_gain && !is_source && !is_pan) { ev->env_unsupported=1; continue; }
+        double base=0;
+        if (is_gain) base=ev->gain;
+        else if (is_source) base=sample_routed?1:ev->freq;
+        else if (is_pan) base=ev->pan;
+        if (!(base>0) && !(base<0)) base=1;
+        if (depth==0 && absolute==0) continue;
+        double scaled=absolute?absolute:depth*base;
+        double min, max;
+        /* connectEnvelope clamps only audio-rate frequency targets; the
+           worklet itself defaults min/max to +-1e9 (no dcoffset term). */
+        if (is_source && !sample_routed && base>=30) { min=20-base; max=24000-base; }
+        else { min=-1e9; max=1e9; }
+        /* The deployed envelope node never starts (connectEnvelope omits
+           begin/end, so begin stays equal to the worklet's initial
+           beginTime): entries are recorded for diagnostics but never
+           rendered, matching the site sample-for-sample. */
+        ev->env_unsupported = 1;
+        int slot=-1;
+        for (int i = 0; i < ENV_SLOTS; i++)
+            if (!ev->env[i].tgt) { slot=i; break; }
+        if (slot<0) continue;
+        int tgt=is_gain?2:is_source?(sample_routed?7:5):8;
+        ev->env[slot].tgt=tgt;
+        ev->env[slot].attack=attack;
+        ev->env[slot].decay=decay;
+        ev->env[slot].sustain=sustain;
+        ev->env[slot].release=rel;
+        ev->env[slot].acurve=acurve;
+        ev->env[slot].dcurve=dcurve;
+        ev->env[slot].rcurve=rcurve;
+        ev->env[slot].depth=scaled;
+        ev->env[slot].min=min;
+        ev->env[slot].max=max;
     }
 }
 
@@ -1089,8 +1357,7 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         ev->dsp.p[DSP_TREM] = control(v,"tremolosync",0,0,1024)/seconds;
     const char *sync[] = {"lpsync","hpsync","bpsync"};
     for (int i = 0; i < 3; i++)
-        if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*6] = control(v,sync[i],0,0,1024)/seconds;
-    read_generic_lfo(ev,v);
+        if (cJSON_HasObjectItem(v,sync[i])) ev->dsp.p[DSP_LPRATE+i*7] = control(v,sync[i],0,0,1024)/seconds;
     apply_fx_steps(ev,v);
     const char *sound = text_control(v,"s");
     if (!strncmp(sound,"lv2:",4))
@@ -1144,9 +1411,19 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
         ev->inst=INST_NATIVE; ev->is_drum=0;
     }
     ev->freq = control(v,"freq",440*pow(2,(midi-69)/12),.01,SR*.45);
+    /* Superdough multiplies the resolved frequency by 2^octave, including
+       explicit freq values. The LFO source base below follows from this. */
+    double octave = control(v,"octave",0,-16,16);
+    if (octave) ev->freq = fmax(.01,fmin(SR*.45,ev->freq*pow(2,octave)));
     /* Static detune is a unison-width control in the REPL, not a generic
        transposition. Pitch envelopes and vibrato automate source detune. */
     if (ev->is_drum) ev->freq = 0;
+    /* Generic LFO depth scales by its target value, so parse it after the
+       frequency, gain and filter base values are known. */
+    read_generic_lfo(ev,v,sound);
+    /* Generic envelope depth scales by its target value like the LFO, so
+       parse it after the frequency, gain and filter base values are known. */
+    read_generic_env(ev,v,sound);
     snprintf(ev->token,sizeof(ev->token),"%.63s",*sound ? sound : native?"kabelsalat":"triangle");
     if (ev->inst == INST_WT) ev->wt = wt_find(sound+3);
     const cJSON *channel = cJSON_GetObjectItemCaseSensitive(v,"midichan");
@@ -1551,7 +1828,10 @@ static int plan_hap(JsProgram *program, const cJSON *hap, double time,
     if (!audio_event_values(hap,plan->origin,seconds,&event,0)) return 0;
     if (event.lfo_unsupported)
         javascript_warn_once(program,"lfo-target",
-            "native audio: LFO modulation is implemented only for gain and cutoff");
+            "native audio: LFO modulation is implemented for gain, cutoff, source and pan");
+    if (event.env_unsupported)
+        javascript_warn_once(program,"env-target",
+            "native audio: generic .env() does not modulate (matches the deployed player, whose envelope node never starts)");
     plan->kind=csound?HAP_IMMEDIATE:HAP_SOURCE;
     return 1;
 }

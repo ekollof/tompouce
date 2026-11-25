@@ -20,4 +20,11 @@ fi
 
 LD_PRELOAD="$helper${LD_PRELOAD:+:$LD_PRELOAD}"
 export LD_PRELOAD
+# Isolate the user prebake store: enabled prebakes (gain curves, default
+# gains) would otherwise leak into every render and test. Tests that need
+# prebakes point XDG_CONFIG_HOME at their own directory.
+isolated_config=$(mktemp -d "${TMPDIR:-/tmp}/tompouce-test-config.XXXXXX")
+trap 'rm -rf "$isolated_config"' EXIT HUP INT TERM
+XDG_CONFIG_HOME="$isolated_config"
+export XDG_CONFIG_HOME
 exec ctest --test-dir "$root/build" "$@"

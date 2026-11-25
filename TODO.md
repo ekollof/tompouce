@@ -428,8 +428,25 @@ and measured divergences are recorded in the archive.
       gate at **0.99935/0.98384** and **0.99556/1.01511** (windowStart 1.137 s)
       with the unchanged thresholds. Suppressing `AudioNode.disconnect` did not
       help; the truncation was IR readiness, not node release.
-- [x] Generic `.lfo()` gain and cutoff paths. Gain uses a relative-depth
-      triangle; `lfo-generic-gain` passes at **0.99965/0.99920**. Cutoff maps
+- [x] Generic `.lfo()` gain, cutoff, source-frequency and pan paths. Voice
+      targets (gain, source Hz, sample cents, pan) follow the deployed
+      `lfo-processor` math (defaults `rate=1 depth=1 dcoffset=-.5` triangle
+      `skew=.5 curve=1`, depth scaled by the target value, `sync` as
+      cycles-per-second multiples, output clamped to `[20-base, 24000-base]`
+      for audio-rate frequency targets at or above 30 Hz, absolute-start
+      phase). A bare `.lfo()` targets the control immediately before it, so
+      `s("saw").lfo().lpf(800)` is a source-frequency LFO: native renders the
+      tutorial vibrato (zero-crossing contour tracks the deployed sweep, e.g.
+      35/55/65/80/90/90/80/65/50/40 Hz per 100 ms against
+      35/55/65/75/95/90/80/65/55/35 Hz). Sample voices use the deployed
+      detune fallback (cents, base 1): gain LFO gates at **0.995/0.99** and
+      the cents path at **1.0/1.0002** (`lfo-sample-gain`,
+      `lfo-sample-detune`). Pan requires explicit `.pan()` (as upstream
+      requires the pan node) and recomputes the equal-power StereoPanner
+      split every sample; it gates at **0.99977/1.0003** (`lfo-pan`).
+      Voices with active voice slots bypass the SoA batch lanes, which have
+      no slot support (previously sample LFOs were silently dropped by the
+      lanes). Cutoff maps
       the deployed worklet parameters (`depth=1000`, `dc=-.5`, `min=-480`,
       `max=23500`, triangle, 0.5 Hz) onto the scalar sample-rate filter LFO;
       both the full 0.6 s window (**0.998685/1.00196**) and the steady
@@ -449,11 +466,82 @@ and measured divergences are recorded in the archive.
       which is a filter transient rather than the source. A one-quantum base
       hold improves full correlation to 0.8336 but overshoots (RMS 2.52, peak
       1.0) and is rejected. The onset is a more complex graph/filter connection
-      response. Other targets keep their static value and log
-      one `LFO modulation is implemented only for gain and cutoff` warning.
-      `test_audio` locks the cutoff mapping, SoA bypass and dynamic-vs-static
-      PCM. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato, pulse-width LFO and
-      tremolo remain separate supported controls.
+      response. Other targets keep their static value and log one warning
+      naming the unsupported target and the expected order. Each voice target
+      takes one slot per entry in encounter order (up to 8) and repeats sum
+      in the renderer; each filter LFO type keeps the first entry. Scanning
+      continues past the first hit so later unsupported targets still warn. `subControl`
+      and non-main `fxi` routings warn instead of misrendering. `test_audio`
+      locks the cutoff mapping, the pan LFO swing, SoA bypass and
+      dynamic-vs-static PCM. `octave` multiplies the resolved frequency per
+      `getFrequencyFromValue`. Filter-specific `lp`/`hp`/`bp` LFOs, vibrato,
+      pulse-width LFO and tremolo remain separate supported controls.
+- [x] Test/compare prebake isolation. The round-ratio "gain drift" family
+      (`lfo-generic-gain` at 0.49960, `wt-sample-lfo-sine` at 0.50014, all saw
+      gates near 1.25, `fx-pattern-gain` at 0.40, `kabel-order-gain-*` at the
+      pattern gain) was **not** a deployed-player change: the user's enabled
+      Switch Angel prebake (`setGainCurve(x => x**2)`, `setDefault('gain',1)`)
+      leaked into every native render and test, since neither `ctest-safe.sh`
+      nor `compare-audio.mjs` isolated `XDG_CONFIG_HOME`. Ratios equal to the
+      pattern gain (or its square) are the signature. `ctest-safe.sh` now
+      exports an empty owned `XDG_CONFIG_HOME` (tests needing prebakes
+      self-isolate, e.g. `test_prebake`, `test_midi_manifest`), and
+      `compare-audio.mjs` runs non-prebake PCM cases under the empty bakery
+      dir (prebake cases keep the pinned starter). This also fixed the two
+      blocking unit failures, which reproduce the same contamination
+      (`test_control_aliases` saw curved gain .49 instead of .7;
+      `test_pattern_fx_chain_pcm` compared .32 against curved .4*.8): both
+      pass now. Full suite is 55/56; `hydra_webgl` still fails identically on
+      the clean tree (headless-WebGL smoke, no C audio involved).
+- [x] Generic `.lfo()` full PCM parity. With isolation, gain LFO gates at
+      **1.0/1.0002** (`lfo-generic-gain`), pan at **0.99977/1.0003**
+      (`lfo-pan`), sample gain at **1.0/1.0004** (`lfo-sample-gain`) and
+      sample detune at **1.0/1.0002**, and all level ratios sit near 1.0.
+      Non-finite `pow(curve)` output reads the target AudioParam default on
+      the deployed node (gain 1.0, frequency 440), verified sample-for-sample
+      against the live player for two bases and gated (`lfo-nan-gain`
+      **0.99834/1.0018**, `lfo-nan-gain-high` **0.99981/1.0007**).
+      Source-frequency LFO was stuck at 0.94 (sine) / 0.73 (saw) with
+      matching sweep contours: the deployed `lfo-processor` leaves its first
+      128-sample block unwritten (`currentTime <= begin`) while its absolute
+      phase stays frozen, so the first-block modulation integrated into a
+      permanent ~35-degree phase offset. Voice LFOs now hold static values
+      for the render quantum containing the voice start (mirroring the
+      scalar filter path's one-quantum base hold): the tutorial example
+      `s("saw").lfo().lpf(800)` gates at **1.0/1.0001**
+      (`lfo-source-default`), no-filter saw at **0.99988/0.9994**
+      (`lfo-source-only`) and sine at **1.0/1.0001**
+      (`lfo-source-sine`), all at the unchanged 0.99/0.85-1.15 limits.
+      Reference is vendored at `.reference/strudel` (gitignored):
+      `packages/superdough/modulators.mjs` (`connectLFO`: `depth=currentValue`
+      scaling with 0->1, freq clamp `[20-base, 24000-base]`, phase
+      `ffrac(time*freq+phaseoffset)` with `time=retrig>0.5?0:cycle/cps`),
+      `helpers.mjs` (`getLfo` defaults), `worklets.mjs` (`LFOProcessor`
+      wave/clamp math) and `packages/webaudio/webaudio.mjs` (the offline
+      render path passes the onset time as `cycle`, so gated PCM uses
+      `time=onset/cps`; live uses `time=whole.begin/cps` — the two disagree
+      upstream, native matches the render path). The deployed filter LFO
+      (verified in the strudel.cc bundle) clamps absolute frequency to
+      [30, 20000], unlike 1.3.0's relative clamp; only the generic path is
+      gated so native models the generic `[20-base, 24000-base]` clamp.
+      Known LFO-adjacent gaps, all verified against the reference:
+      procedural-drum fixed tone (snare 200 Hz tone ignores pitch LFO);
+      wavetable-sample cents (position stepping lives inside the wavetable
+      voice); stretched source-frequency LFO (upstream target unclear);
+      negative-base `pow(curve)` on filter LFOs through the new curve slot
+      (unmeasured); live phase uses the render-path base (the site's own live
+      path disagrees with its render path). Newly gated generic targets:
+      tremolo rate/depth, coarse, crush, shape, distort, phaser center and
+      postgain, plus static tremolo and static phaser. Missing generic
+      targets, each needing a native DSP modulation point: resonance/Q
+      follow-ups, tremolo skew/phase/shape, phaser rate/sweep/depth, delay
+      and compressor params, plus dry/room/busgain, detune unison, vowel,
+      stretch and bmod.
+      Generic `.env()` is parsed, validated and warned but never applied:
+      the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
+      never leaves the initial state (verified flat on strudel.cc with and
+      without explicit `begin: 0, end: 2`); native matches the silence
+      exactly (`env-inert-gain` gates static PCM at 1.0/1.0002).
 - [x] Cutoff-LFO full onset. The full 0.6 s window passes at
       **0.998685/1.00196** and the steady section at **0.9999996/1.00009**.
       The pattern without `.lfo()` matches the complete window at 0.99999995,

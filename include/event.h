@@ -56,6 +56,30 @@ typedef struct {
     float value;
 } AudioLv2Param;
 
+#define LFO_SLOTS 8
+#define ENV_SLOTS 4
+typedef struct {
+    int tgt;            /* 0 off, 1 freq (legacy semitone), 2 gain, 3 lpf, 4 pw,
+                           5 source freq (additive Hz), 7 sample detune (cents), 8 pan */
+    int wave;           /* web shape: 0 triangle, 1 sine, 2 ramp, 3 saw, 4 square */
+    double hz;
+    double depth;       /* scaled depth y (Hz, cents, pan units or linear gain) */
+    double skew;        /* triangle/square skew, default .5 */
+    double curve;       /* exponent, default 1 */
+    double dc;          /* dcoffset, default -.5 */
+    double phase;       /* phase offset in cycles */
+    double timebase;    /* cycle/cps onset base for the absolute phase */
+    double min, max;    /* output clamp bounds */
+} LfoSlot;
+typedef struct {
+    int tgt;            /* 2 gain, 5 source freq (additive Hz), 7 sample detune
+                           (cents), 8 pan; generic cutoff env is unsupported */
+    double attack, decay, sustain, release;
+    double acurve, dcurve, rcurve; /* -1..1 warp, 0 linear */
+    double depth;       /* scaled depth y */
+    double min, max;    /* output clamp bounds */
+} EnvSlot;
+
 typedef struct {
     unsigned generation; /* 0 = legacy; JS generation must match the queue */
     unsigned scope_mask; /* visualization call sites attached to this pattern */
@@ -162,11 +186,10 @@ typedef struct {
     double duck_onset;  /* seconds from source onset to minimum gain */
     int duck_values;
     DuckControl ducks[N_ORBITS];
-    int lfo_tgt;        /* 0 off, 1 freq, 2 gain, 3 lpf, 4 pw */
-    int lfo_wave;       /* 0 triangle, 1 sine, 2 saw, 3 square */
-    double lfo_hz;
-    double lfo_depth;
+    LfoSlot lfo[LFO_SLOTS];
     int lfo_unsupported; /* generic .lfo() target outside gain */
+    EnvSlot env[ENV_SLOTS];
+    int env_unsupported; /* generic .env() target outside gain/source/pan */
     DspParams dsp;
     int fx_stage_count;
     int fx_room_present;

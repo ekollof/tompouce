@@ -36,11 +36,11 @@ static const Parameter parameters[] = {
     {"compressorAttack",.003,0,1}, {"compressorRelease",.25,0,1}, {"pcurve",0,0,1},
     {"chorus",0,0,1},{"shapevol",1,0,16},
     {"lprate",0,0,20000},{"lpdepth",1,0,16},{"lpdepthfrequency",0,0,20000},
-    {"lpshape",0,0,4},{"lpdc",-.5,-1,1},{"lpskew",.5,.001,.999},
+    {"lpshape",0,0,4},{"lpdc",-.5,-1,1},{"lpskew",.5,.001,.999},{"lpcurve",1,.001,64},
     {"hprate",0,0,20000},{"hpdepth",1,0,16},{"hpdepthfrequency",0,0,20000},
-    {"hpshape",0,0,4},{"hpdc",-.5,-1,1},{"hpskew",.5,.001,.999},
+    {"hpshape",0,0,4},{"hpdc",-.5,-1,1},{"hpskew",.5,.001,.999},{"hpcurve",1,.001,64},
     {"bprate",0,0,20000},{"bpdepth",1,0,16},{"bpdepthfrequency",0,0,20000},
-    {"bpshape",0,0,4},{"bpdc",-.5,-1,1},{"bpskew",.5,.001,.999},
+    {"bpshape",0,0,4},{"bpdc",-.5,-1,1},{"bpskew",.5,.001,.999},{"bpcurve",1,.001,64},
     {"roomfade",.1,0,10},{"roomlp",15000,0,22050},{"roomdim",1000,0,22050}
 };
 _Static_assert(sizeof(parameters)/sizeof(parameters[0]) == DSP_FMBASE,
@@ -145,10 +145,24 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     const char *const waves[] = {"sine", "tri", "square", "saw", "ramp"};
     v = symbol(value, "tremoloshape", waves, 5);
     if (v >= 0) p->p[DSP_TSHAPE] = v;
+    /* The deployed tremolo defaults to a triangle LFO; a numeric shape uses
+       the worklet numbering (tri 0, sine 1, ramp 2, saw 3, square 4), while
+       shape names already resolve to the native wave numbering. */
+    if (p->p[DSP_TREM] != 0 || cJSON_HasObjectItem(value, "tremolosync")) {
+        const cJSON *tsh = cJSON_GetObjectItemCaseSensitive(value, "tremoloshape");
+        if (cJSON_IsNumber(tsh) && isfinite(tsh->valuedouble)) {
+            int w = (int)lround(tsh->valuedouble);
+            if (w >= 0 && w <= 4) p->p[DSP_TSHAPE] = ((const int[]){1,0,4,3,2})[w];
+            else p->p[DSP_TSHAPE] = 1;
+        } else if (!cJSON_IsString(tsh) || v < 0) {
+            p->p[DSP_TSHAPE] = 1;
+        }
+        if (!cJSON_HasObjectItem(value, "tremoloskew")) p->p[DSP_TSKEW] = 1;
+    }
     const char *shape_names[] = {"lpshape","hpshape","bpshape"};
     for (int i = 0; i < 3; i++) {
         v = symbol(value,shape_names[i],waves,5);
-        if (v >= 0) p->p[DSP_LPSHAPE+i*6] = v;
+        if (v >= 0) p->p[DSP_LPSHAPE+i*7] = v;
     }
     const char *const disttypes[] = {"tanh","fold","chebyshev","scurve","diode","asym","sinefold"};
     v = symbol(value,"distorttype",disttypes,7);
@@ -351,7 +365,7 @@ int dsp_single_filter(const DspState *state) {
         p[DSP_CRUSH]<16 || p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 ||
         p[DSP_TREM]>0 || p[DSP_COMP]<0 || p[DSP_PHASER]>0 ||
         p[DSP_CHORUS]>0 || p[DSP_POST]!=1 || p[DSP_CUT]>0 ||
-        p[DSP_LPRATE+type*6]>0 || p[DSP_PWRATE]>0 ||
+        p[DSP_LPRATE+type*7]>0 || p[DSP_PWRATE]>0 ||
         state->control.noise_mix>0 || state->control.source_noise) return -1;
     return type;
 }
@@ -755,7 +769,7 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         if (p[base] <= 0) continue;
         if (update) {
             double hz = dsp_filter_frequency(&s->control,type,age,gate);
-            int lfo = DSP_LPRATE+type*6;
+            int lfo = DSP_LPRATE+type*7;
             if (p[lfo] > 0) {
                 double rate=p[lfo];
                 double phase=age*rate;
@@ -782,16 +796,37 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
                 }
                 if (active) {
                     double wave = mod_wave((int)p[lfo+3],p[lfo+5],phase)+p[lfo+4];
-                    hz += wave*(p[lfo+2] > 0 ? p[lfo+2] : p[base]*p[lfo+1]);
+                    double sc = p[lfo+2] > 0 ? p[lfo+2] : p[base]*p[lfo+1];
+                    double g = wave*sc;
+                    double curve = p[lfo+6] > 0 ? p[lfo+6] : 1;
+                    if (curve != 1.0) g = pow(g,curve);
+                    if (!isfinite(g)) {
+                        /* Non-finite LFO output reads the BiquadFilter
+                           frequency default on the deployed node. */
+                        hz = 1000.0;
+                    } else {
+                        /* Generic cutoff LFOs connect straight to the filter
+                           frequency AudioParam: clamp like getRangeForParam
+                           ([20-base, 24000-base] at or above 30 Hz). */
+                        double mn, mx;
+                        if (p[base] >= 30) { mn = 20-p[base]; mx = 24000-p[base]; }
+                        else { mn = p[lfo+4]*sc; mx = mn+sc; }
+                        if (g < mn) g = mn;
+                        if (g > mx) g = mx;
+                        hz += g;
+                    }
                 }
             }
             if (type == 0 && p[DSP_FTYPE] == 1) {
                 double g = tan(M_PI*clamp(hz,20,SR*.45)/SR);
                 s->ladder_g = g/(1+g);
-                s->ladder_k = clamp(p[base+1]/12,0,3.95);
+                s->ladder_k = clamp((p[base+1]+s->control.q_lfo[type])/12,0,3.95);
             }
-            coefficients(&s->filter[type*2], type, hz, p[base+1]);
-            coefficients(&s->filter[type*2+1], type, hz, p[base+1]);
+            {
+                double q = p[base+1] + s->control.q_lfo[type];
+                coefficients(&s->filter[type*2], type, hz, q);
+                coefficients(&s->filter[type*2+1], type, hz, q);
+            }
         }
         if (type == 0 && p[DSP_FTYPE] == 1) x = ladder_filter(s,x);
         else if (s->control.lfo_sample_rate)
@@ -808,62 +843,128 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         for (int i = 0; i < 5; i++) sum += biquad(&s->formant[i], x)*s->formant_gain[i];
         x = sum*8;
     }
-    int coarse = (int)p[DSP_COARSE];
+    int coarse = (int)(p[DSP_COARSE]+s->control.gen_lfo[GEN_COARSE]);
     if (coarse > 1) {
         if ((s->tick - 1) % (unsigned)coarse == 0) s->held = x;
         x = s->held;
     }
-    if (p[DSP_CRUSH] < 16) {
-        double steps = pow(2, p[DSP_CRUSH] - 1);
+    if (p[DSP_CRUSH]+s->control.gen_lfo[GEN_CRUSH] < 16) {
+        double steps = pow(2, p[DSP_CRUSH]+s->control.gen_lfo[GEN_CRUSH] - 1);
         x = round(x * steps) / steps;
     }
-    if (p[DSP_SHAPE] > 0) {
-        double k = 2*p[DSP_SHAPE]/(1-p[DSP_SHAPE]);
-        x = (1+k)*x/(1+k*fabs(x))*p[DSP_SHAPEVOL];
+    if (p[DSP_SHAPE]+s->control.gen_lfo[GEN_SHAPE] > 0) {
+        double sh = p[DSP_SHAPE]+s->control.gen_lfo[GEN_SHAPE];
+        double k = 2*sh/(1-sh);
+        x = (1+k)*x/(1+k*fabs(x))*(p[DSP_SHAPEVOL]+s->control.gen_lfo[GEN_SHAPEVOL]);
     }
-    if (p[DSP_DISTORT] > 0) {
-        if ((int)p[DSP_DISTTYPE] == 0) {
-            double shape=expm1(p[DSP_DISTORT]);
-            double postgain=clamp(p[DSP_DISTVOL],.001,1);
+    if (p[DSP_DISTORT]+s->control.gen_lfo[GEN_DISTORT] > 0) {
+        double dist = p[DSP_DISTORT]+s->control.gen_lfo[GEN_DISTORT];
+        int dtype = (int)(p[DSP_DISTTYPE]+s->control.gen_lfo[GEN_DISTTYPE]);
+        if (dtype == 0) {
+            double shape=expm1(dist);
+            double postgain=clamp(p[DSP_DISTVOL]+s->control.gen_lfo[GEN_DISTVOL],.001,1);
             x=((1+shape)*x/(1+shape*fabs(x)))*postgain;
         } else {
-            double input = x*(1+p[DSP_DISTORT]*8);
-            switch ((int)p[DSP_DISTTYPE]) {
+            double input = x*(1+dist*8);
+            switch (dtype) {
             case 1: x = fabs(fmod(input+3,4)-2)-1; break;
-            case 2: x = cos(clamp(p[DSP_DISTORT],1,32)*acos(clamp(x,-1,1))); break;
+            case 2: x = cos(clamp(dist,1,32)*acos(clamp(x,-1,1))); break;
             case 3: x = input/(1+fabs(input)); break;
             case 4: x = input < 0 ? tanh(input*.5)*.5 : tanh(input); break;
             case 5: x = tanh(input+.5)-tanh(.5); break;
             case 6: x = sin(input); break;
             default: x = tanh(input); break;
             }
-            x *= p[DSP_DISTVOL];
+            x *= p[DSP_DISTVOL]+s->control.gen_lfo[GEN_DISTVOL];
         }
     }
-    if (p[DSP_TREM] > 0)
-        x *= 1-p[DSP_TDEPTH] + p[DSP_TDEPTH]*mod_wave((int)p[DSP_TSHAPE],p[DSP_TSKEW],age*p[DSP_TREM]+p[DSP_TPHASE]);
-    if (p[DSP_COMP] < 0) {
+    if (p[DSP_TREM]+s->control.gen_lfo[GEN_TREM_RATE] > 0) {
+        double rate = p[DSP_TREM]+s->control.gen_lfo[GEN_TREM_RATE];
+        double depth = p[DSP_TDEPTH];
+        double skew = p[DSP_TSKEW]+s->control.gen_lfo[GEN_TREM_SKEW];
+        double phase = p[DSP_TPHASE];
+        int shape = (int)(p[DSP_TSHAPE]+s->control.gen_lfo[GEN_TREM_SHAPE]);
+        /* The deployed tremolo LFO hard-codes curve 1.5, dcoffset 0 and a
+           [0, 1] output clamp on an amGain base of max(1-depth, 0). Like
+           every lfo-processor node it leaves its first render quantum
+           unwritten and phases from the quantum end. A modulated rate is
+           integrated like the worklet's per-sample phase advance instead
+           of multiplying the absolute age. */
+        double quantum = 128.0/SR;
+        double hold = quantum;
+        if (s->control.lfo_start_time >= 0) {
+            double rel = fmod(s->control.lfo_start_time, quantum);
+            hold = rel > 0 ? quantum-rel : quantum;
+        }
+        double lfo = 0.0;
+        if (age >= hold) {
+            s->trem_fm_phase += (rate - p[DSP_TREM]) / SR;
+            double wave = mod_wave(shape, skew, (age-hold)*p[DSP_TREM] + s->trem_fm_phase + phase);
+            lfo = pow(fmax(wave*depth, 0.0), 1.5);
+            if (!(lfo <= 1.0)) lfo = lfo > 1.0 ? 1.0 : 0.0;
+        }
+        double mbase = depth < 1.0 ? 1.0-depth : 0.0;
+        x *= mbase + lfo + s->control.gen_lfo[GEN_TREM_GAIN];
+    }
+    if (p[DSP_COMP]+s->control.gen_lfo[GEN_COMP] < 0) {
+        double threshold = p[DSP_COMP]+s->control.gen_lfo[GEN_COMP];
+        double ratio = p[DSP_COMPRATIO]+s->control.gen_lfo[GEN_COMPRATIO];
+        double knee = p[DSP_COMPKNEE]+s->control.gen_lfo[GEN_COMPKNEE];
         double level = 20*log10(fmax(1e-12,fabs(x)));
-        double over = level-p[DSP_COMP], knee = p[DSP_COMPKNEE], reduction = 0;
+        double over = level-threshold, reduction = 0;
         if (knee > 0 && over > -knee*.5 && over < knee*.5)
-            reduction = (1-1/p[DSP_COMPRATIO])*(over+knee*.5)*(over+knee*.5)/(2*knee);
-        else if (over > 0) reduction = over*(1-1/p[DSP_COMPRATIO]);
+            reduction = (1-1/ratio)*(over+knee*.5)*(over+knee*.5)/(2*knee);
+        else if (over > 0) reduction = over*(1-1/ratio);
         double desired = pow(10,-reduction/20);
-        double time = desired < s->compressor_gain ? p[DSP_COMPATT] : p[DSP_COMPREL];
+        double time = desired < s->compressor_gain ? p[DSP_COMPATT]+s->control.gen_lfo[GEN_COMPATT] : p[DSP_COMPREL]+s->control.gen_lfo[GEN_COMPREL];
         double speed = time > 0 ? exp(-1/(time*SR)) : 0;
         s->compressor_gain = desired + speed*(s->compressor_gain-desired);
         x *= s->compressor_gain;
     }
-    if (p[DSP_PHASER] > 0) {
-        double hz = clamp(p[DSP_PHCENTER] + p[DSP_PHSWEEP]*sin(2*M_PI*age*p[DSP_PHASER]), 20, SR*.4);
-        double t = tan(M_PI*hz/SR), a = (1-t)/(1+t), wet = x;
-        for (int i = 0; i < 6; i++) {
-            double y = -a*wet + s->phaser_z[i];
-            s->phaser_z[i] = wet + a*y; wet = y;
+    /* The deployed phaser node only exists while the static depth is
+       positive; generic depth LFOs only route in that case too. */
+    if ((p[DSP_PHASER] != 0 || s->control.gen_lfo[GEN_PHRATE] != 0 ||
+        s->control.gen_lfo[GEN_PHSWEEP] != 0 ||
+        s->control.gen_lfo[GEN_PHCENTER] != 0 ||
+        s->control.gen_lfo[GEN_PHDEPTH] != 0) && p[DSP_PHDEPTH] > 0) {
+        double rate = p[DSP_PHASER]+s->control.gen_lfo[GEN_PHRATE];
+        double sweep = p[DSP_PHSWEEP];
+        double center = p[DSP_PHCENTER];
+        double depth = p[DSP_PHDEPTH];
+        /* The deployed phaser is a single notch (center + 282 Hz) whose
+           detune in cents is driven by a triangle LFO (skew .5, dcoffset
+           -.5, depth sweep*2, curve 1), with a first-quantum hold and an
+           integrated phase like every lfo-processor node. */
+        double quantum = 128.0/SR;
+        double hold = quantum;
+        if (s->control.lfo_start_time >= 0) {
+            double rel = fmod(s->control.lfo_start_time, quantum);
+            hold = rel > 0 ? quantum-rel : quantum;
         }
-        x = x*(1-p[DSP_PHDEPTH]*.5) + wet*p[DSP_PHDEPTH]*.5;
+        double lfo = 0.0;
+        if (age >= hold) {
+            s->phaser_fm_phase += rate / SR;
+            double u = s->phaser_lfo_phase + s->phaser_fm_phase;
+            u -= floor(u);
+            double wave = (u < 0.5) ? u*2.0 : 2.0-2.0*u;
+            lfo = (wave-0.5)*(sweep*2.0+s->control.gen_lfo[GEN_PHSWEEP]);
+            if (lfo < -sweep) lfo = -sweep;
+            else if (lfo > sweep) lfo = sweep;
+        }
+        double q = 2.0 - fmin(fmax(depth*2.0, 0.0), 1.9) + s->control.gen_lfo[GEN_PHDEPTH];
+        double hz = (center+282.0+s->control.gen_lfo[GEN_PHCENTER])*pow(2.0, lfo/1200.0);
+        hz = clamp(hz, 20.0, SR*.4);
+        double w0 = 2*M_PI*hz/SR, c = cos(w0);
+        double alpha = sin(w0)/(2.0*(q > 0.05 ? q : 0.05));
+        double b0 = 1.0, b1 = -2.0*c, b2 = 1.0;
+        double a0 = 1.0+alpha, a1n = -2.0*c, a2 = 1.0-alpha;
+        double y = (b0*x + b1*s->phaser_z[0] + b2*s->phaser_z[1] - a1n*s->phaser_z[2] - a2*s->phaser_z[3]) / a0;
+        if (!isfinite(y)) y = 0;
+        s->phaser_z[1] = s->phaser_z[0]; s->phaser_z[0] = x;
+        s->phaser_z[3] = s->phaser_z[2]; s->phaser_z[2] = y;
+        x = y;
     }
-    x *= p[DSP_POST];
+    x *= p[DSP_POST]+s->control.gen_lfo[GEN_POSTGAIN];
     return isfinite(x) ? clamp(x, -64, 64) : 0;
 }
 

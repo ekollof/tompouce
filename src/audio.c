@@ -457,6 +457,11 @@ static int soa_kind_for(const Voice *v) {
 static int soa_bank_eligible(const Voice *v) {
     if (!v->active || v->retiring || v->stretch_buffer ||
         v->fx_stage_count>0) return 0;
+    /* Generic voice LFOs and envelopes render per sample in the scalar
+       path; the batch lanes have no slot support. Filter LFOs are excluded
+       separately via lfo_sample_rate below. */
+    for (int i = 0; i < LFO_SLOTS; i++)
+        if (v->vlfo[i].tgt != 0) return 0;
     if (v->wt_sample_frames>0) return 0;
     if (native_synth_effect(v->native_program)) return 0;
     if (!v->dsp.control.enabled) return 0;
@@ -490,7 +495,7 @@ static int soa_bank_eligible(const Voice *v) {
                 return 0;
             }
         }
-    } else if (v->lfo_tgt!=0) return 0;
+    }
     return 1;
 }
 
@@ -1318,6 +1323,139 @@ static void dispatch_voice_onsets(void) {
     for (int i=0;i<count;i++) if (voices[due[i]].active) voice_onset(&voices[due[i]]);
 }
 
+/* A voice LFO targeting pan overrides the static pan split every
+   sample with an equal-power StereoPanner matrix, matching the deployed pan
+   node. Static routing stays untouched. */
+static int voice_pan_lfo_active(const Voice *v) {
+    for (int i = 0; i < LFO_SLOTS; i++)
+        if (v->vlfo[i].tgt == 8 && v->vlfo[i].hz > 0.0) return 1;
+    return 0;
+}
+
+/* Recompute voice route coefficients for an LFO-modulated pan. Matches the
+   static equal-power matrices in cache_routing. */
+static void voice_lfo_pan_routing(Voice *v, double pan) {
+    int dsp = v->dsp.control.enabled;
+    int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW ||
+        v->inst == INST_PULSE || native_synth_stereo(v->native_program);
+    double ll = 1, lr = 0, rl = 0, rr = 1, left = 1, right = 1;
+    if (dsp) {
+        if (!stereo) {
+            double theta = (pan + 1) * M_PI / 4;
+            ll = cos(theta); rr = sin(theta);
+        } else if (pan <= 0) {
+            lr = cos((pan + 1) * M_PI / 2); rr = sin((pan + 1) * M_PI / 2);
+        } else {
+            ll = cos(pan * M_PI / 2); rl = sin(pan * M_PI / 2);
+        }
+    } else {
+        /* Non-DSP voices use the same equal-power split while modulated;
+           the static linear law only applies to unmodulated pan. */
+        double theta = (pan + 1) * M_PI / 4;
+        left = cos(theta); right = sin(theta);
+    }
+    v->route_ll = ll; v->route_lr = lr; v->route_rl = rl; v->route_rr = rr;
+    v->route_left = left; v->route_right = right;
+    v->route_side_one = left == 1 && right == 1;
+}
+
+/* Advance active voice LFO slots one sample; additive outputs match the
+   deployed lfo-processor output for each target. Gain/Hz apply directly;
+   sample cents accumulate for transport scaling; pan accumulates for the
+   per-sample routing split and resonance offsets go straight to the DSP
+   filter state read each sample. The site sums every entry per target;
+   native keeps one slot per entry in encounter order and sums them too. */
+static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
+                               double *cents, double *pan, int *nonfinite) {
+    double qoff[3] = {0.0, 0.0, 0.0};
+    for (int gi = 0; gi < NGEN; gi++) {
+        v->dsp.control.gen_lfo[gi] = 0.0;
+        v->dsp_right.control.gen_lfo[gi] = 0.0;
+    }
+    for (int li = 0; li < LFO_SLOTS; li++) {
+        LfoSlot *sl = &v->vlfo[li];
+        if (sl->tgt <= 0 || !(sl->hz > 0.0)) continue;
+        double u = v->lfo_phase[li] / (2.0 * M_PI);
+        u -= floor(u);
+        /* superdough lfo-processor waveforms (0..1 range). */
+        double wave;
+        switch (sl->wave) {
+        case 1: wave = sin(2.0*M_PI*u)*.5+.5; break;
+        case 2: wave = u; break;
+        case 3: wave = 1.0-u; break;
+        case 4: wave = (u < sl->skew) ? 1.0 : 0.0; break;
+        default: {
+            double t = sl->skew;
+            if (t <= 0.0) t = .5;
+            if (t >= 1.0) t = .5;
+            wave = (u < t) ? u/t : 1.0-(u-t)/(1.0-t);
+            break;
+        }
+        }
+        double g = (wave+sl->dc)*sl->depth;
+        if (sl->curve != 1.0)
+            g = pow(g,sl->curve);
+        if (g < sl->min) g = sl->min;
+        if (g > sl->max) g = sl->max;
+        if (!isfinite(g)) {
+            /* The deployed node reads the target AudioParam default
+               instead of adding (gain 1, frequency 440, detune/pan 0).
+               DSP-param targets have no measured default, so a non-finite
+               curve output contributes nothing there. */
+            if (sl->tgt < GEN_TGT_BASE) *nonfinite |= 1 << sl->tgt;
+            v->lfo_phase[li] += (2.0 * M_PI * sl->hz) / SR;
+            if (v->lfo_phase[li] > 2.0 * M_PI)
+                v->lfo_phase[li] -= 2.0 * M_PI * floor(v->lfo_phase[li] / (2.0 * M_PI));
+            continue;
+        }
+        v->lfo_phase[li] += (2.0 * M_PI * sl->hz) / SR;
+        if (v->lfo_phase[li] > 2.0 * M_PI)
+            v->lfo_phase[li] -= 2.0 * M_PI * floor(v->lfo_phase[li] / (2.0 * M_PI));
+        switch (sl->tgt) {
+        case 2:
+            *amp += g;
+            break;
+        case 5:
+            if (v->sampled_source) {
+                /* Exact Hz-to-cents conversion for a voice that resolved to
+                   a sample; the Hz routing only fits oscillator voices. */
+                if (v->freq > 0 && v->freq+g > 0)
+                    *cents += 1200.0*log2((v->freq+g)/v->freq);
+            } else {
+                *freq += g;
+                if (*freq < 0.01) *freq = 0.01;
+            }
+            break;
+        case 7:
+            /* Sample detune in cents; oscillator voices apply the
+               accumulated cents at use. */
+            *cents += g;
+            break;
+        case 8:
+            *pan += g;
+            break;
+        case 9: case 10: case 11:
+            qoff[sl->tgt - 9] += g;
+            break;
+        default:
+            if (sl->tgt >= GEN_TGT_BASE && sl->tgt < GEN_TGT_BASE + NGEN) {
+                int gi = sl->tgt - GEN_TGT_BASE;
+                v->dsp.control.gen_lfo[gi] += g;
+                v->dsp_right.control.gen_lfo[gi] += g;
+            }
+            break;
+        }
+    }
+    for (int t = 0; t < 3; t++) {
+        double base = v->dsp.control.p[t*7+1];
+        if (!(base > 0)) base = 1;
+        double off = qoff[t];
+        if (*nonfinite & (1 << (9+t))) off = 1.0 - base;
+        v->dsp.control.q_lfo[t] = off;
+        v->dsp_right.control.q_lfo[t] = off;
+    }
+}
+
 /* Freeze per-event pan/send constants once, when the voice is created. The
    callback still applies them in the original order: fade -> pan law -> dry
    and send multiplication. */
@@ -1325,11 +1463,16 @@ static void cache_routing(Voice *v) {
     int dsp = v->dsp.control.enabled;
     v->route_dsp = dsp;
     double ll = 1, lr = 0, rl = 0, rr = 1, left = 1, right = 1;
+    /* Pan-LFO voices start from unity; the callback recomputes the split
+       every sample from the modulated pan. */
+    int pan_lfo = voice_pan_lfo_active(v);
     if (dsp) {
         int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW ||
             v->inst == INST_PULSE || native_synth_stereo(v->native_program);
         double pan = fmax(-1, fmin(1, v->pan));
-        if (!v->has_pan) {
+        if (pan_lfo) {
+            /* Unity base; per-sample split follows in the callback. */
+        } else if (!v->has_pan) {
             /* With no pan control, WebAudio upmixes mono at unity. */
         } else if (!stereo) {
             ll = cos((pan + 1) * M_PI / 4); rr = sin((pan + 1) * M_PI / 4);
@@ -1341,6 +1484,10 @@ static void cache_routing(Voice *v) {
         v->route_dry = v->dsp.control.p[DSP_DRY];
         v->route_room = v->dsp.control.p[DSP_ROOM];
         v->route_room_size = v->dsp.control.p[DSP_SIZE];
+    } else if (pan_lfo) {
+        /* Unity base; per-sample split follows in the callback. */
+        left = 1;
+        right = 1;
     } else {
         left = v->pan <= 0 ? 1 : 1 - v->pan;
         right = v->pan >= 0 ? 1 : 1 + v->pan;
@@ -1468,11 +1615,19 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->onset_pending=1;
     v->onset_delay_time=ev->delay_time; v->onset_delay_feedback=ev->delay_fb;
     v->onset_duck_mask=ev->duck_mask; v->onset_duck_depth=ev->duck_depth; v->onset_duck_attack=ev->duck_attack;
-    v->lfo_tgt = ev->lfo_tgt;
-    v->lfo_wave = ev->lfo_wave;
-    v->lfo_hz = ev->lfo_hz;
-    v->lfo_depth = ev->lfo_depth;
-    v->lfo_phase = 0;
+    for (int i = 0; i < LFO_SLOTS; i++) {
+        v->vlfo[i] = ev->lfo[i];
+        double cycles = ev->lfo[i].timebase*ev->lfo[i].hz + ev->lfo[i].phase;
+        v->lfo_phase[i] = (cycles-floor(cycles))*2.0*M_PI;
+    }
+    /* The deployed lfo-processor leaves its output at zero for the render
+       quantum containing the node start (currentTime <= begin) while the
+       absolute phase stays frozen, exactly like the scalar filter path's
+       one-quantum base hold. */
+    {
+        v->lfo_hold = (floor(v->start_time*SR/128.0)+1.0)*128.0/SR - v->start_time;
+        if (!(v->lfo_hold > 0)) v->lfo_hold = 0;
+    }
     v->wt = ev->wt;
     if (v->wt < 0 && ev->is_drum) v->wt = wt_find("sine");
     v->wtpos = 0;
@@ -2978,8 +3133,18 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         V->active=0; stretch_release(V->stretch_buffer); V->stretch_buffer=NULL; continue;
                     }
                     double gate=V->gate_end-V->start_time;
-                    double left=pcm[(size_t)V->stretch_frame*2]*V->amp*cut_gain;
-                    double right=pcm[(size_t)V->stretch_frame*2+1]*V->amp*cut_gain;
+                    double stamp = 0, stcents = 0, stpan = 0, stfreq = 0;
+                    int st_nf = 0;
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &stamp, &stfreq, &stcents, &stpan, &st_nf);
+                        if (st_nf & (1<<2)) stamp = 1.0 - V->amp;
+                        if (st_nf & (1<<8)) stpan = -V->pan;
+                    }
+                    double samp_use = V->amp + stamp;
+                    if (age >= V->lfo_hold && voice_pan_lfo_active(V))
+                        voice_lfo_pan_routing(V, V->pan + stpan);
+                    double left=pcm[(size_t)V->stretch_frame*2]*samp_use*cut_gain;
+                    double right=pcm[(size_t)V->stretch_frame*2+1]*samp_use*cut_gain;
                     V->env=dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel);
                     if (native_synth_effect(V->native_program))
                         mix_graph_effect(V,pcm[(size_t)V->stretch_frame*2]*cut_gain,pcm[(size_t)V->stretch_frame*2+1]*cut_gain,vm);
@@ -2995,15 +3160,31 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     if (graph && native_synth_quantum_time(audio_time)>=V->graph_end) { V->active=0; continue; }
                     int own_envelope=native_synth_enveloped(V->native_program);
                     double env=retiring_envelope(V,own_envelope?1:dsp_envelope(age,gate,V->vatt,V->vdec,V->vsus,V->vrel));
+                    /* Generic voice LFOs and envelopes on K() graph voices:
+                       frequency and gain modulate the graph call, pan
+                       recomputes routing. */
+                    double namp = 0, nfreq = 0, ncents = 0, npan = 0;
+                    int n_nf = 0;
+                    double nfreq_use = V->freq;
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &namp, &nfreq, &ncents, &npan, &n_nf);
+                        nfreq_use = (n_nf & (1<<5)) ? 440.0 : V->freq + nfreq;
+                        if (!(n_nf & (1<<7)) && ncents != 0) nfreq_use *= pow(2.0, ncents/1200.0);
+                        if (nfreq_use < 0.01 && (nfreq != 0 || ncents != 0 || (n_nf & (1<<5)))) nfreq_use = 0.01;
+                        if (n_nf & (1<<2)) namp = 1.0 - V->amp;
+                        if (n_nf & (1<<8)) npan = -V->pan;
+                        if (voice_pan_lfo_active(V))
+                            voice_lfo_pan_routing(V, V->pan + npan);
+                    }
                     double tail=native_synth_tail(V->native_program);
                     double clock=graph?audio_time:age;
                     if ((!graph && tail>=0 && age>=gate+fmax(V->vrel,tail)) ||
-                        !native_synth_process(V->native_state,clock,gate,V->freq,V->start_time,0,0,&left,&right)) {
+                        !native_synth_process(V->native_state,clock,gate,nfreq_use,V->start_time,0,0,&left,&right)) {
                         V->active=0; continue;
                     }
                     V->env=env;
-                    left=dsp_process(&V->dsp,left*env*V->amp,age,gate);
-                    right=dsp_process(&V->dsp_right,right*env*V->amp,age,gate);
+                    left=dsp_process(&V->dsp,left*env*(V->amp+namp),age,gate);
+                    right=dsp_process(&V->dsp_right,right*env*(V->amp+namp),age,gate);
                     route_voice(V,left,right,vm); V->age+=dt; continue;
                 }
                 // envelope
@@ -3047,8 +3228,17 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     wt_sample_voice(V, age, gate, &left, &right);
                     /* The site's wavetable gain envelope peaks at 0.3. */
                     g *= cut_gain * .3;
-                    left *= V->amp * g;
-                    right *= V->amp * g;
+                    double wt_amp = 0, wt_f = 0, wt_c = 0, wt_pan = 0;
+                    int wt_nf = 0;
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &wt_amp, &wt_f, &wt_c, &wt_pan, &wt_nf);
+                        if (wt_nf & (1<<2)) wt_amp = 1.0 - V->amp;
+                        if (wt_nf & (1<<8)) wt_pan = -V->pan;
+                    }
+                    if (age >= V->lfo_hold && voice_pan_lfo_active(V))
+                        voice_lfo_pan_routing(V, V->pan + wt_pan);
+                    left *= (V->amp + wt_amp) * g;
+                    right *= (V->amp + wt_amp) * g;
                     if (V->dsp.control.enabled)
                         route_voice(V, dsp_process(&V->dsp, left, age, gate),
                             dsp_process(&V->dsp_right, right, age, gate), vm);
@@ -3076,12 +3266,35 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         g = 1.0 - rt / r;
                     }
                     double left = source_value(V,V->smppos,0), right = source_value(V,V->smppos,1);
+                    /* Generic voice LFOs on samples: gain adds, source
+                       targets bend transport in cents (deployed detune
+                       fallback), pan recomputes routing (see helpers). */
+                    double samp_amp = 0, samp_freq = 0, samp_cents = 0, samp_pan = 0;
+                    int samp_nf = 0;
+                    double amp_use = V->amp;
                     double transport = V->smpstep*sample_pitch_ratio(V,audio_time);
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &samp_amp, &samp_freq, &samp_cents, &samp_pan, &samp_nf);
+                        if (samp_nf & (1<<2)) amp_use = 1.0;
+                        else amp_use = V->amp + samp_amp;
+                        if (samp_nf & (1<<7)) samp_cents = 0.0;
+                        if (samp_cents != 0) transport *= pow(2.0, samp_cents/1200.0);
+                        if (samp_nf & (1<<8)) samp_pan = -V->pan;
+                        if (voice_pan_lfo_active(V))
+                            voice_lfo_pan_routing(V, V->pan + samp_pan);
+                    }
                     g*=cut_gain;
-                    double s = left*V->amp*g;
-                    if (native_synth_effect(V->native_program)) mix_graph_effect(V,left*g,right*g,vm);
+                    double s = left*amp_use*g;
+                    if (native_synth_effect(V->native_program)) {
+                        /* mix_graph_effect folds V->amp back in; expose the
+                           LFO-modulated gain for this sample. */
+                        double kept_amp = V->amp;
+                        V->amp = amp_use;
+                        mix_graph_effect(V,left*g,right*g,vm);
+                        V->amp = kept_amp;
+                    }
                     else if (V->smp_channels == 2 && V->stereo_filter_type>=0) {
-                        right *= V->amp*g;
+                        right *= amp_use*g;
                         double gate = V->gate_end-V->start_time, fl,fr;
                         if (dsp_stereo_filter_step(&V->dsp,&V->dsp_right,&V->stereo_filter,
                                 V->stereo_filter_type,s,right,age,gate,&fl,&fr))
@@ -3089,11 +3302,11 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         else route_voice(V,dsp_process(&V->dsp,s,age,gate),
                             dsp_process(&V->dsp_right,right,age,gate),vm);
                     } else if (V->smp_channels == 2 && (V->dsp.control.enabled || V->lpf_hz <= 0)) {
-                        right *= V->amp*g;
+                        right *= amp_use*g;
                         double gate = V->gate_end-V->start_time;
                         route_voice(V,dsp_process(&V->dsp,s,age,gate),dsp_process(&V->dsp_right,right,age,gate),vm);
                     } else {
-                        if (V->smp_channels == 2) s = (s+right*V->amp*g)*.5;
+                        if (V->smp_channels == 2) s = (s+right*amp_use*g)*.5;
                         if (V->lpf_hz > 0.0) s = apply_lpf(V, s, voice_fc(V, V->lpf_hz));
                         mix_voice(V,s,vm);
                     }
@@ -3119,6 +3332,21 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                        web ramps each evicted pool entry to zero at the
                        incoming target plus 250 ms regardless of type. */
                     double drum_fade = retiring_envelope(V,1.0);
+                    /* Generic voice LFOs on procedural drums: gain and pitch
+                       offsets add to the hardcoded sweeps; pan recomputes
+                       routing (see voice_lfo_step_all). */
+                    double damp = 0, dfreq = 0, dcents = 0, dpan = 0;
+                    int d_nf = 0;
+                    double damp_use = V->amp;
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &damp, &dfreq, &dcents, &dpan, &d_nf);
+                        damp_use = (d_nf & (1<<2)) ? 1.0 : V->amp + damp;
+                        if (d_nf & (1<<5)) dfreq = 440.0 - V->freq;
+                        if (d_nf & (1<<7)) dcents = 0.0;
+                        if (d_nf & (1<<8)) dpan = -V->pan;
+                        if (voice_pan_lfo_active(V))
+                            voice_lfo_pan_routing(V, V->pan + dpan);
+                    }
                     // per-drum envelope
                     switch (V->inst) {
                     case INST_KICK: {
@@ -3130,10 +3358,13 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double pitch = 150.0 - 100.0*(t/dur);
                         if (pitch < 50) pitch = 50;
                         V->freq = (1-pow(t/dur,0.5))*100 + 50; // overridden each sample? okay
+                        pitch = V->freq + dfreq;
+                        if (dcents != 0) pitch *= pow(2.0, dcents/1200.0);
+                        if (pitch < 0.01) pitch = 0.01;
                         // phase
-                        V->phase += (2*M_PI * V->freq)/SR;
+                        V->phase += (2*M_PI * pitch)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI)) * env;
-                        mix_voice(V,s*V->amp*.9*drum_fade,vm);
+                        mix_voice(V,s*damp_use*.9*drum_fade,vm);
                         break;
                     }
                     case INST_SNARE: {
@@ -3145,7 +3376,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double tone = wt_sample(V->wt, 200.0*audio_time); // fixed 200
                         double s = (0.7*noise + 0.3*tone)*env;
-                        mix_voice(V,s*V->amp*.7*drum_fade,vm);
+                        mix_voice(V,s*damp_use*.7*drum_fade,vm);
                         break;
                     }
                     case INST_HH: {
@@ -3158,7 +3389,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         static double prev = 0;
                         double hp = noise - prev; prev = noise*0.5 + prev*0.5; // crude
                         double s = hp*env;
-                        mix_voice(V,s*V->amp*.5*drum_fade,vm);
+                        mix_voice(V,s*damp_use*.5*drum_fade,vm);
                         break;
                     }
                     case INST_CP: {
@@ -3168,7 +3399,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double env = exp(-t*12.0);
                         double noise = ((double)rand()/RAND_MAX)*2-1;
                         double s = noise*env;
-                        mix_voice(V,s*V->amp*.6*drum_fade,vm);
+                        mix_voice(V,s*damp_use*.6*drum_fade,vm);
                         break;
                     }
                     case INST_TOM: {
@@ -3176,10 +3407,12 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         double dur = 0.3;
                         if (t >= dur) { V->active = 0; continue; }
                         double env = exp(-t*6.0);
-                        double pitch = V->freq;
+                        double pitch = V->freq + dfreq;
+                        if (dcents != 0) pitch *= pow(2.0, dcents/1200.0);
+                        if (pitch < 0.01) pitch = 0.01;
                         V->phase += (2*M_PI * pitch)/SR;
                         double s = wt_sample(V->wt, V->phase/(2*M_PI))*env;
-                        mix_voice(V,s*V->amp*.8*drum_fade,vm);
+                        mix_voice(V,s*damp_use*.8*drum_fade,vm);
                         break;
                     }
                     default:
@@ -3230,46 +3463,25 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         const double *p = V->dsp.control.p;
                         pwuse += sin(2*M_PI*age*p[DSP_PWRATE])*p[DSP_PWSWEEP];
                     }
-                    double fc = V->lpf_hz;
-                    if (V->lfo_tgt > 0 && V->lfo_hz > 0.0) {
-                        double u = V->lfo_phase / (2.0 * M_PI);
-                        u -= floor(u);
-                        double lfo;
-                        switch (V->lfo_wave) {
-                        case 1: lfo = sin(V->lfo_phase); break;
-                        case 2: lfo = 2.0 * u - 1.0; break;
-                        case 3: lfo = (u < 0.5) ? 1.0 : -1.0; break;
-                        default:
-                            lfo = (u < 0.5) ? (4.0 * u - 1.0) : (3.0 - 4.0 * u);
-                            break;
-                        }
-                        V->lfo_phase += (2.0 * M_PI * V->lfo_hz) / SR;
-                        if (V->lfo_phase > 2.0 * M_PI)
-                            V->lfo_phase -= 2.0 * M_PI * floor(V->lfo_phase / (2.0 * M_PI));
-                        switch (V->lfo_tgt) {
-                        case 1: {
-                            double semi = lfo * V->lfo_depth;
-                            if (semi > 24.0) semi = 24.0;
-                            if (semi < -24.0) semi = -24.0;
-                            freq *= pow(2.0, semi / 12.0);
-                            break;
-                        }
-                        case 2:
-                            amp *= 1.0 + lfo * V->lfo_depth;
-                            if (amp < 0.0) amp = 0.0;
-                            break;
-                        case 3:
-                            if (fc <= 0.0) fc = 1000.0;
-                            fc += lfo * V->lfo_depth;
-                            break;
-                        case 4:
-                            if (pwuse < 0.0) pwuse = 0.5;
-                            pwuse += lfo * V->lfo_depth;
-                            break;
-                        default:
-                            break;
+                    /* Generic voice LFO slots (gain, source Hz, sample
+                       cents, pan); see voice_lfo_step_all. The onset quantum
+                       holds the static values while the deployed worklet
+                       leaves its first block unwritten. */
+                    double pan_lfo = 0, cents_lfo = 0;
+                    int lfo_nf = 0;
+                    if (age >= V->lfo_hold) {
+                        voice_lfo_step_all(V, &amp, &freq, &cents_lfo, &pan_lfo, &lfo_nf);
+                        if (lfo_nf & (1<<2)) amp = 1.0;
+                        if (lfo_nf & (1<<5)) freq = 440.0;
+                        if (lfo_nf & (1<<7)) cents_lfo = 0.0;
+                        if (lfo_nf & (1<<8)) pan_lfo = -V->pan;
+                        if (cents_lfo != 0) {
+                            freq *= pow(2.0, cents_lfo/1200.0);
+                            if (freq < 0.01) freq = 0.01;
                         }
                     }
+                    if (age >= V->lfo_hold && voice_pan_lfo_active(V))
+                        voice_lfo_pan_routing(V, V->pan + pan_lfo);
                     // oscillator
                     freq = dsp_frequency(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time);
                     /* OscillatorNode clamps frequency to ±Nyquist and keeps
@@ -3341,9 +3553,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                             break;
                         }
                     }
-                    if (V->lpf_hz > 0.0 || V->lfo_tgt == 3) {
-                        double base = (V->lfo_tgt == 3) ? fc : V->lpf_hz;
-                        sample = apply_lpf(V, sample, voice_fc(V, base));
+                    if (V->lpf_hz > 0.0) {
+                        sample = apply_lpf(V, sample, voice_fc(V, V->lpf_hz));
                     }
                     sample *= V->waveform_gain>0?V->waveform_gain:1;
                     if (V->dsp.control.noise_mix>0 && (w==INST_SINE || w==INST_SAW ||

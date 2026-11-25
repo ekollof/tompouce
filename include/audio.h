@@ -75,11 +75,9 @@ typedef struct Voice {
     double smp_begin;
     double delay_send;
     int orbit;
-    int lfo_tgt;
-    int lfo_wave;
-    double lfo_hz;
-    double lfo_depth;
-    double lfo_phase;
+    LfoSlot vlfo[LFO_SLOTS];
+    double lfo_phase[LFO_SLOTS]; /* advancing phase in radians */
+    double lfo_hold; /* onset quantum span with unmodulated output (seconds) */
     double release_start_level;
     double release_time;
     double gate_end;

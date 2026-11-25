@@ -856,19 +856,181 @@ static void test_analyser_controls(void) {
         ".lfo({control:'gain',rate:.5,depth:1})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
-    assert(event.lfo_tgt==2 && fabs(event.lfo_hz-.5)<1e-9 &&
-        fabs(event.lfo_depth-.5)<1e-9 && !event.lfo_unsupported);
+    assert(event.lfo[0].tgt==2 && fabs(event.lfo[0].hz-.5)<1e-9 &&
+        fabs(event.lfo[0].depth-.5)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
     haps=query("note(60).s('sawtooth').lpf(500)"
         ".lfo({control:'cutoff',rate:.5,depth:2})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
-    assert(event.lfo_tgt==0 && !event.lfo_unsupported);
+    assert(event.lfo[0].tgt==0 && event.lfo[1].tgt==0 && !event.lfo_unsupported);
     assert(fabs(event.dsp.p[DSP_LPRATE]-.5)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPDEPTH]-2)<1e-9);
     assert(fabs(event.dsp.p[DSP_LPDC]+.5)<1e-9);
     assert(event.dsp.p[DSP_LPSHAPE]==1 && event.dsp.lfo_sample_rate);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('saw').lfo().lpf(800)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==5 && fabs(event.lfo[0].hz-1)<1e-9 &&
+        fabs(event.lfo[0].depth-event.freq)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('saw').lfo().lpf(800).lfo({control:'cutoff',rate:.5,depth:2})",
+        &program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==5 && !event.lfo_unsupported);
+    assert(fabs(event.dsp.p[DSP_LPRATE]-.5)<1e-9);
+    assert(fabs(event.dsp.p[DSP_LPDEPTH]-2)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').gain(.5).pan(.5)"
+        ".lfo({control:'gain',rate:.5,depth:1})"
+        ".lfo({control:'pan',rate:.25,depth:2})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==2 && event.lfo[1].tgt==8 &&
+        fabs(event.lfo[1].hz-.25)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').pan(.25).lfo({control:'pan'})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==8 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').gain(.5)"
+        ".lfo({control:'gain',rate:.5,depth:1})"
+        ".lfo({control:'gain',rate:1,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==2 && event.lfo[1].tgt==2 &&
+        fabs(event.lfo[0].hz-.5)<1e-9 && fabs(event.lfo[1].hz-1)<1e-9 &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').lfo({control:'pan'})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').octave(1)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.freq-2*261.6255653005986)<1e-6);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').gain(.5)"
+        ".env({control:'gain',attack:.1,decay:.2,sustain:.3,release:.4,depth:2})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    /* Recognized targets record their slot but stay inert like the deployed
+       stillborn node (warned once per program at schedule time). */
+    assert(event.env[0].tgt==2 && event.env_unsupported);
+    assert(fabs(event.env[0].attack-.1)<1e-9 && fabs(event.env[0].decay-.2)<1e-9 &&
+        fabs(event.env[0].sustain-.3)<1e-9 && fabs(event.env[0].release-.4)<1e-9);
+    assert(fabs(event.env[0].depth-1)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('saw').lpf(800).env({control:'cutoff'})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.env[0].tgt==0 && event.env_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').pan(.5).env({control:'pan',attack:.01})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.env[0].tgt==8 && fabs(event.env[0].attack-.01)<1e-9 &&
+        event.env_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sine').env({control:'pan'})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.env[0].tgt==0 && event.env_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sawtooth').lpf(800).resonance(2)"
+        ".lfo({control:'resonance',rate:.5,depth:1})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==9 && fabs(event.lfo[0].hz-.5)<1e-9 &&
+        fabs(event.lfo[0].depth-2)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(60).s('sawtooth').lfo({control:'resonance'})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).tremolo(4)"
+        ".lfo({control:'tremolo',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_TREM_RATE &&
+        fabs(event.lfo[0].hz-.5)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).tremolo(4)"
+        ".lfo({control:'tremolodepth',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_TREM_GAIN &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).coarse(4)"
+        ".lfo({control:'coarse',rate:.5,depth:1})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_COARSE &&
+        fabs(event.lfo[0].depth-4)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).crush(4)"
+        ".lfo({control:'crush',rate:.5,depth:1})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_CRUSH &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).shape(.5)"
+        ".lfo({control:'shape',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_SHAPE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).distort(2)"
+        ".lfo({control:'distort',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DISTORT &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5)"
+        ".lfo({control:'phasercenter',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_PHCENTER &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).postgain(.8)"
+        ".lfo({control:'postgain',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_POSTGAIN &&
+        !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 }
 

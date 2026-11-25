@@ -476,8 +476,9 @@ static void test_analyser_controls_do_not_warn(void) {
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
-/* Generic .lfo() modulation is implemented for gain and filter cutoff. Other
-   targets keep their static value and warn instead of silently misrendering. */
+/* Generic .lfo() modulation is implemented for gain, filter cutoff, source
+   frequency and pan. Other targets keep their static value and warn instead
+   of silently misrendering. */
 static void test_generic_lfo_warns(void) {
     double old_time=audio_time; int old_playing=playing;
     playing=1; audio_set_reference_mode(1); audio_time=0;
@@ -486,15 +487,15 @@ static void test_generic_lfo_warns(void) {
     event_queue_clear();
     cJSON *metadata=NULL; char error[512];
     JsProgram *program=javascript_compile(
-        "note(60).s('sawtooth').pan(.5)"
-        ".lfo({control:'pan',rate:.5,depth:2})",
+        "note(60).s('sawtooth').resonance(2)"
+        ".lfo({control:'resonance',rate:.5,depth:2})",
         120,&metadata,error,sizeof(error));
     assert(program); cJSON_Delete(metadata);
     assert(js_audio_schedule(program,0,0,event_queue_generation()));
     int warned=0;
     for (int i=0;i<console_count_get();i++)
         if (strstr(console_line(i),
-            "LFO modulation is implemented only for gain and cutoff"))
+            "LFO modulation is implemented for gain, cutoff, source and pan"))
             warned=1;
     assert(warned);
     event_queue_clear();
@@ -533,6 +534,75 @@ static void test_generic_cutoff_lfo(void) {
     pa_callback(NULL,static_pcm,128,NULL,0,NULL);
     assert(memcmp(dynamic_pcm,static_pcm,sizeof(dynamic_pcm))!=0);
     cJSON_Delete(dynamic); cJSON_Delete(static_hap);
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
+}
+
+/* A generic pan LFO must move energy between channels over time (deployed
+   StereoPanner behavior), not just scale it. */
+static void test_generic_pan_lfo(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    cJSON *hap=cJSON_Parse(
+        "{\"begin\":0,\"end\":2,\"value\":{\"note\":69,\"s\":\"sine\","
+        "\"gain\":0.5,\"pan\":0.5,\"lfo\":{\"0\":{\"control\":\"pan\","
+        "\"rate\":0.5,\"depth\":1},\"__ids\":{}}}}");
+    assert(hap);
+    AudioEvent event;
+    assert(js_audio_event(hap,0,2,&event));
+    assert(event.lfo[0].tgt==8 && !event.lfo_unsupported);
+    audio_trigger_event(&event);
+    assert(voices[0].vlfo[0].tgt==8);
+    float first[512], second[512];
+    pa_callback(NULL,first,128,NULL,0,NULL);
+    /* Advance one half LFO period (rate .5 Hz): pan swings from -.5 at the
+       onset to +.5, mirroring the deployed triangle. */
+    for (int i=0;i<344;i++) { float tmp[256]; pa_callback(NULL,tmp,128,NULL,0,NULL); }
+    pa_callback(NULL,second,128,NULL,0,NULL);
+    double l0=0, r0=0, l1=0, r1=0;
+    for (int i=0;i<128;i++) {
+        l0+=fabs(first[2*i]); r0+=fabs(first[2*i+1]);
+        l1+=fabs(second[2*i]); r1+=fabs(second[2*i+1]);
+    }
+    /* Onset quantum holds the static center pan (matching the deployed
+       first-block hold); the later window is right-heavy. */
+    assert(l0/(r0+1e-9)>0.75 && l0/(r0+1e-9)<1.33 && l1/(r1+1e-9)<0.75);
+    memset(voices,0,sizeof(voices)); audio_time=0;
+    cJSON_Delete(hap);
+    audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
+}
+
+/* A generic envelope must not modulate the voice: the deployed envelope
+   worklet never starts (connectEnvelope omits begin/end), so native keeps
+   env and static renders bit-identical. */
+static void test_generic_gain_env(void) {
+    double old_time=audio_time; int old_playing=playing;
+    playing=1; audio_set_reference_mode(1); audio_time=0;
+    memset(voices,0,sizeof(voices));
+    cJSON *hap=cJSON_Parse(
+        "{\"begin\":0,\"end\":2,\"value\":{\"note\":69,\"s\":\"sine\","
+        "\"gain\":0.5,\"env\":{\"0\":{\"control\":\"gain\",\"attack\":0.5,"
+        "\"decay\":0.1,\"sustain\":1,\"release\":0.1},\"__ids\":{}}}}");
+    assert(hap);
+    AudioEvent event;
+    assert(js_audio_event(hap,0,2,&event));
+    assert(event.env[0].tgt==2 && event.env_unsupported);
+    audio_trigger_event(&event);
+    float dynamic_pcm[256];
+    pa_callback(NULL,dynamic_pcm,128,NULL,0,NULL);
+    memset(voices,0,sizeof(voices)); audio_time=0;
+    cJSON *static_hap=cJSON_Parse(
+        "{\"begin\":0,\"end\":2,\"value\":{\"note\":69,\"s\":\"sine\","
+        "\"gain\":0.5}}");
+    assert(static_hap);
+    AudioEvent static_event;
+    assert(js_audio_event(static_hap,0,2,&static_event));
+    audio_trigger_event(&static_event);
+    float static_pcm[256];
+    pa_callback(NULL,static_pcm,128,NULL,0,NULL);
+    assert(!memcmp(dynamic_pcm,static_pcm,sizeof(dynamic_pcm)));
+    memset(voices,0,sizeof(voices)); audio_time=0;
+    cJSON_Delete(hap); cJSON_Delete(static_hap);
     audio_set_reference_mode(0); playing=old_playing; audio_time=old_time;
 }
 
@@ -1428,6 +1498,9 @@ int main(void) {
     test_analyser_controls_do_not_warn();
     test_generic_lfo_warns();
     test_generic_cutoff_lfo();
+    test_generic_pan_lfo();
+    test_generic_gain_env();
+    test_generic_gain_env();
     test_active_voice_list();
 
     puts("native callback, stereo/pan/ADSR, stretch and partitioned convolution ok");

@@ -590,10 +590,35 @@ start, and damps the previous output history by 0.77 at the connection. That
 matches the deployed overshoot (native peak 0.399, browser 0.3998). Earlier
 50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected; they
 were measured before direct-form-I was in use.
-Other non-gain/cutoff targets keep their static value and log one
-`LFO modulation is implemented only for gain and cutoff` warning.
+Remaining generic targets (delay/compressor params, phaser rate/sweep/depth,
+tremolo skew/phase/shape, vowel, stretch, dry/room/busgain, detune unison)
+keep their static value and log one warning naming the unsupported target
+and the expected control order.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
-versus static PCM. Filter-specific
+versus static PCM. Source-frequency LFO (`s("saw").lfo().lpf(800)`) follows
+the same worklet math against the oscillator frequency with the
+`[20-base, 24000-base]` clamp; the tutorial vibrato sweep matches the
+deployed zero-crossing contour, while exact PCM under deep FM remains
+ungated (sine 0.94, saw ~0.73 at RMS ratio ~1.0: onset/envelope modeling
+plus naive-versus-bandlimited saw). Pan LFO (`pan(.5).lfo(...)`) gates at
+0.99977/1.0003 with per-sample equal-power routing. Sample voices take the
+deployed detune fallback: gain LFO gates at 0.995/0.99 and the cents path at
+1.0/1.0002. Generic `.env()` is parsed and warned but never applied: the
+deployed envelope node never starts, so `env-inert-gain` gates static PCM at
+1.0/1.0002 on both sides. Voices with active voice LFO slots bypass the SoA batch lanes.
+The deployed worklet leaves its first 128-sample block unwritten, so voice
+LFOs hold static values for the onset quantum; this closes the FM phase gap:
+`s("saw").lfo().lpf(800)` gates at 1.0/1.0001, `s("sine").lfo()` at 1.0/1.0001,
+and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth, coarse, crush,
+shape, distort, phaser center and postgain modulate the DSP path per sample
+and gate at the unchanged thresholds: `tremolo-static` 0.99968/1.0002,
+`lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth` 0.99971/1.0002,
+`lfo-coarse` 0.99493/1.0002, `lfo-crush` 0.99577/1.0005, `lfo-shape`
+1.0/1.0001, `lfo-distort` 1.0/1.0001, `phaser-static` 0.99852/0.9923,
+`lfo-phasercenter` 0.99854/0.9924 and `lfo-postgain` 1.0/1.0003. The
+compressor (static and generic) stays diagnostic: the native follower
+anti-correlates near -0.66 with the deployed DynamicsCompressorNode.
+Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.
 

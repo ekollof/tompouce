@@ -294,15 +294,67 @@ Aliases registered by upstream Strudel map to the same controls.
 | MIDI | note events and midichan through the existing ALSA output |
 | OSC | timestamped UDP `/dirt/play` through `.osc()` |
 
-Generic Strudel `.lfo()` modulation is implemented for gain and filter cutoff.
-Gain uses a relative-depth triangle; cutoff maps the deployed worklet's
-`depth=event_depth*target_value`, `dcoffset=-0.5`, triangle and full-range
-clamp onto the sample-rate scalar filter path. The steady cutoff response is
+Generic Strudel `.lfo()` modulation is implemented for gain, filter cutoff,
+source frequency (`s`), pan, tremolo rate/depth, coarse, crush, shape,
+distort, phaser center and postgain. All follow the deployed `lfo-processor`
+semantics: defaults `rate=1 depth=1 dcoffset=-0.5 triangle skew=.5 curve=1`,
+`depth` scaling by the target value (1 when the target is 0), `sync`
+as cycles-per-second multiples, shapes triangle/sine/ramp/saw/square,
+and output clamping (`[20-base, 24000-base]` for audio-rate frequency
+targets at or above 30 Hz). Non-finite `pow(curve)` output reads the target
+AudioParam default instead of adding (gain 1.0, frequency 440, detune/pan 0),
+matching the deployed node sample-for-sample. Like the filter path, voice
+LFOs hold their static values for the render quantum containing the voice
+start (the deployed worklet leaves its first block unwritten while the
+absolute phase stays frozen); this closes the FM phase gap outright.
+A bare `.lfo()` targets the control immediately
+before it, so `s("saw").lfo().lpf(800)` is a source-frequency LFO and
+`s("saw").lpf(800).lfo()` is a cutoff LFO. Gain uses the same additive
+worklet math against the voice gain, on synth and sample voices alike.
+Sample voices use the deployed detune fallback: a source LFO bends transport
+in cents (base 1, inaudible at the default depth, exact at 1.0/1.0002).
+Pan requires an explicit `.pan()` (as upstream requires the pan node) and
+recomputes the equal-power StereoPanner split every sample; it gates at
+0.99977 correlation. Cutoff maps onto the sample-rate
+scalar filter path. The steady cutoff response is
 gated at 0.99977 correlation; only the first ~50 ms graph onset remains a
-comparison limit. Other targets keep their static value and log one
-`native audio: LFO modulation is implemented only for gain and cutoff` warning
-per program. Filter-specific `lp`/`hp`/`bp` LFO controls, pitch
-envelope/vibrato, pulse-width LFO and tremolo are separate supported controls.
+comparison limit. Source-frequency LFO renders the tutorial vibrato shape
+(zero-crossing contour matches the deployed player); exact PCM under deep
+frequency modulation is still limited by onset/envelope modeling plus the
+naive native saw versus the browser's bandlimited oscillator (RMS ratios sit
+near 1.0, so this is not gain staging). Voices with active voice LFO slots
+bypass the SoA batch lanes and render per sample, since the lanes have no
+slot support. Remaining targets (delay/compressor params, phaser
+rate/sweep/depth, tremolo skew/phase/shape, vowel, stretch, bus modulators,
+dry/room/busgain, detune unison) keep their static value and log one warning
+naming the unsupported target per program. Filter-specific `lp`/`hp`/`bp` LFO
+controls, pitch envelope/vibrato and pulse-width LFO are separate
+supported controls. Static tremolo and the phaser (single notch at
+center+282 Hz, Q from depth, detune in cents from its own triangle LFO)
+render natively; generic tremolo rate/depth and phaser center modulate them
+per sample. Voice targets take one slot per entry in encounter
+order (up to 8) and repeats sum in the renderer; each filter LFO type keeps
+the first entry. `subControl` and non-main `fxi` routings warn instead of
+misrendering. Short aliases (`r sh sk cu s dep dr da dc rt`) and `retrig`
+phase restart match the core sub-control table.
+
+Generic `.env()` modulation is recognized, validated and logged, but never
+applied: the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
+stays in the initial state forever and outputs zeros (verified flat against
+strudel.cc with and without explicit `begin: 0, end: 2`; the trigger needs
+`begin` to differ from the initial zero). Native matches the deployed
+silence exactly (`env-inert-gain` gates static PCM at 1.0/1.0002) and warns
+once per program. If the site ever wires `begin`/`end` through, the
+envelope-processor state machine (attack/decay/sustain hold/release with
+`_warp` curves and `[min, max]` clamp) can be evaluated per sample against
+the voice gate.
+
+Reference: `.reference/strudel`
+(gitignored Codeberg checkout) `packages/superdough/modulators.mjs`
+(`connectLFO`), `helpers.mjs` (`getLfo`), `worklets.mjs` (`LFOProcessor`),
+`superdoughdata.mjs` (`CONTROL_TARGETS`), `packages/webaudio/webaudio.mjs`
+(render `cycle` argument) and `packages/core/controls.mjs` (aliases,
+bare-`.lfo()` targets the preceding control).
 
 Native WAV, MP3 and FLAC sampling preserves stereo channels and recorded
 levels. Pitch-keyed maps accept arrays within each region; sample indices

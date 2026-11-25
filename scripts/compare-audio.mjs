@@ -235,6 +235,8 @@ try {
        which aborts the harness ('Silent capture'); native steps the
        integer wave instead (recorded superset, see javascript.md). */
     {name:'lfo-tremolophase-inert',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4).lfo({control:'tremolophase',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'vib-static',sound:'sine',code:`note(69).s('sine').gain(.5).vib(5).vibmod(.5)`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-vibmod',sound:'sine',code:`note(69).s('sine').gain(.5).vib(5).vibmod(.5).lfo({control:'vibmod',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-coarse',sound:'sine',code:`note(69).s('sine').gain(.5).coarse(4).lfo({control:'coarse',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-crush',sound:'sine',code:`note(69).s('sine').gain(.5).crush(4).lfo({control:'crush',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-shape',sound:'sine',code:`note(69).s('sine').gain(.5).shape(.5).lfo({control:'shape',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},

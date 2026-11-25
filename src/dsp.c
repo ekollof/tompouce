@@ -550,7 +550,7 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
             ratio *= pow(2, p[DSP_PENV] * (env - p[DSP_PANCHOR]) / 12);
         }
     }
-    if (p[DSP_VIB] > 0) ratio *= pow(2, sin(2*M_PI*age*p[DSP_VIB])*p[DSP_VIBMOD]/12);
+    if (p[DSP_VIB] > 0) ratio *= pow(2, sin(2*M_PI*age*p[DSP_VIB])*(p[DSP_VIBMOD]+params->gen_lfo[GEN_VIBMOD]/100)/12);
     return ratio;
 }
 
@@ -558,7 +558,7 @@ double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gat
     if (!params->enabled || first_time<=0) return dsp_pitch_multiplier(params,age,gate);
     const double *p=params->p;
     double cents=p[DSP_PENV]!=0?scheduled_pitch_cents(p,age,gate,first_time,p[DSP_PCURVE]>0):0;
-    if (p[DSP_VIB]>0) cents+=100*sin(2*M_PI*age*p[DSP_VIB])*p[DSP_VIBMOD];
+    if (p[DSP_VIB]>0) cents+=100*sin(2*M_PI*age*p[DSP_VIB])*(p[DSP_VIBMOD]+params->gen_lfo[GEN_VIBMOD]/100);
     return pow(2,cents/1200);
 }
 

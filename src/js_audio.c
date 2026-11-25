@@ -1050,6 +1050,7 @@ static const GenTarget gen_targets[] = {
     {"compressorAttack", GEN_COMPATT, DSP_COMPATT, 0, "compressor"},
     {"compressorRelease", GEN_COMPREL, DSP_COMPREL, 0, "compressor"},
     {"postgain", GEN_POSTGAIN, DSP_POST, 0, NULL},
+    {"vibmod", GEN_VIBMOD, DSP_VIBMOD, 0, "vib"},
     {NULL, 0, 0, 0, NULL}
 };
 
@@ -1151,6 +1152,14 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         if (gent && gent->gen == GEN_PHCENTER) base += 282.0;
         if (gent && gent->gen == GEN_PHDEPTH)
             base = 2.0 - fmin(fmax(base*2.0, 0.0), 1.9);
+        /* The deployed vibrato gain is in cents (semitones * 100), so a
+           generic vibmod LFO scales by the cents value (0 maps to 1,
+           like every target). The DSP path divides the offset back to
+           semitones at use. */
+        if (gent && gent->gen == GEN_VIBMOD) {
+            base = base*100.0;
+            if (!(base>0) && !(base<0)) base = 1.0;
+        }
         if (!(base>0) && !(base<0)) {
             if (is_gain || is_source) base=1;
             else if (is_pan) base=1;

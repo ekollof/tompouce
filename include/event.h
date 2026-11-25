@@ -106,9 +106,9 @@ typedef struct {
     /* Multi-frame wavetable sample oscillator (Superdough wt_* samples). */
     int wt_frames, wt_frame_len; // 0 = plain sample playback
     double wt_position, wt_warp, wt_lfo_hz, wt_lfo_depth;
-    double wt_detune, wt_spread, wt_lfo_skew;
+    double wt_detune, wt_spread, wt_lfo_skew, wt_lfo_dc;
     double wt_env_amount, wt_env[4], wt_warp_env_amount, wt_warp_env[4];
-    double wt_warp_lfo_hz, wt_warp_lfo_depth, wt_warp_lfo_skew;
+    double wt_warp_lfo_hz, wt_warp_lfo_depth, wt_warp_lfo_skew, wt_warp_lfo_dc;
     double cps, wt_phase_rand;
     int wt_warp_mode, wt_voices, wt_lfo_shape;
     int wt_warp_lfo_shape;

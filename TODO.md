@@ -538,10 +538,14 @@ and measured divergences are recorded in the archive.
       native steps the integer wave. Newly gated since: shapevol,
       distortvol, distorttype (amount, matching the deployed node),
       tremolosync, vibmod (cents domain), static + generic pw/pwrate/pwsweep,
-      and static + generic vowel (all five formants shift by the same Hz
-      offset). Detune static mismatched only for lack of phase seeding
-      (0.39 unseeded); seeded it gates at 1.0/1.0006, and the generic
-      detune LFO (per-sample freqspread recompute) at 1.0/1.0006.
+      static + generic vowel (all five formants shift by the same Hz
+      offset), static + generic wt/warp rate/depth/skew, static wtdc/warpdc
+      (including negative dc) and the inert wtdc/warpdc match (the deployed
+      node lookup uses `dc` but the worklet exposes `dcoffset`, so the
+      connection never forms). Detune static mismatched only for lack of
+      phase seeding (0.39 unseeded); seeded it gates at 1.0/1.0006, and
+      the generic detune LFO (per-sample freqspread recompute) at
+      1.0/1.0006. Generic wt/warp shape stays a recorded superset.
       Missing generic targets: delay and compressor params, plus
       dry/room/busgain, stretch and bmod. Delay/dry/room/busgain generics need a design
       against the shared-sends architecture: upstream builds per-hap

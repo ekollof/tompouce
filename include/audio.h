@@ -91,9 +91,9 @@ typedef struct Voice {
     /* Multi-frame sample wavetable (Superdough wt_* samples). */
     int wt_sample_frames, wt_sample_frame_len;
     double wt_sample_position, wt_sample_warp, wt_sample_lfo_hz, wt_sample_lfo_depth;
-    double wt_sample_detune, wt_sample_spread, wt_sample_lfo_skew;
+    double wt_sample_detune, wt_sample_spread, wt_sample_lfo_skew, wt_sample_lfo_dc;
     double wt_sample_env_amount, wt_sample_env[4], wt_sample_warp_env_amount, wt_sample_warp_env[4];
-    double wt_sample_warp_lfo_hz, wt_sample_warp_lfo_depth, wt_sample_warp_lfo_skew;
+    double wt_sample_warp_lfo_hz, wt_sample_warp_lfo_depth, wt_sample_warp_lfo_skew, wt_sample_warp_lfo_dc;
     double wt_sample_phase_rand;
     int wt_sample_warp_mode, wt_sample_voices, wt_sample_lfo_shape;
     int wt_sample_warp_lfo_shape;

@@ -1056,8 +1056,55 @@ static const GenTarget gen_targets[] = {
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
     {"vowel", GEN_VOWEL, DSP_VOWEL, 1, "vowel"},
     {"detune", GEN_DETUNE, DSP_UNISON, 0, "spread-voice"},
+    {"wtrate", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
+    {"wtsync", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
+    {"wtdepth", GEN_WTDEPTH, DSP_UNISON, 0, "wt-voice"},
+    {"wtskew", GEN_WTSKEW, DSP_UNISON, 0, "wt-voice"},
+    {"wtshape", GEN_WTSHAPE, DSP_UNISON, 0, "wt-voice"},
+    {"warprate", GEN_WARPRATE, DSP_UNISON, 0, "warp-voice"},
+    {"warpsync", GEN_WARPRATE, DSP_UNISON, 0, "warp-voice"},
+    {"warpdepth", GEN_WARPDEPTH, DSP_UNISON, 0, "warp-voice"},
+    {"warpskew", GEN_WARPSKEW, DSP_UNISON, 0, "warp-voice"},
+    {"warpshape", GEN_WARPSHAPE, DSP_UNISON, 0, "warp-voice"},
     {NULL, 0, 0, 0, NULL}
 };
+
+/* The deployed wt/warp LFO depth defaults to 0.5 when any of its other
+   params is set, else 0 (getParamLfo); native parses the same default. */
+static double wt_depth_defaulted(const cJSON *value, int iswarp) {
+    const char *dp = iswarp ? "warpdepth" : "wtdepth";
+    const char *rp = iswarp ? "warprate" : "wtrate";
+    const char *shp = iswarp ? "warpshape" : "wtshape";
+    const char *skp = iswarp ? "warpskew" : "wtskew";
+    const char *syp = iswarp ? "warpsync" : "wtsync";
+    const cJSON *draw = cJSON_GetObjectItemCaseSensitive(value, dp);
+    if (cJSON_IsNumber(draw) && isfinite(draw->valuedouble)) return draw->valuedouble;
+    if (cJSON_HasObjectItem(value, rp) || cJSON_HasObjectItem(value, shp) ||
+        cJSON_HasObjectItem(value, skp) || cJSON_HasObjectItem(value, syp)) return 0.5;
+    return 0.0;
+}
+
+/* Resolved wt/warp LFO rate in Hz, matching both the deployed sync
+   override and the native static parse. */
+static double wt_rate_resolved(const cJSON *value, double cps, int iswarp, double depth) {
+    const char *rp = iswarp ? "warprate" : "wtrate";
+    const char *syp = iswarp ? "warpsync" : "wtsync";
+    const cJSON *sy = cJSON_GetObjectItemCaseSensitive(value, syp);
+    if (cJSON_IsNumber(sy) && isfinite(sy->valuedouble) && cps > 0) {
+        double s = sy->valuedouble;
+        if (s < -64) s = -64;
+        if (s > 64) s = 64;
+        return fabs(cps) * s;
+    }
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(value, rp);
+    if (cJSON_IsNumber(r) && isfinite(r->valuedouble)) {
+        double v = r->valuedouble;
+        if (v < 0) v = 0;
+        if (v > 20000) v = 20000;
+        return v;
+    }
+    return depth > 0 ? 1 : 0;
+}
 
 static const GenTarget *gen_target(const char *name, const cJSON *value, const char *sound) {
     for (int i = 0; gen_targets[i].name; i++) {
@@ -1084,6 +1131,11 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             int spread = (sound && !strcmp(sound, "supersaw")) ||
                 (sound && !strncmp(sound, "wt_", 3));
             if (spread) return &gen_targets[i];
+        } else if (!strcmp(need, "wt-voice") || !strcmp(need, "warp-voice")) {
+            /* The deployed wt/warp LFO node exists only on wavetable
+               voices and only when its (defaulted) depth is nonzero. */
+            if (!sound || strncmp(sound, "wt_", 3)) return NULL;
+            if (wt_depth_defaulted(value, need[2] == 'r') != 0) return &gen_targets[i];
         } else if (cJSON_HasObjectItem(value,need)) return &gen_targets[i];
         return NULL;
     }
@@ -1136,7 +1188,7 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         double dc=lfo_alias_number(entry,"dcoffset","dc",NULL,-.5,-100,100);
         double skew=lfo_alias_number(entry,"skew","sk",NULL,.5,.001,.999);
         double curve=lfo_alias_number(entry,"curve","cu",NULL,1,.001,64);
-        double phaseoff=lfo_alias_number(entry,"phaseoffset",NULL,NULL,0,0,1);
+        double phaseoff=lfo_alias_number(entry,"phaseoffset",NULL,NULL,0,-64,64);
         if (!(rate>0)) continue;
         const char *name=target->valuestring;
         int is_gain=!strcmp(name,"gain") || !strcmp(name,"amp");
@@ -1176,6 +1228,23 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         /* The deployed detune node scales by the semitone spread, which
            native keeps outside the control array. */
         else if (gent && gent->gen == GEN_DETUNE) base = ev->dsp.supersaw_detune;
+        else if (gent && gent->gen >= GEN_WTRATE && gent->gen <= GEN_WARPSHAPE) {
+            /* Wavetable LFO bases replicate the connected worklet params:
+               resolved rate, defaulted depth, raw skew (default .5) and
+               shape index. Generic dc has no deployed node (the worklet
+               exposes dcoffset, not dc) and warns like tremolophase. */
+            int iswarp = gent->gen >= GEN_WARPRATE;
+            int k = gent->gen - (iswarp ? GEN_WARPRATE : GEN_WTRATE);
+            if (k == 0) base = wt_rate_resolved(value, ev->cps, iswarp,
+                wt_depth_defaulted(value, iswarp));
+            else if (k == 1) base = wt_depth_defaulted(value, iswarp);
+            else if (k == 2) {
+                const cJSON *p = cJSON_GetObjectItemCaseSensitive(value,
+                    iswarp ? "warpskew" : "wtskew");
+                base = (cJSON_IsNumber(p) && isfinite(p->valuedouble)) ? p->valuedouble : 0.5;
+            } else base = (double)lfo_shape_control(value,
+                iswarp ? "warpshape" : "wtshape");
+        }
         else if (gent) base=ev->dsp.p[gent->base];
         /* The amGain tremolo node is constructed with the static gain, so a
            generic tremolodepth LFO scales by that value (0 becomes 1). */
@@ -1627,13 +1696,14 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
                 number_control(value,"wtskew") || number_control(value,"wtsync");
             ev->wt_lfo_depth=number_control(value,"wtdepth") ?
                 control(value,"wtdepth",0,0,16) : wt_lfo_params ? .5 : 0;
-            if (number_control(value,"wtrate"))
-                ev->wt_lfo_hz=control(value,"wtrate",0,0,20000);
-            else if (number_control(value,"wtsync") && ev->cps>0)
+            if (number_control(value,"wtsync") && ev->cps>0)
                 ev->wt_lfo_hz=fabs(ev->cps)*control(value,"wtsync",0,-64,64);
+            else if (number_control(value,"wtrate"))
+                ev->wt_lfo_hz=control(value,"wtrate",0,0,20000);
             else ev->wt_lfo_hz=ev->wt_lfo_depth>0 ? 1 : 0;
             ev->wt_lfo_shape=lfo_shape_control(value,"wtshape");
             ev->wt_lfo_skew=control(value,"wtskew",.5,.001,.999);
+            ev->wt_lfo_dc=control(value,"wtdc",0,-100,100);
             const char *wt_env_names[4]={"wtattack","wtdecay","wtsustain","wtrelease"};
             const char *warp_env_names[4]={"warpattack","warpdecay","warpsustain","warprelease"};
             const double wt_env_defaults[4]={0,.5,0,.1};
@@ -1649,13 +1719,14 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
                 number_control(value,"warpskew") || number_control(value,"warpsync");
             ev->wt_warp_lfo_depth=number_control(value,"warpdepth") ?
                 control(value,"warpdepth",0,0,16) : warp_lfo_params ? .5 : 0;
-            if (number_control(value,"warprate"))
-                ev->wt_warp_lfo_hz=control(value,"warprate",0,0,20000);
-            else if (number_control(value,"warpsync") && ev->cps>0)
+            if (number_control(value,"warpsync") && ev->cps>0)
                 ev->wt_warp_lfo_hz=fabs(ev->cps)*control(value,"warpsync",0,-64,64);
+            else if (number_control(value,"warprate"))
+                ev->wt_warp_lfo_hz=control(value,"warprate",0,0,20000);
             else ev->wt_warp_lfo_hz=ev->wt_warp_lfo_depth>0 ? 1 : 0;
             ev->wt_warp_lfo_shape=lfo_shape_control(value,"warpshape");
             ev->wt_warp_lfo_skew=control(value,"warpskew",.5,.001,.999);
+            ev->wt_warp_lfo_dc=control(value,"warpdc",0,-100,100);
             ev->wt_voices=(int)control(value,"unison",1,1,WT_SAMPLE_VOICES);
             ev->wt_spread=control(value,"spread",.7,0,1);
             ev->wt_detune=control(value,"detune",0,-9600,9600);

@@ -1648,6 +1648,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->wt_sample_lfo_depth = ev->wt_lfo_depth;
     v->wt_sample_lfo_shape = ev->wt_lfo_shape;
     v->wt_sample_lfo_skew = ev->wt_lfo_skew;
+    v->wt_sample_lfo_dc = ev->wt_lfo_dc;
     v->wt_sample_env_amount = ev->wt_env_amount;
     for (int i = 0; i < 4; i++) v->wt_sample_env[i] = ev->wt_env[i];
     v->wt_sample_warp_env_amount = ev->wt_warp_env_amount;
@@ -1656,6 +1657,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->wt_sample_warp_lfo_depth = ev->wt_warp_lfo_depth;
     v->wt_sample_warp_lfo_shape = ev->wt_warp_lfo_shape;
     v->wt_sample_warp_lfo_skew = ev->wt_warp_lfo_skew;
+    v->wt_sample_warp_lfo_dc = ev->wt_warp_lfo_dc;
     v->wt_sample_detune = ev->wt_detune;
     v->wt_sample_spread = ev->wt_spread;
     v->wt_sample_voices = ev->wt_voices > 0 ? ev->wt_voices : 1;
@@ -2897,21 +2899,31 @@ static void wt_sample_voice(Voice *v, double age, double gate, double *left, dou
     double position = v->wt_sample_position;
     if (v->wt_sample_env_amount != 0)
         position += wt_env_value(age, gate, v->wt_sample_env_amount, v->wt_sample_env);
-    if (v->wt_sample_lfo_depth > 0) {
+    if (v->wt_sample_lfo_depth != 0) {
+        double *gen = v->dsp.control.gen_lfo;
+        double depth = v->wt_sample_lfo_depth + gen[GEN_WTDEPTH];
         double phase = v->wt_sample_lfo_phase;
-        double tri = wt_lfo_value(phase, v->wt_sample_lfo_shape, v->wt_sample_lfo_skew);
-        position += tri * v->wt_sample_lfo_depth;
-        v->wt_sample_lfo_phase = wt_wrap(phase + v->wt_sample_lfo_hz / SR);
+        int shape = v->wt_sample_lfo_shape + (int)gen[GEN_WTSHAPE];
+        double skew = v->wt_sample_lfo_skew + gen[GEN_WTSKEW];
+        double tri = wt_lfo_value(phase, shape, skew);
+        position += (tri + v->wt_sample_lfo_dc) * depth;
+        v->wt_sample_lfo_phase = wt_wrap(phase +
+            (v->wt_sample_lfo_hz + gen[GEN_WTRATE]) / SR);
     }
     position = wt_clamp(position, 0, 1);
     double warp = v->wt_sample_warp;
     if (v->wt_sample_warp_env_amount != 0)
         warp += wt_env_value(age, gate, v->wt_sample_warp_env_amount, v->wt_sample_warp_env);
-    if (v->wt_sample_warp_lfo_depth > 0) {
+    if (v->wt_sample_warp_lfo_depth != 0) {
+        double *gen = v->dsp.control.gen_lfo;
+        double depth = v->wt_sample_warp_lfo_depth + gen[GEN_WARPDEPTH];
         double phase = v->wt_sample_warp_lfo_phase;
-        double value = wt_lfo_value(phase, v->wt_sample_warp_lfo_shape, v->wt_sample_warp_lfo_skew);
-        warp += value * v->wt_sample_warp_lfo_depth;
-        v->wt_sample_warp_lfo_phase = wt_wrap(phase + v->wt_sample_warp_lfo_hz / SR);
+        int shape = v->wt_sample_warp_lfo_shape + (int)gen[GEN_WARPSHAPE];
+        double skew = v->wt_sample_warp_lfo_skew + gen[GEN_WARPSKEW];
+        double value = wt_lfo_value(phase, shape, skew);
+        warp += (value + v->wt_sample_warp_lfo_dc) * depth;
+        v->wt_sample_warp_lfo_phase = wt_wrap(phase +
+            (v->wt_sample_warp_lfo_hz + gen[GEN_WARPRATE]) / SR);
     }
     warp = wt_clamp(warp, 0, 1);
     double frame_position = position * (frames - 1);
@@ -3225,9 +3237,6 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         g = 1.0 - rt / r;
                     }
                     double left, right;
-                    wt_sample_voice(V, age, gate, &left, &right);
-                    /* The site's wavetable gain envelope peaks at 0.3. */
-                    g *= cut_gain * .3;
                     double wt_amp = 0, wt_f = 0, wt_c = 0, wt_pan = 0;
                     int wt_nf = 0;
                     if (age >= V->lfo_hold) {
@@ -3237,6 +3246,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     if (age >= V->lfo_hold && voice_pan_lfo_active(V))
                         voice_lfo_pan_routing(V, V->pan + wt_pan);
+                    wt_sample_voice(V, age, gate, &left, &right);
+                    /* The site's wavetable gain envelope peaks at 0.3. */
+                    g *= cut_gain * .3;
                     left *= (V->amp + wt_amp) * g;
                     right *= (V->amp + wt_amp) * g;
                     if (V->dsp.control.enabled)

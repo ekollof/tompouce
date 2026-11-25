@@ -1065,6 +1065,79 @@ static void test_analyser_controls(void) {
     assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4)"
+        ".lfo({control:'wtrate',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WTRATE &&
+        fabs(event.lfo[0].depth-1)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4)"
+        ".lfo({control:'wtdepth',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WTDEPTH &&
+        fabs(event.lfo[0].depth-.2)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4)"
+        ".lfo({control:'wtskew',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WTSKEW &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Generic wtdc has no deployed node (the worklet exposes dcoffset,
+       not dc), so both sides render static like tremolophase. */
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4)"
+        ".lfo({control:'wtdc',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
+        ".lfo({control:'warprate',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPRATE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
+        ".lfo({control:'warpdepth',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPDEPTH &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
+        ".lfo({control:'warpskew',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPSKEW &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Generic warpdc likewise has no deployed node. */
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
+        ".lfo({control:'warpdc',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Wt/warp LFOs have no node off wavetable voices. */
+    haps=query("note(69).s('sine').gain(.5)"
+        ".lfo({control:'wtrate',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Generic tremolophase has no deployed node (the worklet exposes
        phaseoffset, not phase), so both sides render static tremolo. */
     haps=query("note(69).s('sine').gain(.5).tremolo(4)"

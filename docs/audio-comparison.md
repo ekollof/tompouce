@@ -611,6 +611,7 @@ LFOs hold static values for the onset quantum; this closes the FM phase gap:
 `s("saw").lfo().lpf(800)` gates at 1.0/1.0001, `s("sine").lfo()` at 1.0/1.0001,
 and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth/skew, coarse,
 crush, shape, distort, vibmod, pw/pwrate/pwsweep, vowel, detune,
+wavetable position/warp rate/depth/skew,
 every phaser param and postgain modulate the DSP
 path per sample and gate at the unchanged thresholds: `tremolo-static`
 0.99968/1.0002, `lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth`
@@ -624,11 +625,18 @@ path per sample and gate at the unchanged thresholds: `tremolo-static`
 `vib-static` 1.0/1.0002, `lfo-vibmod` 1.0/1.0002, `pw-static` 1.0/1.0004,
 `lfo-pw` 1.0/1.0004, `lfo-pwrate` 1.0/1.0004, `lfo-pwsweep` 0.99963/1.0006,
 `vowel-static` 0.99999/1.0012, `lfo-vowel` 0.9999/0.9997,
-`detune-static` 1.0/1.0006, `lfo-detune` 1.0/1.0006 and
-`lfo-postgain` 1.0/1.0003. Generic tremolophase matches the deployed
-no-op (`lfo-tremolophase-inert` 0.99968/1.0002); generic tremoloshape is
-a recorded superset (native renders, the deployed float shape index
-crashes its worklet to silence). The
+`detune-static` 1.0/1.0006, `lfo-detune` 1.0/1.0006,
+`lfo-wtrate` 1.0/1.0004, `lfo-wtdepth` 0.99997/0.9995,
+`lfo-wtskew` 1.0/1.0003, `lfo-warprate` 0.99986/1.0004,
+`lfo-warpdepth` 0.9995/0.9997, `lfo-warpskew` 1.0/1.0002,
+`wtdc-static` 1.0/1.0003, `lfo-wtdc-inert` 1.0/1.0003,
+`warpdc-static` 1.0/1.0003, `warpdc-static-neg` 1.0/1.0002,
+`lfo-warpdc-inert` 1.0/1.0002 and
+`lfo-postgain` 1.0/1.0003. Generic tremolophase and wtdc/warpdc match the deployed
+no-op (`lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,
+`lfo-warpdc-inert` 1.0/1.0002); generic tremoloshape and wt/warp shape are
+recorded supersets (native renders, the deployed float shape index
+crashes its worklet to silence, so they stay ungated). The
 compressor (static and generic) stays diagnostic: the native follower
 anti-correlates near -0.66 with the deployed DynamicsCompressorNode.
 Filter-specific

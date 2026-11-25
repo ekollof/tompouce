@@ -297,7 +297,8 @@ Aliases registered by upstream Strudel map to the same controls.
 Generic Strudel `.lfo()` modulation is implemented for gain, filter cutoff,
 source frequency (`s`), pan, tremolo rate/depth/skew/sync, coarse, crush,
 shape/shapevol, distort/distortvol/distorttype, vib/vibmod, pw/pwrate/pwsweep,
-vowel, detune, phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
+vowel, detune, wavetable position/warp rate/depth/skew,
+phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
 semantics: defaults `rate=1 depth=1 dcoffset=-0.5 triangle skew=.5 curve=1`,
 `depth` scaling by the target value (1 when the target is 0), `sync`
 as cycles-per-second multiples, shapes triangle/sine/ramp/saw/square,
@@ -326,12 +327,13 @@ naive native saw versus the browser's bandlimited oscillator (RMS ratios sit
 near 1.0, so this is not gain staging). Voices with active voice LFO slots
 bypass the SoA batch lanes and render per sample, since the lanes have no
 slot support. Remaining targets (delay/compressor params, dry/room/busgain,
-detune unison, vowel, stretch, bus modulators) keep their static value and
+stretch, bus modulators) keep their static value and
 log one warning naming the unsupported target per program. Generic
-tremolophase matches the deployed no-op (the worklet exposes `phaseoffset`,
-not `phase`, so both sides render static tremolo) and generic tremoloshape
-is a recorded superset: the deployed float shape index crashes its worklet
-to silence, while native steps the integer wave instead. Filter-specific
+tremolophase and wtdc/warpdc match the deployed no-ops (the worklets
+expose `phaseoffset` and `dcoffset`, not `phase`/`dc`, so both sides render
+static); generic tremoloshape and wt/warp shape are recorded supersets
+(a float shape index crashes the deployed worklet to silence, while native
+steps the integer wave). Filter-specific
 `lp`/`hp`/`bp` LFO
 controls, pitch envelope/vibrato and pulse-width LFO are separate
 supported controls. Static tremolo and the phaser (single notch at

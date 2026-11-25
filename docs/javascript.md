@@ -329,7 +329,10 @@ near 1.0, so this is not gain staging). Voices with active voice LFO slots
 bypass the SoA batch lanes and render per sample, since the lanes have no
 slot support. Remaining targets (delaytime/delayfeedback, compressor params,
 busgain, stretch, bus modulators) keep their static value and
-log one warning naming the unsupported target per program. Generic
+log one warning naming the unsupported target per program. Nested LFO
+controls (`lfo`, `lfo_rate`, …) warn on both sides: generic LFO nodes
+register as `lfo_<id>`, so the plain `lfo` node upstream routing names
+does not exist. Generic
 tremolophase, wtdc/warpdc and dry match the deployed no-ops: `phase` and
 `dc` have no worklet params, and the dry gain node is wired but never
 registered, so both sides render static (`lfo-tremolophase-inert`,

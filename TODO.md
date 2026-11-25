@@ -548,10 +548,18 @@ and measured divergences are recorded in the archive.
       1.0/1.0006. Generic wt/warp shape stays a recorded superset.
       Newly gated since: dry send is inert (node wired but never
       registered), while delay and room sends modulate per voice
-      (`dry-static`, `lfo-dry-inert`, `lfo-delay`, `lfo-room`).
+      (`dry-static`, `lfo-dry-inert`, `lfo-delay`, `lfo-room`). Nested
+      LFO targets (`lfo`, `lfo_rate`, …) warn on both sides: generic
+      nodes register as `lfo_<id>`, so the plain node never exists.
       Remaining: delaytime/delayfeedback (the shared line itself),
       compressor params, busgain (no native send: static folds into voice
-      gain), stretch and bmod. The compressor gap is now precisely scoped:
+      gain), stretch (baked at prepare vs live phase-vocoder), bmod
+      (inter-voice audio bus system), FM fmi/fmh (the deployed gain
+      registry keeps only the last edge per operator, including
+      unconnected nodes; exact replication is not worth the fragility),
+      djf/transient/byteBeat (no native nodes) and overgain/pcurve/vmod
+      (no upstream routing either: both sides warn). The compressor gap
+      is now precisely scoped:
       static level/ballistics are secondary (native defaults now match the
       deployed node: ratio 10, knee 10, attack .005, release .05). The
       deployed voice starts ~265 samples late whenever a

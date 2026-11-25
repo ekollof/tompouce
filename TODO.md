@@ -535,10 +535,18 @@ and measured divergences are recorded in the archive.
       param and postgain, plus static tremolo, static phaser and the inert
       tremolophase match. Generic tremoloshape is a recorded superset:
       the deployed float shape index crashes its worklet to silence while
-      native steps the integer wave. Missing generic targets, each
-      needing a native DSP modulation point: delay and compressor params,
-      plus dry/room/busgain, detune unison, vowel, stretch and bmod.
-      Generic `.env()` is parsed, validated and warned but never applied:
+      native steps the integer wave. Newly gated since: shapevol,
+      distortvol, distorttype (amount, matching the deployed node) and
+      tremolosync. Missing generic targets, each needing a native DSP
+      modulation point: delay and compressor params, plus dry/room/busgain,
+      detune unison, vowel, stretch and bmod. Voice-local follow-ups need
+      static parity first (no static PCM gates yet): vib/vibmod (native
+      sine vs worklet waves), pw/pwrate/pwsweep (native sine/triangle vs
+      lfo-processor), detune freqspread (native supersaw width) and the
+      vowel formant bank. Delay/dry/room/busgain generics need a design
+      against the shared-sends architecture: upstream builds per-hap
+      wet/dry/mix nodes while native shares one orbit line, and send gain
+      is not wet gain under feedback. Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

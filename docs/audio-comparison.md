@@ -617,7 +617,9 @@ path per sample and gate at the unchanged thresholds: `tremolo-static`
 0.99493/1.0002, `lfo-crush` 0.99577/1.0005, `lfo-shape`
 1.0/1.0001, `lfo-distort` 1.0/1.0001, `phaser-static` 0.99852/0.9923,
 `lfo-phasercenter` 0.99854/0.9924, `lfo-phaserrate` 0.9985/0.9922,
-`lfo-phasersweep` 0.99522/0.9885, `lfo-phasedepth` 0.99851/0.9922 and
+`lfo-phasersweep` 0.99522/0.9885, `lfo-phasedepth` 0.99851/0.9922,
+`lfo-shapevol` 1.0/1.0001, `lfo-distortvol` 1.0/1.0001,
+`lfo-distorttype` 1.0/1.0001, `lfo-tremolosync` 0.99861/1.0005 and
 `lfo-postgain` 1.0/1.0003. Generic tremolophase matches the deployed
 no-op (`lfo-tremolophase-inert` 0.99968/1.0002); generic tremoloshape is
 a recorded superset (native renders, the deployed float shape index

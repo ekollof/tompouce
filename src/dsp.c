@@ -854,8 +854,13 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     }
     if (p[DSP_SHAPE]+s->control.gen_lfo[GEN_SHAPE] > 0) {
         double sh = p[DSP_SHAPE]+s->control.gen_lfo[GEN_SHAPE];
+        /* The deployed worklet clamps the summed shape below 1 and the
+           summed postgain to [0.001, 1] before the curve. */
+        if (sh > 1.0-4e-10) sh = 1.0-4e-10;
         double k = 2*sh/(1-sh);
-        x = (1+k)*x/(1+k*fabs(x))*(p[DSP_SHAPEVOL]+s->control.gen_lfo[GEN_SHAPEVOL]);
+        double svol = p[DSP_SHAPEVOL]+s->control.gen_lfo[GEN_SHAPEVOL];
+        if (svol < 0.001) svol = 0.001; else if (svol > 1) svol = 1;
+        x = (1+k)*x/(1+k*fabs(x))*svol;
     }
     if (p[DSP_DISTORT]+s->control.gen_lfo[GEN_DISTORT] > 0) {
         double dist = p[DSP_DISTORT]+s->control.gen_lfo[GEN_DISTORT];
@@ -875,7 +880,7 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
             case 6: x = sin(input); break;
             default: x = tanh(input); break;
             }
-            x *= p[DSP_DISTVOL]+s->control.gen_lfo[GEN_DISTVOL];
+            x *= clamp(p[DSP_DISTVOL]+s->control.gen_lfo[GEN_DISTVOL],.001,1);
         }
     }
     if (p[DSP_TREM]+s->control.gen_lfo[GEN_TREM_RATE] > 0) {

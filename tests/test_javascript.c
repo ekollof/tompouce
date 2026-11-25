@@ -993,6 +993,14 @@ static void test_analyser_controls(void) {
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('sine').gain(.5).tremolosync(4)"
+        ".lfo({control:'tremolosync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_TREM_RATE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Generic tremolophase has no deployed node (the worklet exposes
        phaseoffset, not phase), so both sides render static tremolo. */
     haps=query("note(69).s('sine').gain(.5).tremolo(4)"
@@ -1026,8 +1034,34 @@ static void test_analyser_controls(void) {
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('sine').gain(.5).shape(.5)"
+        ".lfo({control:'shapevol',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_SHAPEVOL &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("note(69).s('sine').gain(.5).distort(2)"
         ".lfo({control:'distort',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DISTORT &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).distort(2)"
+        ".lfo({control:'distortvol',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DISTVOL &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Generic distorttype modulates the distort amount (the deployed node
+       selects the algorithm once from processorOptions). */
+    haps=query("note(69).s('sine').gain(.5).distort(2)"
+        ".lfo({control:'distorttype',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DISTORT &&

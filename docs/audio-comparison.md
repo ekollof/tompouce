@@ -610,7 +610,7 @@ The deployed worklet leaves its first 128-sample block unwritten, so voice
 LFOs hold static values for the onset quantum; this closes the FM phase gap:
 `s("saw").lfo().lpf(800)` gates at 1.0/1.0001, `s("sine").lfo()` at 1.0/1.0001,
 and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth/skew, coarse,
-crush, shape, distort, vibmod, pw/pwrate/pwsweep, vowel,
+crush, shape, distort, vibmod, pw/pwrate/pwsweep, vowel, detune,
 every phaser param and postgain modulate the DSP
 path per sample and gate at the unchanged thresholds: `tremolo-static`
 0.99968/1.0002, `lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth`
@@ -623,7 +623,8 @@ path per sample and gate at the unchanged thresholds: `tremolo-static`
 `lfo-distorttype` 1.0/1.0001, `lfo-tremolosync` 0.99861/1.0005,
 `vib-static` 1.0/1.0002, `lfo-vibmod` 1.0/1.0002, `pw-static` 1.0/1.0004,
 `lfo-pw` 1.0/1.0004, `lfo-pwrate` 1.0/1.0004, `lfo-pwsweep` 0.99963/1.0006,
-`vowel-static` 0.99999/1.0012, `lfo-vowel` 0.9999/0.9997 and
+`vowel-static` 0.99999/1.0012, `lfo-vowel` 0.9999/0.9997,
+`detune-static` 1.0/1.0006, `lfo-detune` 1.0/1.0006 and
 `lfo-postgain` 1.0/1.0003. Generic tremolophase matches the deployed
 no-op (`lfo-tremolophase-inert` 0.99968/1.0002); generic tremoloshape is
 a recorded superset (native renders, the deployed float shape index

@@ -297,7 +297,7 @@ Aliases registered by upstream Strudel map to the same controls.
 Generic Strudel `.lfo()` modulation is implemented for gain, filter cutoff,
 source frequency (`s`), pan, tremolo rate/depth/skew/sync, coarse, crush,
 shape/shapevol, distort/distortvol/distorttype, vib/vibmod, pw/pwrate/pwsweep,
-vowel, phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
+vowel, detune, phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
 semantics: defaults `rate=1 depth=1 dcoffset=-0.5 triangle skew=.5 curve=1`,
 `depth` scaling by the target value (1 when the target is 0), `sync`
 as cycles-per-second multiples, shapes triangle/sine/ramp/saw/square,

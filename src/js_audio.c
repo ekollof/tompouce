@@ -1055,6 +1055,7 @@ static const GenTarget gen_targets[] = {
     {"pwrate", GEN_PWRATE, DSP_PWRATE, 1, "pulse-voice"},
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
     {"vowel", GEN_VOWEL, DSP_VOWEL, 1, "vowel"},
+    {"detune", GEN_DETUNE, DSP_UNISON, 0, "spread-voice"},
     {NULL, 0, 0, 0, NULL}
 };
 
@@ -1077,6 +1078,12 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             double sweep = cJSON_IsNumber(sw) && isfinite(sw->valuedouble) ? sw->valuedouble :
                 (cJSON_HasObjectItem(value, "pwrate") ? 0.3 : 0.0);
             if (sweep != 0) return &gen_targets[i];
+        } else if (!strcmp(need, "spread-voice")) {
+            /* freqspread exists on supersaw-oscillator and wavetable
+               voices; other sources have no such node. */
+            int spread = (sound && !strcmp(sound, "supersaw")) ||
+                (sound && !strncmp(sound, "wt_", 3));
+            if (spread) return &gen_targets[i];
         } else if (cJSON_HasObjectItem(value,need)) return &gen_targets[i];
         return NULL;
     }
@@ -1166,6 +1173,9 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
             if (vi < 0 || vi > 14) { ev->lfo_unsupported=1; continue; }
             base = first[vi];
         }
+        /* The deployed detune node scales by the semitone spread, which
+           native keeps outside the control array. */
+        else if (gent && gent->gen == GEN_DETUNE) base = ev->dsp.supersaw_detune;
         else if (gent) base=ev->dsp.p[gent->base];
         /* The amGain tremolo node is constructed with the static gain, so a
            generic tremolodepth LFO scales by that value (0 becomes 1). */

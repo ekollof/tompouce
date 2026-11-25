@@ -539,10 +539,11 @@ and measured divergences are recorded in the archive.
       distortvol, distorttype (amount, matching the deployed node),
       tremolosync, vibmod (cents domain), static + generic pw/pwrate/pwsweep,
       and static + generic vowel (all five formants shift by the same Hz
-      offset). Detune static mismatches (0.39): native supersaw width vs
-      the deployed freqspread model. Missing generic targets: delay and
-      compressor params, plus dry/room/busgain, detune unison, stretch and
-      bmod. Delay/dry/room/busgain generics need a design
+      offset). Detune static mismatched only for lack of phase seeding
+      (0.39 unseeded); seeded it gates at 1.0/1.0006, and the generic
+      detune LFO (per-sample freqspread recompute) at 1.0/1.0006.
+      Missing generic targets: delay and compressor params, plus
+      dry/room/busgain, stretch and bmod. Delay/dry/room/busgain generics need a design
       against the shared-sends architecture: upstream builds per-hap
       wet/dry/mix nodes while native shares one orbit line, and send gain
       is not wet gain under feedback. Generic `.env()` is parsed, validated and warned but never applied:

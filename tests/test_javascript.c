@@ -1049,6 +1049,22 @@ static void test_analyser_controls(void) {
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('supersaw').gain(.3).detune(.3)"
+        ".lfo({control:'detune',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DETUNE &&
+        fabs(event.lfo[0].depth-.15)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Detune has no node off supersaw/wavetable voices. */
+    haps=query("note(69).s('sawtooth').gain(.5)"
+        ".lfo({control:'detune',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Generic tremolophase has no deployed node (the worklet exposes
        phaseoffset, not phase), so both sides render static tremolo. */
     haps=query("note(69).s('sine').gain(.5).tremolo(4)"

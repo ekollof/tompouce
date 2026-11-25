@@ -551,7 +551,18 @@ and measured divergences are recorded in the archive.
       (`dry-static`, `lfo-dry-inert`, `lfo-delay`, `lfo-room`).
       Remaining: delaytime/delayfeedback (the shared line itself),
       compressor params, busgain (no native send: static folds into voice
-      gain), stretch and bmod. Generic `.env()` is parsed, validated and warned but never applied:
+      gain), stretch and bmod. The compressor gap is now precisely scoped:
+      static level/ballistics are secondary (native defaults now match the
+      deployed node: ratio 10, knee 10, attack .005, release .05). The
+      deployed voice starts ~265 samples late whenever a
+      DynamicsCompressorNode is in the chain, independent of threshold
+      (unity threshold reproduces it) and voice-relative (a hap at cycle
+      0.5 starts at 44100+265). Without the node the same sine gates at
+      1.0/1.0002, and both sides render pure frequency-matched sines, so
+      the whole -0.66 correlation is this onset offset plus its level
+      difference. No deployed code path explains a node-presence delay
+      (no worklet, fresh context, threshold independent); it reproduces
+      deterministically across runs. Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

@@ -985,6 +985,23 @@ static void test_analyser_controls(void) {
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('sine').gain(.5).tremolo(4)"
+        ".lfo({control:'tremoloskew',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_TREM_SKEW &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Generic tremolophase has no deployed node (the worklet exposes
+       phaseoffset, not phase), so both sides render static tremolo. */
+    haps=query("note(69).s('sine').gain(.5).tremolo(4)"
+        ".lfo({control:'tremolophase',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("note(69).s('sine').gain(.5).coarse(4)"
         ".lfo({control:'coarse',rate:.5,depth:1})",&program);
     assert(cJSON_GetArraySize(haps)==1);
@@ -1022,6 +1039,30 @@ static void test_analyser_controls(void) {
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_PHCENTER &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5)"
+        ".lfo({control:'phaserrate',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_PHRATE &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5)"
+        ".lfo({control:'phasersweep',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_PHSWEEP &&
+        !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5)"
+        ".lfo({control:'phaserdepth',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_PHDEPTH &&
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 

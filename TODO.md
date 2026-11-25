@@ -531,12 +531,13 @@ and measured divergences are recorded in the archive.
       negative-base `pow(curve)` on filter LFOs through the new curve slot
       (unmeasured); live phase uses the render-path base (the site's own live
       path disagrees with its render path). Newly gated generic targets:
-      tremolo rate/depth, coarse, crush, shape, distort, phaser center and
-      postgain, plus static tremolo and static phaser. Missing generic
-      targets, each needing a native DSP modulation point: resonance/Q
-      follow-ups, tremolo skew/phase/shape, phaser rate/sweep/depth, delay
-      and compressor params, plus dry/room/busgain, detune unison, vowel,
-      stretch and bmod.
+      tremolo rate/depth/skew, coarse, crush, shape, distort, every phaser
+      param and postgain, plus static tremolo, static phaser and the inert
+      tremolophase match. Generic tremoloshape is a recorded superset:
+      the deployed float shape index crashes its worklet to silence while
+      native steps the integer wave. Missing generic targets, each
+      needing a native DSP modulation point: delay and compressor params,
+      plus dry/room/busgain, detune unison, vowel, stretch and bmod.
       Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and

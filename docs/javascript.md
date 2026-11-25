@@ -295,8 +295,8 @@ Aliases registered by upstream Strudel map to the same controls.
 | OSC | timestamped UDP `/dirt/play` through `.osc()` |
 
 Generic Strudel `.lfo()` modulation is implemented for gain, filter cutoff,
-source frequency (`s`), pan, tremolo rate/depth, coarse, crush, shape,
-distort, phaser center and postgain. All follow the deployed `lfo-processor`
+source frequency (`s`), pan, tremolo rate/depth/skew, coarse, crush, shape,
+distort, phaser rate/center/sweep/depth and postgain. All follow the deployed `lfo-processor`
 semantics: defaults `rate=1 depth=1 dcoffset=-0.5 triangle skew=.5 curve=1`,
 `depth` scaling by the target value (1 when the target is 0), `sync`
 as cycles-per-second multiples, shapes triangle/sine/ramp/saw/square,
@@ -324,14 +324,19 @@ frequency modulation is still limited by onset/envelope modeling plus the
 naive native saw versus the browser's bandlimited oscillator (RMS ratios sit
 near 1.0, so this is not gain staging). Voices with active voice LFO slots
 bypass the SoA batch lanes and render per sample, since the lanes have no
-slot support. Remaining targets (delay/compressor params, phaser
-rate/sweep/depth, tremolo skew/phase/shape, vowel, stretch, bus modulators,
-dry/room/busgain, detune unison) keep their static value and log one warning
-naming the unsupported target per program. Filter-specific `lp`/`hp`/`bp` LFO
+slot support. Remaining targets (delay/compressor params, dry/room/busgain,
+detune unison, vowel, stretch, bus modulators) keep their static value and
+log one warning naming the unsupported target per program. Generic
+tremolophase matches the deployed no-op (the worklet exposes `phaseoffset`,
+not `phase`, so both sides render static tremolo) and generic tremoloshape
+is a recorded superset: the deployed float shape index crashes its worklet
+to silence, while native steps the integer wave instead. Filter-specific
+`lp`/`hp`/`bp` LFO
 controls, pitch envelope/vibrato and pulse-width LFO are separate
 supported controls. Static tremolo and the phaser (single notch at
 center+282 Hz, Q from depth, detune in cents from its own triangle LFO)
-render natively; generic tremolo rate/depth and phaser center modulate them
+render natively; generic tremolo rate/depth/skew and every phaser param
+modulate them
 per sample. Voice targets take one slot per entry in encounter
 order (up to 8) and repeats sum in the renderer; each filter LFO type keeps
 the first entry. `subControl` and non-main `fxi` routings warn instead of

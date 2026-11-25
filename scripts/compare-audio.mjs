@@ -229,12 +229,21 @@ try {
     {name:'tremolo-static',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-tremolorate',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4).lfo({control:'tremolo',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-tremolodepth',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4).lfo({control:'tremolodepth',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-tremoloskew',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4).lfo({control:'tremoloskew',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    /* No tremoloshape PCM case: a generic shape LFO feeds a float index into
+       the deployed worklet's waveShapeNames table and silences the voice,
+       which aborts the harness ('Silent capture'); native steps the
+       integer wave instead (recorded superset, see javascript.md). */
+    {name:'lfo-tremolophase-inert',sound:'sine',code:`note(69).s('sine').gain(.5).tremolo(4).lfo({control:'tremolophase',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-coarse',sound:'sine',code:`note(69).s('sine').gain(.5).coarse(4).lfo({control:'coarse',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-crush',sound:'sine',code:`note(69).s('sine').gain(.5).crush(4).lfo({control:'crush',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-shape',sound:'sine',code:`note(69).s('sine').gain(.5).shape(.5).lfo({control:'shape',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-distort',sound:'sine',code:`note(69).s('sine').gain(.5).distort(2).lfo({control:'distort',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'phaser-static',sound:'sawtooth',code:`note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-phasercenter',sound:'sawtooth',code:`note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5).lfo({control:'phasercenter',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-phaserrate',sound:'sawtooth',code:`note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5).lfo({control:'phaserrate',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-phasersweep',sound:'sawtooth',code:`note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5).lfo({control:'phasersweep',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-phasedepth',sound:'sawtooth',code:`note(69).s('sawtooth').gain(.5).phaserrate(1).phaserdepth(.5).lfo({control:'phaserdepth',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'compressor-static-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).compressor(-6)`,cycles:1,cps:.5,window:2,correlation:null},
     {name:'compressor-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).compressor(-6).lfo({control:'compressor',rate:.5,depth:6})`,cycles:1,cps:.5,window:2,correlation:null},
     {name:'lfo-postgain',sound:'sine',code:`note(69).s('sine').gain(.5).postgain(.8).lfo({control:'postgain',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},

@@ -590,8 +590,8 @@ start, and damps the previous output history by 0.77 at the connection. That
 matches the deployed overshoot (native peak 0.399, browser 0.3998). Earlier
 50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected; they
 were measured before direct-form-I was in use.
-Remaining generic targets (delay/compressor params, phaser rate/sweep/depth,
-tremolo skew/phase/shape, vowel, stretch, dry/room/busgain, detune unison)
+Remaining generic targets (delay/compressor params,
+dry/room/busgain, detune unison, vowel, stretch and bus modulators)
 keep their static value and log one warning naming the unsupported target
 and the expected control order.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
@@ -609,13 +609,19 @@ deployed envelope node never starts, so `env-inert-gain` gates static PCM at
 The deployed worklet leaves its first 128-sample block unwritten, so voice
 LFOs hold static values for the onset quantum; this closes the FM phase gap:
 `s("saw").lfo().lpf(800)` gates at 1.0/1.0001, `s("sine").lfo()` at 1.0/1.0001,
-and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth, coarse, crush,
-shape, distort, phaser center and postgain modulate the DSP path per sample
-and gate at the unchanged thresholds: `tremolo-static` 0.99968/1.0002,
-`lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth` 0.99971/1.0002,
-`lfo-coarse` 0.99493/1.0002, `lfo-crush` 0.99577/1.0005, `lfo-shape`
+and gain LFO rises to 1.0/1.0002. Generic tremolo rate/depth/skew, coarse,
+crush, shape, distort, every phaser param and postgain modulate the DSP
+path per sample and gate at the unchanged thresholds: `tremolo-static`
+0.99968/1.0002, `lfo-tremolorate` 0.99725/1.0007, `lfo-tremolodepth`
+0.99971/1.0002, `lfo-tremoloskew` 0.99981/1.0003, `lfo-coarse`
+0.99493/1.0002, `lfo-crush` 0.99577/1.0005, `lfo-shape`
 1.0/1.0001, `lfo-distort` 1.0/1.0001, `phaser-static` 0.99852/0.9923,
-`lfo-phasercenter` 0.99854/0.9924 and `lfo-postgain` 1.0/1.0003. The
+`lfo-phasercenter` 0.99854/0.9924, `lfo-phaserrate` 0.9985/0.9922,
+`lfo-phasersweep` 0.99522/0.9885, `lfo-phasedepth` 0.99851/0.9922 and
+`lfo-postgain` 1.0/1.0003. Generic tremolophase matches the deployed
+no-op (`lfo-tremolophase-inert` 0.99968/1.0002); generic tremoloshape is
+a recorded superset (native renders, the deployed float shape index
+crashes its worklet to silence). The
 compressor (static and generic) stays diagnostic: the native follower
 anti-correlates near -0.66 with the deployed DynamicsCompressorNode.
 Filter-specific

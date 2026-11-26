@@ -626,6 +626,8 @@ try {
       cycles:1,cps:.5,window:2,correlation:.99}))),
     { name: 'zzfx-sine', code: `note(69).s('z_sine').zrand(0).gain(.5).attack(.01).decay(.04).sustain(.5).release(.1).clip(.25)`, sound: 'z_sine', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'bytebeat', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'bytebeat-nooffset-tmp', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
+    { name: 'bytebeat-zerooffset-tmp', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(0).gain(.5).clip(.25).late(.125)`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'lfo-bytebeat-tmp', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125).lfo({control:'byteBeatStartTime',rate:.5,depth:.5})`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'lfo-wtsync-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4).wtshape('sine').lfo({control:'wtsync',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
     { name: 'lfo-warpsync-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3).warpshape('sine').warpmode('asym').lfo({control:'warpsync',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },

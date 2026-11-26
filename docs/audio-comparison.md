@@ -556,6 +556,8 @@ normalization hides timing/level differences.
 The new comparisons exposed and fixed default mono panning attenuation,
 stock periodic-wave normalization and bytebeat quantum startup. Measured
 ZzFX/bytebeat correlations exceed 0.999999; saw/square/triangle exceed 0.999.
+Bytebeat start-time values gate at 1.0 with and without the offset
+(`bytebeat`, `bytebeat-nooffset-tmp`, `bytebeat-zerooffset-tmp`).
 
 The `source-` cases exercise the complete callback against the deployed web
 renderer, including ADSR, stereo routing and fractional onsets. Run

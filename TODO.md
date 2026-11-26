@@ -627,7 +627,11 @@ and measured divergences are recorded in the archive.
       packaging upstream, not a model to copy; unvalued LFOs warn on
       both sides, and live LFOs would be last-value-per-block but are
       untestable while the node is silent),
-      bmod (inter-voice audio bus system).
+      bmod (inter-voice audio bus system). Bytebeat values gate
+      (`bytebeat`, `bytebeat-nooffset-tmp`, `bytebeat-zerooffset-tmp`
+      at 1.0, origin- vs restart-based time included); its LFO target
+      is a port message rather than an AudioParam, so both sides warn
+      and hold static (`lfo-bytebeat-tmp` at 1.0).
       The compressor matches the deployed Blink dynamics_compressor
       model verbatim (read from the Chromium sources): 6 ms lookahead
       pre-delay (the 264-sample structural latency, verified in-page

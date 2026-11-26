@@ -3051,7 +3051,7 @@ static double wt_env_value(double age, double gate, double amount, const double 
 }
 static void wt_sample_voice(Voice *v, double age, double gate, double *left, double *right) {
     int frames = v->wt_sample_frames;
-    double position = v->wt_sample_position;
+    double position = v->wt_sample_position + v->dsp.control.gen_lfo[GEN_WTPOS];
     if (v->wt_sample_env_amount != 0)
         position += wt_env_value(age, gate, v->wt_sample_env_amount, v->wt_sample_env);
     if (v->wt_sample_lfo_depth != 0) {
@@ -3066,7 +3066,7 @@ static void wt_sample_voice(Voice *v, double age, double gate, double *left, dou
             (v->wt_sample_lfo_hz + gen[GEN_WTRATE]) / SR);
     }
     position = wt_clamp(position, 0, 1);
-    double warp = v->wt_sample_warp;
+    double warp = v->wt_sample_warp + v->dsp.control.gen_lfo[GEN_WARPPOS];
     if (v->wt_sample_warp_env_amount != 0)
         warp += wt_env_value(age, gate, v->wt_sample_warp_env_amount, v->wt_sample_warp_env);
     if (v->wt_sample_warp_lfo_depth != 0) {

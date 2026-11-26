@@ -618,6 +618,8 @@ try {
     { name: 'lfo-bytebeat-tmp', code: `note(60).s('bytebeat').bbexpr('t*(t>>15^t>>66)').bbst(65536).gain(.5).clip(.25).late(.125).lfo({control:'byteBeatStartTime',rate:.5,depth:.5})`, sound: 'bytebeat', cycles: 1, cps: .5, window: 2, correlation: .99 },
     { name: 'lfo-wtsync-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).wt(.3).wtrate(2).wtdepth(.4).wtshape('sine').lfo({control:'wtsync',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
     { name: 'lfo-warpsync-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3).warpshape('sine').warpmode('asym').lfo({control:'warpsync',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
+    { name: 'lfo-wt-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).wt(.3).lfo({control:'wt',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
+    { name: 'lfo-warp-tmp', code: `s('wt_digital_echoes').note(60).gain(.5).warp(.4).lfo({control:'warp',rate:.5,depth:.5})`, sound:'wt_digital_echoes',wavetable:true,cycles:1,cps:.5,window:1,correlation:.99 },
     { name: 'lfo-lpsync-tmp', code: `note(69).s('sawtooth').gain(.5).clip(.05).lpf(800).lfo({control:'lpsync',rate:.5,depth:.5})`, sound:'sawtooth',cycles:1,cps:.5,window:1,correlation:.99 },
     { name: 'lfo-hpsync-tmp', code: `note(69).s('sawtooth').gain(.5).clip(.05).hpf(800).lfo({control:'hpsync',rate:.5,depth:.5})`, sound:'sawtooth',cycles:1,cps:.5,window:1,correlation:.99 },
     { name: 'hpf-static-tmp', code: `note(69).s('sawtooth').gain(.5).clip(.05).hpf(800)`, sound:'sawtooth',cycles:1,cps:.5,window:1,correlation:.99 },

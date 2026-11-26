@@ -673,7 +673,9 @@ Generic spread LFOs bend the shared panspread per sample
 applies a two-pole DJ filter to the shared mix like the deployed
 worklet (`djf-static-tmp`, `djf-static-lo-tmp`, `djf-bypass-tmp` at
 1.0); its generic LFO reads the block-start value like the worklet
-(`djf-lfo-tmp` at 1.0). Filter-sync,
+(`djf-lfo-tmp` at 1.0). Generic wavetable position/warp LFOs ride the
+source params per sample (`lfo-wt-tmp`, `lfo-warp-tmp` at 1.0).
+Filter-sync,
 bus-modulator, envelope-segment, stretch, vmod and byteBeatStartTime
 LFO targets have no deployed node (or a non-AudioParam one), so both
 sides warn and hold static PCM at 1.0 (`lfo-bytebeat-tmp`,

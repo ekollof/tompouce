@@ -1054,6 +1054,8 @@ static const GenTarget gen_targets[] = {
     {"vib", GEN_VIB, DSP_VIB, 1, "vib-rate"},
     {"spread", GEN_SPREAD, DSP_SPREAD, 0, "spread-lfo"},
     {"djf", GEN_DJF, DSP_DRY, 0, "djf-node"},
+    {"wt", GEN_WTPOS, DSP_UNISON, 0, "wt-node"},
+    {"warp", GEN_WARPPOS, DSP_UNISON, 0, "wt-node"},
     {"pw", GEN_PW, DSP_PW, 0, "pulse-voice"},
     {"pwrate", GEN_PWRATE, DSP_PWRATE, 1, "pulse-voice"},
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
@@ -1189,6 +1191,10 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
         } else if (!strcmp(need, "djf-node")) {
             /* The orbit DJF node exists once any hap carries djf. */
             if (ev->has_djf) return &gen_targets[i];
+        } else if (!strcmp(need, "wt-node")) {
+            /* The wavetable source worklet always exposes its position
+               and warp params, unlike its optional LFO worklet. */
+            if (sound && !strncmp(sound, "wt_", 3)) return &gen_targets[i];
         } else if (!strcmp(need, "spread-lfo")) {
             /* The panspread node exists on supersaw-oscillator and
                wavetable voices; native holds static spread at unison 1,
@@ -1354,6 +1360,8 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         else if (gent && gent->gen == GEN_DELAYTIME) base = ev->delay_time;
         else if (gent && gent->gen == GEN_DELAYFB) base = ev->delay_fb;
         else if (gent && gent->gen == GEN_VIB) base = ev->dsp.p[DSP_VIB];
+        else if (gent && gent->gen == GEN_WTPOS) base = control(value, "wt", 0, 0, 1);
+        else if (gent && gent->gen == GEN_WARPPOS) base = control(value, "warp", 0, 0, 1);
         else if (gent && gent->gen == GEN_DJF) base = ev->djf;
         else if (gent && gent->gen == GEN_SPREAD) {
             /* Node value gates on voices for supersaw, raw value for

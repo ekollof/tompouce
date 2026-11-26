@@ -581,7 +581,8 @@ and measured divergences are recorded in the archive.
       applies a two-pole DJ filter to the shared mix like the deployed
       worklet (`djf-static`, `djf-static-lo`, `djf-bypass` at 1.0); its
       generic LFO reads the block-start value like the worklet
-      (`djf-lfo` at 1.0).
+      (`djf-lfo` at 1.0). Generic wavetable position/warp LFOs ride the
+      source params per sample (`lfo-wt`, `lfo-warp` at 1.0).
       Filter-sync, bus-modulator, envelope-segment, stretch, vmod and
       byteBeatStartTime LFO targets have no deployed node (or a
       non-AudioParam one), so both sides warn and hold static PCM

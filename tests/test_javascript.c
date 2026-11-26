@@ -1330,6 +1330,23 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth-.2)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* Generic position/warp LFOs ride the wavetable source params. */
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).wt(.3)"
+        ".lfo({control:'wt',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WTPOS &&
+        fabs(event.lfo[0].depth-.15)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4)"
+        ".lfo({control:'warp',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_WARPPOS &&
+        fabs(event.lfo[0].depth-.2)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* The DJF node exists when the hap carries djf; the LFO bends its
        shared value per sample with first-sample block semantics. */
     haps=query("note(69).s('sine').gain(.5).clip(.25).djf(.6)"

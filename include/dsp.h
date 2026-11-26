@@ -46,6 +46,7 @@ enum {
     DSP_LOOP, DSP_LOOPBEGIN, DSP_LOOPEND, DSP_CUT, DSP_CLIP, DSP_PW,
     DSP_PWRATE, DSP_PWSWEEP, DSP_UNISON, DSP_SPREAD, DSP_DISTTYPE, DSP_DISTVOL,
     DSP_COMP, DSP_COMPRATIO, DSP_COMPKNEE, DSP_COMPATT, DSP_COMPREL, DSP_PCURVE,
+    DSP_TRANSIENT, DSP_TRANSSUSTAIN,
     DSP_CHORUS, DSP_SHAPEVOL,
     DSP_LPRATE, DSP_LPDEPTH, DSP_LPDEPTHFREQ, DSP_LPSHAPE, DSP_LPDC, DSP_LPSKEW,
     DSP_LPCURVE,
@@ -77,6 +78,8 @@ typedef struct {
     int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
     int vib_lfo; /* generic vib-rate LFO: integrate the vibrato phase */
     int compressor_on; /* DynamicsCompressorNode exists (explicit threshold, even 0) */
+    int transient_on; /* transient-processor node exists (hap carries transient) */
+    double transient_gain; /* post-transient static gain folded into the DSP input, divided out and back */
     double lfo_start_time; /* absolute node start; -1 disables the quantum hold */
     double q_lfo[3]; /* per-sample generic resonance offset, voice-driven */
 } DspParams;
@@ -113,6 +116,16 @@ typedef struct {
     int lfo_switched;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;
+    /* Transient-shaper detector state. The attack/sustain envelope
+       followers live in float32 like the deployed Float32Array; the
+       shared makeup gain stays double. Per-channel states: the deployed
+       node shares one makeup gain across channels, which coincides for
+       identical (mono/center) inputs. */
+    float trans_att, trans_sus;
+    double trans_avg;
+    /* First-quantum hold: the deployed node leaves the render quantum
+       containing its start unwritten. Counted in samples from trigger. */
+    int trans_hold;
     /* Structural latency of the deployed DynamicsCompressorNode: 264 samples
        at 44.1 kHz regardless of settings (verified in-page with an impulse
        through an OfflineAudioContext). Applied when the node exists, even at

@@ -34,6 +34,7 @@ static const Parameter parameters[] = {
     {"distorttype",0,0,6}, {"distortvol",1,0,16},
     {"compressor",0,-100,0}, {"compressorRatio",10,1,20}, {"compressorKnee",10,0,40},
     {"compressorAttack",.005,0,1}, {"compressorRelease",.05,0,1}, {"pcurve",0,0,1},
+    {"transient",0,-1,1}, {"transsustain",0,-1,1},
     {"chorus",0,0,1},{"shapevol",1,0,16},
     {"lprate",0,0,20000},{"lpdepth",1,0,16},{"lpdepthfrequency",0,0,20000},
     {"lpshape",0,0,4},{"lpdc",-.5,-1,1},{"lpskew",.5,.001,.999},{"lpcurve",1,.001,64},
@@ -110,6 +111,9 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     /* An explicit threshold (even 0) installs the deployed compressor node
        with its structural latency; the untouched default installs nothing. */
     if (cJSON_HasObjectItem(value,"compressor")) p->compressor_on=1;
+    /* The transient node exists only when the hap carries transient;
+       transsustain alone installs nothing. */
+    if (cJSON_HasObjectItem(value,"transient")) p->transient_on=1;
     /* Superdough getADSRValues: specifying any segment changes the
        defaults of the other segments, even when only attack is given. */
     for (int base = 0; base < 21; base += 7) {
@@ -366,7 +370,8 @@ int dsp_single_filter(const DspState *state) {
     if (active!=1) return -1;
     if (p[DSP_VOWEL]>=0 || p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 ||
         p[DSP_CRUSH]<16 || p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 ||
-        p[DSP_TREM]>0 || p[DSP_COMP]<0 || state->control.compressor_on || p[DSP_PHASER]>0 ||
+        p[DSP_TREM]>0 || p[DSP_COMP]<0 || state->control.compressor_on ||
+        state->control.transient_on || p[DSP_PHASER]>0 ||
         p[DSP_CHORUS]>0 || p[DSP_POST]!=1 || p[DSP_CUT]>0 ||
         p[DSP_LPRATE+type*7]>0 || p[DSP_PWRATE]>0 ||
         state->control.noise_mix>0 || state->control.source_noise) return -1;
@@ -452,6 +457,7 @@ void dsp_init(DspState *s, const DspParams *p) {
     s->control = *p;
     s->noise_seed = 0x1234567u;
     s->compressor_gain = 1;
+    s->trans_avg = 1;
     s->pulse[0]=-M_PI;
     int vowel = (int)p->p[DSP_VOWEL];
     if (vowel >= 0 && vowel < 15)
@@ -477,7 +483,8 @@ void dsp_init(DspState *s, const DspParams *p) {
         if (p->p[type*7] > 0) active = 1;
     if (p->p[DSP_VOWEL] >= 0 || (int)p->p[DSP_COARSE] > 1 || p->p[DSP_CRUSH] < 16 ||
         p->p[DSP_SHAPE] > 0 || p->p[DSP_DISTORT] > 0 || p->p[DSP_TREM] > 0 ||
-        p->p[DSP_COMP] < 0 || p->compressor_on || p->p[DSP_PHASER] > 0 || p->p[DSP_CHORUS] > 0 ||
+        p->p[DSP_COMP] < 0 || p->compressor_on || p->transient_on ||
+        p->p[DSP_PHASER] > 0 || p->p[DSP_CHORUS] > 0 ||
         p->p[DSP_POST] != 1) active = 1;
     s->effects_active = active;
 }
@@ -802,6 +809,49 @@ static double mod_wave(int shape, double skew, double phase) {
     }
 }
 
+/* Transient shaper matching the deployed transient-processor worklet
+   verbatim: dual envelope followers (attack .003 s, sustain .08 s),
+   peakiness ratio with a 0.5+5*sensitivity scaling, dB gains of 18/36,
+   a slow makeup normalizer and a final soft clip. The node sits before
+   the voice gain in the deployed chain, so the folded static gain is
+   divided out and back; only the soft clip is level-sensitive. The
+   envelopes live in float32 like the worklet's Float32Array. */
+static double transient_process(DspState *s, double x) {
+    double attack = s->control.p[DSP_TRANSIENT];
+    if (attack < -1) attack = -1;
+    if (attack > 1) attack = 1;
+    double sustain = s->control.p[DSP_TRANSSUSTAIN];
+    if (sustain < -1) sustain = -1;
+    if (sustain > 1) sustain = 1;
+    double attackCoeff = 1-exp(-1/(SR*.003));
+    double sustainCoeff = 1-exp(-1/(SR*.08));
+    double gainCoeff = 1-exp(-1/(SR*.2));
+    /* Sensitivity and mix have no user control; the deployed defaults
+       give scaling 0.5+5*.1 = 1 and a fully wet mix. */
+    double G = s->control.transient_gain;
+    double u = G != 0 ? x/G : x;
+    double ax = fabs(u);
+    float att = (float)((double)s->trans_att+(ax-(double)s->trans_att)*attackCoeff);
+    float sus = (float)((double)s->trans_sus+(ax-(double)s->trans_sus)*sustainCoeff);
+    s->trans_att = att;
+    s->trans_sus = sus;
+    double peakiness = ((double)att-(double)sus)/((double)sus+1e-6);
+    if (peakiness < -1.5) peakiness = -1.5;
+    if (peakiness > 1.5) peakiness = 1.5;
+    double attScale = peakiness > 0 ? peakiness : 0;
+    double susScale = peakiness < 0 ? -peakiness : 0;
+    double attackGain = pow(10,(attack*attScale*18)/20);
+    double sustainGain = pow(10,(sustain*susScale*36)/20);
+    double gain = attackGain*sustainGain;
+    if (gain < 0) gain = 0;
+    if (gain > 8) gain = 8;
+    s->trans_avg += (gain-s->trans_avg)*gainCoeff;
+    double makeup = s->trans_avg > 1e-3 ? 1/s->trans_avg : 1;
+    double wet = u*gain*makeup;
+    double y = wet/(1+fabs(wet));
+    return G != 0 ? y*G : y;
+}
+
 static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     if (!s->control.enabled) return x;
     const double *p = s->control.p;
@@ -810,6 +860,13 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     /* Nothing configured: the full path reduces to the post gain (1) and the
        output guard. Keep tick advancing so state evolution is unchanged. */
     if (!s->effects_active) return isfinite(x) ? clamp(x, -64, 64) : 0;
+    /* The deployed transient node leaves its first render quantum
+       unwritten (currentTime <= begin) and never steps its envelopes
+       there. The countdown is set at trigger from the voice start. */
+    if (s->control.transient_on) {
+        if (s->trans_hold > 0) { s->trans_hold--; return 0.0; }
+        x = transient_process(s, x);
+    }
     for (int type = 0; type < 3; type++) {
         int base = type * 7;
         if (p[base] <= 0) continue;

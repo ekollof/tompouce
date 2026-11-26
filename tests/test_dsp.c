@@ -1262,6 +1262,24 @@ int main(void) {
     assert(rms("{\"bandf\":1000,\"bandq\":4}",100) < rms("{\"bandf\":1000,\"bandq\":4}",1000)*.1);
     assert(rms("{\"postgain\":0}",1000) == 0);
     assert(rms("{\"compressor\":-30,\"compressorRatio\":20}",1000) < .1);
+    /* Transient with zero amounts is a pure soft clip: strictly below the
+       dry sine but well above silence. The node flag follows the control. */
+    assert(rms("{\"transient\":0}",1000) < .45);
+    assert(rms("{\"transient\":0}",1000) > .35);
+    {
+        cJSON *tr = cJSON_Parse("{\"transient\":0.8,\"transsustain\":0.5}");
+        assert(tr);
+        DspParams tp;
+        dsp_params_read(&tp,tr);
+        assert(tp.transient_on && tp.p[DSP_TRANSIENT] == .8 &&
+            tp.p[DSP_TRANSSUSTAIN] == .5);
+        cJSON_Delete(tr);
+        cJSON *ts = cJSON_Parse("{\"transsustain\":0.5}");
+        assert(ts);
+        dsp_params_read(&tp,ts);
+        assert(!tp.transient_on && tp.p[DSP_TRANSSUSTAIN] == .5);
+        cJSON_Delete(ts);
+    }
     /* Bandlimited saw versus the truncated Fourier series of the same ramp.
        440 Hz keeps about 50 harmonics under Nyquist. PolyBLEP should sit
        closer to that series than the naive saw. */

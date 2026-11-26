@@ -539,7 +539,8 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
        chains apply stage gains before the stages and the main gain after. */
     int fold_chain=(int)ev->dsp.p[DSP_COARSE]>1 || ev->dsp.p[DSP_CRUSH]<16 ||
         ev->dsp.p[DSP_SHAPE]>0 || ev->dsp.p[DSP_DISTORT]>0 ||
-        ev->dsp.compressor_on || ev->dsp.p[DSP_TREM]>0 ||
+        ev->dsp.compressor_on || ev->dsp.transient_on ||
+        ev->dsp.p[DSP_TREM]>0 ||
         ev->dsp.p[DSP_PHASER]>0 || ev->dsp.p[DSP_CHORUS]>0;
     ev->fx_chain_folded=fold_chain;
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
@@ -643,6 +644,9 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                     value=value<dsp_min?dsp_min:value>dsp_max?dsp_max:value;
                     ev->dsp.p[dsp_index]=value;
                     if (dsp_index==DSP_PW) ev->pw=value;
+                    /* A pattern-step transient installs the node like the
+                       main control; its gain placement is approximate. */
+                    if (dsp_index==DSP_TRANSIENT) ev->dsp.transient_on=1;
                     continue;
                 }
             }

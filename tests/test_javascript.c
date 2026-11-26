@@ -1394,6 +1394,27 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth+3)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* The transient node exists only with its value set; transsustain
+       alone installs nothing. The node has no AudioParams, so a generic
+       LFO on it warns on both sides and holds static. */
+    haps=query("note(69).s('sine').gain(.5).transient(.8)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.transient_on && fabs(event.dsp.p[DSP_TRANSIENT]-.8)<1e-9 &&
+        fabs(event.dsp.p[DSP_TRANSSUSTAIN])<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* transsustain without transient installs no node; the value still
+       parses at the C level (covered in test_dsp, since no JS bundle
+       exposes a transsustain method yet). */
+    haps=query("note(69).s('sine').gain(.5).transient(.8)"
+        ".lfo({control:'transient',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.transient_on && event.lfo[0].tgt==0 &&
+        event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

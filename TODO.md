@@ -568,9 +568,21 @@ and measured divergences are recorded in the archive.
       renders whole blocks whose start precedes end). The remaining error
       floor is the 16-bit browser capture, not the model. Registered but
       unread controls stay silent no-ops on both sides (`overgain`,
-      `busgain` without a bus send, `pcurve`, `djf` without a value,
-      main-chain `transient`): explicit static values gate at 1.0 and
-      generic LFOs on them warn with static PCM. The wavetable worklet
+      `busgain` without a bus send, `pcurve`, `djf` without a value):
+      explicit static values gate at 1.0 and
+      generic LFOs on them warn with static PCM. The transient shaper
+      renders its static value per sample (`transient-static`,
+      `transient-zero`, `transient-negative` at 1.0): dual envelope
+      followers with float32 worklet state, the peakiness ratio, dB
+      gains of 18/36, the slow makeup normalizer and the final soft
+      clip. The node leaves its first render quantum unwritten (an exact
+      sample countdown from the voice start) and sits before the voice
+      gain in the deployed chain, so the folded static gain is divided
+      out and back around the soft clip. It has no AudioParams, so a
+      generic LFO on it warns on both sides and holds the static curve
+      (`lfo-transient-tmp`, `transient-lfo-static-tmp` at 1.0); the
+      sustain companion parses at the C level but no JS bundle exposes
+      its method yet, so sustain stays 0 in every gated render. The wavetable worklet
       defaults freqspread to 0.18, so a missing detune still spreads
       unison voices (was: silent unison). Generic vib-rate LFOs
       bend the vibrato oscillator's frequency per sample
@@ -599,8 +611,8 @@ and measured divergences are recorded in the archive.
       Remaining: bus-routed sends (no native bus;
       unrouted busgain is a silent no-op), stretch values (baked at
       prepare vs live phase-vocoder; unvalued LFOs warn on both sides),
-      bmod (inter-voice audio bus system), transient/byteBeat
-      values (no native nodes; unvalued LFOs warn on both sides).
+      bmod (inter-voice audio bus system), byteBeat
+      values (no native node; unvalued LFOs warn on both sides).
       The compressor onset gap is closed: the deployed
       DynamicsCompressorNode carries a structural 264-sample latency at
       44.1 kHz regardless of settings (verified in-page with an impulse

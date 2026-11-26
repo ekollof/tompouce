@@ -696,7 +696,15 @@ the deployed DynamicsCompressorNode delays its voice by 264 samples at
 node exists (including explicit unity threshold). Deep-compression
 level/ballistics (ratio-20, slow attack/release, threshold LFO) stay
 diagnostic: timing correlates near 0.996+ but the native peak follower
-compresses harder than the deployed node as depth grows.
+compresses harder than the deployed node as depth grows. The transient
+shaper renders its static value per sample at 0.99/0.85-1.15
+(`transient-static-tmp`, `transient-zero-tmp`, `transient-negative-tmp`):
+dual float32 envelope followers, the first-quantum hold, pre-gain
+placement with the folded static gain divided out and back, and the
+final soft clip. It has no AudioParams, so generic LFOs on it warn on
+both sides and hold the static curve (`lfo-transient-tmp`,
+`transient-lfo-static-tmp`); the sustain companion parses but no JS
+bundle exposes its method yet, so sustain stays 0 in every gate.
 Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.

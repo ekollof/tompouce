@@ -304,6 +304,7 @@ try {
     {name:'lfo-overgain-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).lfo({control:'overgain',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-pcurve-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).lfo({control:'pcurve',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-busgain-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).lfo({control:'busgain',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'bus-send-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).bus(1).busgain(.5)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-djf-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).lfo({control:'djf',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-transient-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.05).lfo({control:'transient',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'djf-static-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.25).djf(.7)`,cycles:1,cps:.5,window:2,correlation:.99},

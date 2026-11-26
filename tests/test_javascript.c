@@ -1441,6 +1441,14 @@ static void test_analyser_controls(void) {
     assert(!event.has_djf);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* Unread bus sends are inaudible on both sides: the bus selector is
+       accepted and the busgain never folds into the voice gain. */
+    haps=query("note(69).s('sine').gain(.5).clip(.05).bus(1).busgain(.5)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(fabs(event.gain-.5)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

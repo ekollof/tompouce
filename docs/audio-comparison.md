@@ -661,7 +661,8 @@ renders whole blocks whose start precedes end). The remaining gap is the
 16-bit browser capture floor, verified by a constant absolute error
 against decaying echoes. Registered but unread controls stay silent
 no-ops on both sides: `overgain-static-tmp` and `busgain-static-tmp`
-(explicit values ignored upstream) gate static PCM at 1.0, and generic
+(explicit values ignored upstream) gate static PCM at 1.0, as does an
+unread bus send (`bus-send-tmp`, never connected to the output), and generic
 LFOs on `overgain`, `pcurve`, `busgain`, valueless `djf` and main-chain
 `transient` warn with static PCM at 1.0 (`lfo-overgain-tmp`,
 `lfo-pcurve-tmp`, `lfo-busgain-tmp`, `lfo-djf-tmp`, `lfo-transient-tmp`).

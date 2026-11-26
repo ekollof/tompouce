@@ -618,10 +618,10 @@ and measured divergences are recorded in the archive.
       index edges were already exact (per-sample path). The FM edge
       registry keeps the last edge per operator, including unconnected
       nodes.
-      Remaining: bus-routed sends (no native bus;
-      unrouted busgain is a silent no-op), stretch values (the static
-      shift mapping matches the worklet exactly, and the native offline
-      port renders real audio, but the deployed node outputs silence
+      Remaining: bus-routed sends (an unread send is inaudible on both
+      sides and gates as `bus-send-tmp` at 1.0; the bus selector parses
+      silently), stretch values (the static shift mapping matches the
+      worklet exactly, and the native offline port renders real audio, but the deployed node outputs silence
       for every stretch input in-capture — the reference vocoder
       renders correctly standalone, so this looks like broken worklet
       packaging upstream, not a model to copy; unvalued LFOs warn on

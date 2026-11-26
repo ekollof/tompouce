@@ -2064,7 +2064,7 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
             "busgain","overgain","csound","orbit","o","duckorbit","duck","duckattack","duckatt","datt",
             "duckdepth","duckonset","stretch","ir","i","irspeed","irbegin","lv2preset","lv2state","carlaProject","carlaTarget","color","colour","label","activeLabel","markcss",
             "zrand","curve","slide","deltaSlide","pitchJump","pitchJumpTime","lfo","znoise","zmod","zcrush","zdelay","zzfx",
-            "byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",
+            "bus","byteBeatExpression","byteBeatStartTime","workletSrc","workletInputs",
             "wt","warp","warpmode","wtrate","wtdepth","wtshape","wtskew","wtsync","wtdc",
             "wtattack","wtdecay","wtsustain","wtrelease","wtenv","wtphaserand",
             "warprate","warpdepth","warpshape","warpskew","warpsync","warpdc",

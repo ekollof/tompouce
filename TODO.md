@@ -620,13 +620,11 @@ and measured divergences are recorded in the archive.
       nodes.
       Remaining: bus-routed sends (an unread send is inaudible on both
       sides and gates as `bus-send-tmp` at 1.0; the bus selector parses
-      silently), stretch values (the static shift mapping matches the
-      worklet exactly, and the native offline port renders real audio, but the deployed node outputs silence
-      for every stretch input in-capture — the reference vocoder
-      renders correctly standalone, so this looks like broken worklet
-      packaging upstream, not a model to copy; unvalued LFOs warn on
-      both sides, and live LFOs would be last-value-per-block but are
-      untestable while the node is silent),
+      silently), stretch values (static sample stretch gates at 1.0
+      via the offline port: `stretch-up-tmp`, `stretch-down-tmp`. The
+      40 ms pre-roll shifting stretch haps early is mirrored on both
+      sides, which is why the gates start late. Oscillator stretch
+      needs a streaming vocoder; unvalued LFOs warn on both sides),
       bmod (inter-voice audio bus system). Bytebeat values gate
       (`bytebeat`, `bytebeat-nooffset-tmp`, `bytebeat-zerooffset-tmp`
       at 1.0, origin- vs restart-based time included); its LFO target

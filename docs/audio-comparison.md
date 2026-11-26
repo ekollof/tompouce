@@ -689,7 +689,11 @@ sides warn and hold static PCM at 1.0 (`lfo-bytebeat-tmp`,
 `lfo-wtsync-tmp`, `lfo-lpsync-tmp`, `lfo-bpsync-tmp`, `lfo-bmod-tmp`,
 `lfo-envattack-tmp`, `lfo-stretch-tmp`, `lfo-vmod-tmp`); `lfo-warpsync-tmp`
 gates at 0.99986 and `lfo-delaysync-tmp` drives the shared delay line
-like delaytime.
+like delaytime. Static sample stretch gates at 1.0 (`stretch-up-tmp`,
+`stretch-down-tmp`): the offline port reproduces the deployed
+vocoder, whose 40 ms pre-roll shifts stretch haps early on both
+sides; oscillator stretch and live stretch LFOs need a streaming
+vocoder (`stretch-sine-tmp`, `lfo-stretch-static-tmp` diagnostic).
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

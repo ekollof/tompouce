@@ -1330,6 +1330,23 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth-.2)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* The DJF node exists when the hap carries djf; the LFO bends its
+       shared value per sample with first-sample block semantics. */
+    haps=query("note(69).s('sine').gain(.5).clip(.25).djf(.6)"
+        ".lfo({control:'djf',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DJF &&
+        fabs(event.lfo[0].depth-.3)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.25)"
+        ".lfo({control:'djf',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

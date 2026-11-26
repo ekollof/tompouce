@@ -179,6 +179,8 @@ typedef struct {
     double delay_send;  /* 0 dry; >0 feeds this event's orbit delay */
     double delay_time;  /* <0 leave the orbit time; else seconds */
     double delay_fb;    /* <0 leave the orbit feedback; else 0..0.98 */
+    int has_djf;        /* DJF node exists when the hap carries djf */
+    double djf;         /* shared orbit DJF value when present */
     int orbit;          /* 0..N_ORBITS-1 */
     unsigned duck_mask; /* bit i selects a target orbit; JS ramps begin 10 ms early */
     double duck_attack; /* seconds to return to full level */

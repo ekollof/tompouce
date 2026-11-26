@@ -669,7 +669,11 @@ oscillator's frequency per sample
 (`vib-rate-lfo-tmp` at 1.0): the static rate term keeps the closed form
 while only the LFO deviation integrates from the voice start.
 Generic spread LFOs bend the shared panspread per sample
-(`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0). Filter-sync,
+(`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0). The orbit DJF node
+applies a two-pole DJ filter to the shared mix like the deployed
+worklet (`djf-static-tmp`, `djf-static-lo-tmp`, `djf-bypass-tmp` at
+1.0); its generic LFO reads the block-start value like the worklet
+(`djf-lfo-tmp` at 1.0). Filter-sync,
 bus-modulator, envelope-segment, stretch, vmod and byteBeatStartTime
 LFO targets have no deployed node (or a non-AudioParam one), so both
 sides warn and hold static PCM at 1.0 (`lfo-bytebeat-tmp`,

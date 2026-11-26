@@ -124,6 +124,16 @@ static int ensure_orbit_reverb(int orbit);
 
 #define ORBIT_DELAY 88200
 static double orbit_dt[N_ORBITS];static double orbit_fb[N_ORBITS];
+/* Shared orbit DJF (two-pole DJ filter) state and value. Installed on the
+   first hap carrying djf and persisting like the deployed node between
+   the orbit summing node and its output. The worklet reads its value
+   input's first sample per block, so the LFO contribution latches at
+   block starts. */
+static double djf_s0[N_ORBITS][2], djf_s1[N_ORBITS][2];
+static double orbit_djf[N_ORBITS];
+static int orbit_djf_on[N_ORBITS];
+static double orbit_djf_lfo[N_ORBITS];
+static double orbit_djf_latched[N_ORBITS];
 /* Per-sample generic-LFO sums for the shared orbit delay line. The deployed
    LFO nodes connect to one AudioParam per orbit, so every voice's output
    adds onto the same delayTime/feedback value. Zeroed each sample before
@@ -1414,7 +1424,7 @@ static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
            below, which outlives the voice through the enclosing block. */
         if (sl->tgt >= GEN_TGT_BASE && sl->tgt < GEN_TGT_BASE + NGEN) {
             int gi = sl->tgt - GEN_TGT_BASE;
-            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB) continue;
+            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB || gi == GEN_DJF) continue;
         }
         double g = lfo_slot_output(sl, v->lfo_phase[li]);
         if (!isfinite(g)) {
@@ -1660,6 +1670,12 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->delay_send = ev->delay_send;
     v->orbit = ev->orbit;
     if (v->orbit < 0 || v->orbit >= N_ORBITS) v->orbit = 0;
+    /* The orbit DJF node is installed on the first hap carrying djf and
+       persists; later haps update its value like setValueAtTime. */
+    if (ev->has_djf) {
+        orbit_djf_on[v->orbit] = 1;
+        orbit_djf[v->orbit] = ev->djf;
+    }
     orbits_ensure();
     v->onset_serial=++voice_onset_serial;
     if (v->inst==INST_PULSE || v->inst==INST_SUPERSAW) {
@@ -1692,7 +1708,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         int t = v->vlfo[i].tgt;
         if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN && v->vlfo[i].hz > 0.0) {
             int gi = t - GEN_TGT_BASE;
-            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB) { v->has_orbit_lfo = 1; break; }
+            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB || gi == GEN_DJF) { v->has_orbit_lfo = 1; break; }
         }
     }
     if (v->has_orbit_lfo) {
@@ -2769,6 +2785,48 @@ static void native_reverb(int orbit, VoiceMix *mix) {
     pos[orbit]++; ap_pos[orbit]++;
 }
 
+/* Shared orbit DJF (two-pole DJ filter): filters the whole orbit mix
+   after delay/reverb returns, like the deployed node between the orbit
+   summing node and its output. The worklet reads its value input's first
+   sample per block, so the latched block-start value drives the type and
+   cutoff; the center dead zone passes audio through with frozen state. */
+static void orbit_djf_process(int orbit, VoiceMix *mix) {
+    if (orbit < 0 || orbit >= N_ORBITS || !mix) return;
+    if (!orbit_djf_on[orbit]) return;
+    double v = orbit_djf[orbit] + orbit_djf_latched[orbit];
+    if (v < 0) v = 0;
+    else if (v > 1) v = 1;
+    int type = 0; /* 0 bypass, 1 lowpass, 2 highpass */
+    double cutoff = 0;
+    if (v > 0.51) {
+        type = 2;
+        cutoff = pow((v - 0.5) * 2 * 11, 4);
+    } else if (v < 0.49) {
+        type = 1;
+        cutoff = pow(v * 2 * 11, 4);
+    } else return;
+    if (cutoff < 0) cutoff = 0;
+    if (cutoff > SR * .5 - 1) cutoff = SR * .5 - 1;
+    double c = 2 * sin(cutoff * M_PI / SR);
+    if (c < 0) c = 0;
+    else if (c > 1.14) c = 1.14;
+    double r = pow(.5, 8 * .1 + 1);
+    double mrc = 1 - r * c;
+    double in_l = mix->left, in_r = mix->right, out_l, out_r;
+    double s0 = djf_s0[orbit][0], s1 = djf_s1[orbit][0];
+    double ns0 = mrc * s0 - c * s1 + c * in_l;
+    double ns1 = mrc * s1 + c * ns0;
+    djf_s0[orbit][0] = ns0; djf_s1[orbit][0] = ns1;
+    out_l = type == 1 ? ns1 : in_l - ns1;
+    s0 = djf_s0[orbit][1]; s1 = djf_s1[orbit][1];
+    ns0 = mrc * s0 - c * s1 + c * in_r;
+    ns1 = mrc * s1 + c * ns0;
+    djf_s0[orbit][1] = ns0; djf_s1[orbit][1] = ns1;
+    out_r = type == 1 ? ns1 : in_r - ns1;
+    mix->left = out_l;
+    mix->right = out_r;
+}
+
 /* Event sends stay on their orbit. The TUI fx delay is a separate master line. */
 static void orbit_delay(int orbit, VoiceMix *mix) {
     static int dpos[N_ORBITS];
@@ -3156,6 +3214,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
             mixes[o].room_size = -1;
             orbit_lfo_dt[o] = 0.0;
             orbit_lfo_fb[o] = 0.0;
+            orbit_djf_lfo[o] = 0.0;
         }
         for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) target_dry_l[t]=target_dry_r[t]=0;
         double cs_l = 0, cs_r = 0;
@@ -3731,19 +3790,29 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     if (t < GEN_TGT_BASE || t >= GEN_TGT_BASE + NGEN ||
                         !(sl->hz > 0.0)) continue;
                     int gi = t - GEN_TGT_BASE;
-                    if (gi != GEN_DELAYTIME && gi != GEN_DELAYFB) continue;
+                    if (gi != GEN_DELAYTIME && gi != GEN_DELAYFB && gi != GEN_DJF) continue;
                     /* Shared orbit-line targets sum onto one AudioParam per
                        orbit. The worklet writes float output. */
                     double g = (float)lfo_slot_output(sl, ov->lfo_phase[li]);
                     if (isfinite(g)) {
                         if (gi == GEN_DELAYTIME) orbit_lfo_dt[oorbit] += g;
-                        else orbit_lfo_fb[oorbit] += g;
+                        else if (gi == GEN_DELAYFB) orbit_lfo_fb[oorbit] += g;
+                        else orbit_djf_lfo[oorbit] += g;
                     }
                     ov->lfo_phase[li] += (2.0 * M_PI * sl->hz) / SR;
                     if (ov->lfo_phase[li] > 2.0 * M_PI)
                         ov->lfo_phase[li] -= 2.0 * M_PI *
                             floor(ov->lfo_phase[li] / (2.0 * M_PI));
                 }
+            }
+            /* The DJF worklet reads its value input's first sample per
+               block, so latch each orbit's LFO sum at block starts
+               (audio-time grid). After the LFO window the sum stays zero
+               and the base value rules. */
+            {
+                unsigned long long sn = (unsigned long long)(audio_time * SR + 0.5);
+                if (sn % 128 == 0)
+                    for (int o = 0; o < N_ORBITS; o++) orbit_djf_latched[o] = orbit_djf_lfo[o];
             }
             csound_program_sample(csound_program,&cs_l,&cs_r);
             for (int o = 0; o < N_ORBITS; o++) {
@@ -3851,6 +3920,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         for (int o = 0; o < N_ORBITS; o++) {
             native_reverb(o, &mixes[o]);
             orbit_delay(o, &mixes[o]);
+            orbit_djf_process(o, &mixes[o]);
             L += mixes[o].left * duck_g[o];
             R += mixes[o].right * duck_g[o];
         }

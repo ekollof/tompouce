@@ -669,7 +669,14 @@ oscillator's frequency per sample
 (`vib-rate-lfo-tmp` at 1.0): the static rate term keeps the closed form
 while only the LFO deviation integrates from the voice start.
 Generic spread LFOs bend the shared panspread per sample
-(`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0).
+(`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0). Filter-sync,
+bus-modulator, envelope-segment, stretch, vmod and byteBeatStartTime
+LFO targets have no deployed node (or a non-AudioParam one), so both
+sides warn and hold static PCM at 1.0 (`lfo-bytebeat-tmp`,
+`lfo-wtsync-tmp`, `lfo-lpsync-tmp`, `lfo-bpsync-tmp`, `lfo-bmod-tmp`,
+`lfo-envattack-tmp`, `lfo-stretch-tmp`, `lfo-vmod-tmp`); `lfo-warpsync-tmp`
+gates at 0.99986 and `lfo-delaysync-tmp` drives the shared delay line
+like delaytime.
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

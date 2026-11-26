@@ -575,7 +575,14 @@ and measured divergences are recorded in the archive.
       unison voices (was: silent unison). Generic vib-rate LFOs
       bend the vibrato oscillator's frequency per sample
       (`vib-rate-lfo` 1.0): the static rate term keeps the closed form
-      while only the LFO deviation integrates from the voice start. The native 128-sample FM
+      while only the LFO deviation integrates from the voice start.
+      Filter-sync, bus-modulator, envelope-segment, stretch, vmod and
+      byteBeatStartTime LFO targets have no deployed node (or a
+      non-AudioParam one), so both sides warn and hold static PCM
+      (`lfo-bytebeat-tmp`, `lfo-wtsync-tmp`, `lfo-lpsync-tmp`,
+      `lfo-bpsync-tmp`, `lfo-bmod-tmp`, `lfo-envattack-tmp`,
+      `lfo-stretch-tmp`, `lfo-vmod-tmp`; `lfo-delaysync-tmp` drives the
+      shared delay line like delaytime). The native 128-sample FM
       quantum held the refill sample's LFO value across the block while
       the deployed modulator frequency AudioParam is a-rate; the fill
       now consumes the per-frame worklet trajectory, and carrier-direct
@@ -583,10 +590,10 @@ and measured divergences are recorded in the archive.
       registry keeps the last edge per operator, including unconnected
       nodes.
       Remaining: compressor params, bus-routed sends (no native bus;
-      unrouted busgain is a silent no-op), stretch (baked at prepare vs
-      live phase-vocoder), bmod (inter-voice audio bus system),
-      djf/transient/byteBeat values (no native nodes; unvalued LFOs warn
-      on both sides) and vmod (no upstream routing; both sides warn).
+      unrouted busgain is a silent no-op), stretch values (baked at
+      prepare vs live phase-vocoder; unvalued LFOs warn on both sides),
+      bmod (inter-voice audio bus system), djf/transient/byteBeat
+      values (no native nodes; unvalued LFOs warn on both sides).
       The compressor gap
       is now precisely scoped:
       static level/ballistics are secondary (native defaults now match the

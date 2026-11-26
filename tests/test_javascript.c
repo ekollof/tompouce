@@ -1368,6 +1368,66 @@ static void test_analyser_controls(void) {
     assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* Bus-modulator, envelope-segment, stretch, vmod and filter-sync
+       targets have no deployed node, so both sides warn and hold static. */
+    haps=query("note(69).s('sine').gain(.5).clip(.5)"
+        ".lfo({control:'bmod',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.5)"
+        ".lfo({control:'env_attack',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.5)"
+        ".lfo({control:'stretch',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.5)"
+        ".lfo({control:'vmod',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).clip(.05).lpf(800)"
+        ".lfo({control:'lpsync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).clip(.05).hpf(800)"
+        ".lfo({control:'hpsync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sawtooth').gain(.5).clip(.05).bpf(900)"
+        ".lfo({control:'bpsync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* delaysync drives the same shared delay line as delaytime. */
+    haps=query("note(69).s('sine').gain(.5).clip(.05).dry(0).delay(.5).delaytime(.075).delayfeedback(.5)"
+        ".lfo({control:'delaysync',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DELAYTIME &&
+        fabs(event.lfo[0].depth-.0375)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Without a delay send the shared line has no node, so the LFO
        warns like a missing node. */
     haps=query("note(69).s('sine').gain(.5)"

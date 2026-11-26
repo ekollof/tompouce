@@ -313,6 +313,8 @@ try {
     {name:'lfo-pan',sound:'sine',code:`note(69).s('sine').gain(.5).pan(.5).lfo({control:'pan',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-sample-gain',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).clip(.05).lfo({control:'gain',rate:.5,depth:1})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-sample-detune',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').clip(1).lfo()`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'lfo-vibrate-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).vib(6).vibmod(1).lfo({control:'vib',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'vib-static-sample-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).vib(6).vibmod(1)`,cycles:1,cps:.5,window:2,correlation:.99},
                     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-pan',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(pan(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},

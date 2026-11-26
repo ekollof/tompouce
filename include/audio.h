@@ -109,6 +109,7 @@ typedef struct Voice {
     double smppos;  // fractional position for pitch-shifted playback
     double smpstep; // advance per output sample (1 = original pitch)
     double sample_pitch_quantum, sample_pitch_ratio; /* BufferSource k-rate detune */
+    double sample_viblfo_quantum, sample_viblfo_ratio; /* k-rate detune with integrated rate LFO */
     int smp_gate;   // respect note duration + release (melodic banks)
     double stretch_factor;
     const StretchBuffer *stretch_buffer;

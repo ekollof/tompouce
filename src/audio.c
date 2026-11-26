@@ -1260,6 +1260,29 @@ static double sample_pitch_ratio(Voice *v,double now) {
     return v->sample_pitch_ratio;
 }
 
+/* Sample transport for a voice whose vibrato rate is LFO-modulated. The
+   deployed k-rate detune samples the integrated oscillator output at
+   each quantum's first frame and holds it; native mirrors that with a
+   separate quantum cache (the static cache cannot express the integrated
+   phase). The deviation keeps stepping every sample, evaluated before
+   the step so each block reads the phase through the previous sample. */
+static double sample_transport_ratio(Voice *v, double now) {
+    DspParams *c = &v->dsp.control;
+    if (!(c->vib_lfo && c->p[DSP_VIB] > 0)) return sample_pitch_ratio(v, now);
+    double quantum = native_synth_quantum_time(now);
+    if (quantum != v->sample_viblfo_quantum) {
+        v->sample_viblfo_quantum = quantum;
+        double qage = quantum - v->start_time;
+        double first=ceil(v->start_time*SR/128)*128/SR-v->start_time;
+        v->sample_viblfo_ratio = dsp_sample_pitch_viblfo(&v->dsp, qage,
+            v->gate_end-v->start_time, first);
+    }
+    v->dsp.vib_phase += 2*M_PI*c->gen_lfo[GEN_VIB]/SR;
+    if (v->dsp.vib_phase > 2*M_PI || v->dsp.vib_phase < -2*M_PI)
+        v->dsp.vib_phase = fmod(v->dsp.vib_phase,2*M_PI);
+    return v->sample_viblfo_ratio;
+}
+
 static void voice_onset(Voice *v) {
     v->onset_pending=0;
     if (v->dsp.control.source_noise)
@@ -1744,6 +1767,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->smppos = 0;
     v->smpstep = 1.0;
     v->sample_pitch_quantum=-1; v->sample_pitch_ratio=1;
+    v->sample_viblfo_quantum=-1; v->sample_viblfo_ratio=1;
     v->smp_gate = ev->smp_gate;
     v->wt_sample_frames = ev->wt_frames;
     v->wt_sample_frame_len = ev->wt_frame_len;
@@ -3469,17 +3493,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     double samp_amp = 0, samp_freq = 0, samp_cents = 0, samp_pan = 0;
                     int samp_nf = 0;
                     double amp_use = V->amp;
-                    double transport = V->smpstep*sample_pitch_ratio(V,audio_time);
+                    /* Transport resolves after LFO stepping so the integrated
+                       vib-rate phase uses this sample's LFO output. */
+                    double transport = 0;
                     if (age >= V->lfo_hold) {
                         voice_lfo_step_all(V, &samp_amp, &samp_freq, &samp_cents, &samp_pan, &samp_nf);
                         if (samp_nf & (1<<2)) amp_use = 1.0;
                         else amp_use = V->amp + samp_amp;
                         if (samp_nf & (1<<7)) samp_cents = 0.0;
-                        if (samp_cents != 0) transport *= pow(2.0, samp_cents/1200.0);
                         if (samp_nf & (1<<8)) samp_pan = -V->pan;
                         if (voice_pan_lfo_active(V))
                             voice_lfo_pan_routing(V, V->pan + samp_pan);
                     }
+                    transport = V->smpstep*sample_transport_ratio(V,audio_time);
+                    if (samp_cents != 0) transport *= pow(2.0, samp_cents/1200.0);
                     g*=cut_gain;
                     double s = left*amp_use*g;
                     if (native_synth_effect(V->native_program)) {

@@ -667,7 +667,11 @@ The wavetable worklet defaults freqspread to 0.18, so a missing detune
 still spreads unison voices. Generic vib-rate LFOs bend the vibrato
 oscillator's frequency per sample
 (`vib-rate-lfo-tmp` at 1.0): the static rate term keeps the closed form
-while only the LFO deviation integrates from the voice start.
+while only the LFO deviation integrates from the voice start. On
+sample voices the deployed detune is k-rate, so native holds the
+transport ratio per 128-sample block with the integrated phase
+sampled at block starts (`lfo-vibrate-tmp` at 1.0; plain sample vib
+already gated the same way as `vib-static-sample-tmp`).
 Generic spread LFOs bend the shared panspread per sample
 (`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0). The orbit DJF node
 applies a two-pole DJ filter to the shared mix like the deployed

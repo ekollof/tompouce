@@ -588,6 +588,11 @@ and measured divergences are recorded in the archive.
       bend the vibrato oscillator's frequency per sample
       (`vib-rate-lfo` 1.0): the static rate term keeps the closed form
       while only the LFO deviation integrates from the voice start.
+      On sample voices the deployed bufferSource detune is k-rate, so
+      native holds the transport ratio per 128-sample block: the block
+      reads the quantum-start closed form with the integrated phase,
+      which keeps stepping every sample (`lfo-vibrate-tmp` at 1.0;
+      plain `vib` on samples already gated the same way).
       Generic spread LFOs bend the shared panspread per sample
       (`lfo-spread` and `lfo-spread-wt` at 1.0). The orbit DJF node
       applies a two-pole DJ filter to the shared mix like the deployed

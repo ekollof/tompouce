@@ -1415,6 +1415,17 @@ static void test_analyser_controls(void) {
         event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* A generic vib-rate LFO routes on sample voices too: the deployed
+       vibrato oscillator drives the bufferSource detune whenever vib is
+       positive. Depth scales by the static rate like oscillator voices. */
+    haps=query("s('mono_fixture').gain(.5).vib(6).vibmod(1)"
+        ".lfo({control:'vib',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.vib_lfo && event.lfo[0].tgt==GEN_TGT_BASE+GEN_VIB &&
+        fabs(event.lfo[0].depth-3)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

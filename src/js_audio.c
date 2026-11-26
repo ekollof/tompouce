@@ -1191,10 +1191,12 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
         } else if (!strcmp(need, "phaserrate")) {
             if (cJSON_HasObjectItem(value,"phaserrate") && control(value,"phaserdepth",.75,0,16) > 0) return &gen_targets[i];
         } else if (!strcmp(need, "vib-rate")) {
-            /* The deployed vibrato oscillator exists only when its rate
-               is positive; sample voices take the detune fallback with
-               no such node. */
-            if (ev->dsp.p[DSP_VIB] > 0 && ev->smp < 0 && !ev->stretch_buffer) return &gen_targets[i];
+            /* The deployed vibrato oscillator exists whenever its rate
+               is positive, on every voice type: oscillator and wavetable
+               worklets drive their detune param, samples drive the
+               bufferSource detune. Native integrates the LFO deviation
+               per sample on oscillator frequency and sample transport. */
+            if (ev->dsp.p[DSP_VIB] > 0 && !ev->stretch_buffer) return &gen_targets[i];
         } else if (!strcmp(need, "djf-node")) {
             /* The orbit DJF node exists once any hap carries djf. */
             if (ev->has_djf) return &gen_targets[i];

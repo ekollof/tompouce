@@ -580,6 +580,22 @@ double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gat
     return pow(2,cents/1200);
 }
 
+/* Sample transport with a generic vib-rate LFO. The deployed bufferSource
+   detune/playbackRate are k-rate: the value at the quantum's first frame
+   holds for the block. Only the evaluation is quantized; the LFO
+   deviation keeps integrating every sample like the deployed oscillator,
+   and the caller evaluates before stepping so the block reads the phase
+   through the previous sample. */
+double dsp_sample_pitch_viblfo(DspState *s, double age, double gate, double first_time) {
+    const double *p = s->control.p;
+    double cents = p[DSP_PENV]!=0 ? scheduled_pitch_cents(p,age,gate,first_time,p[DSP_PCURVE]>0) : 0;
+    if (p[DSP_VIB] > 0) {
+        double depth = p[DSP_VIBMOD]+s->control.gen_lfo[GEN_VIBMOD]/100;
+        cents += 100*sin(2*M_PI*age*p[DSP_VIB]+s->vib_phase)*depth;
+    }
+    return pow(2,cents/1200);
+}
+
 float dsp_oscillator_nyquist_gain(float frequency) {
     /* The basic sine keeps one partial. The top pitch range culls it, and the
        range below interpolates toward that empty table. */

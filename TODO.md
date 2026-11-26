@@ -658,7 +658,12 @@ and measured divergences are recorded in the archive.
       `compressor-panfull-tmp`, `compressor-panunity-tmp`,
       `compressor-pan05-tmp`, `compressor-pan025-tmp`,
       `pan-static-tmp`, `pan-center-node-tmp`,
-      `compressor-center12-tmp`).
+      `compressor-center12-tmp`). On true-stereo material the deployed
+      node links the detector across channels while native keeps
+      per-channel states; the difference is a diffuse 0.99976 even
+      with fully anticorrelated channels (`compressor-stereo-tmp`,
+      `compressor-stereopan-tmp`), and the pan LFO composes with the
+      crossfeed matrix at 1.0 (`compressor-panlfo-tmp`).
       Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and

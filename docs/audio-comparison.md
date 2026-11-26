@@ -714,7 +714,10 @@ a compressor selects the deployed stereo crossfeed panner law, keyed
 natively off the compressor's presence (`compressor-pan-tmp`,
 `compressor-panlight-tmp`, `compressor-panfull-tmp`,
 `compressor-panunity-tmp`, `compressor-pan05-tmp`,
-`compressor-pan025-tmp`, all 1.0). The transient
+`compressor-pan025-tmp`, all 1.0). On true-stereo material the deployed
+linked detector vs native per-channel states differ by a diffuse
+0.99976 (`compressor-stereo-tmp`, `compressor-stereopan-tmp`); the
+pan LFO composes with the crossfeed at 1.0 (`compressor-panlfo-tmp`). The transient
 shaper renders its static value per sample at 0.99/0.85-1.15
 (`transient-static-tmp`, `transient-zero-tmp`, `transient-negative-tmp`):
 dual float32 envelope followers, the first-quantum hold, pre-gain

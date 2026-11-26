@@ -1052,6 +1052,7 @@ static const GenTarget gen_targets[] = {
     {"postgain", GEN_POSTGAIN, DSP_POST, 0, NULL},
     {"vibmod", GEN_VIBMOD, DSP_VIBMOD, 0, "vib"},
     {"vib", GEN_VIB, DSP_VIB, 1, "vib-rate"},
+    {"spread", GEN_SPREAD, DSP_SPREAD, 0, "spread-lfo"},
     {"pw", GEN_PW, DSP_PW, 0, "pulse-voice"},
     {"pwrate", GEN_PWRATE, DSP_PWRATE, 1, "pulse-voice"},
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
@@ -1184,6 +1185,19 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
                is positive; sample voices take the detune fallback with
                no such node. */
             if (ev->dsp.p[DSP_VIB] > 0 && ev->smp < 0 && !ev->stretch_buffer) return &gen_targets[i];
+        } else if (!strcmp(need, "spread-lfo")) {
+            /* The panspread node exists on supersaw-oscillator and
+               wavetable voices; native holds static spread at unison 1,
+               so the LFO needs more than one voice like the static path.
+               Wavetable event fields resolve after LFO parsing, so read
+               the hap directly like the wt defaults do. */
+            int iswt = sound && !strncmp(sound, "wt_", 3);
+            if ((sound && !strcmp(sound, "supersaw")) || iswt) {
+                double voices = iswt ? control(value, "unison", 1, 1, WT_SAMPLE_VOICES) :
+                    ev->dsp.p[DSP_UNISON];
+                if (voices > 1) return &gen_targets[i];
+            }
+            return NULL;
         } else if (!strcmp(need, "pulse-voice")) {
             /* The deployed pulsewidth nodes only exist on pulse-oscillator
                voices, and the pw LFO node only when the (defaulted) sweep
@@ -1336,6 +1350,12 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         else if (gent && gent->gen == GEN_DELAYTIME) base = ev->delay_time;
         else if (gent && gent->gen == GEN_DELAYFB) base = ev->delay_fb;
         else if (gent && gent->gen == GEN_VIB) base = ev->dsp.p[DSP_VIB];
+        else if (gent && gent->gen == GEN_SPREAD) {
+            /* Node value gates on voices for supersaw, raw value for
+               wavetable (read from the hap: wt fields resolve later). */
+            if (sound && !strcmp(sound, "supersaw")) base = ev->dsp.p[DSP_SPREAD];
+            else base = control(value, "spread", .7, 0, 1);
+        }
         else if (gent && gent->gen == GEN_ROOM) base = ev->dsp.p[DSP_ROOM];
         else if (gent && gent->gen >= GEN_WTRATE && gent->gen <= GEN_WARPSHAPE) {
             /* Wavetable LFO bases replicate the connected worklet params:
@@ -1842,7 +1862,10 @@ static int resolve_sample_source(AudioEvent *ev, const cJSON *value) {
             ev->wt_warp_lfo_dc=control(value,"warpdc",0,-100,100);
             ev->wt_voices=(int)control(value,"unison",1,1,WT_SAMPLE_VOICES);
             ev->wt_spread=control(value,"spread",.7,0,1);
-            ev->wt_detune=control(value,"detune",0,-9600,9600);
+            /* The wavetable worklet defaults freqspread to 0.18; a missing
+               detune still spreads unison voices. Single-voice playback is
+               unaffected either way. */
+            ev->wt_detune=control(value,"detune",.18,-9600,9600);
             ev->wt_phase_rand=number_control(value,"wtphaserand") ?
                 (control(value,"wtphaserand",0,0,1)>0 ? 1 : 0) : ev->wt_voices>1 ? 1 : 0;
             /* Each selected AKWF file is one cycle. Its length, not the

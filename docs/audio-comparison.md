@@ -663,9 +663,13 @@ no-ops on both sides: `overgain-static-tmp` and `busgain-static-tmp`
 LFOs on `overgain`, `pcurve`, `busgain`, valueless `djf` and main-chain
 `transient` warn with static PCM at 1.0 (`lfo-overgain-tmp`,
 `lfo-pcurve-tmp`, `lfo-busgain-tmp`, `lfo-djf-tmp`, `lfo-transient-tmp`).
-Generic vib-rate LFOs bend the vibrato oscillator's frequency per sample
+The wavetable worklet defaults freqspread to 0.18, so a missing detune
+still spreads unison voices. Generic vib-rate LFOs bend the vibrato
+oscillator's frequency per sample
 (`vib-rate-lfo-tmp` at 1.0): the static rate term keeps the closed form
 while only the LFO deviation integrates from the voice start.
+Generic spread LFOs bend the shared panspread per sample
+(`lfo-spread-tmp` and `lfo-spread-wt-tmp` at 1.0).
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

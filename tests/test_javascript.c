@@ -1305,11 +1305,29 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth-2.5)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('supersaw').gain(.3).unison(5).spread(.6)"
+        ".lfo({control:'spread',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_SPREAD &&
+        fabs(event.lfo[0].depth-.3)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("note(69).s('sine').gain(.5).clip(.5)"
         ".lfo({control:'vib',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Wavetable voices take the same shared-node path with their own
+       default spread. */
+    haps=query("s('wt_digital_echoes').note(60).gain(.5).unison(3).spread(.4)"
+        ".lfo({control:'spread',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_SPREAD &&
+        fabs(event.lfo[0].depth-.2)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
     /* Non-registered LFO targets warn on both sides and hold static. */

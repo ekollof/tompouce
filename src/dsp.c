@@ -1186,6 +1186,14 @@ void dsp_supersaw_init(DspState *s, unsigned seed) {
 double dsp_supersaw(DspState *s, double frequency) {
     double left = 0, right = 0;
     double pan_l=s->supersaw_pan_l,pan_r=s->supersaw_pan_r;
+    /* A generic spread LFO modulates the deployed panspread per sample;
+       recompute the voice gains from the widened/narrowed spread. */
+    double ds = s->control.gen_lfo[GEN_SPREAD];
+    if (ds != 0 && isfinite(ds)) {
+        double voices=clamp(s->control.p[DSP_UNISON],1,DSP_SUPERSAW_VOICES);
+        double spread=voices>1?clamp(s->control.p[DSP_SPREAD]+(float)ds,0,1):0;
+        pan_l=sqrt((1-spread)*.5); pan_r=sqrt((1+spread)*.5);
+    }
     /* A generic detune LFO modulates the deployed freqspread per sample;
        recompute the voice ratios from the widened/narrowed total. */
     double dg = s->control.gen_lfo[GEN_DETUNE];

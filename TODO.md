@@ -570,7 +570,9 @@ and measured divergences are recorded in the archive.
       unread controls stay silent no-ops on both sides (`overgain`,
       `busgain` without a bus send, `pcurve`, `djf` without a value,
       main-chain `transient`): explicit static values gate at 1.0 and
-      generic LFOs on them warn with static PCM. Generic vib-rate LFOs
+      generic LFOs on them warn with static PCM. The wavetable worklet
+      defaults freqspread to 0.18, so a missing detune still spreads
+      unison voices (was: silent unison). Generic vib-rate LFOs
       bend the vibrato oscillator's frequency per sample
       (`vib-rate-lfo` 1.0): the static rate term keeps the closed form
       while only the LFO deviation integrates from the voice start. The native 128-sample FM

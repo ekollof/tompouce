@@ -3044,6 +3044,13 @@ static void wt_sample_voice(Voice *v, double age, double gate, double *left, dou
         sample += (following - sample) * blend;
         if (v->wt_sample_warp_mode == 21 && phase < warp) sample = -sample;
         double pan = voices > 1 ? v->wt_sample_spread : 0;
+        double spread_lfo = (double)(float)v->dsp.control.gen_lfo[GEN_SPREAD];
+        if (voices > 1 && spread_lfo != 0 && isfinite(spread_lfo)) {
+            /* A generic spread LFO modulates the deployed panspread per
+               sample; clamp the sum to keep the gains finite. */
+            double spread = v->wt_sample_spread + spread_lfo;
+            pan = spread < 0 ? 0 : spread > 1 ? 1 : spread;
+        }
         double left_gain = sqrt(.5 - .5 * pan), right_gain = sqrt(.5 + .5 * pan);
         if (voice & 1) {
             double swap = left_gain;

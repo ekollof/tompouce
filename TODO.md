@@ -619,25 +619,34 @@ and measured divergences are recorded in the archive.
       registry keeps the last edge per operator, including unconnected
       nodes.
       Remaining: bus-routed sends (no native bus;
-      unrouted busgain is a silent no-op), stretch values (baked at
-      prepare vs live phase-vocoder; unvalued LFOs warn on both sides),
-      bmod (inter-voice audio bus system), byteBeat
-      values (no native node; unvalued LFOs warn on both sides).
-      The compressor onset gap is closed: the deployed
-      DynamicsCompressorNode carries a structural 264-sample latency at
-      44.1 kHz regardless of settings (verified in-page with an impulse
-      through an OfflineAudioContext: unity threshold still delays and
-      attenuates the impulse to ~0.2 at sample 264). Native applies the
-      same delay whenever the node exists — including an explicit unity
-      threshold 0, which installs the node on the deployed side too —
-      before the downstream phaser/post stages, whose LFOs stay timed to
-      the absolute hap start. Static threshold, unity, late-onset and
-      knee gates pass (`compressor-static-tmp`, `compressor-unity-tmp`,
-      `compressor-late-tmp`, `compressor-knee-tmp` at 0.99/0.85-1.15).
-      Deep-compression level/ballistics stay diagnostic (ratio-20,
-      slow attack/release and threshold-LFO cases): timing correlates at
-      ~0.996+ but the native peak follower compresses harder than the
-      deployed node as depth grows. Generic `.env()` is parsed, validated and warned but never applied:
+      unrouted busgain is a silent no-op), stretch values (the static
+      shift mapping matches the worklet exactly, and the native offline
+      port renders real audio, but the deployed node outputs silence
+      for every stretch input in-capture — the reference vocoder
+      renders correctly standalone, so this looks like broken worklet
+      packaging upstream, not a model to copy; unvalued LFOs warn on
+      both sides, and live LFOs would be last-value-per-block but are
+      untestable while the node is silent),
+      bmod (inter-voice audio bus system).
+      The compressor matches the deployed Blink dynamics_compressor
+      model verbatim (read from the Chromium sources): 6 ms lookahead
+      pre-delay (the 264-sample structural latency, verified in-page
+      with an impulse), peak detector with shaped saturation (exponential
+      knee matched in 1st derivative by bisection, constant ratio above),
+      per-sample detector smoothing with a 2.5 ms saturation release,
+      32-sample envelope divisions with adaptive 4th-order release and
+      max-attack-tracked attack, sine-warped gain and the fixed
+      perceptual makeup. The node installs on explicit threshold
+      (including unity 0). All seven gates pass at 1.0
+      (`compressor-static-tmp`, `compressor-unity-tmp`,
+      `compressor-late-tmp`, `compressor-knee-tmp`,
+      `compressor-ratio-tmp`, `compressor-attrel-tmp`,
+      `compressor-tmp`): the late-onset case needed the deployed
+      schedule-then-render order, where every node pre-rolls silence
+      from render start (native reproduces the convergence at trigger),
+      and the envelope divisions align to absolute 32-sample frames.
+      Per-channel states approximate the deployed linked detector, exact
+      for mono/center material. Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

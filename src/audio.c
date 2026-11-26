@@ -1661,6 +1661,15 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         if (hold > 128) hold = 128;
         v->dsp.trans_hold = v->dsp_right.trans_hold = (int)hold;
     }
+    /* The Blink envelope divisions quantize to absolute 32-sample
+       boundaries, and the node pre-rolls silence from render start:
+       reproduce both from the absolute start frame. */
+    if (ev->dsp.compressor_on) {
+        long long f0 = llround(v->start_time*SR);
+        if (f0 < 0) f0 = 0;
+        comp_silence_preroll(&v->dsp, f0, ev->dsp.p[DSP_COMPATT], ev->dsp.p[DSP_COMPREL]);
+        comp_silence_preroll(&v->dsp_right, f0, ev->dsp.p[DSP_COMPATT], ev->dsp.p[DSP_COMPREL]);
+    }
     /* Superdough's wavetable path applies clip to the already clipped hap
        duration a second time (Zo: Z = min(e + clip*duration, ...)). */
     double source_duration = ev->duration;

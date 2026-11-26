@@ -1261,7 +1261,11 @@ int main(void) {
     assert(rms("{\"cutoff\":1000}",5000) < rms("{\"cutoff\":1000}",100)*.1);
     assert(rms("{\"bandf\":1000,\"bandq\":4}",100) < rms("{\"bandf\":1000,\"bandq\":4}",1000)*.1);
     assert(rms("{\"postgain\":0}",1000) == 0);
-    assert(rms("{\"compressor\":-30,\"compressorRatio\":20}",1000) < .1);
+    /* Deep compression with the Blink makeup: the shaped gain plus the
+       fixed post-gain lands well below the dry sine but far above the
+       old makeup-less floor. */
+    { double cr = rms("{\"compressor\":-30,\"compressorRatio\":20}",1000);
+      assert(cr < .4 && cr > .1); }
     /* Transient with zero amounts is a pure soft clip: strictly below the
        dry sine but well above silence. The node flag follows the control. */
     assert(rms("{\"transient\":0}",1000) < .45);

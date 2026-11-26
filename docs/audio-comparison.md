@@ -693,14 +693,16 @@ registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.000
 `lfo-warpdc-inert` 1.0/1.0002, `lfo-dry-inert` 1.0/1.0003; generic tremoloshape and wt/warp shape are
 recorded supersets (native renders, the deployed float shape index
 crashes its worklet to silence, so they stay ungated). The
-compressor statics gate at 0.99/0.85-1.15 (`compressor-static-tmp`,
-`compressor-unity-tmp`, `compressor-late-tmp`, `compressor-knee-tmp`):
-the deployed DynamicsCompressorNode delays its voice by 264 samples at
-44.1 kHz regardless of settings, which native reproduces whenever the
-node exists (including explicit unity threshold). Deep-compression
-level/ballistics (ratio-20, slow attack/release, threshold LFO) stay
-diagnostic: timing correlates near 0.996+ but the native peak follower
-compresses harder than the deployed node as depth grows. The transient
+compressor ports the deployed Blink dynamics_compressor model verbatim
+(6 ms lookahead, exponential knee matched by bisection, adaptive
+envelope, sine warp, fixed makeup): all seven gates pass at
+0.99/0.85-1.15 and 1.0 (`compressor-static-tmp`,
+`compressor-unity-tmp`, `compressor-late-tmp`, `compressor-knee-tmp`,
+`compressor-ratio-tmp`, `compressor-attrel-tmp`, `compressor-tmp`),
+including deep ballistics and the threshold LFO. The late-onset case
+reproduces the schedule-then-render silence pre-roll and the absolute
+32-sample envelope divisions. Per-channel states approximate the
+linked detector, exact for mono/center material. The transient
 shaper renders its static value per sample at 0.99/0.85-1.15
 (`transient-static-tmp`, `transient-zero-tmp`, `transient-negative-tmp`):
 dual float32 envelope followers, the first-quantum hold, pre-gain

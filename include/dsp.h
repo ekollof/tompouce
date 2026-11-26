@@ -115,7 +115,18 @@ typedef struct {
     double trem_fm_phase; /* accumulated generic-LFO rate offset (cycles) */
     int lfo_switched;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
-    double noise[8], compressor_gain;
+    double noise[8];
+    /* Blink DynamicsCompressor model (platform/audio/dynamics_compressor):
+       peak detector with shaped saturation, 32-sample envelope divisions
+       with adaptive release, 6 ms lookahead and a sine-warped gain with a
+       fixed makeup. Per-channel states: the deployed detector links
+       channels, which coincides for identical (mono/center) inputs. */
+    double comp_detector, comp_gain, comp_db_max_attack;
+    double comp_db_thr, comp_db_knee, comp_ratio, comp_slope;
+    double comp_lin_thr, comp_knee_thr, comp_db_knee_thr, comp_db_yknee_thr;
+    double comp_knee_k;
+    int comp_curve_set, comp_div;
+    double comp_env_rate, comp_desired;
     /* Transient-shaper detector state. The attack/sustain envelope
        followers live in float32 like the deployed Float32Array; the
        shared makeup gain stays double. Per-channel states: the deployed
@@ -215,6 +226,7 @@ void dsp_oscillator_onset(DspState *state, double onset);
 double dsp_pitch_multiplier(const DspParams *params, double age, double gate);
 double dsp_sample_pitch_multiplier(const DspParams *params,double age,double gate,double first_time);
 double dsp_sample_pitch_viblfo(DspState *s,double age,double gate,double first_time);
+void comp_silence_preroll(DspState *s,long long frames,double attack,double release);
 double dsp_envelope(double age, double gate, double attack, double decay, double sustain, double release);
 double dsp_noise(DspState *state, int color);
 /* Voice preparation only. Independent phases avoid a coherent onset burst. */

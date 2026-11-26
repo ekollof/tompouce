@@ -456,7 +456,12 @@ void dsp_init(DspState *s, const DspParams *p) {
     memset(s, 0, sizeof(*s));
     s->control = *p;
     s->noise_seed = 0x1234567u;
-    s->compressor_gain = 1;
+    s->comp_detector = 0;
+    s->comp_gain = 1;
+    s->comp_db_max_attack = -1;
+    s->comp_curve_set = 0;
+    s->comp_div = 0;
+    s->comp_env_rate = 0;
     s->trans_avg = 1;
     s->pulse[0]=-M_PI;
     int vowel = (int)p->p[DSP_VOWEL];
@@ -868,6 +873,116 @@ static double transient_process(DspState *s, double x) {
     return G != 0 ? y*G : y;
 }
 
+/* Blink DynamicsCompressor static curve (platform/audio/
+   dynamics_compressor.cc): exponential knee matched in 1st derivative
+   to the ratio slope by bisection, then constant ratio above the knee. */
+static double comp_knee_curve(double x, double lin_thr, double k) {
+    if (x < lin_thr) return x;
+    return lin_thr+(1.0-exp(-k*(x-lin_thr)))/k;
+}
+static double comp_k_at_slope(double db_thr, double db_knee, double lin_thr, double desired_slope) {
+    double x = pow(10,(db_thr+db_knee)/20), x2 = 1, db_x = db_thr+db_knee, db_x2 = 0;
+    if (!(x < lin_thr)) {
+        x2 = x*1.001;
+        db_x2 = 20*log10(x2);
+    }
+    double min_k = .1, max_k = 10000, k = 5, slope = 1;
+    for (int i = 0; i < 15; i++) {
+        if (!(x < lin_thr)) {
+            double db_y = 20*log10(comp_knee_curve(x,lin_thr,k));
+            double db_y2 = 20*log10(comp_knee_curve(x2,lin_thr,k));
+            slope = (db_y2-db_y)/(db_x2-db_x);
+        }
+        if (slope < desired_slope) max_k = k;
+        else min_k = k;
+        k = sqrt(min_k*max_k);
+    }
+    return k;
+}
+static double comp_update_curve(DspState *s, double db_thr, double db_knee, double ratio) {
+    if (!s->comp_curve_set || db_thr != s->comp_db_thr ||
+        db_knee != s->comp_db_knee || ratio != s->comp_ratio) {
+        s->comp_db_thr = db_thr;
+        s->comp_db_knee = db_knee;
+        s->comp_ratio = ratio;
+        s->comp_lin_thr = pow(10,db_thr/20);
+        s->comp_slope = 1/ratio;
+        double k = comp_k_at_slope(db_thr,db_knee,s->comp_lin_thr,1/ratio);
+        s->comp_knee_k = k;
+        s->comp_db_knee_thr = db_thr+db_knee;
+        s->comp_knee_thr = pow(10,s->comp_db_knee_thr/20);
+        s->comp_db_yknee_thr = 20*log10(comp_knee_curve(s->comp_knee_thr,s->comp_lin_thr,k));
+        s->comp_curve_set = 1;
+    }
+    return s->comp_knee_k;
+}
+static double comp_saturate(DspState *s, double x, double k) {
+    if (x < s->comp_knee_thr) return comp_knee_curve(x,s->comp_lin_thr,k);
+    double db_y = s->comp_db_yknee_thr+s->comp_slope*(20*log10(x)-s->comp_db_knee_thr);
+    return pow(10,db_y/20);
+}
+
+/* The deployed node processes silence from chain setup: offline rendering
+   schedules every hap before the first quantum, so the detector and gain
+   converge during the pre-voice silence (zero input makes attenuation
+   identically 1). Reproduce that convergence at trigger from the absolute
+   start frame; static params only, since LFO slots have not stepped yet. */
+void comp_silence_preroll(DspState *s, long long frames, double attack, double release) {    double attack_frames = (attack > 0.001 ? attack : 0.001)*SR;
+    double release_frames = SR*release;
+    double sat_rate = pow(10,(2.0/(0.0025*SR))/20)-1;
+    const double z1 = 0.09, z2 = 0.16, z3 = 0.42, z4 = 0.98;
+    double ra = release_frames*(0.9999999999999998*z1+1.8432219684323923e-16*z2-1.9373394351676423e-16*z3+8.824516011816245e-18*z4);
+    double rb = release_frames*(-1.5788320352845888*z1+2.3305837032074286*z2-0.9141194204840429*z3+0.1623677525612032*z4);
+    double rc = release_frames*(0.5334142869106424*z1-1.272736789213631*z2+0.9258856042207512*z3-0.18656310191776226*z4);
+    double rd = release_frames*(0.08783463138207234*z1-0.1694162967925622*z2+0.08588057951595272*z3-0.00429891410546283*z4);
+    double re = release_frames*(-0.042416883008123074*z1+0.1115693827987602*z2-0.09764676325265872*z3+0.028494263462021576*z4);
+    double detector = 0, gain = 1, db_max = -1, env_rate = 0, desired = 0;
+    long long div = 0;
+    for (long long i = 0; i < frames; i++) {
+        if (div == 0) {
+            double scaled = asin(detector > 1 ? 1 : detector)/(M_PI/2);
+            desired = scaled;
+            int releasing = scaled > gain;
+            double diff = scaled == 0 ? (releasing ? -1 : 1) : 20*log10(gain/scaled);
+            if (releasing) {
+                db_max = -1;
+                if (!isfinite(diff)) diff = -1;
+                double q = diff < -12 ? -12 : diff > 0 ? 0 : diff;
+                q = 0.25*(q+12);
+                double q2 = q*q, q3 = q2*q, q4 = q2*q2;
+                env_rate = pow(10,(5/(ra+rb*q+rc*q2+rd*q3+re*q4))/20);
+            } else {
+                if (!isfinite(diff)) diff = 1;
+                if (db_max == -1 || db_max < diff) db_max = diff;
+                double eff = db_max > 0.5 ? db_max : 0.5;
+                env_rate = 1-pow(0.25/eff,1/attack_frames);
+            }
+        }
+        double drate = 1.0 > detector ? sat_rate : 1.0;
+        detector += (1.0-detector)*drate;
+        if (detector > 1) detector = 1;
+        if (!isfinite(detector)) detector = 1;
+        if (env_rate < 1) gain += (desired-gain)*env_rate;
+        else {
+            gain *= env_rate;
+            if (gain > 1) gain = 1;
+        }
+        if (++div == 32) div = 0;
+        if (detector == 1.0 && gain == 1.0) {
+            /* Converged; the remaining iterations are no-ops, but the
+               division counter must still land on the start frame. */
+            div = (int)(frames & 31);
+            break;
+        }
+    }
+    s->comp_detector = detector;
+    s->comp_gain = gain;
+    s->comp_db_max_attack = db_max;
+    s->comp_env_rate = env_rate;
+    s->comp_desired = desired;
+    s->comp_div = (int)(div & 31);
+}
+
 static double dsp_process_impl(DspState *s, double x, double age, double gate) {
     if (!s->control.enabled) return x;
     const double *p = s->control.p;
@@ -1045,30 +1160,83 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         double mbase = depth < 1.0 ? 1.0-depth : 0.0;
         x *= mbase + lfo + s->control.gen_lfo[GEN_TREM_GAIN];
     }
+    /* Blink DynamicsCompressor model: 6 ms lookahead pre-delay, peak
+       detector with shaped saturation, 32-sample envelope divisions with
+       adaptive release, and a sine-warped gain with a fixed makeup. The
+       delayed signal feeds the downstream nodes (phaser/post) at
+       absolute age, like the deployed chain. Per-channel states: the
+       deployed detector links channels, which coincides for identical
+       (mono/center) inputs. */
     if (s->control.compressor_on) {
         double threshold = p[DSP_COMP]+s->control.gen_lfo[GEN_COMP];
-        if (threshold < 0) {
-            double ratio = p[DSP_COMPRATIO]+s->control.gen_lfo[GEN_COMPRATIO];
-            double knee = p[DSP_COMPKNEE]+s->control.gen_lfo[GEN_COMPKNEE];
-            double level = 20*log10(fmax(1e-12,fabs(x)));
-            double over = level-threshold, reduction = 0;
-            if (knee > 0 && over > -knee*.5 && over < knee*.5)
-                reduction = (1-1/ratio)*(over+knee*.5)*(over+knee*.5)/(2*knee);
-            else if (over > 0) reduction = over*(1-1/ratio);
-            double desired = pow(10,-reduction/20);
-            double time = desired < s->compressor_gain ? p[DSP_COMPATT]+s->control.gen_lfo[GEN_COMPATT] : p[DSP_COMPREL]+s->control.gen_lfo[GEN_COMPREL];
-            double speed = time > 0 ? exp(-1/(time*SR)) : 0;
-            s->compressor_gain = desired + speed*(s->compressor_gain-desired);
-            x *= s->compressor_gain;
+        double knee = p[DSP_COMPKNEE]+s->control.gen_lfo[GEN_COMPKNEE];
+        double ratio = p[DSP_COMPRATIO]+s->control.gen_lfo[GEN_COMPRATIO];
+        double attack = p[DSP_COMPATT]+s->control.gen_lfo[GEN_COMPATT];
+        double release = p[DSP_COMPREL]+s->control.gen_lfo[GEN_COMPREL];
+        double k = comp_update_curve(s,threshold,knee,ratio);
+        double makeup = pow(1.0/comp_saturate(s,1.0,k),0.6);
+        double attack_frames = (attack > 0.001 ? attack : 0.001)*SR;
+        double release_frames = SR*release;
+        double sat_release_frames = 0.0025*SR;
+        /* Adaptive-release polynomial (Blink coefficients). */
+        const double z1 = 0.09, z2 = 0.16, z3 = 0.42, z4 = 0.98;
+        double ra = release_frames*(0.9999999999999998*z1+1.8432219684323923e-16*z2-1.9373394351676423e-16*z3+8.824516011816245e-18*z4);
+        double rb = release_frames*(-1.5788320352845888*z1+2.3305837032074286*z2-0.9141194204840429*z3+0.1623677525612032*z4);
+        double rc = release_frames*(0.5334142869106424*z1-1.272736789213631*z2+0.9258856042207512*z3-0.18656310191776226*z4);
+        double rd = release_frames*(0.08783463138207234*z1-0.1694162967925622*z2+0.08588057951595272*z3-0.00429891410546283*z4);
+        double re = release_frames*(-0.042416883008123074*z1+0.1115693827987602*z2-0.09764676325265872*z3+0.028494263462021576*z4);
+        if (s->comp_div == 0) {
+            if (!isfinite(s->comp_detector)) s->comp_detector = 1;
+            double desired = s->comp_detector;
+            double scaled = asin(desired > 1 ? 1 : desired)/(M_PI/2);
+            s->comp_desired = scaled;
+            double rate = 0;
+            int releasing = scaled > s->comp_gain;
+            double diff = 0;
+            if (scaled == 0) diff = releasing ? -1 : 1;
+            else diff = 20*log10(s->comp_gain/scaled);
+            if (releasing) {
+                s->comp_db_max_attack = -1;
+                if (!isfinite(diff)) diff = -1;
+                double q = diff;
+                if (q < -12) q = -12; else if (q > 0) q = 0;
+                q = 0.25*(q+12);
+                double q2 = q*q, q3 = q2*q, q4 = q2*q2;
+                double calc = ra+rb*q+rc*q2+rd*q3+re*q4;
+                rate = pow(10,(5/calc)/20);
+            } else {
+                if (!isfinite(diff)) diff = 1;
+                if (s->comp_db_max_attack == -1 || s->comp_db_max_attack < diff)
+                    s->comp_db_max_attack = diff;
+                double eff = s->comp_db_max_attack > 0.5 ? s->comp_db_max_attack : 0.5;
+                rate = 1-pow(0.25/eff,1/attack_frames);
+            }
+            s->comp_env_rate = rate;
         }
-        /* Structural DynamicsCompressorNode latency: the delayed signal feeds
-           the downstream nodes (phaser/post) at absolute age, like the
-           deployed chain where the compressor node delays everything before
-           it while downstream LFOs stay timed to the hap start. */
+        double env_rate = s->comp_env_rate;
+        double shaped = comp_saturate(s,fabs(x),k);
+        double attenuation = fabs(x) <= 0.0001 ? 1 : shaped/fabs(x);
+        double db_att = -20*log10(attenuation);
+        if (db_att < 2) db_att = 2;
+        double sat_rate = pow(10,(db_att/sat_release_frames)/20)-1;
+        int is_release = attenuation > s->comp_detector;
+        double drate = is_release ? sat_rate : 1;
+        s->comp_detector += (attenuation-s->comp_detector)*drate;
+        if (s->comp_detector > 1) s->comp_detector = 1;
+        if (!isfinite(s->comp_detector)) s->comp_detector = 1;
+        if (env_rate < 1) {
+            s->comp_gain += (s->comp_desired-s->comp_gain)*env_rate;
+        } else {
+            s->comp_gain *= env_rate;
+            if (s->comp_gain > 1) s->comp_gain = 1;
+        }
+        double warp = sin((M_PI/2)*s->comp_gain);
+        double total = makeup*warp;
         double delayed = s->comp_delay[s->comp_pos];
         s->comp_delay[s->comp_pos] = x;
         s->comp_pos = (s->comp_pos+1) % DSP_COMP_DELAY;
-        x = delayed;
+        x = delayed*total;
+        s->comp_div = (s->comp_div+1) % 32;
     }
     /* The deployed phaser node only exists while the static depth is
        positive; generic depth LFOs only route in that case too. */

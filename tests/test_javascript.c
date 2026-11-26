@@ -1426,6 +1426,21 @@ static void test_analyser_controls(void) {
         fabs(event.lfo[0].depth-3)<1e-9 && !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* Pattern-layer transient installs the voice node (the layer gain
+       folds through the same pre-gain math); pattern-layer djf stays
+       inert since the deployed node reads only the main value. */
+    haps=query("note(69).s('sine').gain(.5).FX(transient(.8))",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.transient_on && fabs(event.dsp.p[DSP_TRANSIENT]-.8)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.25).FX(djf(.7))",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(!event.has_djf);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

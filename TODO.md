@@ -582,7 +582,12 @@ and measured divergences are recorded in the archive.
       generic LFO on it warns on both sides and holds the static curve
       (`lfo-transient-tmp`, `transient-lfo-static-tmp` at 1.0); the
       sustain companion parses at the C level but no JS bundle exposes
-      its method yet, so sustain stays 0 in every gated render. The wavetable worklet
+      its method yet, so sustain stays 0 in every gated render. Pattern-
+      layer transient rides the same voice node: the layer's default 0.8
+      gain folds through the pre-gain math exactly (`fx-transient-tmp`
+      at 1.0). Pattern-layer djf stays inert on both sides (the deployed
+      node reads only the main value; native has no such step)
+      (`fx-djf-tmp` at 1.0). The wavetable worklet
       defaults freqspread to 0.18, so a missing detune still spreads
       unison voices (was: silent unison). Generic vib-rate LFOs
       bend the vibrato oscillator's frequency per sample

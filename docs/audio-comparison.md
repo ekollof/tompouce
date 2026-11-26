@@ -709,6 +709,9 @@ final soft clip. It has no AudioParams, so generic LFOs on it warn on
 both sides and hold the static curve (`lfo-transient-tmp`,
 `transient-lfo-static-tmp`); the sustain companion parses but no JS
 bundle exposes its method yet, so sustain stays 0 in every gate.
+Pattern-layer transient rides the same voice node with the layer's
+default 0.8 gain folding through (`fx-transient-tmp` at 1.0), while
+pattern-layer djf is inert on both sides (`fx-djf-tmp` at 1.0).
 Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.

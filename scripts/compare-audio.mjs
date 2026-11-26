@@ -272,6 +272,8 @@ try {
     {name:'transient-zero-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).transient(0)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'transient-negative-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).transient(-.8)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'transient-lfo-static-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).transient(.8).lfo({control:'transient',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'fx-transient-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).FX(transient(.8))`,cycles:1,cps:.5,window:2,correlation:.99},
+    {name:'fx-djf-tmp',sound:'sine',code:`note(69).s('sine').gain(.5).clip(.25).FX(djf(.7))`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-postgain',sound:'sine',code:`note(69).s('sine').gain(.5).postgain(.8).lfo({control:'postgain',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'dry-static',sound:'sine',code:`note(69).s('sine').gain(.5).dry(.8)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'lfo-dry-inert',sound:'sine',code:`note(69).s('sine').gain(.5).dry(.8).lfo({control:'dry',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},

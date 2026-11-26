@@ -76,6 +76,7 @@ typedef struct {
     int n_partials;
     int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
     int vib_lfo; /* generic vib-rate LFO: integrate the vibrato phase */
+    int compressor_on; /* DynamicsCompressorNode exists (explicit threshold, even 0) */
     double lfo_start_time; /* absolute node start; -1 disables the quantum hold */
     double q_lfo[3]; /* per-sample generic resonance offset, voice-driven */
 } DspParams;
@@ -112,6 +113,13 @@ typedef struct {
     int lfo_switched;
     double saw_phase[DSP_SUPERSAW_VOICES], saw_ratio[DSP_SUPERSAW_VOICES];
     double noise[8], compressor_gain;
+    /* Structural latency of the deployed DynamicsCompressorNode: 264 samples
+       at 44.1 kHz regardless of settings (verified in-page with an impulse
+       through an OfflineAudioContext). Applied when the node exists, even at
+       unity thresholds where the follower itself is transparent. */
+#define DSP_COMP_DELAY 264
+    double comp_delay[DSP_COMP_DELAY];
+    unsigned comp_pos;
     double supersaw_pan_l, supersaw_pan_r, supersaw_gain;
     unsigned supersaw_voices;
     double pulse[6], pulse_lfo_phase;

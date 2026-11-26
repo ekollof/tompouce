@@ -107,6 +107,9 @@ void dsp_params_read(DspParams *p, const cJSON *value) {
     p->noise_mix=number(value,"noise",0,0,1);
     for (int i = 0; i < DSP_FMBASE; i++)
         p->p[i] = number(value, parameters[i].name, p->p[i], parameters[i].min, parameters[i].max);
+    /* An explicit threshold (even 0) installs the deployed compressor node
+       with its structural latency; the untouched default installs nothing. */
+    if (cJSON_HasObjectItem(value,"compressor")) p->compressor_on=1;
     /* Superdough getADSRValues: specifying any segment changes the
        defaults of the other segments, even when only attack is given. */
     for (int base = 0; base < 21; base += 7) {
@@ -363,7 +366,7 @@ int dsp_single_filter(const DspState *state) {
     if (active!=1) return -1;
     if (p[DSP_VOWEL]>=0 || p[DSP_FTYPE]!=0 || (int)p[DSP_COARSE]>1 ||
         p[DSP_CRUSH]<16 || p[DSP_SHAPE]>0 || p[DSP_DISTORT]>0 ||
-        p[DSP_TREM]>0 || p[DSP_COMP]<0 || p[DSP_PHASER]>0 ||
+        p[DSP_TREM]>0 || p[DSP_COMP]<0 || state->control.compressor_on || p[DSP_PHASER]>0 ||
         p[DSP_CHORUS]>0 || p[DSP_POST]!=1 || p[DSP_CUT]>0 ||
         p[DSP_LPRATE+type*7]>0 || p[DSP_PWRATE]>0 ||
         state->control.noise_mix>0 || state->control.source_noise) return -1;
@@ -474,7 +477,7 @@ void dsp_init(DspState *s, const DspParams *p) {
         if (p->p[type*7] > 0) active = 1;
     if (p->p[DSP_VOWEL] >= 0 || (int)p->p[DSP_COARSE] > 1 || p->p[DSP_CRUSH] < 16 ||
         p->p[DSP_SHAPE] > 0 || p->p[DSP_DISTORT] > 0 || p->p[DSP_TREM] > 0 ||
-        p->p[DSP_COMP] < 0 || p->p[DSP_PHASER] > 0 || p->p[DSP_CHORUS] > 0 ||
+        p->p[DSP_COMP] < 0 || p->compressor_on || p->p[DSP_PHASER] > 0 || p->p[DSP_CHORUS] > 0 ||
         p->p[DSP_POST] != 1) active = 1;
     s->effects_active = active;
 }
@@ -969,20 +972,30 @@ static double dsp_process_impl(DspState *s, double x, double age, double gate) {
         double mbase = depth < 1.0 ? 1.0-depth : 0.0;
         x *= mbase + lfo + s->control.gen_lfo[GEN_TREM_GAIN];
     }
-    if (p[DSP_COMP]+s->control.gen_lfo[GEN_COMP] < 0) {
+    if (s->control.compressor_on) {
         double threshold = p[DSP_COMP]+s->control.gen_lfo[GEN_COMP];
-        double ratio = p[DSP_COMPRATIO]+s->control.gen_lfo[GEN_COMPRATIO];
-        double knee = p[DSP_COMPKNEE]+s->control.gen_lfo[GEN_COMPKNEE];
-        double level = 20*log10(fmax(1e-12,fabs(x)));
-        double over = level-threshold, reduction = 0;
-        if (knee > 0 && over > -knee*.5 && over < knee*.5)
-            reduction = (1-1/ratio)*(over+knee*.5)*(over+knee*.5)/(2*knee);
-        else if (over > 0) reduction = over*(1-1/ratio);
-        double desired = pow(10,-reduction/20);
-        double time = desired < s->compressor_gain ? p[DSP_COMPATT]+s->control.gen_lfo[GEN_COMPATT] : p[DSP_COMPREL]+s->control.gen_lfo[GEN_COMPREL];
-        double speed = time > 0 ? exp(-1/(time*SR)) : 0;
-        s->compressor_gain = desired + speed*(s->compressor_gain-desired);
-        x *= s->compressor_gain;
+        if (threshold < 0) {
+            double ratio = p[DSP_COMPRATIO]+s->control.gen_lfo[GEN_COMPRATIO];
+            double knee = p[DSP_COMPKNEE]+s->control.gen_lfo[GEN_COMPKNEE];
+            double level = 20*log10(fmax(1e-12,fabs(x)));
+            double over = level-threshold, reduction = 0;
+            if (knee > 0 && over > -knee*.5 && over < knee*.5)
+                reduction = (1-1/ratio)*(over+knee*.5)*(over+knee*.5)/(2*knee);
+            else if (over > 0) reduction = over*(1-1/ratio);
+            double desired = pow(10,-reduction/20);
+            double time = desired < s->compressor_gain ? p[DSP_COMPATT]+s->control.gen_lfo[GEN_COMPATT] : p[DSP_COMPREL]+s->control.gen_lfo[GEN_COMPREL];
+            double speed = time > 0 ? exp(-1/(time*SR)) : 0;
+            s->compressor_gain = desired + speed*(s->compressor_gain-desired);
+            x *= s->compressor_gain;
+        }
+        /* Structural DynamicsCompressorNode latency: the delayed signal feeds
+           the downstream nodes (phaser/post) at absolute age, like the
+           deployed chain where the compressor node delays everything before
+           it while downstream LFOs stay timed to the hap start. */
+        double delayed = s->comp_delay[s->comp_pos];
+        s->comp_delay[s->comp_pos] = x;
+        s->comp_pos = (s->comp_pos+1) % DSP_COMP_DELAY;
+        x = delayed;
     }
     /* The deployed phaser node only exists while the static depth is
        positive; generic depth LFOs only route in that case too. */

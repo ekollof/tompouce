@@ -1364,6 +1364,36 @@ static void test_analyser_controls(void) {
     assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    /* An explicit compressor threshold (even 0) installs the deployed
+       node with its structural latency; the untouched default installs
+       nothing. The generic threshold LFO scales by the static value. */
+    haps=query("note(69).s('sine').gain(.5).compressor(-6)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.compressor_on && fabs(event.dsp.p[DSP_COMP]+6)<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).compressor(0)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.compressor_on && fabs(event.dsp.p[DSP_COMP])<1e-9);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5)",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(!event.dsp.compressor_on);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).compressor(-6)"
+        ".lfo({control:'compressor',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.dsp.compressor_on &&
+        event.lfo[0].tgt==GEN_TGT_BASE+GEN_COMP &&
+        fabs(event.lfo[0].depth+3)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     /* Non-registered LFO targets warn on both sides and hold static. */
     haps=query("note(69).s('sine').gain(.5).clip(.05)"
         ".lfo({control:'overgain',rate:.5,depth:.5})",&program);

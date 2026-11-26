@@ -590,8 +590,8 @@ start, and damps the previous output history by 0.77 at the connection. That
 matches the deployed overshoot (native peak 0.399, browser 0.3998). Earlier
 50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected; they
 were measured before direct-form-I was in use.
-Remaining generic targets (compressor params,
-dry/room/busgain, detune unison, vowel, stretch and bus modulators)
+Remaining generic targets (dry/room/busgain, detune unison, vowel,
+stretch and bus modulators)
 keep their static value and log one warning naming the unsupported target
 and the expected control order.
 `test_audio` locks the cutoff event mapping, the SoA-bank bypass and dynamic
@@ -689,8 +689,14 @@ registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.000
 `lfo-warpdc-inert` 1.0/1.0002, `lfo-dry-inert` 1.0/1.0003; generic tremoloshape and wt/warp shape are
 recorded supersets (native renders, the deployed float shape index
 crashes its worklet to silence, so they stay ungated). The
-compressor (static and generic) stays diagnostic: the native follower
-anti-correlates near -0.66 with the deployed DynamicsCompressorNode.
+compressor statics gate at 0.99/0.85-1.15 (`compressor-static-tmp`,
+`compressor-unity-tmp`, `compressor-late-tmp`, `compressor-knee-tmp`):
+the deployed DynamicsCompressorNode delays its voice by 264 samples at
+44.1 kHz regardless of settings, which native reproduces whenever the
+node exists (including explicit unity threshold). Deep-compression
+level/ballistics (ratio-20, slow attack/release, threshold LFO) stay
+diagnostic: timing correlates near 0.996+ but the native peak follower
+compresses harder than the deployed node as depth grows.
 Filter-specific
 `lp`/`hp`/`bp` LFO controls, pitch vibrato/envelope, pulse-width LFO and
 tremolo are separate supported controls with their own gates.

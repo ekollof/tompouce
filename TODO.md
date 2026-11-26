@@ -596,24 +596,26 @@ and measured divergences are recorded in the archive.
       index edges were already exact (per-sample path). The FM edge
       registry keeps the last edge per operator, including unconnected
       nodes.
-      Remaining: compressor params, bus-routed sends (no native bus;
+      Remaining: bus-routed sends (no native bus;
       unrouted busgain is a silent no-op), stretch values (baked at
       prepare vs live phase-vocoder; unvalued LFOs warn on both sides),
-      bmod (inter-voice audio bus system), djf/transient/byteBeat
+      bmod (inter-voice audio bus system), transient/byteBeat
       values (no native nodes; unvalued LFOs warn on both sides).
-      The compressor gap
-      is now precisely scoped:
-      static level/ballistics are secondary (native defaults now match the
-      deployed node: ratio 10, knee 10, attack .005, release .05). The
-      deployed voice starts ~265 samples late whenever a
-      DynamicsCompressorNode is in the chain, independent of threshold
-      (unity threshold reproduces it) and voice-relative (a hap at cycle
-      0.5 starts at 44100+265). Without the node the same sine gates at
-      1.0/1.0002, and both sides render pure frequency-matched sines, so
-      the whole -0.66 correlation is this onset offset plus its level
-      difference. No deployed code path explains a node-presence delay
-      (no worklet, fresh context, threshold independent); it reproduces
-      deterministically across runs. Generic `.env()` is parsed, validated and warned but never applied:
+      The compressor onset gap is closed: the deployed
+      DynamicsCompressorNode carries a structural 264-sample latency at
+      44.1 kHz regardless of settings (verified in-page with an impulse
+      through an OfflineAudioContext: unity threshold still delays and
+      attenuates the impulse to ~0.2 at sample 264). Native applies the
+      same delay whenever the node exists — including an explicit unity
+      threshold 0, which installs the node on the deployed side too —
+      before the downstream phaser/post stages, whose LFOs stay timed to
+      the absolute hap start. Static threshold, unity, late-onset and
+      knee gates pass (`compressor-static-tmp`, `compressor-unity-tmp`,
+      `compressor-late-tmp`, `compressor-knee-tmp` at 0.99/0.85-1.15).
+      Deep-compression level/ballistics stay diagnostic (ratio-20,
+      slow attack/release and threshold-LFO cases): timing correlates at
+      ~0.996+ but the native peak follower compresses harder than the
+      deployed node as depth grows. Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

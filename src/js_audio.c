@@ -531,12 +531,15 @@ static int fx_last_filter_stage(const AudioEvent *ev, int type) {
 static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
     ev->fx_chain_gain = 1;
     ev->fx_chain_folded = 0;
+    /* An explicit threshold (even 0) installs the deployed compressor node
+       with its structural latency; the default 0 installs nothing. */
+    if (cJSON_HasObjectItem(v,"compressor")) ev->dsp.compressor_on=1;
     /* Source DSP effects consume the event gain before the FX chain in the
        native renderer; keep their established chain-gain folding. Pure FX
        chains apply stage gains before the stages and the main gain after. */
     int fold_chain=(int)ev->dsp.p[DSP_COARSE]>1 || ev->dsp.p[DSP_CRUSH]<16 ||
         ev->dsp.p[DSP_SHAPE]>0 || ev->dsp.p[DSP_DISTORT]>0 ||
-        ev->dsp.p[DSP_COMP]<0 || ev->dsp.p[DSP_TREM]>0 ||
+        ev->dsp.compressor_on || ev->dsp.p[DSP_TREM]>0 ||
         ev->dsp.p[DSP_PHASER]>0 || ev->dsp.p[DSP_CHORUS]>0;
     ev->fx_chain_folded=fold_chain;
     const cJSON *chains = cJSON_GetObjectItemCaseSensitive(v,"_fxSteps");
@@ -879,7 +882,7 @@ static void apply_fx_steps(AudioEvent *ev, const cJSON *v) {
                 if (value>=0 && value<=4) ev->dsp.p[DSP_TSHAPE]=value;
                 break;
             case FX_OP_COMPRESSOR:
-                if (value>=-100 && value<=0) ev->dsp.p[DSP_COMP]=value;
+                if (value>=-100 && value<=0) { ev->dsp.p[DSP_COMP]=value; ev->dsp.compressor_on=1; }
                 break;
             case FX_OP_COMPRESSORRATIO:
                 if (value>=1 && value<=20) ev->dsp.p[DSP_COMPRATIO]=value;

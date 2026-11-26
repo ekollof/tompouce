@@ -709,7 +709,12 @@ envelope, sine warp, fixed makeup): all seven gates pass at
 including deep ballistics and the threshold LFO. The late-onset case
 reproduces the schedule-then-render silence pre-roll and the absolute
 32-sample envelope divisions. Per-channel states approximate the
-linked detector, exact for mono/center material. The transient
+linked detector, exact for mono/center material. A panned voice with
+a compressor selects the deployed stereo crossfeed panner law, keyed
+natively off the compressor's presence (`compressor-pan-tmp`,
+`compressor-panlight-tmp`, `compressor-panfull-tmp`,
+`compressor-panunity-tmp`, `compressor-pan05-tmp`,
+`compressor-pan025-tmp`, all 1.0). The transient
 shaper renders its static value per sample at 0.99/0.85-1.15
 (`transient-static-tmp`, `transient-zero-tmp`, `transient-negative-tmp`):
 dual float32 envelope followers, the first-quantum hold, pre-gain

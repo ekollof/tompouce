@@ -1374,8 +1374,12 @@ static int voice_pan_lfo_active(const Voice *v) {
    static equal-power matrices in cache_routing. */
 static void voice_lfo_pan_routing(Voice *v, double pan) {
     int dsp = v->dsp.control.enabled;
+    /* A compressor in the chain forces its stereo output on the panner
+       (DynamicsCompressorNode always renders two channels), selecting
+       the deployed stereo crossfeed law like stereo sources do. */
     int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW ||
-        v->inst == INST_PULSE || native_synth_stereo(v->native_program);
+        v->inst == INST_PULSE || native_synth_stereo(v->native_program) ||
+        v->dsp.control.compressor_on;
     double ll = 1, lr = 0, rl = 0, rr = 1, left = 1, right = 1;
     if (dsp) {
         if (!stereo) {
@@ -1565,7 +1569,8 @@ static void cache_routing(Voice *v) {
     int pan_lfo = voice_pan_lfo_active(v);
     if (dsp) {
         int stereo = v->smp_channels == 2 || v->inst == INST_SUPERSAW ||
-            v->inst == INST_PULSE || native_synth_stereo(v->native_program);
+            v->inst == INST_PULSE || native_synth_stereo(v->native_program) ||
+            v->dsp.control.compressor_on;
         double pan = fmax(-1, fmin(1, v->pan));
         if (pan_lfo) {
             /* Unity base; per-sample split follows in the callback. */

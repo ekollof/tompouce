@@ -648,7 +648,18 @@ and measured divergences are recorded in the archive.
       from render start (native reproduces the convergence at trigger),
       and the envelope divisions align to absolute 32-sample frames.
       Per-channel states approximate the deployed linked detector, exact
-      for mono/center material. Generic `.env()` is parsed, validated and warned but never applied:
+      for mono/center material. A panned voice with a compressor in its
+      chain selects the deployed stereo crossfeed panner law (the
+      compressor always renders two channels, and the StereoPannerNode
+      mixes dual-mono inputs differently from mono): native keys the
+      same law off the compressor's presence, verified across pan
+      positions at unity and deep thresholds at 1.0
+      (`compressor-pan-tmp`, `compressor-panlight-tmp`,
+      `compressor-panfull-tmp`, `compressor-panunity-tmp`,
+      `compressor-pan05-tmp`, `compressor-pan025-tmp`,
+      `pan-static-tmp`, `pan-center-node-tmp`,
+      `compressor-center12-tmp`).
+      Generic `.env()` is parsed, validated and warned but never applied:
       the deployed `connectEnvelope` omits `begin`/`end`, so its worklet
       never leaves the initial state (verified flat on strudel.cc with and
       without explicit `begin: 0, end: 2`); native matches the silence

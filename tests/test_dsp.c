@@ -1105,6 +1105,56 @@ static void test_fm_wave_and_range(void) {
     puts("FM waveforms follow the OscillatorNode frequency range");
 }
 
+static void test_fm_lfo_traj(void) {
+    cJSON *value=cJSON_Parse("{\"fmi\":0.5,\"fmh\":2}"); assert(value);
+    DspParams p; dsp_params_read(&p,value); cJSON_Delete(value);
+    DspState held, ramped;
+    static double traj[16*128];
+    /* A null trajectory is the legacy sample-held path. */
+    dsp_init(&held,&p); dsp_init(&ramped,&p);
+    for (int i=0;i<260;i++) {
+        double a=dsp_frequency(&held,440,i/SR,.5);
+        double b=dsp_frequency_traj(&ramped,440,i/SR,.5,NULL);
+        assert(a==b);
+    }
+    /* A uniform trajectory row matches the held voice-stepped value,
+       locking the FMH row layout. */
+    dsp_init(&held,&p); dsp_init(&ramped,&p);
+    held.control.gen_lfo[GEN_FMH1]=3.25;
+    for (int k=0;k<16*128;k++) traj[k]=0.0;
+    for (int n=0;n<128;n++) traj[8*128+n]=3.25;
+    for (int i=0;i<260;i++) {
+        double a=dsp_frequency(&held,440,i/SR,.5);
+        double b=dsp_frequency_traj(&ramped,440,i/SR,.5,traj);
+        assert(a==b);
+    }
+    /* A varying trajectory bends each modulator frame instead of holding
+       the refill sample across the quantum. */
+    dsp_init(&held,&p); dsp_init(&ramped,&p);
+    for (int n=0;n<128;n++) traj[8*128+n]=(double)n;
+    int differ=0;
+    for (int i=0;i<260;i++) {
+        double a=dsp_frequency(&held,440,i/SR,.5);
+        double b=dsp_frequency_traj(&ramped,440,i/SR,.5,traj);
+        if (a!=b) differ=1;
+    }
+    assert(differ);
+    /* Same layout lock for an operator-target index edge (op2 into op1). */
+    value=cJSON_Parse("{\"fmi2\":0.25}"); assert(value);
+    dsp_params_read(&p,value); cJSON_Delete(value);
+    dsp_init(&held,&p); dsp_init(&ramped,&p);
+    held.control.fm_gen_edge[1]=2; ramped.control.fm_gen_edge[1]=2;
+    held.control.gen_lfo[GEN_FMI2]=0.0625;
+    for (int k=0;k<16*128;k++) traj[k]=0.0;
+    for (int n=0;n<128;n++) traj[1*128+n]=0.0625;
+    for (int i=0;i<260;i++) {
+        double a=dsp_frequency(&held,440,i/SR,.5);
+        double b=dsp_frequency_traj(&ramped,440,i/SR,.5,traj);
+        assert(a==b);
+    }
+    puts("FM quantum fill follows the per-frame LFO trajectory");
+}
+
 static void test_pitch_envelope_defaults(void) {
     DspParams p;
     cJSON *value=cJSON_Parse("{\"penv\":12}"); assert(value);
@@ -1292,6 +1342,7 @@ int main(void) {
     test_fm_source_semantics();
     test_fm_matrix();
     test_fm_wave_and_range();
+    test_fm_lfo_traj();
     test_supersaw();
     test_source_controls();
     test_periodic_limits();

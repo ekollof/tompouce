@@ -551,14 +551,41 @@ and measured divergences are recorded in the archive.
       (`dry-static`, `lfo-dry-inert`, `lfo-delay`, `lfo-room`). Nested
       LFO targets (`lfo`, `lfo_rate`, …) warn on both sides: generic
       nodes register as `lfo_<id>`, so the plain node never exists.
-      Remaining: delaytime/delayfeedback (the shared line itself),
-      compressor params, busgain (no native send: static folds into voice
-      gain), stretch (baked at prepare vs live phase-vocoder), bmod
-      (inter-voice audio bus system), FM fmi/fmh (the deployed gain
-      registry keeps only the last edge per operator, including
-      unconnected nodes; exact replication is not worth the fragility),
-      djf/transient/byteBeat (no native nodes) and overgain/pcurve/vmod
-      (no upstream routing either: both sides warn). The compressor gap
+      Newly gated since: generic FM ratio/index LFOs (`fmh-lfo`,
+      `fmh-ratio1/05/4`, `fmh-long`, `fmh-rate005/2`, `fmi-lfo`,
+      `fmi2-lfo`, `fmi-dud`, all at 1.0). Cross-edge LFO controls
+      (`fmi12`) warn on both sides with no registry entry; same-source
+      fan-out follows last-edge-wins (`fm-fanout`, `fm-xdud`), op2 ratio
+      (`fmh2-lfo`) and a cyclic op1/op2 chain (`fm-cycle`) all gate at
+      1.0. Wave and other non-gain/frequency FM controls (`fmwave`,
+      `fmwave2`) have no deployed registry entry and warn on both sides
+      (static at 1.0; the hap plays on, no per-hap throw). Generic
+      delaytime/delayfeedback LFOs modulate the shared orbit line per
+      sample (`delaytime-lfo` 0.99999, `delaytime-longrel` 0.99999,
+      `delayfeedback-lfo` 0.99984): depth scales by the hap's own value,
+      voices sum onto the shared AudioParams, and the LFO outlives the
+      voice through the enclosing 128-sample block (the deployed worklet
+      renders whole blocks whose start precedes end). The remaining error
+      floor is the 16-bit browser capture, not the model. Registered but
+      unread controls stay silent no-ops on both sides (`overgain`,
+      `busgain` without a bus send, `pcurve`, `djf` without a value,
+      main-chain `transient`): explicit static values gate at 1.0 and
+      generic LFOs on them warn with static PCM. Generic vib-rate LFOs
+      bend the vibrato oscillator's frequency per sample
+      (`vib-rate-lfo` 1.0): the static rate term keeps the closed form
+      while only the LFO deviation integrates from the voice start. The native 128-sample FM
+      quantum held the refill sample's LFO value across the block while
+      the deployed modulator frequency AudioParam is a-rate; the fill
+      now consumes the per-frame worklet trajectory, and carrier-direct
+      index edges were already exact (per-sample path). The FM edge
+      registry keeps the last edge per operator, including unconnected
+      nodes.
+      Remaining: compressor params, bus-routed sends (no native bus;
+      unrouted busgain is a silent no-op), stretch (baked at prepare vs
+      live phase-vocoder), bmod (inter-voice audio bus system),
+      djf/transient/byteBeat values (no native nodes; unvalued LFOs warn
+      on both sides) and vmod (no upstream routing; both sides warn).
+      The compressor gap
       is now precisely scoped:
       static level/ballistics are secondary (native defaults now match the
       deployed node: ratio 10, knee 10, attack .005, release .05). The

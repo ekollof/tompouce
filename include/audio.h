@@ -78,6 +78,8 @@ typedef struct Voice {
     LfoSlot vlfo[LFO_SLOTS];
     double lfo_phase[LFO_SLOTS]; /* advancing phase in radians */
     double lfo_hold; /* onset quantum span with unmodulated output (seconds) */
+    int has_orbit_lfo; /* voice drives the shared orbit delay line */
+    double orbit_lfo_end; /* absolute time through which its shared-line LFO renders */
     double release_start_level;
     double release_time;
     double gate_end;

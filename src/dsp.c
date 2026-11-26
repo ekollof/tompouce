@@ -537,12 +537,9 @@ static double scheduled_pitch_cents(const double *p,double age,double gate,doubl
         depth-depth*p[DSP_PANCHOR],p[DSP_PATT],p[DSP_PDEC],p[DSP_PSUS],p[DSP_PREL]);
 }
 
-double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
-    if (!params->enabled) return 1;
-    const double *p = params->p;
-    /* Neither branch below can change the ratio; skip the envelope and the
-       transcendental work entirely. */
-    if (p[DSP_PENV] == 0 && p[DSP_VIB] <= 0) return 1;
+/* Pitch-envelope multiplier without vibrato, shared by the closed-form
+   and integrated-vibrato paths. */
+static double pitch_env_mult(const double *p, double age, double gate) {
     double ratio = 1;
     if (p[DSP_PENV] != 0) {
         if (p[DSP_PCURVE]>0) ratio*=pow(2,scheduled_pitch_cents(p,age,gate,0,1)/1200);
@@ -551,6 +548,16 @@ double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
             ratio *= pow(2, p[DSP_PENV] * (env - p[DSP_PANCHOR]) / 12);
         }
     }
+    return ratio;
+}
+
+double dsp_pitch_multiplier(const DspParams *params, double age, double gate) {
+    if (!params->enabled) return 1;
+    const double *p = params->p;
+    /* Neither branch below can change the ratio; skip the envelope and the
+       transcendental work entirely. */
+    if (p[DSP_PENV] == 0 && p[DSP_VIB] <= 0) return 1;
+    double ratio = pitch_env_mult(p, age, gate);
     if (p[DSP_VIB] > 0) ratio *= pow(2, sin(2*M_PI*age*p[DSP_VIB])*(p[DSP_VIBMOD]+params->gen_lfo[GEN_VIBMOD]/100)/12);
     return ratio;
 }
@@ -592,7 +599,8 @@ void dsp_oscillator_onset(DspState *state,double onset) {
     state->pitch_initial_frames=128-(unsigned)offset;
 }
 
-double dsp_frequency(DspState *s, double freq, double age, double gate) {
+double dsp_frequency_traj(DspState *s, double freq, double age, double gate,
+    const double *fm_traj) {
     if (!s->control.enabled) return freq;
     const double *p = s->control.p;
     /* No pitch envelope/vibrato and no FM operator: the modulation sum is
@@ -606,7 +614,21 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
             if (age*SR+1e-7<s->pitch_initial_frames) pitch_age-=s->pitch_quantum_offset;
             else s->pitch_initial_frames=0;
         }
-        if (pitch_age>=0) freq*=dsp_pitch_multiplier(&s->control,pitch_age,gate);
+        if (pitch_age>=0) {
+            if (s->control.vib_lfo && p[DSP_VIB] > 0) {
+                /* A generic vib-rate LFO bends the vibrato oscillator's
+                   frequency AudioParam, which the deployed node integrates
+                   per sample. The static rate term keeps the closed form
+                   (with onset alignment); only the LFO deviation integrates
+                   from the voice start. */
+                double depth=p[DSP_VIBMOD]+s->control.gen_lfo[GEN_VIBMOD]/100;
+                freq*=pitch_env_mult(p,pitch_age,gate);
+                freq*=pow(2,sin(2*M_PI*pitch_age*p[DSP_VIB]+s->vib_phase)*depth/12);
+                s->vib_phase += 2*M_PI*s->control.gen_lfo[GEN_VIB]/SR;
+                if (s->vib_phase > 2*M_PI || s->vib_phase < -2*M_PI)
+                    s->vib_phase = fmod(s->vib_phase,2*M_PI);
+            } else freq*=dsp_pitch_multiplier(&s->control,pitch_age,gate);
+        }
     }
     if (!s->fm_active) return freq;
     /* WebAudio pulls complete modulator quanta. Fixed voice-owned buffers
@@ -642,9 +664,13 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
                 if (!(feeds && (s->control.fm_envelopes&(1u<<i))) && !incoming) continue;
                 const double *op=p+DSP_FMBASE+i*8;
                 for (unsigned frame=0;frame<skip;frame++) {
-                    float frequency=(float)(base*op[1]);
+                    /* A generic ratio LFO bends the operator frequency in Hz. */
+                    float frequency=(float)(base*op[1])+(float)s->control.gen_lfo[GEN_FMH1+i];
                     if (shape<4 || shape>6) for (unsigned source=0;source<8;source++) {
-                        double index=s->control.matrix[source][i+1];
+                        /* A generic index LFO rides the registered edge only. */
+                        double gen=s->control.fm_gen_edge[source]==(signed char)(i+2) ?
+                            s->control.gen_lfo[GEN_FMI1+source] : 0;
+                        double index=s->control.matrix[source][i+1]+gen;
                         if (index) frequency+=(float)((float)(head[source][frame]*(float)index)*
                             (float)(base*p[DSP_FMBASE+source*8+1]));
                     }
@@ -678,11 +704,20 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
             const double *op=p+DSP_FMBASE+i*8;
             int shape=(int)op[7];
             for (unsigned frame=0;frame<128;frame++) {
-                float frequency=(float)(base*op[1]);
+                /* A generic ratio LFO bends the operator frequency in Hz.
+                   The trajectory carries the per-frame worklet output; the
+                   fallback holds the voice-stepped sample value. */
+                float lfo_h = fm_traj ? (float)fm_traj[(8+i)*128+frame] :
+                    (float)s->control.gen_lfo[GEN_FMH1+i];
+                float frequency=(float)(base*op[1])+lfo_h;
                 /* A noise BufferSource has no frequency parameter, so matrix
                    sends into it are dropped. */
                 if (shape<4 || shape>6) for (unsigned source=0;source<8;source++) {
-                    double index=s->control.matrix[source][i+1];
+                    /* A generic index LFO rides the registered edge only. */
+                    double gen=s->control.fm_gen_edge[source]==(signed char)(i+2) ?
+                        (fm_traj ? fm_traj[source*128+frame] :
+                            s->control.gen_lfo[GEN_FMI1+source]) : 0;
+                    double index=s->control.matrix[source][i+1]+gen;
                     if (index) frequency+=(float)((float)(s->fm_buffer[source][frame]*(float)index)*
                         (float)(base*p[DSP_FMBASE+source*8+1]));
                 }
@@ -735,14 +770,21 @@ double dsp_frequency(DspState *s, double freq, double age, double gate) {
         s->fm_frame=0;
     }
     float mod=0;
-    for (unsigned i=0;i<8;i++) if (s->control.matrix[i][0])
-        mod+=(float)((float)(s->fm_buffer[i][s->fm_frame]*(float)s->control.matrix[i][0])*
+    for (unsigned i=0;i<8;i++) if (s->control.matrix[i][0]) {
+        /* A generic index LFO rides the registered carrier edge only. */
+        double gen=s->control.fm_gen_edge[i]==1 ? s->control.gen_lfo[GEN_FMI1+i] : 0;
+        mod+=(float)((float)(s->fm_buffer[i][s->fm_frame]*(float)(s->control.matrix[i][0]+gen))*
             (float)(base*p[DSP_FMBASE+i*8+1]));
+    }
     s->fm_frame++;
     if (s->fm_initial_frames && !--s->fm_initial_frames) s->fm_frame=128;
     /* Values inside ±Nyquist keep the established expression. The caller
        clamps this frequency parameter and applies the sine-table fade. */
     return base?freq*(1+(double)mod/base):freq;
+}
+
+double dsp_frequency(DspState *s, double freq, double age, double gate) {
+    return dsp_frequency_traj(s, freq, age, gate, NULL);
 }
 
 static double mod_wave(int shape, double skew, double phase) {

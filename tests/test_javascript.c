@@ -1130,6 +1130,94 @@ static void test_analyser_controls(void) {
         !event.lfo_unsupported);
     cJSON_Delete(haps); javascript_free(program);
 
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fmh(2)"
+        ".lfo({control:'fmh',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_FMH1 &&
+        fabs(event.lfo[0].depth-440)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm2(.25)"
+        ".lfo({control:'fmi2',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_FMI2 &&
+        fabs(event.lfo[0].depth-.125)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Operator 1's last mention in .fm().fm2() is target-side, so its
+       gain node is unconnected and the LFO warns like a missing node. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm2(.25)"
+        ".lfo({control:'fmi',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* A cross-edge control has no deployed registry entry, so the LFO
+       warns on both sides. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm12(.25)"
+        ".lfo({control:'fmi12',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Same-source fan-out registers the last edge: the fmi LFO rides
+       op1->op2 (base .25), which dangles unheard. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm12(.25)"
+        ".lfo({control:'fmi',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_FMI1 &&
+        fabs(event.lfo[0].depth-.125)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* The trailing target-side mention (op2->op1) leaves op1's gain
+       node unconnected, so the fmi LFO warns. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm12(.25).fm2(.15)"
+        ".lfo({control:'fmi',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Op2's ratio LFO scales by the operator frequency (440*3). */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm2(.25).fmh2(3)"
+        ".lfo({control:'fmh2',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_FMH2 &&
+        fabs(event.lfo[0].depth-660)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* An incoming edge earlier in scan order does not dud the op2->op1
+       edge: the fmi2 LFO still rides it through the cycle. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm2(.25).fm12(.15)"
+        ".lfo({control:'fmi2',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_FMI2 &&
+        fabs(event.lfo[0].depth-.125)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Wave-selector (and other non-gain/frequency FM) controls have no
+       deployed registry entry, so the LFO warns on both sides. */
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5)"
+        ".lfo({control:'fmwave',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.1).clip(.25).fm(.5).fm2(.25)"
+        ".lfo({control:'fmwave2',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
     haps=query("s('wt_digital_echoes').note(60).gain(.5).warp(.4).warprate(2).warpdepth(.3)"
         ".lfo({control:'warpdepth',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
@@ -1186,6 +1274,86 @@ static void test_analyser_controls(void) {
 
     haps=query("note(69).s('sine').gain(.5)"
         ".lfo({control:'delay',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.05).dry(0).delay(.5).delaytime(.075).delayfeedback(.5)"
+        ".lfo({control:'delaytime',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DELAYTIME &&
+        fabs(event.lfo[0].depth-.0375)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.05).dry(0).delay(.5).delaytime(.075).delayfeedback(.5)"
+        ".lfo({control:'delayfeedback',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_DELAYFB &&
+        fabs(event.lfo[0].depth-.25)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* The vib oscillator exists only with a positive rate; without it
+       the LFO warns on both sides. */
+    haps=query("note(69).s('sine').gain(.5).clip(.5).vib(5).vibmod(.5)"
+        ".lfo({control:'vib',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==GEN_TGT_BASE+GEN_VIB &&
+        fabs(event.lfo[0].depth-2.5)<1e-9 && !event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.5)"
+        ".lfo({control:'vib',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Non-registered LFO targets warn on both sides and hold static. */
+    haps=query("note(69).s('sine').gain(.5).clip(.05)"
+        ".lfo({control:'overgain',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.05)"
+        ".lfo({control:'pcurve',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.05)"
+        ".lfo({control:'busgain',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* The djf/transient nodes only exist with their values set (orbit
+       djf) or in FX chains, so main-chain LFOs warn on both sides. */
+    haps=query("note(69).s('sine').gain(.5).clip(.05)"
+        ".lfo({control:'djf',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    haps=query("note(69).s('sine').gain(.5).clip(.05)"
+        ".lfo({control:'transient',rate:.5,depth:.5})",&program);
+    assert(cJSON_GetArraySize(haps)==1);
+    assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
+    assert(event.lfo[0].tgt==0 && event.lfo_unsupported);
+    cJSON_Delete(haps); javascript_free(program);
+
+    /* Without a delay send the shared line has no node, so the LFO
+       warns like a missing node. */
+    haps=query("note(69).s('sine').gain(.5)"
+        ".lfo({control:'delaytime',rate:.5,depth:.5})",&program);
     assert(cJSON_GetArraySize(haps)==1);
     assert(js_audio_event(cJSON_GetArrayItem(haps,0),0,1,&event));
     assert(event.lfo[0].tgt==0 && event.lfo_unsupported);

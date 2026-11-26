@@ -124,6 +124,11 @@ static int ensure_orbit_reverb(int orbit);
 
 #define ORBIT_DELAY 88200
 static double orbit_dt[N_ORBITS];static double orbit_fb[N_ORBITS];
+/* Per-sample generic-LFO sums for the shared orbit delay line. The deployed
+   LFO nodes connect to one AudioParam per orbit, so every voice's output
+   adds onto the same delayTime/feedback value. Zeroed each sample before
+   voices step, consumed by orbit_delay after. */
+static double orbit_lfo_dt[N_ORBITS];static double orbit_lfo_fb[N_ORBITS];
 static double duck_depth[N_ORBITS];
 static double duck_atk[N_ORBITS];
 static double duck_t[N_ORBITS];
@@ -1359,6 +1364,36 @@ static void voice_lfo_pan_routing(Voice *v, double pan) {
     v->route_side_one = left == 1 && right == 1;
 }
 
+/* superdough lfo-processor wave output (0..1 range) plus depth/dc/curve and
+   the output clamp for one voice slot at an absolute phase in radians.
+   Non-finite curve output survives the clamp; GEN-target callers add nothing
+   for it, matching the deployed node reading its target default. */
+static double lfo_slot_output(const LfoSlot *sl, double phase) {
+    double u = phase / (2.0 * M_PI);
+    u -= floor(u);
+    /* superdough lfo-processor waveforms (0..1 range). */
+    double wave;
+    switch (sl->wave) {
+    case 1: wave = sin(2.0*M_PI*u)*.5+.5; break;
+    case 2: wave = u; break;
+    case 3: wave = 1.0-u; break;
+    case 4: wave = (u < sl->skew) ? 1.0 : 0.0; break;
+    default: {
+        double t = sl->skew;
+        if (t <= 0.0) t = .5;
+        if (t >= 1.0) t = .5;
+        wave = (u < t) ? u/t : 1.0-(u-t)/(1.0-t);
+        break;
+    }
+    }
+    double g = (wave+sl->dc)*sl->depth;
+    if (sl->curve != 1.0)
+        g = pow(g,sl->curve);
+    if (g < sl->min) g = sl->min;
+    if (g > sl->max) g = sl->max;
+    return g;
+}
+
 /* Advance active voice LFO slots one sample; additive outputs match the
    deployed lfo-processor output for each target. Gain/Hz apply directly;
    sample cents accumulate for transport scaling; pan accumulates for the
@@ -1375,28 +1410,13 @@ static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
     for (int li = 0; li < LFO_SLOTS; li++) {
         LfoSlot *sl = &v->vlfo[li];
         if (sl->tgt <= 0 || !(sl->hz > 0.0)) continue;
-        double u = v->lfo_phase[li] / (2.0 * M_PI);
-        u -= floor(u);
-        /* superdough lfo-processor waveforms (0..1 range). */
-        double wave;
-        switch (sl->wave) {
-        case 1: wave = sin(2.0*M_PI*u)*.5+.5; break;
-        case 2: wave = u; break;
-        case 3: wave = 1.0-u; break;
-        case 4: wave = (u < sl->skew) ? 1.0 : 0.0; break;
-        default: {
-            double t = sl->skew;
-            if (t <= 0.0) t = .5;
-            if (t >= 1.0) t = .5;
-            wave = (u < t) ? u/t : 1.0-(u-t)/(1.0-t);
-            break;
+        /* Shared orbit-line slots step exclusively in the orbit pass
+           below, which outlives the voice through the enclosing block. */
+        if (sl->tgt >= GEN_TGT_BASE && sl->tgt < GEN_TGT_BASE + NGEN) {
+            int gi = sl->tgt - GEN_TGT_BASE;
+            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB) continue;
         }
-        }
-        double g = (wave+sl->dc)*sl->depth;
-        if (sl->curve != 1.0)
-            g = pow(g,sl->curve);
-        if (g < sl->min) g = sl->min;
-        if (g > sl->max) g = sl->max;
+        double g = lfo_slot_output(sl, v->lfo_phase[li]);
         if (!isfinite(g)) {
             /* The deployed node reads the target AudioParam default
                instead of adding (gain 1, frequency 440, detune/pan 0).
@@ -1454,6 +1474,50 @@ static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
         v->dsp.control.q_lfo[t] = off;
         v->dsp_right.control.q_lfo[t] = off;
     }
+}
+
+/* Per-frame generic FM offsets (rows 0..7 GEN_FMI1..8, 8..15 GEN_FMH1..8) for
+   the quantum refill the following dsp_frequency_traj call performs. The
+   phases are the pre-step values, so row k equals the output the per-sample
+   stepping below produces for that frame; the stepping then advances from
+   the same base. Returns 0 when no slot targets an FM operator, leaving the
+   legacy sample-held value in place. */
+static int voice_fm_traj(const Voice *v, double traj[16][128]) {
+    int need = 0;
+    for (int li = 0; li < LFO_SLOTS; li++) {
+        int t = v->vlfo[li].tgt;
+        if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN && v->vlfo[li].hz > 0.0) {
+            int gi = t - GEN_TGT_BASE;
+            if ((gi >= GEN_FMI1 && gi <= GEN_FMI8) ||
+                (gi >= GEN_FMH1 && gi <= GEN_FMH8)) {
+                need = 1;
+                break;
+            }
+        }
+    }
+    if (!need) return 0;
+    for (int k = 0; k < 16; k++)
+        for (int n = 0; n < 128; n++) traj[k][n] = 0.0;
+    for (int li = 0; li < LFO_SLOTS; li++) {
+        const LfoSlot *sl = &v->vlfo[li];
+        int t = sl->tgt;
+        if (t < GEN_TGT_BASE || t >= GEN_TGT_BASE + NGEN || !(sl->hz > 0.0)) continue;
+        int gi = t - GEN_TGT_BASE;
+        int row;
+        if (gi >= GEN_FMI1 && gi <= GEN_FMI8) row = gi - GEN_FMI1;
+        else if (gi >= GEN_FMH1 && gi <= GEN_FMH8) row = 8 + gi - GEN_FMH1;
+        else continue;
+        double ph = v->lfo_phase[li];
+        double inc = (2.0 * M_PI * sl->hz) / SR;
+        for (int n = 0; n < 128; n++) {
+            double g = lfo_slot_output(sl, ph);
+            if (isfinite(g)) traj[row][n] += g;
+            ph += inc;
+            if (ph > 2.0 * M_PI)
+                ph -= 2.0 * M_PI * floor(ph / (2.0 * M_PI));
+        }
+    }
+    return 1;
 }
 
 /* Freeze per-event pan/send constants once, when the voice is created. The
@@ -1618,6 +1682,24 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         v->vlfo[i] = ev->lfo[i];
         double cycles = ev->lfo[i].timebase*ev->lfo[i].hz + ev->lfo[i].phase;
         v->lfo_phase[i] = (cycles-floor(cycles))*2.0*M_PI;
+    }
+    /* Shared-line LFOs outlive the voice: the deployed worklet renders
+       whole blocks whose start precedes end, so the orbit line keeps
+       bending through the enclosing block. */
+    v->has_orbit_lfo = 0;
+    v->orbit_lfo_end = 0;
+    for (int i = 0; i < LFO_SLOTS; i++) {
+        int t = v->vlfo[i].tgt;
+        if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN && v->vlfo[i].hz > 0.0) {
+            int gi = t - GEN_TGT_BASE;
+            if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB) { v->has_orbit_lfo = 1; break; }
+        }
+    }
+    if (v->has_orbit_lfo) {
+        double end = v->gate_end + fmax(ev->rel, ev->fx_release);
+        double s = end * SR - 1e-7;
+        if (!(s > 0)) s = 0;
+        v->orbit_lfo_end = (floor(s / 128) + 1) * 128 / SR;
     }
     /* The deployed lfo-processor leaves its output at zero for the render
        quantum containing the node start (currentTime <= begin) while the
@@ -2710,6 +2792,16 @@ static void orbit_delay(int orbit, VoiceMix *mix) {
     if (fb < 0) fb = 0;
     if (dt > 1.99) dt = 1.99;
     if (!web_delay_created[orbit] && dt < 1.0 / SR) dt = 1.0 / SR;
+    /* Generic delaytime/delayfeedback LFOs sum onto the shared line like
+       the deployed AudioParam inputs. DelayNode.delayTime clamps to
+       [0, maxDelayTime=1]; feedback gain sums unclamped. */
+    double lfo_dt = orbit_lfo_dt[orbit], lfo_fb = orbit_lfo_fb[orbit];
+    dt += lfo_dt;
+    fb += lfo_fb;
+    if (lfo_dt != 0 || lfo_fb != 0) {
+        if (dt > 1) dt = 1;
+        if (dt < 0) dt = 0;
+    }
     double frames=web_delay_created[orbit]?(float)((float)dt*(float)SR):dt*SR;
     int dl = (int)frames;
     if (dl < (web_delay_created[orbit]?0:1)) dl = web_delay_created[orbit]?0:1;
@@ -3055,6 +3147,8 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
         for (int o = 0; o < N_ORBITS; o++) {
             mixes[o] = (VoiceMix){0};
             mixes[o].room_size = -1;
+            orbit_lfo_dt[o] = 0.0;
+            orbit_lfo_fb[o] = 0.0;
         }
         for (int t=1;t<=AUDIO_OUTPUT_NAMED_MAX;t++) target_dry_l[t]=target_dry_r[t]=0;
         double cs_l = 0, cs_r = 0;
@@ -3486,6 +3580,17 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                        leaves its first block unwritten. */
                     double pan_lfo = 0, cents_lfo = 0;
                     int lfo_nf = 0;
+                    /* The FM quantum about to refill renders 128 modulator
+                       frames at once; precompute the per-frame worklet
+                       outputs from the pre-step phases so the fill bends
+                       each operator per sample like the a-rate AudioParam.
+                       The hold gate mirrors the stepping below, keeping the
+                       legacy zero while the deployed first block is silent. */
+                    double fm_traj[16][128];
+                    const double *fm_traj_p = NULL;
+                    if (V->dsp.fm_active && V->dsp.fm_frame >= 128 &&
+                        age >= V->lfo_hold && voice_fm_traj(V, fm_traj))
+                        fm_traj_p = &fm_traj[0][0];
                     if (age >= V->lfo_hold) {
                         voice_lfo_step_all(V, &amp, &freq, &cents_lfo, &pan_lfo, &lfo_nf);
                         if (lfo_nf & (1<<2)) amp = 1.0;
@@ -3500,7 +3605,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     if (age >= V->lfo_hold && voice_pan_lfo_active(V))
                         voice_lfo_pan_routing(V, V->pan + pan_lfo);
                     // oscillator
-                    freq = dsp_frequency(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time);
+                    freq = dsp_frequency_traj(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time,fm_traj_p);
                     /* OscillatorNode clamps frequency to ±Nyquist and keeps
                        advancing phase there. A sine fades out across the top
                        third-octave because that partial is culled. */
@@ -3600,6 +3705,38 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     continue;
                 }
                 V->age += dt;
+            }
+            /* Shared orbit-line LFOs step here rather than in
+               voice_lfo_step_all: the deployed worklet renders whole
+               blocks whose start precedes end, so the orbit sum must
+               continue past voice silence through orbit_lfo_end. Slots
+               are disjoint from the voice-stepped set. */
+            for (int i = 0; i < VOICE_SLOTS; i++) {
+                Voice *ov = &voices[i];
+                if (!ov->has_orbit_lfo) continue;
+                if (!(audio_time < ov->orbit_lfo_end - 1e-9)) continue;
+                if (ov->age < ov->lfo_hold) continue;
+                int oorbit = ov->orbit;
+                if (oorbit < 0 || oorbit >= N_ORBITS) continue;
+                for (int li = 0; li < LFO_SLOTS; li++) {
+                    LfoSlot *sl = &ov->vlfo[li];
+                    int t = sl->tgt;
+                    if (t < GEN_TGT_BASE || t >= GEN_TGT_BASE + NGEN ||
+                        !(sl->hz > 0.0)) continue;
+                    int gi = t - GEN_TGT_BASE;
+                    if (gi != GEN_DELAYTIME && gi != GEN_DELAYFB) continue;
+                    /* Shared orbit-line targets sum onto one AudioParam per
+                       orbit. The worklet writes float output. */
+                    double g = (float)lfo_slot_output(sl, ov->lfo_phase[li]);
+                    if (isfinite(g)) {
+                        if (gi == GEN_DELAYTIME) orbit_lfo_dt[oorbit] += g;
+                        else orbit_lfo_fb[oorbit] += g;
+                    }
+                    ov->lfo_phase[li] += (2.0 * M_PI * sl->hz) / SR;
+                    if (ov->lfo_phase[li] > 2.0 * M_PI)
+                        ov->lfo_phase[li] -= 2.0 * M_PI *
+                            floor(ov->lfo_phase[li] / (2.0 * M_PI));
+                }
             }
             csound_program_sample(csound_program,&cs_l,&cs_r);
             for (int o = 0; o < N_ORBITS; o++) {

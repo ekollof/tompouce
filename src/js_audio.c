@@ -1051,12 +1051,16 @@ static const GenTarget gen_targets[] = {
     {"compressorRelease", GEN_COMPREL, DSP_COMPREL, 0, "compressor"},
     {"postgain", GEN_POSTGAIN, DSP_POST, 0, NULL},
     {"vibmod", GEN_VIBMOD, DSP_VIBMOD, 0, "vib"},
+    {"vib", GEN_VIB, DSP_VIB, 1, "vib-rate"},
     {"pw", GEN_PW, DSP_PW, 0, "pulse-voice"},
     {"pwrate", GEN_PWRATE, DSP_PWRATE, 1, "pulse-voice"},
     {"pwsweep", GEN_PWSWEEP, DSP_PWSWEEP, 0, "pulse-voice"},
     {"vowel", GEN_VOWEL, DSP_VOWEL, 1, "vowel"},
     {"detune", GEN_DETUNE, DSP_UNISON, 0, "spread-voice"},
     {"delay", GEN_DELAY, DSP_DRY, 0, "delay-send"},
+    {"delaytime", GEN_DELAYTIME, DSP_DRY, 0, "delay-send"},
+    {"delaysync", GEN_DELAYTIME, DSP_DRY, 0, "delay-send"},
+    {"delayfeedback", GEN_DELAYFB, DSP_DRY, 0, "delay-send"},
     {"room", GEN_ROOM, DSP_ROOM, 0, "room-send"},
     {"wtrate", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
     {"wtsync", GEN_WTRATE, DSP_UNISON, 0, "wt-voice"},
@@ -1068,6 +1072,22 @@ static const GenTarget gen_targets[] = {
     {"warpdepth", GEN_WARPDEPTH, DSP_UNISON, 0, "warp-voice"},
     {"warpskew", GEN_WARPSKEW, DSP_UNISON, 0, "warp-voice"},
     {"warpshape", GEN_WARPSHAPE, DSP_UNISON, 0, "warp-voice"},
+    {"fmi", GEN_FMI1, DSP_UNISON, 0, "fm-edge"},
+    {"fmi2", GEN_FMI2, DSP_UNISON, 0, "fm-edge"},
+    {"fmi3", GEN_FMI3, DSP_UNISON, 0, "fm-edge"},
+    {"fmi4", GEN_FMI4, DSP_UNISON, 0, "fm-edge"},
+    {"fmi5", GEN_FMI5, DSP_UNISON, 0, "fm-edge"},
+    {"fmi6", GEN_FMI6, DSP_UNISON, 0, "fm-edge"},
+    {"fmi7", GEN_FMI7, DSP_UNISON, 0, "fm-edge"},
+    {"fmi8", GEN_FMI8, DSP_UNISON, 0, "fm-edge"},
+    {"fmh", GEN_FMH1, DSP_UNISON, 1, "fm-osc"},
+    {"fmh2", GEN_FMH2, DSP_UNISON, 1, "fm-osc"},
+    {"fmh3", GEN_FMH3, DSP_UNISON, 1, "fm-osc"},
+    {"fmh4", GEN_FMH4, DSP_UNISON, 1, "fm-osc"},
+    {"fmh5", GEN_FMH5, DSP_UNISON, 1, "fm-osc"},
+    {"fmh6", GEN_FMH6, DSP_UNISON, 1, "fm-osc"},
+    {"fmh7", GEN_FMH7, DSP_UNISON, 1, "fm-osc"},
+    {"fmh8", GEN_FMH8, DSP_UNISON, 1, "fm-osc"},
     {NULL, 0, 0, 0, NULL}
 };
 
@@ -1108,6 +1128,48 @@ static double wt_rate_resolved(const cJSON *value, double cps, int iswarp, doubl
     return depth > 0 ? 1 : 0;
 }
 
+static void fm_control_name(char *name, size_t len, const char *stem, int op) {
+    if (op == 1) snprintf(name, len, "%s", stem);
+    else snprintf(name, len, "%s%d", stem, op);
+}
+
+/* Replicate the deployed FM edge scan (i = 1..8, j = 0..8, skipping
+   falsy amounts) for one operator. Reports whether its oscillator node
+   exists, and the registered gain edge (native matrix column + 1, with
+   the edge amount) when the last mention is a connected source edge;
+   a trailing target-side mention registers an unconnected node. */
+static void fm_op_scan(const cJSON *value, int op, int *osc, int *edge, double *amt) {
+    int o = 0, e = 0;
+    double a = 0;
+    for (int i = 1; i <= 8; i++) {
+        for (int j = 0; j <= 8; j++) {
+            char name[16];
+            if (i == j + 1) fm_control_name(name, sizeof name, "fmi", i);
+            else snprintf(name, sizeof name, "fmi%d%d", i, j);
+            const cJSON *c = cJSON_GetObjectItemCaseSensitive(value, name);
+            double v = (cJSON_IsNumber(c) && isfinite(c->valuedouble)) ? c->valuedouble : 0.0;
+            /* Deployed skips falsy amounts (0, NaN, missing). */
+            if (!(v > 0) && !(v < 0)) continue;
+            if (i == op) { o = 1; e = j + 1; a = v; }
+            else if (j == op) { o = 1; e = 0; }
+        }
+    }
+    if (osc) *osc = o;
+    if (edge) *edge = e;
+    if (amt) *amt = a;
+}
+
+/* Wavetable FM waves named white/pink/brown are buffer sources with no
+   frequency input, so a generic rate LFO has no oscillator to drive. */
+static int fm_op_noise(const cJSON *value, int op) {
+    char name[16];
+    fm_control_name(name, sizeof name, "fmwave", op);
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(value, name);
+    if (!cJSON_IsString(w) || !w->valuestring) return 0;
+    return !strcmp(w->valuestring, "white") || !strcmp(w->valuestring, "pink") ||
+        !strcmp(w->valuestring, "brown");
+}
+
 static const GenTarget *gen_target(const char *name, const cJSON *value, const char *sound, const AudioEvent *ev) {
     for (int i = 0; gen_targets[i].name; i++) {
         if (strcmp(name, gen_targets[i].name)) continue;
@@ -1117,6 +1179,11 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             if (cJSON_HasObjectItem(value,"tremolo") || cJSON_HasObjectItem(value,"tremolosync")) return &gen_targets[i];
         } else if (!strcmp(need, "phaserrate")) {
             if (cJSON_HasObjectItem(value,"phaserrate") && control(value,"phaserdepth",.75,0,16) > 0) return &gen_targets[i];
+        } else if (!strcmp(need, "vib-rate")) {
+            /* The deployed vibrato oscillator exists only when its rate
+               is positive; sample voices take the detune fallback with
+               no such node. */
+            if (ev->dsp.p[DSP_VIB] > 0 && ev->smp < 0 && !ev->stretch_buffer) return &gen_targets[i];
         } else if (!strcmp(need, "pulse-voice")) {
             /* The deployed pulsewidth nodes only exist on pulse-oscillator
                voices, and the pw LFO node only when the (defaulted) sweep
@@ -1137,6 +1204,22 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             if (ev->delay_send > 0) return &gen_targets[i];
         } else if (!strcmp(need, "room-send")) {
             if (ev->dsp.p[DSP_ROOM] > 0) return &gen_targets[i];
+        } else if (!strcmp(need, "fm-edge") || !strcmp(need, "fm-osc")) {
+            /* FM gain nodes register per edge with last-edge-wins (a
+               trailing target-side mention leaves an unconnected node);
+               oscillator nodes exist for any mentioned operator. */
+            int is_gain = !strcmp(need, "fm-edge");
+            int op = (int)(gen_targets[i].gen - (is_gain ? GEN_FMI1 : GEN_FMH1)) + 1;
+            int osc = 0, edge = 0;
+            double amt = 0;
+            fm_op_scan(value, op, &osc, &edge, &amt);
+            if (!osc) return NULL;
+            if (is_gain) {
+                if (!edge) return NULL;
+            } else if (fm_op_noise(value, op)) {
+                return NULL;
+            }
+            return &gen_targets[i];
         } else if (!strcmp(need, "wt-voice") || !strcmp(need, "warp-voice")) {
             /* The deployed wt/warp LFO node exists only on wavetable
                voices and only when its (defaulted) depth is nonzero. */
@@ -1234,7 +1317,25 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         /* The deployed detune node scales by the semitone spread, which
            native keeps outside the control array. */
         else if (gent && gent->gen == GEN_DETUNE) base = ev->dsp.supersaw_detune;
+        else if (gent && gent->gen >= GEN_FMI1 && gent->gen <= GEN_FMI8) {
+            /* A generic index LFO scales by the registered edge amount. */
+            int op = (int)(gent->gen - GEN_FMI1) + 1;
+            int edge = 0;
+            double amt = 0;
+            fm_op_scan(value, op, NULL, &edge, &amt);
+            if (!edge) { ev->lfo_unsupported = 1; continue; }
+            ev->dsp.fm_gen_edge[op - 1] = (signed char)edge;
+            base = amt;
+        }
+        else if (gent && gent->gen >= GEN_FMH1 && gent->gen <= GEN_FMH8) {
+            /* A generic ratio LFO scales by the operator frequency in Hz. */
+            int op = (int)(gent->gen - GEN_FMH1) + 1;
+            base = ev->freq * ev->dsp.p[DSP_FMBASE + (op - 1) * 8 + 1];
+        }
         else if (gent && gent->gen == GEN_DELAY) base = ev->delay_send;
+        else if (gent && gent->gen == GEN_DELAYTIME) base = ev->delay_time;
+        else if (gent && gent->gen == GEN_DELAYFB) base = ev->delay_fb;
+        else if (gent && gent->gen == GEN_VIB) base = ev->dsp.p[DSP_VIB];
         else if (gent && gent->gen == GEN_ROOM) base = ev->dsp.p[DSP_ROOM];
         else if (gent && gent->gen >= GEN_WTRATE && gent->gen <= GEN_WARPSHAPE) {
             /* Wavetable LFO bases replicate the connected worklet params:
@@ -1317,6 +1418,7 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
             ev->lfo[slot].min=min;
             ev->lfo[slot].max=max;
             ev->lfo[slot].timebase=(retrigger||!(ev->cps>0))?0:ev->time/ev->cps;
+            if (gent && gent->gen == GEN_VIB) ev->dsp.vib_lfo = 1;
             if (tgt>=9) ev->dsp.lfo_sample_rate=1;
             continue;
         }
@@ -1441,9 +1543,12 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     ev->clip = clip;
     ev->duration = fmin(60,ev->duration * clip);
     ev->duration = control(v,"duration",ev->duration,.00001,60);
-    /* Superdough multiplies velocity with no 0..1 cap. 16 matches the other amplitude stages. */
-    ev->gain = control(v,"gain",.8,0,16) * control(v,"velocity",1,0,16) * control(v,"amp",1,0,16)
-        * control(v,"busgain",1,0,16) * control(v,"overgain",1,0,16);
+    /* Superdough multiplies velocity with no 0..1 cap. 16 matches the other amplitude stages.
+       busgain/overgain are registered controls but superdough never reads
+       them into the voice gain (busgain only sizes an optional bus send;
+       overgain nowhere): keep them silent no-ops instead of folding them
+       in, so explicit values match the deployed static output. */
+    ev->gain = control(v,"gain",.8,0,16) * control(v,"velocity",1,0,16) * control(v,"amp",1,0,16);
     ev->pan = control(v,"pan",.5,0,1) * 2 - 1;
     ev->has_pan=cJSON_HasObjectItem(v,"pan");
     const char *envelope_names[4] = {"attack","decay","sustain","release"};

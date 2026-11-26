@@ -20,6 +20,10 @@ enum {
     GEN_DELAY, GEN_ROOM,
     GEN_WTRATE, GEN_WTDEPTH, GEN_WTSKEW, GEN_WTSHAPE,
     GEN_WARPRATE, GEN_WARPDEPTH, GEN_WARPSKEW, GEN_WARPSHAPE,
+    GEN_FMI1, GEN_FMI2, GEN_FMI3, GEN_FMI4, GEN_FMI5, GEN_FMI6, GEN_FMI7, GEN_FMI8,
+    GEN_FMH1, GEN_FMH2, GEN_FMH3, GEN_FMH4, GEN_FMH5, GEN_FMH6, GEN_FMH7, GEN_FMH8,
+    GEN_DELAYTIME, GEN_DELAYFB,
+    GEN_VIB,
     NGEN
 };
 
@@ -58,6 +62,7 @@ typedef struct {
     double p[DSP_COUNT];
     double gen_lfo[NGEN]; /* per-sample generic-modulation offsets, voice-driven (see GEN_*) */
     double matrix[8][9]; /* source -> carrier (0) or operator (1..8) */
+    signed char fm_gen_edge[8]; /* registered generic-fmi edge per operator: native matrix column + 1, 0 = none or unconnected (last-edge-wins, matching upstream) */
     double partials[32], phases[32];
     double supersaw_detune; /* total unison width in semitones, not pitch cents */
     unsigned fm_envelopes;
@@ -69,6 +74,7 @@ typedef struct {
     int periodic_kind, periodic_numeric;
     int n_partials;
     int lfo_sample_rate; /* generic cutoff LFO needs per-sample filter updates */
+    int vib_lfo; /* generic vib-rate LFO: integrate the vibrato phase */
     double lfo_start_time; /* absolute node start; -1 disables the quantum hold */
     double q_lfo[3]; /* per-sample generic resonance offset, voice-driven */
 } DspParams;
@@ -90,6 +96,11 @@ typedef struct {
     double ladder[4], ladder_g, ladder_k;
     double fm_phase[8];
     float fm_buffer[8][128];
+    /* Integrated vibrato-oscillator phase (radians) for rate-modulated
+       vibrato; the deployed oscillator integrates its frequency AudioParam
+       per sample. Selected by control.vib_lfo when a generic vib-rate LFO
+       exists; otherwise the closed form below is bit-identical legacy. */
+    double vib_phase;
     double fm_noise_pos[8];
     unsigned fm_order[8], fm_count, fm_frame;
     unsigned fm_initial_frames;
@@ -164,6 +175,15 @@ void dsp_envelope_profile_stats(unsigned long long *calls,
                                 unsigned long long *total_cycles);
 #endif
 double dsp_frequency(DspState *state, double freq, double age, double gate);
+/* Per-frame generic FM offsets for the next quantum refill: rows 0..7 are
+   GEN_FMI1..8, rows 8..15 GEN_FMH1..8, each 128 frames (NULL selects the
+   legacy held value). A modulator OscillatorNode's frequency AudioParam is
+   a-rate, so the LFO bends it every sample; the quantum fill must use the
+   per-frame worklet output, not the sample-held gen_lfo value. The
+   silent-head pre-roll keeps the held value: those frames predate the node
+   start, where the deployed worklet output is zero. */
+double dsp_frequency_traj(DspState *state, double freq, double age, double gate,
+    const double *fm_traj);
 /* Sine wavetable gain: 1 below Nyquist/2^(1/3), then 3*log2(Nyquist/|f|),
    and 0 at ±Nyquist. Phase still advances at the clamped frequency. */
 float dsp_oscillator_nyquist_gain(float frequency);

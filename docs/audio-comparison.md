@@ -590,7 +590,7 @@ start, and damps the previous output history by 0.77 at the connection. That
 matches the deployed overshoot (native peak 0.399, browser 0.3998). Earlier
 50 ms hold/bypass/crossfade and ramp/state-reset models remain rejected; they
 were measured before direct-form-I was in use.
-Remaining generic targets (delay/compressor params,
+Remaining generic targets (compressor params,
 dry/room/busgain, detune unison, vowel, stretch and bus modulators)
 keep their static value and log one warning naming the unsupported target
 and the expected control order.
@@ -598,9 +598,9 @@ and the expected control order.
 versus static PCM. Source-frequency LFO (`s("saw").lfo().lpf(800)`) follows
 the same worklet math against the oscillator frequency with the
 `[20-base, 24000-base]` clamp; the tutorial vibrato sweep matches the
-deployed zero-crossing contour, while exact PCM under deep FM remains
-ungated (sine 0.94, saw ~0.73 at RMS ratio ~1.0: onset/envelope modeling
-plus naive-versus-bandlimited saw). Pan LFO (`pan(.5).lfo(...)`) gates at
+deployed zero-crossing contour. Generic FM LFOs gate at 1.0 (see below);
+saw-based FM keeps its naive-versus-bandlimited gap and stays ungated.
+Pan LFO (`pan(.5).lfo(...)`) gates at
 0.99977/1.0003 with per-sample equal-power routing. Sample voices take the
 deployed detune fallback: gain LFO gates at 0.995/0.99 and the cents path at
 1.0/1.0002. Generic `.env()` is parsed and warned but never applied: the
@@ -634,7 +634,39 @@ path per sample and gate at the unchanged thresholds: `tremolo-static`
 `lfo-warpdc-inert` 1.0/1.0002, `dry-static` 1.0/1.0003,
 `lfo-dry-inert` 1.0/1.0003, `lfo-delay` 1.0/1.0004,
 `lfo-room` 1.0/0.9942 and
-`lfo-postgain` 1.0/1.0003. Generic tremolophase, wtdc/warpdc and dry match the deployed
+`lfo-postgain` 1.0/1.0003. Generic FM ratio/index LFOs gate at 1.0:
+`fmh-lfo`, `fmh-ratio1`, `fmh-ratio05`, `fmh-ratio4`, `fmh-long`,
+`fmh-rate005`, `fmh-rate2`, `fmi-lfo`, `fmi2-lfo`, `fmi-dud`. Cross-edge LFO controls have no
+deployed registry entry and warn on both sides (`fmix-lfo-tmp` static at
+1.0); same-source fan-out follows last-edge-wins on both sides, whether
+the last edge dangles (`fm-fanout-tmp`), is dudded by a trailing
+target-side mention (`fm-xdud-tmp`), bends op2's ratio (`fmh2-lfo-tmp`)
+or closes an op1/op2 cycle (`fm-cycle-tmp`), all at 1.0. Wave-selector
+and other non-gain/frequency FM controls have no deployed registry entry:
+`fmwave-lfo-tmp` and `fmwave2-lfo-tmp` warn on both sides and hold static
+PCM at 1.0. The native
+128-sample FM quantum held the refill sample's LFO value across the block
+while the deployed modulator frequency AudioParam is a-rate; the fill now
+consumes the per-frame worklet trajectory (`dsp_frequency_traj`, fed by
+the pre-step voice phases), and carrier-direct index edges were already
+exact through the per-sample path. Generic delaytime/delayfeedback LFOs
+modulate the shared orbit line: `delaytime-lfo-tmp` at 0.99999,
+`delaytime-longrel-tmp` at 0.99999, `delayfeedback-lfo-tmp` at 0.99984.
+Depth scales by the hap's own delaytime/feedback, every voice's output
+sums onto the shared AudioParams per sample, and the LFO outlives the
+voice through the enclosing 128-sample block (the deployed worklet
+renders whole blocks whose start precedes end). The remaining gap is the
+16-bit browser capture floor, verified by a constant absolute error
+against decaying echoes. Registered but unread controls stay silent
+no-ops on both sides: `overgain-static-tmp` and `busgain-static-tmp`
+(explicit values ignored upstream) gate static PCM at 1.0, and generic
+LFOs on `overgain`, `pcurve`, `busgain`, valueless `djf` and main-chain
+`transient` warn with static PCM at 1.0 (`lfo-overgain-tmp`,
+`lfo-pcurve-tmp`, `lfo-busgain-tmp`, `lfo-djf-tmp`, `lfo-transient-tmp`).
+Generic vib-rate LFOs bend the vibrato oscillator's frequency per sample
+(`vib-rate-lfo-tmp` at 1.0): the static rate term keeps the closed form
+while only the LFO deviation integrates from the voice start.
+Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,
 `lfo-warpdc-inert` 1.0/1.0002, `lfo-dry-inert` 1.0/1.0003; generic tremoloshape and wt/warp shape are

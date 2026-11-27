@@ -2503,11 +2503,12 @@ implementing.
   needs no plaintext mode.
 - **Optional server-side shim (not recommended):** a director mode that
   terminates y-websocket and pubsub so Flok browsers could join Tompouce
-  rooms. That needs a server-side Y.Doc (yrs or Node), which is **incompatible with E2E
-  by default** (D2) and would only be possible in plaintext debug rooms
-  (§14.10). It is not planned. A more valuable upstream path would
-  be to propose a clock and quantize extension to Flok, using this protocol's
-  epoch model (§8). That's an open question.
+  rooms. That needs a server-side Y.Doc (yrs or Node), which stays
+  incompatible with E2E by default (D2) and would only be possible in
+  plaintext debug rooms; a server-side shim is not planned. The agreed
+  upstream path, decided with Q7, is to propose a clock and quantize
+  extension to Flok, using this protocol's epoch model (§8) — on Flok's
+  timeline, with the client-side bridge above working either way.
 
 ## 17. Testing strategy
 
@@ -3256,12 +3257,16 @@ design. Each states a default the implementer will use if you do not answer.
 5. **Shared slot 0.** ~~Always present, opt-in per room, or not at all?
    Default: opt-in per room, on for a new room.~~ **Decided 2026-11-27:**
    opt-in per room, on for new rooms (the default stands).
-6. **Ableton Link bridge.** Publish room tempo and phase to local Link peers
-   later? Default: no, post-v1.
-7. **Upstream Flok.** Propose an epoch-based clock and `live` activation
-   extension to Flok so browser users can phase-align? Default: no.
-8. **Naming.** Is "director" the right user-facing name? Default: keep
-   "director" in docs, "room server" in the UI.
+6. **Ableton Link bridge.** ~~Publish room tempo and phase to local Link peers
+   later? Default: no, post-v1.~~ **Decided 2026-11-27:** no, post-v1 (the
+   default stands).
+7. **Upstream Flok.** ~~Propose an epoch-based clock and `live` activation
+   extension to Flok so browser users can phase-align? Default: no.~~
+   **Decided 2026-11-27:** yes, propose it — an epoch/clock extension
+   using this protocol's model (§8), on Flok's timeline.
+8. **Naming.** ~~Is "director" the right user-facing name? Default: keep
+   "director" in docs, "room server" in the UI.~~ **Decided 2026-11-27:**
+   keep the hybrid (the default stands).
 9. **Own `local:` imports in a room.** ~~The profile is per composite, so your
    own `local:` modules stop working while others are in the room (§13.2).
    Default: accept, and document it.~~ **Decided 2026-11-27:** accept and
@@ -3289,7 +3294,9 @@ design. Each states a default the implementer will use if you do not answer.
     registration kill-switch backstop (§13.6); no token/CAPTCHA tiers.
 14. **Browser as a client.** Is a later browser-based joiner (Strudel in the
     page) desired, or does the web front end stay a front door only
-    (current design)? Default: front door only.
+    (current design)? Default: front door only.~~ **Decided 2026-11-27:** front door only. A browser
+   joiner could never phase-align anyway: browser WebAudio rendering does
+   not match the native engine, so it would always hear a different mix.
 15. **Room latency feel.** A room eval waits `lead` (about 350–450 ms) instead
     of the local 200–350 ms, so everyone changes together (§8.7). Acceptable,
     or should an author's own client be allowed to hot-swap sooner and

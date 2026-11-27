@@ -1,0 +1,28 @@
+baseURL = "https://bakery.andrath.nl/"
+title = "Bakery — jam together in Tompouce"
+languageCode = "en"
+disableKinds = ["taxonomy", "term"]
+
+[params]
+  # Owed before public launch (D8). Replace with the real abuse contact.
+  abuseContact = "to be published before public launch"
+
+[[menus.main]]
+  name = "Guides"
+  url = "/guides/"
+  weight = 1
+
+[[menus.main]]
+  name = "Safety"
+  url = "/safety/"
+  weight = 2
+
+[[menus.main]]
+  name = "Privacy"
+  url = "/privacy/"
+  weight = 3
+
+[[menus.main]]
+  name = "Rules"
+  url = "/abuse/"
+  weight = 4

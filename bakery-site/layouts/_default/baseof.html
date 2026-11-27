@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} · Bakery{{ end }}</title>
+  <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}The public Tompouce jam room server: host a room, share an invite, play together. End-to-end encrypted, no accounts.{{ end }}">
+  <link rel="canonical" href="{{ .Permalink }}">
+  <meta property="og:title" content="{{ if .IsHome }}Bakery{{ else }}{{ .Title }} · Bakery{{ end }}">
+  <meta property="og:description" content="The public Tompouce jam room server: host a room, share an invite, play together. End-to-end encrypted, no accounts.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ .Permalink }}">
+  <meta property="og:image" content="{{ "og.jpg" | absURL }}">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ if .IsHome }}Bakery{{ else }}{{ .Title }} · Bakery{{ end }}">
+  <meta name="twitter:description" content="The public Tompouce jam room server: host a room, share an invite, play together.">
+  <meta name="twitter:image" content="{{ "og.jpg" | absURL }}">
+  <link rel="icon" href="{{ "logo.jpg" | relURL }}" type="image/jpeg">
+  <link rel="stylesheet" href="{{ "styles.css" | relURL }}">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="status" aria-hidden="true">
+    <span>Bakery</span>
+    <span>tompouce collab</span>
+    <span>E2E on</span>
+    <span>no accounts</span>
+  </header>
+  <nav class="topnav" aria-label="Site">
+    <a class="brand" href="{{ "/" | relURL }}">Bakery</a>
+    {{ range .Site.Menus.main }}
+    <a href="{{ .URL | relURL }}">{{ .Name }}</a>
+    {{ end }}
+  </nav>
+
+  <main id="content">
+    {{ block "main" . }}{{ end }}
+  </main>
+
+  <footer>
+    <p>Bakery is the public jam room server for <a href="https://github.com/ekollof/tompouce">Tompouce</a> (AGPL-3.0-or-later). Rooms are end-to-end encrypted; the operator cannot hear or see what you play.</p>
+    <p><a href="{{ "/privacy/" | relURL }}">Privacy</a> · <a href="{{ "/abuse/" | relURL }}">Rules &amp; abuse</a> · <a href="{{ "/safety/" | relURL }}">How encryption works</a></p>
+  </footer>
+</body>
+</html>

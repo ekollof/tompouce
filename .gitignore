@@ -12,6 +12,8 @@ js/node_modules/
 web/node_modules/
 __pycache__/
 *.py[cod]
+bakery-site/public/
+bakery-site/resources/
 thirdparty/quickjs/*.o
 thirdparty/tree-sitter-javascript/src/*.o
 js/dist/runtime.inc

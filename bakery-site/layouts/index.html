@@ -1,0 +1,53 @@
+{{ define "main" }}
+<section class="hero">
+  <img class="logo" src="{{ "logo.jpg" | relURL }}" width="168" height="168" alt="Tompouce logo: a layered pastry with a waveform in the icing">
+  <div>
+    <h1>Bakery</h1>
+    <p class="lede">The public jam room server for Tompouce. Host a room, share an invite, play together — from two terminals anywhere on the internet.</p>
+    <p class="keys">End-to-end encrypted by default. No accounts, no passwords: whoever holds the invite link holds the key.</p>
+    <p class="links">
+      <a class="button" href="#start">Start jamming</a>
+      <a class="button ghost" href="{{ "/guides/" | relURL }}">Guides</a>
+      <a class="button ghost" href="{{ "/safety/" | relURL }}">How encryption works</a>
+    </p>
+  </div>
+</section>
+
+<section class="points" id="start">
+  <h2>Start jamming in three steps</h2>
+  <ul>
+    <li><strong>Install Tompouce</strong> (<a href="https://github.com/ekollof/tompouce">source</a>). This server is already the default, so nothing needs configuring.</li>
+    <li><strong>Pick a nickname.</strong> Press F2 and type <code>/nick your-name</code>. It is saved and reused in every room. Skip this and you get a generated one like <code>amber-otter</code>.</li>
+    <li><strong>Host or join.</strong> One person hosts, everyone else joins with the invite.</li>
+  </ul>
+</section>
+
+<section class="split">
+  <article>
+    <h2>Hosting</h2>
+    <p>Press F2 and create a room on this server. You become the owner.</p>
+    <pre><code>/collab host my-jam</code></pre>
+    <p>Mint an invite as a join code plus a passphrase. Read the code out, send the passphrase on a <em>different</em> channel (a second message, a call, across the room).</p>
+    <pre><code>/collab invite --code</code></pre>
+    <p class="note">Full owner guide: <a href="{{ "/guides/hosting-a-room/" | relURL }}">hosting a room</a>.</p>
+  </article>
+  <article>
+    <h2>Joining</h2>
+    <p>Paste what the host sent you. For an invite link, press F2 and type:</p>
+    <pre><code>/collab join https://bakery.andrath.nl/j/…</code></pre>
+    <p>For a join code, type the code, then the passphrase when asked:</p>
+    <pre><code>/collab join bakery.andrath.nl K7QF-92XM-PD4T</code></pre>
+    <p class="note">Always check the consent prompt — host, room, owner fingerprint. Details: <a href="{{ "/guides/joining-a-room/" | relURL }}">joining a room</a>.</p>
+  </article>
+</section>
+
+<section class="points">
+  <h2>What to expect in a room</h2>
+  <ul>
+    <li>Everyone hears every accepted evaluation at the same shared instant, about a third of a second after someone presses F5 — like a local Alt+Enter, but synchronized.</li>
+    <li>Typing is shared live, including typos. Sound only changes when someone evaluates.</li>
+    <li>Your own slots stay yours. Slot 0 is the shared scratch pad. F7 shows who is here, F9 lists the slots.</li>
+    <li>If your connection drops, the music keeps playing and your edits queue up; you resync when you are back. See <a href="{{ "/guides/connection-troubles/" | relURL }}">connection troubles</a>.</li>
+  </ul>
+</section>
+{{ end }}

@@ -20,6 +20,11 @@ default, local-equivalent `live` eval, recent-software floors).
 > **Revision note, 2026-11-27 (ekollof), Q1 decided (D8).** ekollof hosts
 > the public director at `bakery.andrath.nl`. §20 Q1 is resolved; Q2–Q15
 > keep their defaults pending owner answers.
+>
+> **Revision note, 2026-11-27 (ekollof), OpenBSD host (D9).** The public
+> director runs on OpenBSD 8.0 (`castor.hackerheaven.org`, SSH via bastion
+> host only). §6.5, §18.1 and §18.4 now require portable server code and
+> an `rc.d` script next to the systemd unit.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -56,6 +61,7 @@ questions are in §20.
 | D6 | 2026-11-26 | Derived from D2: the **shared user-sound blob store is off on the public instance** (the operator cannot scan E2E blobs) and opt-in on self-hosted directors. | §11.2, §18.4 |
 | D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators are an open question. | §13.5, §20 |
 | D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director at `bakery.andrath.nl`. Examples, invite links and defaults use that hostname through the `public_url` setting. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
+| D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -680,6 +686,7 @@ these and fails with a clear message, or turns collab off, instead of limping.
 | **esbuild, Node** (build time only) | esbuild 0.25.12 (the version `web/` and `js/` already pin) or newer; Node ≥ 22 LTS | Node never runs at runtime. |
 | **Browsers** (web front end) | Evergreen: ES2022 modules, WebAssembly, Clipboard API | No polyfills. |
 | **Caddy** (public instance reverse proxy) | ≥ 2.8 | Automatic ACME. |
+| **OpenBSD** (public director host, decision D9) | **8.0**, `castor.hackerheaven.org` | Portable code only: POSIX C11, no Linux-only APIs (`epoll`, `timerfd`/`eventfd`/`signalfd`, `prctl`, `malloc_trim`, `getrandom(2)` — use `poll(2)`-family I/O through libwebsockets and `arc4random`/`getentropy` via libsodium `randombytes`), no direct OpenSSL-3-only calls (the host ships LibreSSL; talk TLS through libcurl/libwebsockets), dual-stack sockets (the host resolves to IPv6), and small-machine caps (§13.6 sized for ~1 GiB RAM). Ship an OpenBSD `rc.d` script next to the systemd unit (§18.1); keep `sd_notify` optional as today. Prefer `pledge`/`unveil` confinement on OpenBSD, following the repo's seccomp posture for helper processes. |
 | **systemd** | ≥ 252 | For the hardening directives in §18.1 (VERIFY each directive). |
 | Existing: C11 compiler, CMake ≥ 3.20, Notcurses ≥ 3.0.9, QuickJS (vendored) | unchanged | Whatever `CMakeLists.txt` already requires. |
 
@@ -2473,7 +2480,13 @@ drift for real, the test hook `TOMPOUCE_COLLAB_CLOCK_SKEW="offset_s,ppm"`
 
 ## 18. Deployment and configuration
 
-### 18.1 systemd (system service)
+### 18.1 Service supervision (systemd and OpenBSD rc.d)
+
+The systemd unit below is for self-hosted Linux installs. The public
+instance runs on OpenBSD (decision D9), so an `rc.d` script with the same
+shape (dedicated user, state dir mode 0700, resource caps, restart) ships
+next to it, and the director must not depend on anything systemd-specific
+at runtime (`sd_notify` stays optional).
 
 This follows the `systemd/tompouce-daemon.service.in` placeholder pattern.
 
@@ -2519,6 +2532,32 @@ WantedBy=multi-user.target
   already probes `libsystemd`.
 - To use native TLS instead of a reverse proxy, add `--cert` and `--key`
   through `LoadCredential=`.
+
+OpenBSD `rc.d` script (NEW `rc.d/tompouce_director`), same shape:
+
+```sh
+#!/bin/sh
+# $OpenBSD$
+
+daemon="/usr/local/bin/tompouce-director"
+daemon_user="_tompouce-director"
+daemon_flags="--listen 127.0.0.1:7420 --state-dir /var/tompouce-director --config /etc/tompouce/director.conf"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+rc_reload=NO
+
+rc_pre() {
+        install -d -o _tompouce-director -m 0700 /var/tompouce-director
+}
+
+rc_cmd $1
+```
+
+Cap the daemon with `login.conf` (`datasize`, `openfiles`) instead of
+the systemd `MemoryMax`/`LimitNOFILE` lines, and prefer `pledge`/`unveil`
+in the director on OpenBSD.
 
 Reverse proxy example (Caddy):
 
@@ -2663,7 +2702,11 @@ Room creation policy (`POST /v1/rooms`):
 ### 18.4 Public hosted instance (decision D1)
 
 Everything here is operator guidance for the official instance. The same
-director binary runs it; only the configuration differs.
+director binary runs it; only the configuration differs. The machine is
+`castor.hackerheaven.org` (OpenBSD 8.0, ~1 GiB RAM, reachable over SSH
+only through the operator's bastion host); the public name
+`bakery.andrath.nl` is expected to resolve there — confirm the DNS mapping
+before launch.
 
 **Model.** **Account-less.** There are no user accounts, passwords or e-mail
 addresses (D5). A room exists because someone solved a proof-of-work and

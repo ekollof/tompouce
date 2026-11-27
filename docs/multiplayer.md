@@ -1738,6 +1738,27 @@ The **F4** internals pane gets a "collab" block:
 - the CRDT doc size per slot
 - rate-limit drops
 - consent state per capability
+- **network/protocol** (only when a room is joined; counts and sizes, never
+  sealed content, consistent with the E2E posture):
+  - connection: `wss://host` (or `ws://` LAN address), uptime, reconnect
+    count, resumes used
+  - traffic: bytes up/down total plus per-10 s rates, split into control
+    frames and binary frames
+  - messages: evals sent vs received, activations applied on time vs late,
+    pings sent vs pongs received (loss count), acks sent/received,
+    member joins/parts observed, `snapshot_req` received
+  - store and sync: opaque bytes held per slot (snapshot + log entry
+    count), per-slot synced state and last snapshot time
+  - protocol health: malformed frames, schema/type/auth failures,
+    `e2e_required` rejections, rate-limit drops, close codes seen,
+    eval_seq gaps observed (missing sequence numbers)
+  - director-advertised: the `welcome.limits`, current epoch and room
+    quantum, for comparison against local settings
+- Counters live in the collab thread (`collab.c` session state) and are
+  copied atomically on each UI poll, the same way the clock snapshot
+  already is (§10.1); rendering the pane never touches the socket. All
+  counters reset on room leave. Per-member latency stays out of the F7
+  roster by design (§12.5); the room aggregates live here.
 
 ### 12.4 Per-player colors and cursors
 

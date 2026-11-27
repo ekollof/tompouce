@@ -3241,8 +3241,9 @@ design. Each states a default the implementer will use if you do not answer.
    room-wide and union across slots, with attribution in the status bar, the
    F7 roster and the F9 list, plus a per-line authorship gutter in the editor
    (§12.6).
-5. **Shared slot 0.** Always present, opt-in per room, or not at all?
-   Default: opt-in per room, on for a new room.
+5. **Shared slot 0.** ~~Always present, opt-in per room, or not at all?
+   Default: opt-in per room, on for a new room.~~ **Decided 2026-11-27:**
+   opt-in per room, on for new rooms (the default stands).
 6. **Ableton Link bridge.** Publish room tempo and phase to local Link peers
    later? Default: no, post-v1.
 7. **Upstream Flok.** Propose an epoch-based clock and `live` activation
@@ -3252,16 +3253,20 @@ design. Each states a default the implementer will use if you do not answer.
 9. **Own `local:` imports in a room.** The profile is per composite, so your
    own `local:` modules stop working while others are in the room (§13.2).
    Default: accept, and document it.
-10. **Delegated moderators / co-owners.** Owner key is the single trust root
+10. **Delegated moderators / co-owners.** ~~Owner key is the single trust root
     (D7). Should the owner be able to sign delegation certificates so
     trusted members can mint invites and kick? Default: no in v1; the owner
-    can hand the owner link to a co-owner they trust fully.
+    can hand the owner link to a co-owner they trust fully.~~ **Decided
+    2026-11-27:** no moderators in v1 (the default stands); owner-link
+    handover covers co-ownership.
 11. **Stronger passphrase method.** Use a PAKE (OPAQUE or CPace) instead of an
     Argon2id-wrapped blob, so that even a human-chosen passphrase resists
     offline attack? Default: Argon2id with generated 80-bit passphrases (§14.4).
-12. **Web console power.** Should the web owner console also kick and rotate
-    keys (more JS and more attack surface), or stay client-only for that
-    (current design)? Default: client-only in v1.
+12. **Web console power.** ~~Should the web owner console also kick and
+    rotate keys (more JS and more attack surface), or stay client-only for
+    that (current design)? Default: client-only in v1.~~ **Decided
+    2026-11-27:** client-only kick/rotate in v1 (the default stands); the
+    console links out to the client command.
 13. **Proof-of-work vs. other anti-abuse for room creation.** PoW is cheap and
     privacy-friendly, but a botnet pays it. Add an optional creation-token or
     CAPTCHA tier if abuse appears? Default: PoW only, with adaptive difficulty.

@@ -54,6 +54,10 @@ const ConvKernel *convolution_prepare_reverb_ex(double size,double fade,double l
 void convolution_reverb_reset_stream(void);
 /* Test/offline builder; normalization follows WebAudio when normalize != 0. */
 ConvKernel *convolution_kernel(const float *stereo, int frames, int channels, int normalize);
+/* Blink ConvolverNode perceived-volume calibration,
+   third_party/blink/renderer/platform/audio/reverb.cc: 10^(-58*0.05).
+   The 2012 draft rounded this to .00125, which renders 0.7% quiet. */
+double convolution_gain_calibration(void);
 void convolution_kernel_free(ConvKernel *kernel);
 /* Callback safe: no allocation, I/O, or locks. */
 void convolution_set(ConvState *state, const ConvKernel *kernel);

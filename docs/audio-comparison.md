@@ -1223,15 +1223,20 @@ absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so only the correlation
 misses, by 0.00065. Shorter 0.6/1.0 second windows were worse (0.9814 and
 0.9889). Mono-source, longer-clip/release, stereo-IR and dry probes point at
 the browser's low-level IR-speed path, not source width or the IR kernel.
-`diag-ir-tail` isolates the sub-unity IR tail with a 0.2 ms source: the full
-2 s matches at **0.99918/1.032** (per-100 ms 0.9980-0.9998, ratio
-1.057->1.012), so the resampler and IR edge are not the residual. The deployed
-`adjustLength` is the backward index resampler native already mirrors, not a
-phase vocoder. The .03 source peaks at 3e-4, about ten int16 levels. The
-harness now supports a `float32: true` capture that wraps the main
-`OfflineAudioContext.startRendering` buffer and writes an IEEE-float WAV;
-with it the original .03 full 2 s window gates at **0.999996/0.99208**
-without changing gain or thresholds (the int16 capture measured 0.98935).
+`custom-ir-tail` isolates the sub-unity IR tail with a 0.2 ms wet-only source:
+the full 2 s gates at **0.999999997/0.99997**, and the unity/double-speed
+variants at **1.0/0.99999** and **0.99999996/1.00003**. The earlier
+0.99918/1.032 int16 reading was mostly the 16-bit capture floor, and the
+remaining uniform 0.9929 gap was the convolver calibration: native used the
+rounded 2012 draft constant 0.00125, while current Blink
+(`third_party/blink/renderer/platform/audio/reverb.cc`,
+`kGainCalibration = -58`) scales by 10^(-58*0.05) = 0.00125893, i.e. 1.00714x
+hotter. `convolution_gain_calibration()` now carries that constant for both
+custom and generated IRs. The deployed `adjustLength` is the backward index
+resampler native already mirrors, not a phase vocoder. The harness captures
+the main `OfflineAudioContext.startRendering` buffer as IEEE-float WAV
+(`float32: true`); with it the original .03 full 2 s window gates at
+**0.999996/0.99916** (the int16 capture measured 0.98935).
 The same path at `.gain(1)` also gates on int16 at **0.999988/0.9959**
 (`shared-room-lifetime-rate-half-source-unity-gain`). The 1.8 s active
 portion remains gated at 0.99029. The residual was the 16-bit capture floor,

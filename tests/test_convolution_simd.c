@@ -145,7 +145,7 @@ static void demand_sized_history(void) {
     assert(silent.slots==slots);
     convolution_set(&silent,small);
     convolution_process(&silent,1,-2,&l,&r);
-    assert(fabs(l-.00125)<1e-9 && fabs(r+.0025)<1e-9);
+    assert(fabs(l-convolution_gain_calibration())<1e-9 && fabs(r+2*convolution_gain_calibration())<1e-9);
     convolution_kernel_free(small); convolution_kernel_free(k);
     convolution_state_free(&clone); convolution_state_free(&silent);
     puts("demand-sized convolution histories and clones passed");

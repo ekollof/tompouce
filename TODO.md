@@ -404,16 +404,18 @@ and measured divergences are recorded in the archive.
       the near-silent IR-speed edges: 0-0.5 s 0.966-0.989 at RMS 1.24-1.13,
       0.5-1.6 s 0.989-0.997 at 1.08-1.13, and 1.7-2.0 s 0.944-0.986 at
       1.30-1.32. The absolute RMS error is 1.65e-5 at peaks below 3.3e-4, so
-      only correlation misses, by 0.00065. `diag-ir-tail` (0.2 ms source)
-      isolates the sub-unity IR tail and matches at 0.99918/1.032 over the
-      full 2 s, so the resampler and IR edge are not the residual; the
-      deployed `adjustLength` is the backward index resampler native mirrors,
-      not a phase vocoder. The harness now captures the main render as
+      only correlation misses, by 0.00065. `custom-ir-tail` (0.2 ms wet-only
+      source) gates at **0.999999997/0.99997** over the full 2 s, with unity/
+      double-speed variants at **1.0/0.99999** and **1.0/1.00003**. The old
+      int16 0.99918/1.032 reading was mostly the 16-bit capture floor; the
+      remaining uniform 0.9929 gap was the convolver calibration (native used
+      the rounded 2012 draft 0.00125, current Blink uses 10^(-58*0.05)).
+      The harness now captures the main render as
       float32 (`float32: true`), and the original .03 full 2 s window gates at
-      **0.999996/0.99208** without changing gain or thresholds; the int16
+      **0.999996/0.99916** without changing thresholds; the int16
       capture measured 0.98935. The same path at gain 1 also gates on int16
-      at **0.999988/0.9959**. The residual was the 16-bit capture floor, not a
-      room-send envelope. The 1.8 s active window remains gated at 0.99029.
+      at **0.999988/1.0030**. The residual was calibration plus the 16-bit
+      capture floor, not a room-send envelope. The 1.8 s active window remains gated at 0.99029.
 - [x] Seeded Arpoon opening gate. The previously diagnostic random-room
       `arpoon-opening` case now uses the shared `0xc0ffee` generated-room seed
       and passes at correlation **0.99986** and RMS ratio **1.0030** with the

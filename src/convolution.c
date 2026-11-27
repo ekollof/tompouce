@@ -32,6 +32,10 @@ void convolution_kernel_free(ConvKernel *kernel) {
     if (kernel) { free(kernel->tail); free(kernel); }
 }
 
+double convolution_gain_calibration(void) {
+    return pow(10.0,-58*0.05);
+}
+
 static ConvKernel *build_kernel(const float *stereo, int frames, int channels, int normalize, int normal_frames) {
     convolution_simd_init();
     if (!stereo || frames < 1 || frames > CONV_MAX_FRAMES || (channels != 1 && channels != 2)) return NULL;
@@ -50,7 +54,7 @@ static ConvKernel *build_kernel(const float *stereo, int frames, int channels, i
         if (!isfinite(v)) { convolution_kernel_free(kernel); return NULL; }
         sum += v*v;
     }
-    double scale = normalize ? .00125/fmax(.000125,sqrt(sum/((double)normal_frames*channels))) : 1;
+    double scale = normalize ? convolution_gain_calibration()/fmax(.000125,sqrt(sum/((double)normal_frames*channels))) : 1;
     for (int ch = 0; ch < 2; ch++) {
         int source = channels == 1 ? 0 : ch;
         for (int i = 0; i < frames && i < CONV_BLOCK; i++) kernel->head[ch][i] = (float)(stereo[(size_t)i*2+source]*scale);

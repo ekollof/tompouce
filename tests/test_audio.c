@@ -213,7 +213,7 @@ static void test_convolution(void) {
     assert(kernel);
     convolution_set(state,kernel);
     convolution_process(state,1,-2,&left,&right);
-    assert(fabs(left-.00125) < 1e-9 && fabs(right+.0025) < 1e-9);
+    assert(fabs(left-convolution_gain_calibration()) < 1e-9 && fabs(right+2*convolution_gain_calibration()) < 1e-9);
     convolution_kernel_free(kernel); convolution_state_free(state); free(state);
 }
 

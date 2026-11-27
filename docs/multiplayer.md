@@ -2000,6 +2000,18 @@ When a member goes over a limit, the director drops the frame and sends
 than 30 s over the limit) it kicks the member. The client also limits itself
 to the same rates, so honest clients never trip these.
 
+**Registration kill-switch (botnet backstop, decided with Q13).** PoW
+prices out casual abuse but not a botnet, and E2E rules out content
+moderation — so the public instance has a no-protocol-change lever:
+`room_creation` in the director config is `open` (anyone passing PoW),
+`invite-only` (creation additionally requires an unused creation token
+the operator issued out of band — one optional field on the existing
+`POST /v1/rooms`, no wire-protocol change), or `closed` (no new rooms at
+all).
+The operator flips it without restarting rooms in flight, and flips
+back when the wave passes. Adaptive PoW difficulty stays the day-to-day
+control; the kill-switch is the fire escape.
+
 ### 13.7 Threat model
 
 Scope: a public hosted director with a web front end, E2E on by default (D2),
@@ -3250,26 +3262,31 @@ design. Each states a default the implementer will use if you do not answer.
    extension to Flok so browser users can phase-align? Default: no.
 8. **Naming.** Is "director" the right user-facing name? Default: keep
    "director" in docs, "room server" in the UI.
-9. **Own `local:` imports in a room.** The profile is per composite, so your
+9. **Own `local:` imports in a room.** ~~The profile is per composite, so your
    own `local:` modules stop working while others are in the room (§13.2).
-   Default: accept, and document it.
+   Default: accept, and document it.~~ **Decided 2026-11-27:** accept and
+   document (the default stands); per-slot trust is a v2 question.
 10. **Delegated moderators / co-owners.** ~~Owner key is the single trust root
     (D7). Should the owner be able to sign delegation certificates so
     trusted members can mint invites and kick? Default: no in v1; the owner
     can hand the owner link to a co-owner they trust fully.~~ **Decided
     2026-11-27:** no moderators in v1 (the default stands); owner-link
     handover covers co-ownership.
-11. **Stronger passphrase method.** Use a PAKE (OPAQUE or CPace) instead of an
+11. **Stronger passphrase method.** ~~Use a PAKE (OPAQUE or CPace) instead of an
     Argon2id-wrapped blob, so that even a human-chosen passphrase resists
-    offline attack? Default: Argon2id with generated 80-bit passphrases (§14.4).
+    offline attack? Default: Argon2id with generated 80-bit passphrases (§14.4).~~
+   **Decided 2026-11-27:** Argon2id with generated-only passphrases (no
+   human-chosen option in the UI, which dissolves the PAKE question).
 12. **Web console power.** ~~Should the web owner console also kick and
     rotate keys (more JS and more attack surface), or stay client-only for
     that (current design)? Default: client-only in v1.~~ **Decided
     2026-11-27:** client-only kick/rotate in v1 (the default stands); the
     console links out to the client command.
-13. **Proof-of-work vs. other anti-abuse for room creation.** PoW is cheap and
+13. **Proof-of-work vs. other anti-abuse for room creation.** ~~PoW is cheap and
     privacy-friendly, but a botnet pays it. Add an optional creation-token or
-    CAPTCHA tier if abuse appears? Default: PoW only, with adaptive difficulty.
+    CAPTCHA tier if abuse appears? Default: PoW only, with adaptive difficulty.~~
+    **Decided 2026-11-27:** PoW with adaptive difficulty, plus the
+    registration kill-switch backstop (§13.6); no token/CAPTCHA tiers.
 14. **Browser as a client.** Is a later browser-based joiner (Strudel in the
     page) desired, or does the web front end stay a front door only
     (current design)? Default: front door only.

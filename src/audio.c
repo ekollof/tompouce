@@ -18,6 +18,7 @@
 #include "midi.h"
 #include "convolution.h"
 #include "stretch.h"
+#include "vocoder.h"
 #include "scheduler.h"
 #include "prep_pool.h"
 #include "prep_profile.h"
@@ -410,6 +411,52 @@ static int silent_clock;
    Moving a Voice transfers its prepared references; the callback never frees. */
 enum { VOICE_SLOTS = MAX_VOICES*2 };
 static Voice voices[VOICE_SLOTS];
+/* Live phase-vocoder pool for plain osc + stretch voices. Slots are
+   claimed at trigger under voice_lock and reclaimed lazily the same way;
+   the callback only reads and writes, never allocates or frees. */
+enum { LIVE_VOCODERS = 32 };
+static LiveVocoder live_pool[LIVE_VOCODERS];
+static int live_owner[LIVE_VOCODERS]; /* owning voice slot +1, 0 free */
+static void live_vocoder_catchup(Voice *V);
+static unsigned long long live_serial[LIVE_VOCODERS];
+
+/* Plain osc + stretch voices render through a per-voice streaming
+   phase vocoder (the deployed chain runs the raw oscillator into the
+   vocoder before the gain envelope). Qualifying voices hold no source
+   modulation the chunked refill cannot reproduce exactly: no FM, no
+   pitch envelope, no frequency/cents LFOs, raw oscillator only. */
+static int live_vocoder_eligible(const AudioEvent *ev, const Voice *v) {
+    int reason = 0;
+    if (ev->stretch <= 0 || ev->is_drum || ev->smp >= 0 || ev->wt_frames > 0) reason = 1;
+    else if (v->inst != INST_SINE && v->inst != INST_SAW &&
+        v->inst != INST_SQUARE && v->inst != INST_TRI) reason = 2;
+    else if (v->dsp.fm_active || v->dsp.pitch_active) reason = 4;
+    else if (ev->lpf != 0) reason = 5;
+    else if (ev->dsp.noise_mix != 0 || ev->dsp.source_noise) reason = 6;
+    else for (int i = 0; i < LFO_SLOTS; i++) {
+        int t = ev->lfo[i].tgt;
+        if (t == 5 || t == 7) { reason = 7; break; }
+        if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN) {
+            int gi = t - GEN_TGT_BASE;
+            if ((gi >= GEN_FMI1 && gi <= GEN_FMI8) ||
+                (gi >= GEN_FMH1 && gi <= GEN_FMH8)) { reason = 8; break; }
+        }
+    }
+    return reason == 0;
+}
+
+static int live_vocoder_try_claim(int slot) {
+    for (int i = 0; i < LIVE_VOCODERS; i++) {
+        int owner = live_owner[i]-1;
+        if (live_owner[i] != 0 && owner >= 0 && owner < VOICE_SLOTS &&
+            voices[owner].active && voices[owner].onset_serial == live_serial[i] &&
+            voices[owner].live_voc == i+1) continue;
+        live_owner[i] = slot+1;
+        live_serial[i] = 0; /* recorded once the voice owns a serial */
+        return i+1;
+    }
+    return 0;
+}
 /* Sorted active-slot list. Scanning this instead of the whole 256-slot pool
    keeps the per-frame renderer proportional to sounding voices while
    preserving slot order and therefore mixing order. */
@@ -472,6 +519,9 @@ static int soa_kind_for(const Voice *v) {
 static int soa_bank_eligible(const Voice *v) {
     if (!v->active || v->retiring || v->stretch_buffer ||
         v->fx_stage_count>0) return 0;
+    /* Live-vocoder voices chunk their source through a 128-sample
+       transform the batch lanes cannot stage. */
+    if (v->live_voc > 0) return 0;
     /* Generic voice LFOs and envelopes render per sample in the scalar
        path; the batch lanes have no slot support. Filter LFOs are excluded
        separately via lfo_sample_rate below. */
@@ -1452,6 +1502,10 @@ static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
         if (sl->tgt >= GEN_TGT_BASE && sl->tgt < GEN_TGT_BASE + NGEN) {
             int gi = sl->tgt - GEN_TGT_BASE;
             if (gi == GEN_DELAYTIME || gi == GEN_DELAYFB || gi == GEN_DJF) continue;
+            /* Stretch LFOs on live-vocoder voices step in the refill that
+               stages the next block, so the block's factor is the last
+               sample's value like the worklet's parameters read. */
+            if (gi == GEN_STRETCH && v->live_voc > 0) continue;
         }
         double g = lfo_slot_output(sl, v->lfo_phase[li]);
         if (!isfinite(g)) {
@@ -1613,6 +1667,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     soa_bank_release(v);
     memset(v, 0, sizeof(Voice));
     v->soa_lane=-1;
+    v->live_voc=0; /* streaming vocoder pool slot +1, claimed below */
     v->scope_mask = ev->scope_mask; v->scope_generation = ev->generation;
     v->out_target = ev->out_target;
     v->analyser_id = ev->analyser_id; v->analyser_fft = ev->analyser_fft;
@@ -1655,6 +1710,18 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     v->has_pan=ev->has_pan;
     v->waveform_gain=ev->waveform_gain>0?ev->waveform_gain:1;
     v->start_time = fmax(audio_time,ev->time);
+    /* Live-vocoder voices start their source on the deployed 40 ms
+       preroll (t -= 0.04) so the overlap state aligns at the musical
+       onset; the envelope and gate derive from the shifted start. The
+       trigger lands at/after the preroll, so the missed blocks are
+       fast-forwarded below once the voice is fully set up. */
+    if (live_vocoder_eligible(ev, v)) {
+        int slot = live_vocoder_try_claim((int)(v-voices));
+        if (slot > 0) {
+            v->live_voc = slot;
+            v->start_time = ev->time-.04;
+        }
+    }
     v->dsp.control.lfo_start_time = v->start_time;
     v->dsp_right.control.lfo_start_time = v->start_time;
     /* The transient node holds its first render quantum silent; the hold
@@ -1724,6 +1791,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
     }
     orbits_ensure();
     v->onset_serial=++voice_onset_serial;
+    if (v->live_voc > 0) live_serial[v->live_voc-1]=v->onset_serial;
     if (v->inst==INST_PULSE || v->inst==INST_SUPERSAW) {
         /* Worklet begin/time parameters are Float32. At an exact quantum
            boundary their rounding decides which block is first active. */
@@ -1745,6 +1813,13 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
         double cycles = ev->lfo[i].timebase*ev->lfo[i].hz + ev->lfo[i].phase;
         v->lfo_phase[i] = (cycles-floor(cycles))*2.0*M_PI;
     }
+    /* A stretch LFO the voice cannot consume (no live path) modulates
+       nothing; the deployed node it targets does not exist here. */
+    if (v->live_voc <= 0) for (int i = 0; i < LFO_SLOTS; i++)
+        if (v->vlfo[i].tgt == GEN_TGT_BASE+GEN_STRETCH) {
+            log_console("stretch: voice has no live vocoder path; static transpose fallback");
+            break;
+        }
     /* Shared-line LFOs outlive the voice: the deployed worklet renders
        whole blocks whose start precedes end, so the orbit line keeps
        bending through the enclosing block. */
@@ -1875,6 +1950,7 @@ static void trigger_voice(Voice *v, AudioEvent *ev) {
             }
     }
     cache_routing(v);
+    if (v->live_voc > 0) live_vocoder_catchup(v);
     if (v->start_time<=audio_time+1e-10) voice_onset(v);
     else next_voice_onset=fmin(next_voice_onset,v->start_time);
 }
@@ -3211,6 +3287,141 @@ static double source_value(const Voice *v, double position, int channel) {
 #define source_value source_value_impl
 #endif
 
+/* Stage one absolute 128-sample block of raw oscillator into the
+   voice's streaming vocoder, then transform. The source replicates the
+   scalar oscillator code sample for sample; samples before the first
+   rendered sample stay zero like a freshly created worklet node. The stretch factor is evaluated per sample with last
+   value winning, mirroring the worklet's pitchFactor[last] read; only
+   GEN_STRETCH slots step here, everything else steps in the drain. */
+static void live_vocoder_refill_block(Voice *V) {
+    LiveVocoder *voc = &live_pool[V->live_voc-1];
+    long B = (long)V->live_next;
+    double f = V->freq;
+    double st = V->stretch_factor;
+    double shift = st >= 1 ? st-1 : (st-1)*4;
+    double pw = V->pw;
+    double pwrate = V->dsp.control.p[DSP_PWRATE];
+    double pwsweep = V->dsp.control.p[DSP_PWSWEEP];
+    int w = V->inst;
+    /* The deployed source node applies its ADSR before the vocoder
+       (oscillator into gain into envelope into the chain); the release
+       node fades after it. The refill stages the enveloped source while
+       the drain keeps only the release fade, so attack and decay shape
+       the vocoder input exactly like the worklet chain. */
+    double gate = V->gate_end - V->start_time;
+    double ea = V->vatt >= 0 ? V->vatt : 0.005;
+    double ed = V->vdec >= 0 ? V->vdec : 0.1;
+    double esus = V->vsus >= 0 ? V->vsus : 0.6;
+    double er = V->vrel >= 0 ? V->vrel : 0.15;
+    if (ea < 0.001) ea = 0.001;
+    if (ed < 0) ed = 0;
+    if (esus < 0) esus = 0;
+    if (esus > 1) esus = 1;
+    if (er < 0.005) er = 0.005;
+    for (int j = 0; j < VOCODE_HOP; j++) {
+        long S = B+j;
+        double age_j = S/SR - V->start_time;
+        double src = 0;
+        /* The oscillator starts at the exact shifted start; earlier
+           staging slots stay zero like a fresh worklet node. */
+        if (age_j >= 0) {
+            /* Same source computation as the scalar oscillator path:
+               naive switch on the incremental phase, then the polyBLEP
+               override. FM, pitch envelopes and the transpose stay out
+               of the live path by eligibility. */
+            double pwuse = pw;
+            if (pwrate > 0) pwuse += sin(2*M_PI*age_j*pwrate)*pwsweep;
+            switch (w) {
+            case INST_SINE:
+                src = sin(V->phase);
+                break;
+            case INST_SAW:
+                src = 2.0*(V->phase/(2*M_PI) - floor(V->phase/(2*M_PI)+0.5));
+                break;
+            case INST_SQUARE:
+                if (pwuse >= 0.0) {
+                    double pu = pwuse;
+                    if (pu < 0.05) pu = 0.05;
+                    if (pu > 0.95) pu = 0.95;
+                    double u = V->phase/(2.0*M_PI);
+                    u -= floor(u);
+                    src = (u < pu) ? 1.0 : -1.0;
+                } else {
+                    src = (sin(V->phase) >= 0) ? 1.0 : -1.0;
+                }
+                break;
+            case INST_TRI: {
+                double t = V->phase/(2*M_PI); t -= floor(t);
+                src = 4.0*fabs(t-0.5)-1.0;
+                break;
+            }
+            default:
+                src = sin(V->phase);
+                break;
+            }
+            if (w == INST_SAW) src = dsp_oscillator(0,V->phase,f,.5);
+            else if (w == INST_SQUARE)
+                src = dsp_oscillator(1,V->phase,f,pwuse >= 0 ? pwuse : .5);
+            else if (w == INST_TRI) src = dsp_oscillator(2,V->phase,f,.5);
+            /* The source-node ADSR shapes the vocoder input; the drain
+               keeps only the release fade (see the release node). */
+            src *= dsp_envelope(age_j,gate,ea,ed,esus,er);
+            V->phase += (2*M_PI*f)/SR;
+            if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
+        }
+        double g = 0;
+        for (int li = 0; li < LFO_SLOTS; li++) {
+            LfoSlot *sl = &V->vlfo[li];
+            if (sl->tgt != GEN_TGT_BASE+GEN_STRETCH || !(sl->hz > 0.0)) continue;
+            if (age_j < V->lfo_hold) continue;
+            double gg = lfo_slot_output(sl, V->lfo_phase[li]);
+            if (isfinite(gg)) g += gg;
+            V->lfo_phase[li] += (2.0*M_PI*sl->hz)/SR;
+            if (V->lfo_phase[li] > 2.0*M_PI)
+                V->lfo_phase[li] -= 2.0*M_PI*floor(V->lfo_phase[li]/(2.0*M_PI));
+        }
+        live_vocoder_set_factor(voc, vocoder_factor(shift+g));
+        live_vocoder_push(voc, (float)src, (float)src);
+    }
+    V->live_next = B+VOCODE_HOP;
+}
+
+/* Fast-forward a live voice from its shifted start through already
+   rendered time. The trigger lands at/after the preroll in both the
+   realtime consumer and the offline renderer, so the missed blocks run
+   here (scheduler thread, never the callback): source, stretch factor
+   and envelope advance exactly as if rendering since start. */
+static void live_vocoder_catchup(Voice *V) {
+    long long now_frame = (long long)ceil(audio_time*SR - 1e-3);
+    V->live_first = (long long)floor(V->start_time*SR) - VOCODE_HOP;
+    long blk = V->live_first >= 0 ? (V->live_first/VOCODE_HOP)*VOCODE_HOP
+        : ((V->live_first-VOCODE_HOP+1)/VOCODE_HOP)*VOCODE_HOP;
+    /* The refill stages whole blocks including leading pre-onset zeros,
+       so the init skip stays zero (a nonzero skip is only for callers
+       that push fewer than 128 samples for the first block). */
+    live_vocoder_init(&live_pool[V->live_voc-1], blk, 0, V->stretch_factor, 1);
+    V->live_next = blk;
+    int guard = 0;
+    while (V->live_next+VOCODE_HOP <= now_frame && guard++ < 64)
+        live_vocoder_refill_block(V);
+    if (V->live_next+VOCODE_HOP <= now_frame) {
+        /* Absurdly late trigger: restart the effect cold at now. */
+        long blk2 = now_frame >= 0 ? (now_frame/VOCODE_HOP)*VOCODE_HOP
+            : ((now_frame-VOCODE_HOP+1)/VOCODE_HOP)*VOCODE_HOP;
+        live_vocoder_init(&live_pool[V->live_voc-1], blk2,
+            0, V->stretch_factor, 1);
+        V->live_first = now_frame;
+        V->live_next = blk2;
+    }
+    /* Sync the counted age to true time; the scalar path would otherwise
+       start the envelope 40 ms in. V->env keeps tracking the input ADSR
+       per sample in the drain for the release level. */
+    double age_now = audio_time - V->start_time;
+    if (!(age_now > 0)) age_now = 0;
+    V->age = age_now;
+    V->live_frame = V->live_first-1; /* primed; first drain adopts */
+}
+
 /* Audio callback */
 static int pa_callback(const void *input, void *output, unsigned long frameCount,
                        const PaStreamCallbackTimeInfo *timeInfo, PaStreamCallbackFlags statusFlags, void *userData) {
@@ -3735,7 +3946,9 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     if (age >= V->lfo_hold && voice_pan_lfo_active(V))
                         voice_lfo_pan_routing(V, V->pan + pan_lfo);
                     // oscillator
-                    freq = dsp_frequency_traj(&V->dsp,freq*(V->stretch_factor > 0 ? V->stretch_factor : 1),V->age,V->gate_end-V->start_time,fm_traj_p);
+                    /* Live-vocoder voices run the raw oscillator; the
+                       transform applies the stretch factor per block. */
+                    freq = dsp_frequency_traj(&V->dsp,freq*(V->live_voc>0?1:(V->stretch_factor > 0 ? V->stretch_factor : 1)),V->age,V->gate_end-V->start_time,fm_traj_p);
                     /* OscillatorNode clamps frequency to ±Nyquist and keeps
                        advancing phase there. A sine fades out across the top
                        third-octave because that partial is culled. */
@@ -3750,6 +3963,40 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     double phaseinc = (2*M_PI * render_freq)/SR;
                     double sample = 0;
                     int w = V->inst;
+                    if (V->live_voc > 0) {
+                        /* Streaming vocoder: whole absolute blocks are
+                           refilled ahead, then one transformed sample per
+                           frame is consumed through the identical
+                           downstream chain. The output buffer covers the
+                           block ending at live_next; the position is the
+                           render sample's offset into it. */
+                        long long sn = llround(audio_time*SR);
+                        if (V->live_frame == V->live_first-1) {
+                            V->live_frame = sn; /* primed; state caught up */
+                        } else if (sn != V->live_frame ||
+                            sn < V->live_next-VOCODE_HOP) {
+                            /* Clock jump or absurd trigger gap: restart
+                               the effect cold at the render sample. The
+                               refill stages the whole block, so skip is
+                               zero; the offset only positions consumption. */
+                            long blk = sn >= 0 ? (sn/VOCODE_HOP)*VOCODE_HOP
+                                : ((sn-VOCODE_HOP+1)/VOCODE_HOP)*VOCODE_HOP;
+                            live_vocoder_init(&live_pool[V->live_voc-1], blk,
+                                0, V->stretch_factor, 1);
+                            V->live_first = sn;
+                            V->live_next = blk;
+                            V->live_frame = sn;
+                        }
+                        while (sn >= V->live_next) live_vocoder_refill_block(V);
+                        LiveVocoder *lv = &live_pool[V->live_voc-1];
+                        long LB = (long)V->live_next-VOCODE_HOP;
+                        int Lpos = (int)(sn-LB);
+                        sample = (Lpos >= 0 && Lpos < VOCODE_HOP) ? lv->out[0][Lpos] : 0;
+                        V->live_frame = sn+1;
+                        /* Raw switch sources carry no periodic-table gain
+                           match; saw/square need it like the scalar path. */
+                        sample *= V->waveform_gain>0?V->waveform_gain:1;
+                    } else {
                     switch (w) {
                         case INST_SINE: sample = sin(V->phase)*sine_gain; break;
                         case INST_WT: {
@@ -3818,6 +4065,7 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                     }
                     V->phase += phaseinc;
                     if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
+                    } /* end non-live oscillator source */
                     if (native_synth_effect(V->native_program)) {
                         double source_gain=env*(V->dsp.control.enabled && w!=INST_PULSE?.3:1);
                         if (w==INST_SUPERSAW) mix_graph_effect(V,V->dsp.supersaw_l*source_gain,V->dsp.supersaw_r*source_gain,vm);
@@ -3825,6 +4073,20 @@ static int pa_callback(const void *input, void *output, unsigned long frameCount
                         V->age+=dt; continue;
                     }
                     V->age += dt;
+                    /* Live-vocoder voices carry the source ADSR in the
+                       staged input; the drain keeps only the release fade
+                       (the deployed release node), which the retiring
+                       envelope then folds in for stolen voices. */
+                    if (V->live_voc > 0) {
+                        env = 1.0;
+                        if (V->released) {
+                            double rr = V->vrel >= 0 ? V->vrel : 0.15;
+                            if (rr < 0.005) rr = 0.005;
+                            double rt = audio_time - V->release_time;
+                            env = rt < rr ? V->release_start_level*(1.0-rt/rr) : 0.0;
+                        }
+                        env = retiring_envelope(V, env);
+                    }
                     double smp = sample * env * amp;
                     /* Superdough oscillator sources have a fixed 0.3 gain
                        before the amplitude envelope and effects. */

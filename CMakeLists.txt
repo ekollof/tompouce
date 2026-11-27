@@ -220,7 +220,7 @@ add_library(tompouce_core STATIC
     src/js_audio.c src/dsp.c src/dsp_supersaw.c src/render_block.c src/voice_soa_dsp.c src/soa_voice.c src/periodic.c src/csound_host.c src/convolution.c src/convolution_mix.c src/companion.c
     src/sounds.c src/sound_store.c src/terminal_graphics.c src/visual.c src/visual_render.c src/visual_fft_simd.c
     src/audio_output.c src/native_synth.c src/osc_output.c src/reverb_impulse.c src/duck_onset.c
-    src/stretch.c src/gm_synth.c src/sample_interp.c src/envelope_simd.c src/oscillator_simd.c src/reverb_simd.c src/delay_simd.c src/stretch_fft_simd.c src/stretch_real_fft_simd.c src/prep_profile.c src/prep_pool.c src/prep_cpu.c
+    src/stretch.c src/vocoder.c src/gm_synth.c src/sample_interp.c src/envelope_simd.c src/oscillator_simd.c src/reverb_simd.c src/delay_simd.c src/stretch_fft_simd.c src/stretch_real_fft_simd.c src/prep_profile.c src/prep_pool.c src/prep_cpu.c
     src/rational.c src/signal_wave.c src/js_worker.c src/lv2_host.c src/lv2_worker.c src/live_lv2.c src/carla_host.c)
 add_dependencies(tompouce_core embedded_resources)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

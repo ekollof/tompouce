@@ -114,6 +114,14 @@ typedef struct Voice {
     double stretch_factor;
     const StretchBuffer *stretch_buffer;
     unsigned stretch_frame;
+    /* Streaming phase-vocoder render (plain osc + stretch): pool slot +1,
+       or 0 for none (zero survives pool wipes). The source runs on the
+       absolute 128-sample grid so the transform matches the deployed
+       per-quantum processing. */
+    int live_voc;
+    long long live_first; /* absolute onset sample of the first render */
+    long long live_next;  /* absolute start of the next block to refill */
+    long long live_frame; /* absolute sample the next drain renders */
     char token[24]; /* printable label for music_debug; not a path */
     // drum-specific
     double age;

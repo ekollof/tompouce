@@ -3,18 +3,15 @@
    Spectrum peak regions, phase correction and Float32 OLA follow that source.
    All transforms run during generator preparation, never in the callback. */
 #include "stretch.h"
+#include "vocoder.h"
 #include "stretch_fft_simd.h"
 #include "sampler.h"
 #include "prep_profile.h"
 #include <stdatomic.h>
 #include <float.h>
 
-#define FFT_SIZE 2048
-#define HOP 128
 #define CACHE_SIZE 128
 #define CACHE_BYTES (128u*1024u*1024u)
-typedef struct { double re,im; } Complex;
-_Static_assert(sizeof(Complex)==2*sizeof(double),"Complex layout");
 typedef struct {
     char source_key[768];
     int sample, phase, frames;
@@ -36,90 +33,6 @@ static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t ready=PTHREAD_COND_INITIALIZER;
 static void stretch_lock(void) { prep_lock(&lock, PREP_LOCK_STRETCH); }
 static void stretch_unlock(void) { prep_unlock(&lock, PREP_LOCK_STRETCH); }
-static pthread_once_t tables_once=PTHREAD_ONCE_INIT;
-static float hann[FFT_SIZE];
-static Complex twiddle[FFT_SIZE/2];
-static unsigned reverse_bits[FFT_SIZE];
-static unsigned real_reverse[FFT_SIZE/2];
-
-static void init_tables(void) {
-    for (unsigned i=0;i<FFT_SIZE;i++) {
-        hann[i]=(float)(.5*(1-cos(2*M_PI*i/FFT_SIZE)));
-        unsigned x=i, reversed=0;
-        for (int bit=0;bit<11;bit++) { reversed=(reversed<<1)|(x&1); x>>=1; }
-        reverse_bits[i]=reversed;
-        if (i<FFT_SIZE/2) twiddle[i]=(Complex){cos(2*M_PI*i/FFT_SIZE),-sin(2*M_PI*i/FFT_SIZE)};
-        if (i<FFT_SIZE/2) {
-            unsigned reversed_pairs=0;
-            for (unsigned shift=0;shift<10;shift+=2) reversed_pairs|=((i>>shift)&3)<<(8-shift);
-            real_reverse[i]=reversed_pairs;
-        }
-    }
-}
-
-/* Adapted from fft.js, Fedor Indutny 2017, MIT (LICENSE-FFT).
-   Preserve its real-transform layout, including the upper-half intermediate
-   bins read by the reference vocoder's last peak region when shifting down. */
-static Complex multiply(Complex a,Complex b) { return (Complex){a.re*b.re-a.im*b.im,a.re*b.im+a.im*b.re}; }
-static void real_fft(Complex *out,const float *input) {
-    for (unsigned i=0;i<FFT_SIZE/2;i++) {
-        double a=input[real_reverse[i]],b=input[real_reverse[i]+FFT_SIZE/2];
-        out[i*2]=(Complex){a+b,0}; out[i*2+1]=(Complex){a-b,0};
-    }
-    for (unsigned step=FFT_SIZE/4;step>=2;step/=4) {
-        unsigned length=FFT_SIZE*2/step,q=length/4;
-        for (unsigned base=0;base<FFT_SIZE;base+=length) for (unsigned j=0,k=0;j<=q/2;j++,k+=step/2) {
-            unsigned a=base+j,b=a+q,c=b+q,d=c+q;
-            Complex ma=out[a],mb=multiply(out[b],twiddle[k]),mc=multiply(out[c],twiddle[2*k]),md=multiply(out[d],twiddle[3*k]);
-            Complex t0={ma.re+mc.re,ma.im+mc.im},t1={ma.re-mc.re,ma.im-mc.im};
-            Complex t2={mb.re+md.re,mb.im+md.im},t3={mb.re-md.re,mb.im-md.im};
-            out[a]=(Complex){t0.re+t2.re,t0.im+t2.im}; out[b]=(Complex){t1.re+t3.im,t1.im-t3.re};
-            if (!j) { out[c]=(Complex){t0.re-t2.re,t0.im-t2.im}; continue; }
-            if (j==q/2) continue;
-            out[base+q-j]=(Complex){t1.re-t3.im,-t1.im-t3.re};
-            out[base+2*q-j]=(Complex){t0.re-t2.re,-t0.im+t2.im};
-        }
-    }
-}
-static void fft(Complex *data,int inverse) {
-    stretch_fft((double*)data,inverse,(const double*)twiddle,reverse_bits);
-}
-
-static void transform(const float *input,float *sum,double factor,unsigned cursor,
-                      Complex *freq,Complex *shifted) {
-    float magnitudes[FFT_SIZE/2+1]; int peaks[FFT_SIZE/2+1],count=0;
-    float windowed[FFT_SIZE];
-    for (int i=0;i<FFT_SIZE;i++) windowed[i]=(float)((double)input[i]*hann[i]*1.62);
-    real_fft(freq,windowed); memset(shifted,0,FFT_SIZE*sizeof(*shifted));
-    for (int i=0;i<=FFT_SIZE/2;i++) magnitudes[i]=(float)(freq[i].re*freq[i].re+freq[i].im*freq[i].im);
-    for (int i=2;i<FFT_SIZE/2-1;i++) {
-        float mag=magnitudes[i];
-        if (magnitudes[i-1]>=mag || magnitudes[i-2]>=mag || magnitudes[i+1]>=mag || magnitudes[i+2]>=mag) continue;
-        peaks[count++]=i; i++;
-    }
-    for (int i=0;i<count;i++) {
-        int peak=peaks[i],target=(int)floor(peak*factor+.5);
-        if (target>FFT_SIZE/2+1) break;
-        int start=i?peak-(peak-peaks[i-1])/2:0;
-        int end=i+1<count?peak+(peaks[i+1]-peak+1)/2:FFT_SIZE;
-        double angle=2*M_PI*(target-peak)*cursor/FFT_SIZE;
-        double re=cos(angle),im=sin(angle);
-        for (int bin=start;bin<end;bin++) {
-            int dest=target+bin-peak;
-            if (dest>FFT_SIZE/2) break;
-            if (dest<0) continue;
-            shifted[dest].re+=freq[bin].re*re-freq[bin].im*im;
-            shifted[dest].im+=freq[bin].re*im+freq[bin].im*re;
-        }
-    }
-    for (int i=1;i<FFT_SIZE/2;i++) shifted[FFT_SIZE-i]=(Complex){shifted[i].re,-shifted[i].im};
-    fft(shifted,1);
-    for (int i=0;i<FFT_SIZE;i++) {
-        float sample=(float)shifted[i].re;
-        sample=(float)((double)sample*hann[i]*1.62);
-        sum[i]=(float)(sum[i]+sample/(FFT_SIZE/HOP));
-    }
-}
 
 void stretch_retain(const StretchBuffer *buffer) { if (buffer) atomic_fetch_add(&((StretchBuffer *)buffer)->refs,1); }
 void stretch_release(const StretchBuffer *buffer) { if (buffer) atomic_fetch_sub(&((StretchBuffer *)buffer)->refs,1); }
@@ -238,14 +151,14 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     double nearest=round(onset);
     if (fabs(onset-nearest)<=10*DBL_EPSILON*fmax(1,fabs(onset))) onset=nearest;
     double first_frame=ceil(onset);
-    key.phase=(int)fmod(first_frame,FFT_SIZE); if (key.phase<0) key.phase+=FFT_SIZE;
+    key.phase=(int)fmod(first_frame,VOCODE_FFT); if (key.phase<0) key.phase+=VOCODE_FFT;
     key.fraction=onset-first_frame;
     /* Source onended disconnects the entire browser graph on the next quantum;
        retaining the vocoder's trailing window would extend its release. */
-    key.frames=(int)(ceil((key.phase+key.fraction-.04*SR+(key.gate+key.release+.01)*SR)/HOP)*HOP-key.phase);
+    key.frames=(int)(ceil((key.phase+key.fraction-.04*SR+(key.gate+key.release+.01)*SR)/VOCODE_HOP)*VOCODE_HOP-key.phase);
     if (key.frames<0) key.frames=0;
     size_t bytes=sizeof(StretchBuffer)+(size_t)key.frames*2*sizeof(float);
-    pthread_once(&tables_once,init_tables);
+    vocoder_tables_init();
     stretch_lock();
     for (int i=0;i<CACHE_SIZE;i++) if (cache[i].buffer && !memcmp(&cache[i].key,&key,sizeof(key))) {
         cache[i].used=++serial; stretch_retain(cache[i].buffer); stretch_unlock(); return cache[i].buffer;
@@ -270,7 +183,7 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     stretch_unlock();
     if (slot<0) return NULL;
     StretchBuffer *buffer=calloc(1,bytes);
-    typedef struct { float input[2][FFT_SIZE],sum[2][FFT_SIZE]; Complex freq[FFT_SIZE],shifted[FFT_SIZE]; } Work;
+    typedef struct { float input[2][VOCODE_FFT],sum[2][VOCODE_FFT]; VocoderComplex freq[VOCODE_FFT],shifted[VOCODE_FFT]; } Work;
     Work *work=calloc(1,sizeof(*work));
     if (!buffer || !work) {
         free(buffer); free(work);
@@ -282,23 +195,23 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     /* Match the reference's 40ms source anticipation and global 128-frame
        OLA grid. PCM is indexed from the musical onset, including its tail. */
     double source_start=key.phase+key.fraction-.04*SR;
-    long first=(long)floor(source_start/HOP)*HOP;
+    long first=(long)floor(source_start/VOCODE_HOP)*VOCODE_HOP;
     double position=key.step<0?length-1-length*key.begin:length*key.begin;
     double loop_lo=length*key.params.p[DSP_LOOPBEGIN],loop_hi=length*key.params.p[DSP_LOOPEND];
     if (key.step<0) { double swap=loop_lo; loop_lo=length-loop_hi; loop_hi=length-swap; }
     int started=0;
     prep_work_begin(PREP_STRETCH);
-    for (long block=first;block<key.phase+buffer->frames;block+=HOP) {
+    for (long block=first;block<key.phase+buffer->frames;block+=VOCODE_HOP) {
         for (int channel=0;channel<2;channel++) {
-            memmove(work->input[channel],work->input[channel]+HOP,(FFT_SIZE-HOP)*sizeof(float));
-            memset(work->input[channel]+FFT_SIZE-HOP,0,HOP*sizeof(float));
+            memmove(work->input[channel],work->input[channel]+VOCODE_HOP,(VOCODE_FFT-VOCODE_HOP)*sizeof(float));
+            memset(work->input[channel]+VOCODE_FFT-VOCODE_HOP,0,VOCODE_HOP*sizeof(float));
         }
-        for (int i=0;i<HOP;i++) {
+        for (int i=0;i<VOCODE_HOP;i++) {
             double age=(block+i-source_start)/SR;
             if (age<0) continue;
             if (!started) { position+=age*SR*key.step; started=1; }
             if (key.params.p[DSP_LOOP]<=0 && (position<0 || position>=length)) {
-                int end=(int)(ceil((block+i)/(double)HOP)*HOP-key.phase);
+                int end=(int)(ceil((block+i)/(double)VOCODE_HOP)*VOCODE_HOP-key.phase);
                 if (end<buffer->frames) buffer->frames=end>0?end:0;
             }
             double env=dsp_envelope(age,key.gate,key.attack,key.decay,key.sustain,key.release);
@@ -311,7 +224,7 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
                     int read_index=index+offset;
                     double a=read_index<length?source[(size_t)read_index*2+channel]:0;
                     double b=read_index+1<length?source[(size_t)(read_index+1)*2+channel]:offset?0:a;
-                    work->input[channel][FFT_SIZE-HOP+i]=(float)((a+(b-a)*fraction)*(float)env);
+                    work->input[channel][VOCODE_FFT-VOCODE_HOP+i]=(float)((a+(b-a)*fraction)*(float)env);
                 }
             }
             position+=key.step*dsp_pitch_multiplier(&key.params,age,key.gate);
@@ -321,10 +234,10 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
                 if (position<loop_lo) position+=loop_hi-loop_lo;
             }
         }
-        unsigned cursor=(unsigned)((block%FFT_SIZE+FFT_SIZE)%FFT_SIZE);
+        unsigned cursor=(unsigned)((block%VOCODE_FFT+VOCODE_FFT)%VOCODE_FFT);
         for (int channel=0;channel<(channels==1?1:2);channel++) {
-            transform(work->input[channel],work->sum[channel],key.factor,cursor,work->freq,work->shifted);
-            for (int i=0;i<HOP;i++) {
+            vocoder_transform(work->input[channel],work->sum[channel],key.factor,cursor,work->freq,work->shifted);
+            for (int i=0;i<VOCODE_HOP;i++) {
                 long at=block+i-key.phase;
                 if (at>=0 && at<key.frames) {
                     buffer->pcm[(size_t)at*2+channel]=work->sum[channel][i];
@@ -333,8 +246,8 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
                     if (channels==1) buffer->pcm[(size_t)at*2+1]=work->sum[channel][i];
                 }
             }
-            memmove(work->sum[channel],work->sum[channel]+HOP,(FFT_SIZE-HOP)*sizeof(float));
-            memset(work->sum[channel]+FFT_SIZE-HOP,0,HOP*sizeof(float));
+            memmove(work->sum[channel],work->sum[channel]+VOCODE_HOP,(VOCODE_FFT-VOCODE_HOP)*sizeof(float));
+            memset(work->sum[channel]+VOCODE_FFT-VOCODE_HOP,0,VOCODE_HOP*sizeof(float));
         }
     }
     prep_work_end(PREP_STRETCH);

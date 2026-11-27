@@ -692,8 +692,13 @@ gates at 0.99986 and `lfo-delaysync-tmp` drives the shared delay line
 like delaytime. Static sample stretch gates at 1.0 (`stretch-up-tmp`,
 `stretch-down-tmp`): the offline port reproduces the deployed
 vocoder, whose 40 ms pre-roll shifts stretch haps early on both
-sides; oscillator stretch and live stretch LFOs need a streaming
-vocoder (`stretch-sine-tmp`, `lfo-stretch-static-tmp` diagnostic).
+sides; oscillator stretch renders through a streaming per-voice
+vocoder on the absolute 128-sample grid, with the source ADSR applied
+pre-vocoder like the deployed source node (`stretch-sine-tmp`
+0.999998/1.0002) and live stretch LFOs modulate the per-block factor
+with last value winning (`stretch-sine-lfo-tmp` 0.999998/1.0002;
+`lfo-stretch-static-tmp` stays diagnostic for the sample-side live
+path).
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

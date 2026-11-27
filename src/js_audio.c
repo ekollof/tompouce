@@ -1061,6 +1061,7 @@ static const GenTarget gen_targets[] = {
     {"vib", GEN_VIB, DSP_VIB, 1, "vib-rate"},
     {"spread", GEN_SPREAD, DSP_SPREAD, 0, "spread-lfo"},
     {"djf", GEN_DJF, DSP_DRY, 0, "djf-node"},
+    {"stretch", GEN_STRETCH, DSP_DRY, 0, "stretch-voice"},
     {"wt", GEN_WTPOS, DSP_UNISON, 0, "wt-node"},
     {"warp", GEN_WARPPOS, DSP_UNISON, 0, "wt-node"},
     {"pw", GEN_PW, DSP_PW, 0, "pulse-voice"},
@@ -1200,6 +1201,14 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
         } else if (!strcmp(need, "djf-node")) {
             /* The orbit DJF node exists once any hap carries djf. */
             if (ev->has_djf) return &gen_targets[i];
+        } else if (!strcmp(need, "stretch-voice")) {
+            /* The phase-vocoder node exists on plain-oscillator voices
+               carrying a static stretch value; without one the deployed
+               connection warns instead of modulating. */
+            if (ev->stretch > 0 && (ev->inst == INST_SINE ||
+                ev->inst == INST_SAW || ev->inst == INST_SQUARE ||
+                ev->inst == INST_TRI) && !ev->is_drum) return &gen_targets[i];
+            return NULL;
         } else if (!strcmp(need, "wt-node")) {
             /* The wavetable source worklet always exposes its position
                and warp params, unlike its optional LFO worklet. */
@@ -1372,6 +1381,12 @@ static void read_generic_lfo(AudioEvent *ev, const cJSON *value, const char *sou
         else if (gent && gent->gen == GEN_WTPOS) base = control(value, "wt", 0, 0, 1);
         else if (gent && gent->gen == GEN_WARPPOS) base = control(value, "warp", 0, 0, 1);
         else if (gent && gent->gen == GEN_DJF) base = ev->djf;
+        else if (gent && gent->gen == GEN_STRETCH) {
+            /* The deployed LFO depth scales by the pitchFactor AudioParam
+               value: the raw static shift (0 falls back to 1 like every
+               connected target). Invert the parsed mapped factor. */
+            base = ev->stretch >= 1 ? ev->stretch-1 : (ev->stretch-1)*4;
+        }
         else if (gent && gent->gen == GEN_SPREAD) {
             /* Node value gates on voices for supersaw, raw value for
                wavetable (read from the hap: wt fields resolve later). */

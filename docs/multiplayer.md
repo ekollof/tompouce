@@ -29,6 +29,11 @@ default, local-equivalent `live` eval, recent-software floors).
 > **Revision note, 2026-11-27 (ekollof), LAN discovery (D10).** §6.6 and
 > Phase 1.5: first-come-first-serve LAN director over built-in mDNS,
 > join-code handshake, same E2E as the internet path.
+>
+> **Revision note, 2026-11-27 (ekollof), static web presence (D11).** No
+> user accounts, no Flask/Django/FastCGI: the site is the front-door pages
+> plus static setup guides; `relayd` terminates TLS straight to the
+> director.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -67,6 +72,7 @@ questions are in §20.
 | D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director at `bakery.andrath.nl`. Examples, invite links and defaults use that hostname through the `public_url` setting. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
 | D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
+| D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -624,6 +630,7 @@ the address bar after reading it when the user chooses "hide link".
 | `/j/<room>#v=1&o=<opk>&n=<invite-id>&i=<invite-seed>&k=<K>&e=<epoch>` | **Invite landing** | Shows the room's short id, the owner fingerprint, the role and expiry (from `GET /v1/invites/<id>`, which needs only the public id), and four actions: **Open in Tompouce** (the `tompouce://` link with the same fragment), **Copy join command** (`/collab join <https link>`), **Show QR**, **Install instructions**. No secret is ever sent. |
 | `/j/<room>` with no fragment | **Join with code** | Asks for the join code (read from the path or typed) and the passphrase, fetches the wrapped invite with `GET /v1/codes/<code>`, **unwraps it locally** (Argon2id in WebAssembly), then behaves like the landing page. |
 | `/about`, `/privacy` | Static text | States what the server sees and what it does not (§14.9). |
+| `/guide`, `/guide/*` | Static setup guides | Plain pages explaining how to set up rooms and connect people to your Tompouce: public rooms, E2E invite links, join codes, and LAN discovery (decision D11). No accounts, no forms that submit secrets, no JavaScript beyond the shared header. |
 
 **What the page does not do.** It does not play audio, evaluate code, host a
 code editor, or act as a full client. It is a front door. Co-editing and

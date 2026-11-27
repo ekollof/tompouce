@@ -18,8 +18,8 @@ default, local-equivalent `live` eval, recent-software floors).
 > composite). No decision (D1–D7, §20 defaults) was changed.
 >
 > **Revision note, 2026-11-27 (ekollof), Q1 decided (D8).** ekollof hosts
-> the public director at `bakery.andrath.nl`. §20 Q1 is resolved; Q2–Q15
-> keep their defaults pending owner answers.
+> the public director at `bakery.andrath.nl`. (All §20 questions are now
+> decided; see the log above.)
 >
 > **Revision note, 2026-11-27 (ekollof), OpenBSD host (D9).** The public
 > director runs on OpenBSD 8.0 (`castor.hackerheaven.org`, SSH via bastion
@@ -43,6 +43,13 @@ default, local-equivalent `live` eval, recent-software floors).
 > user accounts, no Flask/Django/FastCGI: the site is the front-door pages
 > plus static setup guides; `relayd` terminates TLS straight to the
 > director.
+>
+> **Revision note, 2026-11-27 (ekollof), nicknames (D14).** §2, §7, §12.1,
+> §12.5, §13.5 and §18.3: `/nick <name>` on the F2 command line sets the
+> user's sealed display name (not a room name), persisted in `collab.json`
+> and reused in every room; an unset nick is generated once as a
+> pronounceable `adjective-noun` pair. Nicks are cosmetic, non-unique and
+> never grant identity or permissions.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -78,13 +85,14 @@ their answers in place).
 | D4 | 2026-11-26 | **Require recent software.** libcurl ≥ 8.11.0 with `ws`/`wss` (WebSocket support became official and default-enabled in 8.11.0). The libwebsockets *client* fallback is dropped. Other floors in §6.5. | §6.1, §6.5 |
 | D5 | 2026-11-26 | Derived from D1 and D2: **account-less, capability-based access.** The room owner holds a room-scoped owner key that is the root of trust. Invites are owner-signed certificates, so a malicious server cannot invent members. The old `public` room flag is removed (a public listener link is just a multi-use listener invite). | §13.5, §14 |
 | D6 | 2026-11-26 | Derived from D2: the **shared user-sound blob store is off on the public instance** (the operator cannot scan E2E blobs) and opt-in on self-hosted directors. | §11.2, §18.4 |
-| D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators are an open question. | §13.5, §20 |
+| D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators were considered and deferred to post-v1 (Q10). | §13.5, §20 |
 | D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director at `bakery.andrath.nl`. Examples, invite links and defaults use that hostname through the `public_url` setting. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
 | D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 | D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
 | D12 | 2026-11-27 | **F7 shows the room roster in collab mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
-| D13 | 2026-11-27 | **Room-wide solos with attribution.** `S$:` solos mute non-soloed slots for everyone (union across slots, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. | §6.4, §12.5, §12.6 |
+| D13 | 2026-11-27 | **Room-wide solos with attribution.** `S$:` solos mute non-soloed slots for everyone (union across slots, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. | §12.2, §12.5, §12.6 |
+| D14 | 2026-11-27 | **Nicknames are user-chosen, persistent and cosmetic.** `/nick <name>` on the F2 command line sets **the user's** sealed display name; it is stored in `collab.json` and reused in every room and later session. It is not a room nickname or a per-room setting. If unset, the client generates a pronounceable `adjective-noun` nick once before the first join and saves it. A nick is not an identity: it is not unique, and roles, ownership and ACLs still come only from keys and certificates. | §2, §7, §12.1, §12.5, §13.5, §18.3 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -170,8 +178,8 @@ cycle origin and the same tempo, they produce the same events.
 - Peer-to-peer transport, NAT traversal or WebRTC.
 - Ableton Link as the sync mechanism. Link uses UDP multicast discovery and is
   LAN-only, so it cannot sync over the internet. A later local bridge may
-  publish the room tempo and phase to Link peers on the same LAN; see the open
-  questions.
+  publish the room tempo and phase to Link peers on the same LAN (Q6,
+  decided: post-v1, §8.8).
 - Sharing local hardware state between members, such as MIDI input
   controllers or LV2 plugins only one member has.
 - Collaborative song mode (the `F7` track list). Song mode is disabled in a
@@ -214,6 +222,7 @@ cycle origin and the same tempo, they produce the same events.
 | **Join code** | A short code (for example `K7QF-92XM-PD4T`) that looks up a passphrase-wrapped invite on the director (§14.4). |
 | **Passphrase** | A generated secret, shared out of band, that unwraps a join code's invite and room key. |
 | **Membership certificate** | The chain `opk → invite → member pk` that lets any client check that a member was admitted by the owner. |
+| **Nick** | The user's cosmetic, sealed display name, chosen with `/nick` (F2 command line) and stored once in `collab.json` for use in every room. It is not an identity: it may repeat, and roles and ownership come only from keys and certificates (§13.5, §18.3). |
 | **E2E** | End-to-end encryption with a room key that the server never sees. On by default. |
 | **Plaintext debug mode** | The explicit opt-out of E2E, available only on self-hosted/debug directors. |
 
@@ -486,7 +495,7 @@ fallback.
 
 | File (NEW) | Owns | Key entry points (NEW) |
 |---|---|---|
-| `include/collab.h`, `src/collab.c` | Session lifecycle, state machine (§10), collab thread, routing between the UI, MCP, compile and scheduler | `collab_connect(const CollabConfig *)`, `collab_disconnect()`, `collab_state()`, `collab_submit_edit(slot, a, b, text)`, `collab_request_eval(slot)`, `collab_poll_ui(CollabUiEvent *out, int max)`, `collab_status_copy(CollabStatus *)` |
+| `include/collab.h`, `src/collab.c` | Session lifecycle, state machine (§10), collab thread, routing between the UI, MCP, compile and scheduler; the local nick (load, validate, generate, persist). | `collab_connect(const CollabConfig *)`, `collab_disconnect()`, `collab_state()`, `collab_submit_edit(slot, a, b, text)`, `collab_request_eval(slot)`, `collab_poll_ui(CollabUiEvent *out, int max)`, `collab_status_copy(CollabStatus *)`, `collab_nick_get()`, `collab_nick_set(const char *)` |
 | `src/collab_transport.c` | WebSocket client over **libcurl's WebSocket API**: `CURLOPT_CONNECT_ONLY=2`, `curl_ws_send()`, `curl_ws_recv()`, `CURLINFO_ACTIVESOCKET` for `poll()`. At build time require `LIBCURL_VERSION_NUM >= 0x080B00`. At runtime check that `curl_version_info()->version_num >= 0x080B00` and that `->protocols` contains `wss`; if not, report "collab needs libcurl 8.11 or newer with WebSocket support" and stay offline. Also used for the plain HTTPS calls to `/v1/pow`, `/v1/rooms` and `/v1/codes`. | `ctr_open(url, subprotocol)`, `ctr_send_text()`, `ctr_send_binary()`, `ctr_recv()`, `ctr_fd()`, `ctr_close()` |
 | `src/collab_proto.c`, `include/collab_proto.h` | Frame codec and schema validation for every message. **Shared with the director.** Pure, no I/O, fuzzable. Uses cJSON with explicit depth and size checks. | `cp_parse_control(const char *, size_t, CpMsg *)`, `cp_encode_*()`, `cp_parse_binary(const uint8_t *, size_t, CpBin *)` |
 | `src/collab_clock.c`, `include/collab_clock.h` | Offset and drift estimation, audio↔monotonic mapping, room-cycle↔audio-time mapping, correction policy (§8). Pure and deterministic, so it is unit-testable. | `cc_add_sample()`, `cc_server_time()`, `cc_audio_time_for_cycle()`, `cc_correction()` |
@@ -510,10 +519,10 @@ is room-wide (§12.6), decided in D13. One slot's runtime exception is caught an
 | `src/audio_output.c`, `include/audio_output.h` | Add **`double audio_output_latency_seconds(void)`** (NEW). Use the backend-reported output latency: PipeWire `pw_stream_get_time_n()` delay, PulseAudio `pa_stream_get_latency()`, PortAudio `Pa_GetStreamInfo()->outputLatency`, OpenAL buffers × frames / rate. Return `NAN` when it is unknown. VERIFY each backend's API. |
 | `include/event.h`, `src/js_audio.c`, `src/osc_output.c`, `src/midi.c` | Add a per-event **origin tag**: `AudioEvent` gains `uint16_t slot` (NEW). Derive it from the namespaced branch id in the hap's `id` control. Gate OSC and MIDI emission through `collab_capability_allowed(slot, CAP_OSC/CAP_MIDI_OUT, target)` (NEW) **on the generator, before preparation**. `osc_output.h` already says "Prepare on the generator. Send on the consumer, never in audio", so the check goes in `osc_output_prepare()`'s caller. |
 | `src/websamp.c`, `include/websamp.h` | Add `websamp_prefetch(const char *token)` (NEW): a non-blocking enqueue of the download path that `websamp_acquire()` uses lazily today. Add a per-host consent hook for remote-authored `samples()` calls. |
-| `src/tui.c`, `src/tui_commands.h`, `src/tui_terminal.h` | Slot view, `/collab` and `:collab` commands (including `:join <link>`, `/join <link>`, the join consent prompt and `/collab invite --qr`), remote cursors, status segment, F9 slot list in collab mode, edit capture (§9.3) and the remote-delta apply path that bypasses snapshot undo (§9.3). |
+| `src/tui.c`, `src/tui_commands.h`, `src/tui_terminal.h` | Slot view, `/collab` and `:collab` commands (including `:join <link>`, `/join <link>`, the join consent prompt and `/collab invite --qr`), the top-level `/nick` command, remote cursors, status segment, F9 slot list in collab mode, edit capture (§9.3) and the remote-delta apply path that bypasses snapshot undo (§9.3). |
 | `src/mcp.c` | When collab is active, `music_set_code` writes into the local user's focused slot and `music_evaluate` becomes a room eval request. Add the NEW read-only tool `music_collab_status`, which `test_mcp_security` must bound. |
 | `web/hydra.html` / companion | If the composite contains remote-authored text, `music_get_code` returns only local-authored slots to the hydra page. Alternatively the page refuses to `new Function` until the user consents (`CAP_HYDRA`). |
-| `src/main.c` | Add `--collab URL` (NEW), `--collab-name NAME` (NEW) and **`--join LINK`** (NEW, the target of the `tompouce://` handler: parse, show the consent prompt, then connect). These sit next to the existing `--mcp`, `--mcp-port` and `--bpm` flags. |
+| `src/main.c` | Add `--collab URL` (NEW), `--collab-nick NAME` (NEW) and **`--join LINK`** (NEW, the target of the `tompouce://` handler: parse, show the consent prompt, then connect). These sit next to the existing `--mcp`, `--mcp-port` and `--bpm` flags. |
 | `scripts/install.py`, `scripts/build-appimage.sh`, `packaging/aur/` | Register the `x-scheme-handler/tompouce` MIME handler (`Exec=tompouce --join %u`, `Terminal=true`), detect a libcurl older than 8.11.0 and build with `WITH_COLLAB=OFF` plus a message, and bundle a current libcurl in the AppImage (§6.5). The AppImage `.desktop` file is written near `scripts/build-appimage.sh:169`. |
 | `CMakeLists.txt` | `WITH_COLLAB`, `WITH_DIRECTOR`, `WITH_WEB_COLLAB` options, the libcurl and libsodium version checks, `tompouce_embed()` for `collab.js` and the web assets (§6.4). |
 | `cmake/Tests.cmake` | Register the new tests (§17), add them to the sanitize lists and add `test_collab_proto` to the `test-security` target. |
@@ -591,8 +600,8 @@ TLS deployment:
 - Public deployment, ACME, quotas and ops are in §18.4. A TLS-terminating
   third party (CDN) in front of the public instance is discouraged.
 - The director **refuses** to bind a non-loopback address without TLS unless
-  `--insecure-lan` is given. That flag exists for Phase 1 only and logs a
-  warning every minute.
+  `--insecure-lan` is given. That flag exists for Phase 1/1.5 LAN use
+  (E2E-sealed `ws://`) and logs a warning every minute.
 
 The port 7420 is a proposal.
 
@@ -654,8 +663,8 @@ the address bar after reading it when the user chooses "hide link".
 
 **What the page does not do.** It does not play audio, evaluate code, host a
 code editor, or act as a full client. It is a front door. Co-editing and
-playback stay in the Tompouce client. (A browser client is out of scope; see
-the open questions.)
+playback stay in the Tompouce client. (A browser client is out of scope by
+decision, Q14: front-door only.)
 
 **Trust caveat, stated plainly.** A web page served by the operator could be
 changed to read the fragment. E2E protects against a server that stores and
@@ -761,12 +770,14 @@ director for the room.
   or anything else: multicast is plaintext, and the E2E posture (D2)
   extends to the LAN.
 - **Joining.** `/collab join` lists discovered directors with their
-  fingerprints. The host's screen shows an 8-digit join code (the §14.4
-  method, no URL fragments needed on a LAN); the joiner types it in, and
-  from there the handshake is the standard E2E one — capability
-  certificates, sealed frames, same as the internet path. Trust is TOFU:
-  both screens show the fingerprint for out-of-band comparison (read aloud
-  across the room).
+  fingerprints. The host's screen shows the 12-character join code
+  (`XXXX-XXXX-XXXX`); the 16-character passphrase travels a second channel
+  (read aloud across the room, or shown separately) — the two-channel split
+  of §14.4, with no URL fragments on a LAN. The joiner types both parts in
+  and proceeds with the standard E2E handshake. In Phase 1.5 the code wraps
+  the room key itself (same wrapping, passphrase-derived kw); cert-wrapped
+  invites arrive with Phase 2 rooms and identities. Trust is TOFU: both
+  screens show the fingerprint for out-of-band comparison.
 - **Transport on LAN.** Plain `ws://` is acceptable here: everything sensitive
   is already sealed end to end, and skipping TLS/proxy setup is the point of
   LAN mode. D2's `--allow-plaintext` debug switch is **not** auto-enabled on
@@ -861,7 +872,7 @@ integer in `[0, 2^53)`. A quantum of `[0,1]` means **`live`** (§8.7).
 
 **E2E consequences for this table.** In an E2E room (the default, D2) every
 field that would reveal what members are playing or who they are is carried
-inside a sealed blob `enc` (§14.5): member names, slot names, eval bodies,
+inside a sealed blob `enc` (§14.5): member nicks, slot names, eval bodies,
 chat, sample manifests, slider values. The director sees and enforces only
 the plaintext routing fields: `slot`, `q`, `at_cycle`, roles, ACL member ids,
 sizes and rates. A control frame that carries a field that must be sealed in
@@ -874,7 +885,8 @@ when the room is E2E.
 |---|---|---|
 | `hello` | `proto:[1]`, `client:{name:"tompouce", version:"…"}`, `caps:["e2e","sliders"]` | First frame, sent within 5 s of connecting or the connection is closed. A client always lists `e2e`. |
 | `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. Known members reconnect with `pk` alone, or `resume`. |
-| `join` | `room`, `profile` (sealed `{name, color?}`, §14.5) | Sent after `auth_ok`. |
+| `join` | `room`, `profile` (sealed `{nick, color?}`, §14.5 type 2) | Sent after `auth_ok`. |
+| `profile_update` | `enc` (sealed+signed profile record, §14.5 type 2, carrying `{nick, color?}`) | Cosmetic nick change. The director replaces the author field from the connection, rate-limits it, and relays `member_updated`; it never sees the nick. In Phase 1 this is the only way a name changes after joining. |
 | `ping` | `t0` (client monotonic µs, opaque to the server) | Clock sampling (§8.2). |
 | `eval_req` | `slot`, `q?` (`[n,d]`, defaults to the room quantum, which defaults to `live`), `enc` (sealed, signed eval record, §14.5) | The director assigns `at_cycle` and `eval_seq`, then fans out `eval`. The sealed record carries the body and the author's per-slot monotonic `seq`. |
 | `tempo_req` | `cps` (finite, 0 < cps ≤ 4), `q?` | Needs the `tempo` permission. Uses the same activation rule as an eval (§8.7). |
@@ -924,7 +936,7 @@ client (through libcurl) before a WebSocket exists.
 | `clock` | `epoch:{c:[n,d], t_us, cps}`, `next?:{c:[n,d], t_us, cps}`, `running:bool`, `seq` | Broadcast on every epoch change. `next` announces a scheduled tempo change ahead of its activation. |
 | `eval` | `slot`, `author` (member id), `eval_seq` (room-global, monotonic), `at_cycle:[n,d]`, `q`, `enc` | The authoritative activation order. |
 | `snapshot_req` | `slot`, `upto:{member:seq,…}` | Sent to the slot owner, or the longest-connected editor for slot 0, when the log for that slot passes its threshold (§9.6). |
-| `member_joined` / `member_left` / `member_updated` | member object (with `cert`) | |
+| `member_joined` / `member_left` / `member_updated` | member object (with `cert`) | A `profile_update` fan-out is a `member_updated` whose `profile` is the new sealed type-2 record; the plaintext nick never appears. Receivers verify that record's signature against the member's `pk`, so a forged rename is dropped. |
 | `member_kicked` | `member`, `pk`, `kcert`, `epoch_next` | Relayed so every client drops the member from its trusted set before it seals anything else under the old key. |
 | `rekey` | `epoch`, `sealed` (this member's envelope), `osig` | See §14.6. |
 | `slot_created` / `slot_updated` / `slot_deleted` | slot object | |
@@ -987,7 +999,7 @@ C→S  {"t":"hello","proto":[1],"client":{"name":"tompouce","version":"0.2.0"},"
 S→C  {"t":"welcome","proto":1,"caps":["e2e"],"challenge":"q8Zk…","server":{"name":"bakery.andrath.nl","version":"0.2.0","source":"https://github.com/ekollof/tompouce"},"limits":{"ctrl":16384,"update":65536,"eval_body":262144},"now_us":91233441021}
 C→S  {"t":"auth","pk":"Hk3…","sig":"9fA…","room":"mfrggzdfmztwq2lknnwg23tpoa","invite":{"id":"Zx9…","ipk":"Lm2…","msig":"Ab7…"}}
 S→C  {"t":"auth_ok","member_pk":"Hk3…","resume":"Pq…"}
-C→S  {"t":"join","room":"mfrggzdfmztwq2lknnwg23tpoa","profile":"<sealed {name:andrath}>"}
+C→S  {"t":"join","room":"mfrggzdfmztwq2lknnwg23tpoa","profile":"<sealed {nick:amber-otter}>"}
 S→C  {"t":"joined","room":{"quantum":[0,1],"locked":false,"e2e":true,"epoch":0,"opk":"Qw1…"},
       "you":{"member":3,"role":"editor","color_idx":4},
       "members":[{"member":1,"pk":"Qw1…","role":"owner","color_idx":0,"profile":"<sealed>"}],
@@ -997,6 +1009,8 @@ S→C  {"t":"joined","room":{"quantum":[0,1],"locked":false,"e2e":true,"epoch":0
 S→C  <binary ver=1 kind=3 slot=1 member=1 epoch=0 …>          (stored snapshot, sealed)
 S→C  <binary ver=1 kind=1 slot=1 member=1 epoch=0 …> ×N       (log tail, sealed)
 S→C  {"t":"synced","slots":[1]}
+C→S  {"t":"profile_update","enc":"<sealed+signed {nick:andrath}>"}
+S→C  {"t":"member_updated","member":3,"profile":"<sealed>", …}
 C→S  {"t":"slot_create","slot_name":"<sealed andrath-bass>","id":5}
 S→C  {"t":"slot_created","slot":2,"slot_name":"<sealed>","owner":3,"acl":{"write":[3]}}
 C→S  <binary ver=1 kind=1 slot=2 member=0 seq=1 epoch=0 …>    (typing, sealed)
@@ -1299,7 +1313,7 @@ Collab runtime setup (NEW, in `collab_doc.c`):
   `muted` and the quantum (what it needs for enforcement). **Slot names are
   sealed** (E2E, §14.8), so the director never sees them.
 - Awareness, using the y-protocols format, is per room, on its own
-  awareness-only `Y.Doc`. Each member's local state is `{name, color, slot,
+  awareness-only `Y.Doc`. Each member's local state is `{nick, color, slot,
   anchor, head}`. `anchor` and `head` are encoded `Y.RelativePosition`s in
   the focused slot's text, so cursors stay correct while text shifts.
   Awareness updates are sent at most 10 times per second, with an idle
@@ -1670,10 +1684,12 @@ with E2E it cannot see the URLs anyway (it is sealed).
 
 These are added to `native_command_words[]` (F2 `/…`) and also accepted as vi
 `:collab …` (add `"collab"` to `command_words[]`). Tab completion follows the
-existing completion code.
+existing completion code. `/nick` is the one top-level addition; every other
+row is under `/collab` unless the row says otherwise.
 
 | Command | Action |
 |---|---|
+| `/nick [name]` | Top-level command (F2), not `/collab`. Sets **your nickname** — one per user, stored in `collab.json` and used in every room, not a room name and not a per-room setting. It is your sealed display name in the roster, slot list, remote cursors and solo attribution. No argument prints the current nick and where it is stored; otherwise the rest of the line is the name, so spaces are allowed. A change is written to `collab.json` immediately; in a room it also sends `profile_update` (§7), and other rooms see it at the next join. Accepted names are 1–32 UTF-8 bytes and at most 24 display columns after trimming; control and bidi-control characters are rejected (§13.5). An invalid name is rejected with a message and the stored nick is unchanged. A generated nick is used until one is set (§18.3). |
 | `/collab join <link>` | Join a room from an invite link (§14.3): `https://host/j/<room>#…` or `tompouce://join/host/<room>#…`. The fragment never goes to the server. **Always shows a consent prompt first**: host, room id, owner fingerprint, role. `:join <link>` and `/join <link>` are short aliases (NEW command words). Plaintext debug rooms need `--plaintext` (§14.10). |
 | `/collab join <server> <code>` | Join with a join code (§14.4). The passphrase is asked for in a hidden prompt. |
 | `/collab host [name]` | Create a room on the default director (proof-of-work, then `POST /v1/rooms`). You become owner. The owner secrets are stored under `~/.config/tompouce/collab/rooms/` (0600). The owner link is shown once, with a warning. |
@@ -1696,10 +1712,15 @@ existing completion code.
 
 ### 12.2 Keybindings
 
-These keep to existing conventions. No F-keys are reassigned, with one
-carve-out: F7's solo job is the room-level list, so in collab mode —
-where it would otherwise do nothing — it shows the room roster (§12.5).
+These keep to existing conventions. In collab mode F7/F9 (and Ctrl+N/B)
+are repurposed as the room roster and slot list; no other F-keys change.
+F7's solo job *is* the room-level list, so the repurpose fits its existing
+meaning (details under F7 below).
 
+- **F2** opens the slash command line exactly as today; `/nick <name>` sets
+  your display name (§12.1). F2 itself gains no new mode. The name is shown
+  in the roster, slot list, remote cursors and solo attribution, never as a
+  role or permission.
 - **F5, Ctrl+Enter, Alt+Enter** in a collab slot send a room eval for the
   focused slot. By default it activates `live`, at one shared instant about
   0.35–0.45 s later (§8.7), not at the next bar. The status line counts down
@@ -1707,8 +1728,8 @@ where it would otherwise do nothing — it shows the room roster (§12.5).
 - **Ctrl+N / Ctrl+B** (next and previous track today) become **next and
   previous slot** in collab mode, the same "move through buffers" idea.
 - **F9** (track list today) shows the **slot list** in collab mode. Each row
-  shows color, slot name, owner, state and the last eval cycle. The states
-  are `editing`, `queued c131`, `live`, `⚠ error`, `muted (local)` and
+  shows color, slot name, owner's nick, state and the last eval cycle. The
+  states are `editing`, `queued c131`, `live`, `⚠ error`, `muted (local)` and
   `missing sounds`. Enter focuses a slot.
 - **F7, F8 and Ctrl+T** (song mode, hold, copy to track) are disabled in
   collab mode, except that **F7 opens the room roster** (§12.5): the key
@@ -1783,10 +1804,10 @@ The **F4** internals pane gets a "collab" block:
   look consistent. A member can't choose a color already in use.
 - **Remote cursors** in the focused slot are drawn as a one-cell
   background-colored block. Remote selections are tinted, and each cursor
-  line gets a name tag at its right edge. Truncate the tag to fit and skip it
-  when the line is too narrow. Draw these in the editor render pass, after
-  syntax colors and before the play highlight, so active-hap highlights stay
-  visible.
+  line gets a nick tag (§13.5) at its right edge. Truncate the tag to fit and
+  skip it when the line is too narrow. Draw these in the editor render pass,
+  after syntax colors and before the play highlight, so active-hap highlights
+  stay visible.
 - **Play highlights.** `scheduler_editor_play_styles()` already returns a
   `color` per span. In collab, haps carry a `slot` id (namespaced branch ids
   from `__compileSlots`), and each slot's highlight uses its author's color.
@@ -1811,11 +1832,17 @@ the internals pane (§12.3).
 
 - **Header row:** room short id, quantum (`live`/`q1`/…), member count,
   clock `ε`, E2E lock state. Same data as the status segment, one glance.
-- **One row per member**, in join order: color chip + name, role
+- **One row per member**, in join order: color chip + nick, role
   (`owner`/`editor`/`listener`), focused slot (`slot 3 "bass"`), and state:
   `typing…` (CRDT update in the last 3 s), `eval @c128` (last evaluated
   cycle), `late +180ms` (from the last `ack`), `syncing…`, or
   `reconnecting`. No per-member latency numbers here — those live in F4.
+- **Nicks are labels, not identities.** Any member may pick any valid nick,
+  including one that matches another member's or looks like a role. The role
+  column always comes from the certificate, and when two visible nicks are
+  identical each row also shows a short `pk` fingerprint, so a name cannot
+  impersonate a person or a role. A rename arrives as `member_updated` and
+  redraws this panel immediately.
 - **Keys:** Enter (or `j`/`k` + Enter) jumps to that member's focused slot,
   like a chosen "go to the action" (cf. Ctrl+G for the latest evaluator).
   `q`/Esc closes. No moderation actions here: kick/ban stay owner-only
@@ -1844,7 +1871,7 @@ the composite.
 Attribution must make clear who soloed what, in three places:
 
 - **Status bar:** the collab segment shows `SOLO` plus the soloing
-  member name(s) in their color(s) while any solo is active.
+  member nick(s) in their color(s) while any solo is active.
 - **F7 roster (§12.5):** the header shows `SOLO by X (slot 3 "bass")`,
   and the soloing member's row is highlighted. The per-row state gains a
   `soloing` value.
@@ -1945,9 +1972,23 @@ dedicated security review.
   `~/.config/tompouce/collab/identity.key`. For each room the client derives a
   **per-room Ed25519 keypair** (`crypto_kdf_derive_from_key`, context
   `"tpcroom1"`, subkey id from the room id), so rooms and servers cannot be
-  linked by public key. The display name is cosmetic and sealed. The `pk` is
-  shown as a short fingerprint (first 10 bytes of SHA-256, base32) in
-  `/collab status` and member lists.
+  linked by public key. The `pk` is shown as a short fingerprint (first 10
+  bytes of SHA-256, base32) in `/collab status` and member lists.
+- **Nick:** your display name is cosmetic, user-chosen and **sealed**
+  (§14.5 type 2), so the director never sees it. It is one value per user,
+  reused in every room, not a room name or a per-room setting. It grants
+  nothing: two members may share a nick, and roles, ownership and ACLs come
+  only from keys and certificates. `/nick` accepts 1–32 UTF-8 bytes and at
+  most 24 display columns after trimming; C0/C1/DEL and bidi-control
+  characters are rejected, whitespace runs collapse to one space, and the
+  result must not be empty. Every client re-validates and width-truncates a received
+  profile before drawing it, drops an invalid update, and shows
+  `member-<id>` if a member has no valid profile. A rename is a signed
+  type-2 record checked against that member's `pk`, so a director cannot
+  rename anyone. Nicks are drawn as plain text — never markup, a shell word
+  or a role label — and are stored in `collab.json`, which holds no secrets
+  (§18.3). Because the stored nick is reused, people who share two rooms can
+  correlate you by it; per-room keys still keep the director from doing so.
 - **Owner key:** at room creation the owner makes a random room-scoped
   Ed25519 keypair `(osk, opk)`. `opk` is registered with the director and is
   the room's **trust root**, pinned in every invite link and checked by every
@@ -1980,8 +2021,8 @@ dedicated security review.
   of trust, so ownership changes only by handing over the owner link or key
   file (for example to the owner's second machine). If the owner is absent the
   room keeps running: nobody can mint invites, kick or rotate until the owner
-  returns. Delegated moderators (owner-signed delegation certificates) are an
-  open question (§20).
+  returns. Delegated moderators (owner-signed delegation certificates) were
+  considered and deferred to post-v1 (Q10, decided).
 
 ### 13.6 Rate limits
 
@@ -1994,6 +2035,7 @@ The director keeps token buckets per member, and per IP for connects.
 | Bytes in | 64 KiB/s | 512 KiB |
 | `eval_req` | 2/s | 6 |
 | `tempo_req` and slot admin | 1/s | 3 |
+| `profile_update` (nick) | 1 per 5 s | 2 |
 | `ping` | 4/s | 16 |
 | `chat` and other `sealed_msg` | 1/s | 5 |
 | `POST /v1/rooms` | Public instance: 5/day and 20 active per /24 (IPv4) or /56 (IPv6), plus proof-of-work | 5 |
@@ -2012,8 +2054,9 @@ prices out casual abuse but not a botnet, and E2E rules out content
 moderation — so the public instance has a no-protocol-change lever:
 `room_creation` in the director config is `open` (anyone passing PoW),
 `invite-only` (creation additionally requires an unused creation token
-the operator issued out of band — one optional field on the existing
-`POST /v1/rooms`, no wire-protocol change), or `closed` (no new rooms at
+the operator issued out of band: operator infrastructure, not a
+user-facing tier; one optional field on the existing
+`POST /v1/rooms`), or `closed` (no new rooms at
 all).
 The operator flips it without restarting rooms in flight, and flips
 back when the wave passes. Adaptive PoW difficulty stays the day-to-day
@@ -2062,6 +2105,7 @@ thief.
 | T32 | **Metadata exposure** | Operator, network | Learns who joined which room, when, how often, message sizes, roles, member count, epochs | Opaque room ids, per-room keys, sealed names, minimal logs (§18.4), no analytics. Users can reach the instance over a VPN or Tor. | Inherent. Documented on `/privacy`. |
 | T33 | **Proof-of-work or rate-limit bypass behind shared NAT** | Stranger | Locks out honest users, or abuses | Limits are per /24 (IPv4) or /56 (IPv6) with burst allowance, PoW applies only to creation, joins are not PoW-gated. | Corner cases at large shared NATs. |
 | T34 | **Weak randomness in the browser or client** | Platform bug | Predictable keys | Keys come only from `randombytes_buf` (libsodium), which uses OS randomness. The page refuses to continue if `crypto.getRandomValues` is missing. | — |
+| T35 | **Nick spoofing** (taking another member's name or a role-like name) | Member | Misattribution, social engineering | Nicks are cosmetic; roles and ownership come from certificates and keys, drawn in a separate column. Duplicate nicks show a short `pk` fingerprint, and renames are signed type-2 records, so the director cannot rename anyone. No auth or ACL decision reads the nick. | A user who trusts a name and ignores the color/fingerprint. |
 
 ## 14. End-to-end encryption, room keys and invitations (default ON, decisions D1, D2, D5)
 
@@ -2236,8 +2280,7 @@ cannot make it burn arbitrary resources or weaken the wrapping.
 
 - The wrapped blob is public to the operator. With a **generated 80-bit
   passphrase** and Argon2id at 128 MiB, offline guessing is infeasible. The
-  client generates the passphrase and offers no way to pick a weaker one in v1
-  (an advanced `--passphrase-stdin` exists, with a warning).
+  client generates the passphrase and offers no weaker option in v1.
 - A leaked **code alone** is harmless. A leaked **passphrase alone** is
   harmless. Both together equal a leaked link.
 - Online guessing of the code is not an attack on the passphrase. The director
@@ -2246,7 +2289,8 @@ cannot make it burn arbitrary resources or weaken the wrapping.
 - Expiry, single-use or multi-use, revocation and epoch binding work exactly
   as for links, because the code wraps the same invite.
 - A stronger option, a PAKE such as OPAQUE or CPace so even a weak
-  passphrase resists offline attack, is an open question (§20).
+  passphrase resists offline attack, was considered and rejected: passphrases
+  are generated-only (Q11, decided), which dissolves the PAKE question.
 
 **QR codes.** The landing page, the owner console and `/collab invite --qr`
 render a QR code of either (a) the full invite link, for joining in the same
@@ -2273,7 +2317,9 @@ verified member list.
 
 **Control records** (`enc` fields) use `enc = epoch(u16) ‖ nonce ‖ ct ‖ tag ‖ sig`
 with `AD = "tpc-ctrl-v1" ‖ room_id ‖ epoch ‖ type(u8) ‖ slot(u16) ‖ author_pk`.
-Types: 1 eval, 2 profile, 3 slot name, 4 chat, 5 manifest, 6 slider.
+Types: 1 eval, 2 profile `{nick, color?}`, 3 slot name, 4 chat, 5 manifest, 6 slider.
+A profile record updates only the fields it carries: a `/nick` record changes
+the nick and leaves the member's color alone. Profile records use slot 0.
 
 **Eval record** (type 1, inside the seal): `{v:1, slot, seq, body}` where `seq`
 is the author's monotonic counter **per slot**. Receivers reject `seq ≤
@@ -2552,7 +2598,7 @@ Follow the existing harness conventions:
 - Start `tompouce-director --listen 127.0.0.1:0 --insecure-lan --state-dir
   $TMP` (`--allow-plaintext` only in the dedicated plaintext-mode test). Read the bound port from its stdout `ready port=N` line.
 - Start three headless engines as clients:
-  - `tompouce --mcp --collab ws://127.0.0.1:N/... --collab-name a|b|c`
+  - `tompouce --mcp --collab ws://127.0.0.1:N/... --collab-nick a|b|c`
   - each with its own `XDG_*` directory and the silent clock.
 - Drive them through MCP (`music_set_code`, `music_evaluate`,
   `music_collab_status`, `music_debug`). The existing
@@ -2585,6 +2631,13 @@ Follow the existing harness conventions:
     ignored.
   - (l) Downgrade: the client refuses `e2e:false` rooms and drops
     plaintext-flag frames without the explicit opt-in.
+  - (m) Nicknames: a client with no stored nick writes a generated
+    `adjective-noun` name to `collab.json` before joining; a restart reuses
+    it; `/nick` propagates to every other member list within 500 ms; names
+    containing control or bidi characters, or longer than 32 bytes, are
+    rejected; two members with the same nick are distinguishable by color
+    and fingerprint; the director's logs and store contain no nick
+    plaintext.
 
 ### 17.2b Web front end and invitation tests (`tests/test_collab_web.mjs`, NEW)
 
@@ -2824,7 +2877,7 @@ because `config.json` is read into a 4 KiB buffer. It holds no secrets.
 
 ```json
 {
-  "name": "andrath",
+  "nick": "amber-otter",
   "default_server": "https://bakery.andrath.nl",
   "latency_ms": { "PipeWire": 0, "PulseAudio": 8, "JACK": 0, "ALSA": 0, "OpenAL": 0 },
   "local_prebake": false,
@@ -2838,6 +2891,20 @@ because `config.json` is read into a 4 KiB buffer. It holds no secrets.
   }
 }
 ```
+
+`nick` is your nickname: a single user setting, not a room name or per-room
+setting, reused in every room. `/nick <name>` validates it (§13.5), rewrites
+this file atomically before applying it, and sends `profile_update` to the
+current room if one is open; with no argument, `/nick` prints it. If the key
+is missing, empty or invalid, the client generates one on first collab use —
+two lowercase words from embedded 128-entry lists joined by `-` (for example
+`amber-otter`), one libsodium `randombytes_buf` byte per word masked to 7
+bits; both lists are capped at 11 columns per word, so a generated nick
+always passes validation — and saves it before connecting, so it stays
+stable across sessions. If that write fails, warn once and keep the generated
+name for the session; never block the join. `--collab-nick` overrides the
+stored nick for one run, is never written back, and suppresses the generated
+default when the key is absent.
 
 `join_handler.confirm` can only be turned off for hosts in `allowed_hosts`;
 an empty list always prompts (§6.4, T29).
@@ -2861,7 +2928,8 @@ Environment variables (NEW):
 - `TOMPOUCE_COLLAB_SERVER` overrides the default server.
 - `TOMPOUCE_COLLAB_TRACE` is the test event trace from §17.2.
 - `TOMPOUCE_COLLAB_INSECURE=1` allows `ws://` to a non-loopback address. It
-  is for Phase 1 LAN use and prints a warning on every connect.
+  is for Phase 1/1.5 LAN use (E2E-sealed traffic) and prints a warning on
+  every connect.
 - `TOMPOUCE_COLLAB_PLAINTEXT=1` lets the client join a plaintext debug room
   (§14.10). Never needed with the public instance.
 
@@ -3071,6 +3139,10 @@ comes before any public launch.
   `--allow-plaintext` exists for debugging only.
 - Client transport (libcurl WebSocket), `collab_crypto.c`, `collab_doc` with
   Yjs, editor diff capture and remote apply, remote cursors.
+- **Nicknames.** `join.profile` carries the sealed nick; `/nick` sends a
+  sealed profile record (`profile_update`), which the director relays as
+  `member_updated`. A client with no stored nick generates and saves one
+  before connecting (§18.3). The director never sees the name.
 - Evals go through the director with the **`live`** rule (§8.7). Clients use a
   single min-RTT ping sample and no drift fit yet.
 - **The remote profile is on from day one.** Remote code runs in this phase,
@@ -3082,6 +3154,10 @@ comes before any public launch.
 - Two machines on one LAN, or two engines on loopback in `test_collab.py`:
   typing on either shows up on the other within 200 ms, and random concurrent
   edits converge.
+- A fresh client generates a pronounceable nick, persists it across a
+  restart, and `/nick` updates the other client without a rejoin; invalid
+  names are rejected and never rendered raw. Director logs and store contain
+  no nick plaintext.
 - F5 / Alt+Enter on either activates on both at the same `at_cycle`, which is
   `ceil64(c(S_now + lead))` (no musical quantization). Matching events'
   `room_us` differ by ≤ 20 ms (no drift fit yet).
@@ -3113,6 +3189,8 @@ comes before any public launch.
 - Master seed, per-room keys, **owner key and invite certificates**
   (§14.2), roles and ACLs from certificates, `joined` with verified
   member certs, `POST /v1/rooms` (PoW stub allowed), key epochs in headers.
+- Tempo grants: a per-room `tempo` holder list, owner-managed; `tempo_req`
+  is accepted from the owner and listed holders (Q2).
 - Multiple rooms and slots, ownership, the slot list (F9) and Ctrl+N/B.
 - The opaque store of sealed snapshots and logs, `--state-dir` and resume
   tokens.
@@ -3252,7 +3330,8 @@ design. Each states a default the implementer will use if you do not answer.
    ToS, privacy text and abuse contact remain owed before public launch.
 2. **Who controls tempo?** ~~Owner only by default, with grants to editors, or
    anyone with a slot? Default: owner only, grantable.~~ **Decided 2026-11-27:**
-   owner only, with grants to editors (the default stands).
+   owner only, with grants to editors via a per-room `tempo` holder list
+   (specified with Phase 2 roles; owner-only in practice until then).
 3. **Stop semantics.** ~~Ctrl+. stops only local listening, and the room
    transport is owner-only. Right feel? Default: yes.~~ **Decided 2026-11-27:**
    yes, as specified.
@@ -3298,7 +3377,9 @@ design. Each states a default the implementer will use if you do not answer.
     privacy-friendly, but a botnet pays it. Add an optional creation-token or
     CAPTCHA tier if abuse appears? Default: PoW only, with adaptive difficulty.~~
     **Decided 2026-11-27:** PoW with adaptive difficulty, plus the
-    registration kill-switch backstop (§13.6); no token/CAPTCHA tiers.
+    registration kill-switch backstop (§13.6). No user-facing token or
+    CAPTCHA tiers; the kill-switch's operator-issued creation token is
+    infrastructure, not a user tier.
 14. **Browser as a client.** Is a later browser-based joiner (Strudel in the
     page) desired, or does the web front end stay a front door only
     (current design)? Default: front door only.~~ **Decided 2026-11-27:** front door only. A browser

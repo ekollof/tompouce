@@ -134,6 +134,25 @@ the current lesson; press it before switching lessons to retain your work.
 Ctrl+S saves the whole tutorial. Allow about 30–45 minutes, or take one lesson
 at a time. F1 remains the Tompouce keybinding reference.
 
+## Jam together (work in progress)
+
+Jam mode — several Tompouces playing together over the network, everyone
+hearing the same mix at the same shared instant — is under active
+development and **isn't close to working yet**. Today you can run the room
+server and watch a client complete the encrypted handshake, set a nickname,
+and stage a program activation; there are no joinable rooms, no shared
+editing, and no roster UI yet.
+
+- The public room server lives at [Bakery](https://bakery.andrath.nl/), with
+  setup guides for the intended flow (hosting, joining, nicknames, LAN play).
+- The design brief is [`docs/multiplayer.md`](docs/multiplayer.md); `TODO.md`
+  tracks what is actively being worked on.
+- The wiki has a [Collaborative jamming](docs/wiki/Collaborative-Jamming.md)
+  page with the current build status and how to try the pieces that exist.
+- Feedback is welcome: musical experiments and session reports in
+  [Discussions](https://github.com/ekollof/tompouce/discussions), bugs with
+  reproduction steps in [Issues](https://github.com/ekollof/tompouce/issues).
+
 ## Components
 
 - `src/audio.c` — native real-time synth + drum voices
@@ -148,10 +167,13 @@ at a time. F1 remains the Tompouce keybinding reference.
 - `src/wavetable.c` — procedural bandlimited single-cycle tables (`inst wt:<name>`)
 - `src/mcp.c` — MCP JSON-RPC server + UI orchestration
 - `src/csound_host.c` — isolated native Csound orchestra renderer
+- `director/` — standalone Jam-mode room server: admission, ordering, relay, opaque store (work in progress; build with `-DWITH_DIRECTOR=ON`)
+- `src/collab*.c`, `include/collab*.h` — Jam-mode client: transport, session, nicknames, staged activation, capability gates (work in progress)
 
 ## Docs
 
 - [`docs/wiki/Home.md`](docs/wiki/Home.md) — project handbook: installation, live coding, sounds, visuals, integrations, development and troubleshooting
+- [`docs/wiki/Collaborative-Jamming.md`](docs/wiki/Collaborative-Jamming.md) — Jam mode: playing together, the Bakery server, and the current build status (work in progress)
 - [`docs/wiki/Learn-Strudel.md`](docs/wiki/Learn-Strudel.md) — official Strudel workshops, reference pages and learning resources
 - [GitHub Discussions](https://github.com/ekollof/tompouce/discussions) — questions, ideas and musical showcases
 - [Strudeltutor](#learn-with-strudeltutor) — interactive lessons, exercises and hints inside Tompouce

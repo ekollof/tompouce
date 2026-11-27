@@ -16,6 +16,11 @@ default, local-equivalent `live` eval, recent-software floors).
 > confirmed missing (implementer must add it). Added one determinism
 > checklist item (DSP path latency must be a pure function of the shared
 > composite). No decision (D1–D7, §20 defaults) was changed.
+>
+> **Revision note, 2026-11-27 (ekollof), Q1 decided (D8).** ekollof hosts
+> the public director and provides the domain/subdomain; the hostname is
+> still to be chosen. §20 Q1 is resolved; Q2–Q15 keep their defaults
+> pending owner answers.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -51,6 +56,7 @@ questions are in §20.
 | D5 | 2026-11-26 | Derived from D1 and D2: **account-less, capability-based access.** The room owner holds a room-scoped owner key that is the root of trust. Invites are owner-signed certificates, so a malicious server cannot invent members. The old `public` room flag is removed (a public listener link is just a multi-use listener invite). | §13.5, §14 |
 | D6 | 2026-11-26 | Derived from D2: the **shared user-sound blob store is off on the public instance** (the operator cannot scan E2E blobs) and opt-in on self-hosted directors. | §11.2, §18.4 |
 | D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators are an open question. | §13.5, §20 |
+| D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director and provides the domain (a subdomain to be chosen). Until the hostname is chosen, every example and default keeps using the `jam.example.org` placeholder behind the `public_url` setting, which is the single place the real name lands. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -2968,10 +2974,13 @@ The first revision's questions Q1, Q2, Q3, Q8, Q9 and Q12 are decided (see the
 Decisions log). These remain, renumbered, with new ones from the revised
 design. Each states a default the implementer will use if you do not answer.
 
-1. **Operator and domain of the public instance.** Who runs it, on which
+1. **Operator and domain of the public instance.** ~~Who runs it, on which
    domain, with which ToS, privacy text and abuse contact (§18.4)? Default:
    a placeholder `jam.example.org`, and the implementer builds everything
-   behind `public_url`.
+   behind `public_url`.~~ **Decided 2026-11-27 (D8):** ekollof hosts it and
+   provides the domain/subdomain; the hostname is still to be chosen, so the
+   `jam.example.org` placeholder and the single `public_url` setting stand.
+   ToS, privacy text and abuse contact remain owed before public launch.
 2. **Who controls tempo?** Owner only by default, with grants to editors, or
    anyone with a slot? Default: owner only, grantable.
 3. **Stop semantics.** Ctrl+. stops only local listening, and the room

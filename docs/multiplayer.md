@@ -25,6 +25,10 @@ default, local-equivalent `live` eval, recent-software floors).
 > director runs on OpenBSD 8.0 (`castor.hackerheaven.org`, SSH via bastion
 > host only). §6.5, §18.1 and §18.4 now require portable server code and
 > an `rc.d` script next to the systemd unit.
+>
+> **Revision note, 2026-11-27 (ekollof), LAN discovery (D10).** §6.6 and
+> Phase 1.5: first-come-first-serve LAN director over built-in mDNS,
+> join-code handshake, same E2E as the internet path.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -62,6 +66,7 @@ questions are in §20.
 | D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators are an open question. | §13.5, §20 |
 | D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director at `bakery.andrath.nl`. Examples, invite links and defaults use that hostname through the `public_url` setting. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
 | D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
+| D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -704,6 +709,62 @@ these and fails with a clear message, or turns collab off, instead of limping.
   and the AUR package can bundle a current libcurl.
 - The director container base moves to the current Debian stable (trixie) or
   newer, so its runtime libraries are recent without backports (§18.2).
+
+### 6.6 LAN discovery and first-come-first-serve director
+
+No public server, no DNS, no manual addresses: two tompouces on the same
+network find each other, and whoever starts hosting first becomes the
+director for the room.
+
+- **Hosting.** `/collab host` (or `tompouce --collab-host`) starts the
+  installed `tompouce-director` as a managed child process bound to the LAN
+  interface (loopback stays up too), then advertises it. If the binary is
+  not installed, the command fails with the install pointer instead of a
+  socket error. Quitting collab mode stops the child. There is deliberately
+  no election protocol: the first binder wins, and a second host just shows
+  up as a second advertisement for the joiner to pick between.
+- **Discovery.** A minimal built-in mDNS announcer and browser over UDP
+  5353 (multicast `224.0.0.251`, plus IPv6 link-local), written in portable
+  POSIX C in the client — no Avahi/Bonjour dependency, which would be a new
+  toolchain-weight dependency with poor OpenBSD story, against the grain of
+  §6.1. Service type `_tompouce-collab._tcp.local`. TXT records carry only
+  `v` (protocol version), `fp` (director/room public-key fingerprint, which
+  is public key material the joiner needs for trust-on-first-use) and
+  `join=code`. They never carry room names, member lists, sample manifests
+  or anything else: multicast is plaintext, and the E2E posture (D2)
+  extends to the LAN.
+- **Joining.** `/collab join` lists discovered directors with their
+  fingerprints. The host's screen shows an 8-digit join code (the §14.4
+  method, no URL fragments needed on a LAN); the joiner types it in, and
+  from there the handshake is the standard E2E one — capability
+  certificates, sealed frames, same as the internet path. Trust is TOFU:
+  both screens show the fingerprint for out-of-band comparison (read aloud
+  across the room).
+- **Transport on LAN.** Plain `ws://` is acceptable here: everything sensitive
+  is already sealed end to end, and skipping TLS/proxy setup is the point of
+  LAN mode. D2's `--allow-plaintext` debug switch is **not** auto-enabled on
+  LAN; debug plaintext stays an explicit flag.
+- **Clock.** The §8 filter runs unchanged and is at its best on a LAN
+  (sub-ms typical); nothing LAN-specific is needed.
+- **Firewall.** The host must allow inbound UDP 5353 to the mDNS multicast
+  group and inbound TCP to the director port on the LAN interface only
+  (e.g. `pf`, `firewalld` `--add-port`, `ufw allow in on <lan-if>` — exact
+  rules depend on the installer's firewall, so document the two openings,
+  not copy-paste rules).
+- **Security notes.** Discovery leaks presence (someone on this LAN is
+  hosting) plus a fingerprint; that is inherent and documented in the UI.
+  Join codes are single-use, short-lived and rate-limited by the director's
+  existing buckets (§13.6). A VPN looks like a LAN to this machinery,
+  which is fine. LAN is not trusted: the remote profile (§13.2) applies
+  exactly as on the internet.
+
+NEW modules: `src/collab_mdns.c` + `include/collab_mdns.h` (announce,
+browse, TXT encode/decode; pure socket code, no I/O beyond its own
+sockets, unit-testable against loopback multicast), wired into `collab.c`
+lifecycle. `/collab host` gains the LAN bind-and-advertise behavior;
+`/collab join` with no argument lists discovered LAN directors instead of
+taking a link. NEW test: `tests/test_collab_mdns.py` loopback
+announce/browse round-trip (part of the §17.2 integration family).
 
 ## 7. Wire protocol (`tompouce.collab.v1`)
 
@@ -2897,6 +2958,23 @@ comes before any public launch.
 - Remote code cannot open `local:` modules, send OSC or MIDI, or reach the
   hydra page. Tests prove it.
 - `test_collab_proto` and `test_collab_crypto` are in `test-security`.
+
+### Phase 1.5: LAN discovery (decision D10)
+
+- `tompouce-director` spawns as a managed child of `/collab host`, bound
+  to the LAN interface; built-in mDNS announce/browse (`collab_mdns.c`);
+  `/collab join` lists discovered directors; join-code handshake (§14.4).
+- Same E2E as Phase 1 (pre-shared room key replaced by the join-code
+  wrap); `ws://` on LAN, no TLS/proxy.
+
+**Acceptance:**
+
+- Two machines on one LAN with no manual addresses and no public server:
+  host on one, join from the other via the discovered entry plus the
+  on-screen code; typing converges; F5 activates on both at the same
+  `at_cycle`.
+- Captured multicast traffic contains no room names or member lists; a
+  wrong join code is rejected and rate-limited.
 
 ### Phase 2: rooms, identity, owner-signed invites, reconnect, TLS
 

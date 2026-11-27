@@ -364,14 +364,37 @@ int main(void) {
             director_now_us());
         CHECK(room!=NULL,"room create");
         CHECK(room->key_epoch==0 && room->clock_seq==0,"epochs fresh");
+        before=director_now_us();
+        {
+            uint64_t born=room->active_us;
+            /* Idle reaper: a fresh memberless room expires only after the
+               idle timeout; any member pins it indefinitely. */
+            CHECK(!director_room_expired(room,before),"fresh room kept");
+            CHECK(director_room_expired(room,
+                born+DIRECTOR_ROOM_IDLE_US+1),"idle room reaped");
+            CHECK(!director_room_expired(room,
+                born+DIRECTOR_ROOM_IDLE_US-1),"grace respected");
+        }
         member=director_member_add(room,zero,0,director_now_us());
         CHECK(member!=NULL,"member add");
+        CHECK(!director_room_expired(room,
+            before+DIRECTOR_ROOM_IDLE_US+1),"member pins room");
         member->delay_us=5000000u;
         member->has_delay=1;
-        before=director_now_us();
         director_activation_at(room,before,&num,&den,&act);
         CHECK(act>=before && act-before<=1100000u,"lead capped at ~1s");
+        director_member_remove(room,member);
+        {
+            uint64_t gone=room->active_us;
+            CHECK(!director_room_expired(room,gone),"just emptied kept");
+            CHECK(director_room_expired(room,
+                gone+DIRECTOR_ROOM_IDLE_US+1),"emptied room reaped");
+            CHECK(!director_room_expired(room,
+                gone+DIRECTOR_ROOM_IDLE_US-1),"emptied grace respected");
+        }
         director_room_destroy(room);
+        CHECK(!director_room_expired(room,before+
+            DIRECTOR_ROOM_IDLE_US+1),"destroyed room ignored");
     }
     binary=getenv("TOMPOUCE_DIRECTOR_BIN");
     if (!binary || !*binary) binary="./build/tompouce-director";
@@ -491,6 +514,15 @@ int main(void) {
         memcpy(m+18+32+26,alice.pk,32);
         CHECK(crypto_sign_detached(sig,NULL,m,sizeof(m),alice.sk)==0,
             "sign");
+        {
+            uint8_t amsg[32+26+32];
+            memcpy(amsg,challenge,32);
+            memcpy(amsg+32,TEST_ROOM,26);
+            memcpy(amsg+32+26,alice.pk,32);
+            CHECK(crypto_generichash(proof,sizeof(proof),amsg,sizeof(amsg),
+                admission_key,sizeof(admission_key))==0,"alice proof");
+            b64e(proof,32,proof_b64,sizeof(proof_b64));
+        }
         b64e(alice.pk,32,pk_b64,sizeof(pk_b64));
         b64e(sig,64,sig_b64,sizeof(sig_b64));
         cJSON_AddStringToObject(auth,"t","auth");
@@ -498,6 +530,7 @@ int main(void) {
         cJSON_AddStringToObject(auth,"room",TEST_ROOM);
         cJSON_AddStringToObject(auth,"pk",pk_b64);
         cJSON_AddStringToObject(auth,"sig",sig_b64);
+        cJSON_AddStringToObject(auth,"proof",proof_b64);
         cJSON_AddTrueToObject(auth,"owner");
         send_json(alice.handle,auth);
     }

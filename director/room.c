@@ -50,6 +50,7 @@ DirectorRoom *director_room_create(const char *id, const uint8_t *opk,
     room->epoch_us=now_us;
     room->epoch_cps=0.5;
     room->running=0;
+    room->active_us=now_us;
     room->quantum_num=0;
     room->quantum_den=1;
     room->locked=0;
@@ -72,6 +73,14 @@ void director_room_destroy(DirectorRoom *room) {
         }
     }
     memset(room,0,sizeof(*room));
+}
+int director_room_expired(const DirectorRoom *room, uint64_t now_us) {
+    unsigned i;
+    if (!room || !room->used) return 0;
+    for (i=0;i<DIRECTOR_MEMBERS_MAX;i++)
+        if (room->members[i].used) return 0;
+    return now_us>=room->active_us &&
+        now_us-room->active_us>DIRECTOR_ROOM_IDLE_US;
 }
 DirectorMember *director_member_add(DirectorRoom *room, const uint8_t *pk,
     int is_owner, uint64_t now_us) {
@@ -96,6 +105,7 @@ DirectorMember *director_member_add(DirectorRoom *room, const uint8_t *pk,
             memcpy(member->pk,pk,32);
             member->is_owner=is_owner;
             member->last_seen_us=now_us;
+            room->active_us=now_us;
             director_bucket_init(&member->bucket,now_us);
             return member;
         }
@@ -122,6 +132,7 @@ void director_member_remove(DirectorRoom *room, DirectorMember *member) {
     if (!room || !member) return;
     free(member->profile);
     memset(member,0,sizeof(*member));
+    room->active_us=director_now_us();
 }
 double director_cycle_at(const DirectorRoom *room, uint64_t now_us) {
     double base, delta;

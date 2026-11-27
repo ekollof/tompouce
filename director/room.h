@@ -10,6 +10,9 @@
 #define DIRECTOR_ROOMS_MAX 512
 #define DIRECTOR_MEMBERS_MAX 16
 #define DIRECTOR_SLOTS_MAX 16
+/* Reap memberless rooms after this long without a connection (section
+   18.4 room_idle_days). Until the config system lands this is fixed. */
+#define DIRECTOR_ROOM_IDLE_US ((uint64_t)1209600*1000000u)
 #define DIRECTOR_LOG_CAP 256
 #define DIRECTOR_RESUME_SECS 600
 typedef struct {
@@ -101,6 +104,9 @@ typedef struct {
     int locked;
     unsigned max_members;
     int solos_off;
+    /* Last time the room had at least one member (creation counts as
+       activity). Memberless rooms older than this are reaped. */
+    uint64_t active_us;
 } DirectorRoom;
 /* Monotonic server time in microseconds. */
 uint64_t director_now_us(void);
@@ -113,6 +119,9 @@ DirectorRoom *director_room_at(unsigned index);
 DirectorRoom *director_room_create(const char *id, const uint8_t *opk,
     uint64_t now_us);
 void director_room_destroy(DirectorRoom *room);
+/* True when a used room has no members and has been memberless longer
+   than DIRECTOR_ROOM_IDLE_US: its slot can be destroyed and reused. */
+int director_room_expired(const DirectorRoom *room, uint64_t now_us);
 /* Member slots: 0..members-1, stable while used. */
 DirectorMember *director_member_add(DirectorRoom *room, const uint8_t *pk,
     int is_owner, uint64_t now_us);

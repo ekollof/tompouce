@@ -908,7 +908,7 @@ when the room is E2E.
 | `t` | Fields | Notes |
 |---|---|---|
 | `hello` | `proto:[1]`, `client:{name:"tompouce", version:"…"}`, `caps:["e2e","sliders"]` | First frame, sent within 5 s of connecting or the connection is closed. A client always lists `e2e`. |
-| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room ‖ pk` under the admission key derived from the room key with `crypto_kdf` context `"tpcadm01"` — the only key material the director holds, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
+| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room ‖ pk` under the admission key derived from the room key with `crypto_kdf` context `"tpcadm01"` — the only key material the director holds, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`; claiming an opk-less room (including creating it) additionally requires a valid `proof`, verified before any room slot is consumed. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
 | `join` | `room`, `profile` (sealed `{nick, color?}`, §14.5 type 2) | Sent after `auth_ok`. |
 | `profile_update` | `enc` (sealed+signed profile record, §14.5 type 2, carrying `{nick, color?}`) | Cosmetic nick change. The director replaces the author field from the connection, rate-limits it, and relays `member_updated`; it never sees the nick. In Phase 1 this is the only way a name changes after joining. |
 | `ping` | `t0` (client monotonic µs, opaque to the server) | Clock sampling (§8.2). |
@@ -3263,8 +3263,9 @@ comes before any public launch.
   so a relayed challenge cannot mint membership for another key). The
   proof is the Phase-1 stand-in for
   invite certificates: whoever derives the admission key is admitted as
-  editor. A room is created by the first `auth` with `owner:true` (whose
-  `pk` becomes `opk`). Frames are sealed with the room key and signed with
+  editor. A room is created by the first `auth` with `owner:true` plus a
+  valid `proof` (whose `pk` becomes `opk`). Frames are sealed with the
+  room key and signed with
   ephemeral Ed25519 keys. No identities or certificates yet.
   `--allow-plaintext` exists for debugging only.
 - Client transport (libcurl WebSocket), `collab_crypto.c`, `collab_doc` with

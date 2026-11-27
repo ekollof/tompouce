@@ -300,6 +300,32 @@ static int verify_sig(const uint8_t *pk, const uint8_t *sig,
     memcpy(msg+sizeof(context)-1+32+26,pk,32);
     return crypto_sign_verify_detached(sig,msg,sizeof(msg),pk)==0;
 }
+/* Verifies the Phase-1 bootstrap proof without touching shared state, so
+   a bad proof never consumes a room slot (reviewer note). Returns 1 with
+   nothing sent on success; otherwise sends the error and returns 0. */
+static int check_bootstrap_proof(DirectorSession *s, const void *obj,
+    const char *room_id, const uint8_t *pk, const DirectorConfig *config,
+    const CpMsg *msg) {
+    uint8_t mac[32], material[32+26+32], proof[32];
+    size_t proof_len=0;
+    if (!config->has_admission_key ||
+        !cp_get_b64(obj,"proof",proof,sizeof(proof),
+        &proof_len) || proof_len!=sizeof(proof)) {
+        send_error(s,CP_E_AUTH,"proof required to claim",
+            msg->has_id,msg->id);
+        return 0;
+    }
+    memcpy(material,s->challenge,32);
+    memcpy(material+32,room_id,26);
+    memcpy(material+32+26,pk,32);
+    crypto_generichash(mac,sizeof(mac),material,sizeof(material),
+        config->admission_key,sizeof(config->admission_key));
+    if (sodium_memcmp(mac,proof,32)!=0) {
+        send_error(s,CP_E_AUTH,"bad proof",msg->has_id,msg->id);
+        return 0;
+    }
+    return 1;
+}
 static void auth_success(DirectorSession *s, DirectorRoom *room,
     DirectorMember *member, const CpMsg *msg) {
     cJSON *obj;
@@ -370,35 +396,19 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 return;
             }
             if (!room) {
+                if (!check_bootstrap_proof(s,obj,room_id,pk,config,msg))
+                    return;
                 room=director_room_create(room_id,pk,director_now_us());
                 if (!room) {
                     send_error(s,CP_E_ROOM_FULL,"no room slots",
                         msg->has_id,msg->id);
                     return;
                 }
-            }
-            if (!room->has_opk) {
-                /* Bootstrap claim: only an admission-key holder can crown the
-                   first owner of an opk-less room. The admission key is a
-                   crypto_kdf of the room key the director never sees. */
-                uint8_t mac[32], material[32+26+32], proof[32];
-                size_t proof_len=0;
-                if (!config->has_admission_key ||
-                    !cp_get_b64(obj,"proof",proof,sizeof(proof),
-                    &proof_len) || proof_len!=sizeof(proof)) {
-                    send_error(s,CP_E_AUTH,"proof required to claim",
-                        msg->has_id,msg->id);
+                memcpy(room->opk,pk,32);
+                room->has_opk=1;
+            } else if (!room->has_opk) {
+                if (!check_bootstrap_proof(s,obj,room_id,pk,config,msg))
                     return;
-                }
-                memcpy(material,s->challenge,32);
-                memcpy(material+32,room_id,26);
-                memcpy(material+32+26,pk,32);
-                crypto_generichash(mac,sizeof(mac),material,sizeof(material),
-                    config->admission_key,sizeof(config->admission_key));
-                if (sodium_memcmp(mac,proof,32)!=0) {
-                    send_error(s,CP_E_AUTH,"bad proof",msg->has_id,msg->id);
-                    return;
-                }
                 memcpy(room->opk,pk,32);
                 room->has_opk=1;
             }
@@ -473,14 +483,6 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 msg->has_id,msg->id);
             return;
         }
-        if (!room) {
-            room=director_room_create(room_id,NULL,director_now_us());
-            if (!room) {
-                send_error(s,CP_E_ROOM_FULL,"no room slots",msg->has_id,
-                    msg->id);
-                return;
-            }
-        }
         memcpy(material,s->challenge,32);
         memcpy(material+32,room_id,26);
         memcpy(material+32+26,pk,32);
@@ -489,6 +491,14 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
         if (sodium_memcmp(mac,token,32)!=0) {
             send_error(s,CP_E_AUTH,"bad proof",msg->has_id,msg->id);
             return;
+        }
+        if (!room) {
+            room=director_room_create(room_id,NULL,director_now_us());
+            if (!room) {
+                send_error(s,CP_E_ROOM_FULL,"no room slots",msg->has_id,
+                    msg->id);
+                return;
+            }
         }
         member=director_member_by_pk(room,pk);
         if (!member) {
@@ -1684,6 +1694,20 @@ void director_sweep_rooms(uint64_t now_us) {
                 send_member_event(room,"member_left",member,NULL);
                 director_member_remove(room,member);
             }
+        }
+        /* Reclaim memberless rooms (anonymous squats, abandoned lobbies):
+           section 18.4 deletes unused rooms, so the table cannot fill. */
+        if (director_room_expired(room,now_us)) {
+            unsigned s;
+            for (s=0;s<DIRECTOR_SESSIONS_MAX;s++) {
+                DirectorSession *st=sessions[s];
+                if (st && st->room==room) {
+                    st->room=NULL;
+                    st->member=NULL;
+                    close_with(st,1000,"room expired");
+                }
+            }
+            director_room_destroy(room);
         }
     }
 }

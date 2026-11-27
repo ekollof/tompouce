@@ -1101,86 +1101,150 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       `TOMPOUCE_SIMD=c`/`avx2` runs. Keep applying this rule to any new kernel;
       do not add a global `-mavx2` build.
 
-## Collaboration (multiplayer)
+## Jam mode milestones
 
-Design brief: `docs/multiplayer.md`. Director and wire codec exist
-(`director/`, `src/collab_proto.c`); the engine-side collab client is new.
+Jam mode = the user-facing name for multiplayer (`docs/multiplayer.md`,
+"the brief"). Code, config, commands and the wire protocol keep their
+`collab` names. Status words: **done** = built, tested, green on the
+full serial suite; **doing** = actively being worked (uncommitted work is
+called out); **next** = queued; **later** = specified in the brief, not
+started. Each milestone ends with: focused tests green, `test-security`
+(+ `-sanitize`) green where a trust boundary changed, full serial suite
+green, docs updated. Milestones map to brief §19 phases.
 
-- [ ] Collab client core, Phase 0 (active). Done: `WITH_COLLAB` CMake
-      option with the libcurl ≥ 8.11.0 floor; `src/collab_transport.c`
-      (libcurl WebSocket per §6.2, runtime `wss` check, loopback-only
-      `ws://` gate); `src/collab.c` session skeleton, nick
-      load/validate/generate/persist (D14), per-user `ws://` display-choice
-      groundwork; `AudioEvent.slot` plumbing; staged activation
-      (`track_stage_program`, window split, no-rewind late path) with the
-      local-equivalence test; capability gates wired with a test-driven
-      default (`tests/test_collab_cap.c`). Full serial suite green and both
-      build flavors verified. Still open in Phase 0: Yjs doc integration,
-      clock filter, consent UI, `/collab` command family, and the composite
-      compile-time benchmark (blocked on `__compileSlots`, in progress).
+### M0 — Foundations (done)
 
-- [x] Hydra sandbox split. Token-holding parent shell plus tokenless
-      `web/hydra-frame.html` in an opaque-origin `sandbox="allow-scripts"`
-      iframe. Per-file CSP, `Permissions-Policy` denying camera/mic/
-      geolocation/display-capture. `tests/test_companion.py` and
-      `scripts/hydra-webgl-qa.mjs` updated and green.
-- [ ] `music_get_code` collab filtering (blocked on the collab client).
-      Doc §6.2 specifies: in a room it returns only slots the viewer
-      authored (shared slot 0 counts as remote). Needs session/slot state
-      in `src/collab.c` first.
-- [ ] `/collab allow hydra` opt-in plumbing (blocked on the collab client).
-      Doc §13.2/T5/§18.3 specify: per-user, per-room-scoped, warned display
-      choice, never room state. Needs `collab.json` allow handling first.
-- [ ] Room asset allowlist serving (blocked on collab rooms). The iframe CSP
-      already permits `img-src/media-src 'self'`; a path-confined
-      `/assets/<room>/` companion route is the unveil-style boundary when
-      rooms exist.
-- [ ] Front-door routing (decided, deploys with Phase 5 `web-collab/`).
-      httpd keeps the Hugo front door (`/`, `/guides/`, `/safety/`,
-      `/privacy/`, `/abuse/`). relayd path-matches `/j/*`, `/o/*`, `/v1/*`
-      and the WebSocket to the director on loopback; the director serves
-      one static app shell per `/j`, `/o` prefix (room id parsed
-      client-side, secrets stay in the fragment). No extra port, no CORS.
-      Salt owns the relayd/httpd configs — no hand edits on castor.
-- [ ] Castor proxy log + header hardening (blocked on the Salt change,
-      reviewer note 2026-11-27). relayd's `match url log` (and any httpd
-      access-log URI for the bakery vhost) records `/j/<room>` paths, which
-      contradicts the privacy page; drop URL/path logging there (IPs stay,
-      7-day rule). Same change adds `Permissions-Policy: camera=(),
-      microphone=(), geolocation=(), display-capture=()` and
-      `frame-ancestors 'none'` response headers for the static site (the
-      Hugo pages already carry a meta CSP; meta cannot set those two).
-      Docs: §18.4 logging paragraph.
-- [ ] Director-driven ping round (Phase 3, reviewer note 2026-11-27).
-      Today the director estimates delay from client `t0` stamps it cannot
-      read (mixed timebases); garbage samples are dropped above 5 s RTT
-      and the lead is capped at 1 s. Proper fix per §8.2: the director
-      sends `ping_req{t1}` on its own clock, the client echoes immediately,
-      and the director smooths (min-filter) the true RTT for `lead`.
-      Client clock filter (§8.2–§8.3) is unchanged.
-- [ ] Eval acceptance window + signed tempo grants (Phase 2, reviewer note
-      2026-11-27). Owner-signed grants (`{member, permission, epoch}`
-      verified against `opk`, Q2); director enforces the holder list,
-      clients reject rogue tempo/transport broadcasts and any `eval` with
-      `at_cycle` outside [current cycle, current + lead + slack]. Needs
-      the collab client eval path first.
-- [ ] Solo override application (Phase 2, reviewer note 2026-11-27).
-      Director side done (`room_update{solos_off}`, `room_updated`,
-      `joined.room.solos_off`). Still needed: client composite honors
-      `solos_off` when evaluating solo flags per branch (§12.6).
-- [ ] Store accounting + config system (Phase 6, reviewer note
-      2026-11-27). Enforce `store_slot_bytes`, `store_room_bytes` (public:
-      256 KiB / 512 KiB) and the global `store_total_bytes` backstop
-      (256 MiB), plus the unified `room_creation` knob
-      (`open-pow`/`invite-only`/`closed`, self-host adds `admin-token`,
-      `token`, `open`), when `POST /v1/rooms` and config-file parsing land.
-      Until then: public caps stay at/below 500 rooms (static table holds
-      512) and the protocol caps (1 MiB snapshot, 64 KiB frames, 256-entry
-      log ring) are the only bound.
-- [ ] SIGHUP config/cert reload (Phase 6, reviewer note 2026-11-27).
-      `rc_reload` stays NO until the director reloads TLS certificates
-      without dropping rooms; restarts plus client resume cover rotation
-      in the meantime. VERIFY item V13 tracks the lws reload behavior.
+- [x] Standalone director: hello/auth/admission-key proof (bound to `pk`),
+      rooms, relay with per-slot ACL and Ed25519 checks, binary sealed-frame
+      validation, kick/ban with immediate key rotation, tempo/transport owner
+      gates, lead selection capped at 1 s, epoch split (`key_epoch` vs
+      `clock_seq`), room reaping, rate limits, `room_updated` + `solos_off`.
+- [x] Wire codec (`collab_proto.c`) with round-trip, fuzz and security tests.
+- [x] Phase-0 client core: `WITH_COLLAB` CMake floor (libcurl ≥ 8.11 `wss`,
+      runtime checks), libcurl WebSocket transport with loopback/LAN-only
+      plaintext policy, session skeleton, nick load/validate/generate/persist
+      plus `--collab-nick`, `--collab`/`--join` flags, staged activation with
+      window split and no-rewind late path (`test_scheduler_collab`, incl. the
+      local-equivalence check), `AudioEvent.slot`, capability gates wired with
+      a test-driven default (`tests/test_collab_cap.c`).
+- [x] Decisions D1–D14 and Q1–Q15 recorded in the brief; Nickname spec,
+      per-branch solos with owner override, signed gutter authorship.
+- [x] Hydra sandbox split (tokenless `web/hydra-frame.html`, per-file CSP,
+      `Permissions-Policy`) with companion + WebGL tests green.
+- [x] Bakery site live at <https://bakery.andrath.nl/> with setup guides,
+      safety/privacy/rules pages and a meta CSP.
+
+### M1 — Room composite compile (doing, uncommitted)
+
+- [ ] `__compileSlots` in `js/runtime.mjs`: per-slot isolated eval, namespaced
+      `"<slot>/<label>"` branch ids, union of soloed branches, `tempoBySlot`,
+      `locationsBase`, per-slot `{ok, error}` without failing the room.
+- [ ] `JsProfile` + `javascript_compile_slots()` in C: remote-profile denials
+      (local modules, prebakes, MIDI manifest/input, Csound) as catchable
+      errors with no side effects, `force_quickjs`, seeded `Math.random`.
+      (In progress: `JsProfile` declarations and the shared `finish_compile`
+      helper are uncommitted in `include/javascript.h` / `src/javascript.c`;
+      the slots entry point, profile enforcement and `__compileSlots` still
+      to land.)
+- [ ] Extend `tests/test_javascript.c`; `npm --prefix js run build`, rebuild C
+      to re-embed the bundle.
+- [ ] Acceptance: scope isolation (`const x` in two slots), per-slot errors,
+      namespaced hap ids, no weaker-option paths, deterministic seeded random,
+      full suite green.
+
+### M2 — Live shared eval (next)
+
+- [ ] Client eval path: auth with proof, `join` + `profile`, `eval_req`,
+      remote apply into the composite, activation at the shared instant
+      (§8.7, incl. the live-`eval` acceptance window).
+- [ ] `/collab` command family and the F2 `/nick` command; `profile_update` /
+      `member_updated` flow; consent UI basics (allow/deny).
+- [ ] Room-wide solo union application incl. `solos_off`; no-plaintext-on-LAN
+      rules enforced client-side.
+- [ ] Acceptance: loopback two-client test (typing converges ≤ 200 ms,
+      same `at_cycle`, `room_us` within 20 ms, bad-signature/tampered frames
+      dropped), nick generation/persistence/propagation, `test-security`
+      extended.
+
+### M3 — Rooms and identity (later, brief Phase 2)
+
+- [ ] Master seed, per-room keys, owner key + invite certificates (§14.2),
+      roles/ACLs from certificates, `joined` with verified member certs,
+      `POST /v1/rooms`, key epochs in headers.
+- [ ] Tempo grants (owner-signed holder lists, Q2); multiple rooms and slots;
+      slot roster (F9) + Ctrl+N/B; per-slot write/commit attribution.
+- [ ] Opaque store + `--state-dir`, resume tokens, reconnect diffs (§10.4),
+      rate limits and size caps.
+- [ ] Director native TLS + client certificate verification; plaintext refused
+      off loopback. Link joins (`:join`, `--join` + consent prompt). Slider
+      events (cap `sliders`).
+- [ ] Acceptance: brief §19 Phase 2 list (listener cannot write, ghost member
+      detected, single-use invites, kick → rekey, 10-minute fuzz clean).
+
+### M4 — Clock sync and latency (later, brief Phase 3)
+
+- [ ] `collab_clock.c`: offset/drift estimation, audio↔monotonic↔room-cycle
+      mapping, correction policy; epoch tempo changes; `L_out` + `L_user`.
+- [ ] Status-line `±ε` and the F4 block.
+- [ ] Director-sent `ping_req`/`pong` round (replaces untrusted client-`t0`
+      sampling), min-filter smoothing, 1 s lead cap retained.
+- [ ] Acceptance: `test_collab_clock`, netem matrix (§17.3), 30-minute soak
+      (drift < 2 ms, ≤ 1 re-anchor), manual two-machine alignment procedure
+      documented like `midi-latency-qa.py`.
+
+### M5 — Samples and sharing (later, brief Phase 4)
+
+- [ ] Bank-set digest, sealed manifest exchange, SHA-256 verification,
+      `websamp_prefetch()`, mismatch warnings.
+- [ ] Optional user-sound sharing through the director blob store as
+      ciphertext, self-hosted only (D6).
+- [ ] Companion asset allowlist (`/assets/<room>/`, unveil-style boundary).
+- [ ] Acceptance: pre-activation prefetch proven by trace, mismatch and
+      differing-locks warnings, no names/URLs/digests in director logs/store.
+
+### M6 — Web front end (later, brief Phase 5)
+
+- [ ] `web-collab/`: create-room, owner console, invite landing, join-with-code,
+      QR, CSP/SRI, assets embedded in the director.
+- [ ] Invite lifecycle (expiry, single/multi-use, revocation, epoch binding)
+      and join codes (`GET /v1/codes`, decoys, KDF limits).
+- [ ] `tompouce://` handler: `--join`, installer/AUR/AppImage registration,
+      always-prompt rule; `/collab invite --qr`; `docs/collab.md` user guide.
+- [ ] Acceptance: browser-harness end-to-end join, server-blindness recording
+      proxy (no `K`/seeds/phrases/fragments in traffic or logs), CSP lint,
+      shared C/web test vectors.
+
+### M7 — Hardening and launch (later, brief Phase 6)
+
+- [ ] Kick/ban with key rotation, `/collab rotate`, snapshot re-upload,
+      pending-rotation UX; complete consent UX; strike rule; `state.json` and
+      save-file protections; `/collab lock`; ban by key/IP prefix.
+- [ ] Public-instance controls: adaptive PoW, quotas, idle expiry, metrics,
+      health, log redaction, asset hashes on `/about`.
+- [ ] Config system + store accounting (`store_total_bytes` backstop, unified
+      `room_creation`), `rc.d` + systemd units, SIGHUP reload, director
+      load-shedding, container build.
+- [ ] Fuzz client (30 min, bounded memory), load test, §13.7 review pass
+      (every row: test or written rationale), staging deploy behind relayd
+      with TLS/header/quota checks.
+
+### M8 — Flok bridge (later, stretch, brief Phase 7)
+
+- [ ] Client-side Flok bridge (§16.2) with the always-on remote profile and
+      the public-session warning; docs state phase is not aligned with
+      browser peers. Acceptance: co-edit + cross-triggered evals against a
+      local `flok-server`.
+
+### Cross-cutting (ongoing)
+
+- [ ] Docs stay in sync with behavior: brief first, then `docs/`, wiki (mirror
+      rule in `AGENTS.md`), GitHub Pages (`site/`), `README.md`.
+- [ ] Bakery ops go through Salt only (no hand edits on castor): relayd
+      `/j /o /v1` + WebSocket routing, URL/path log redaction, response
+      headers (`Permissions-Policy`, `frame-ancestors`).
+- [ ] Remaining `VERIFY` items (brief appendix B) and the audio-comparison
+      gates stay green; small committed JS bundles stay out of `git diff`
+      whitespace checks per `AGENTS.md`.
 
 ## Code quality
 

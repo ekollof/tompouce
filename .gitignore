@@ -14,6 +14,7 @@ __pycache__/
 *.py[cod]
 bakery-site/public/
 bakery-site/resources/
+bakery-site/.hugo_build.lock
 thirdparty/quickjs/*.o
 thirdparty/tree-sitter-javascript/src/*.o
 js/dist/runtime.inc

@@ -5,7 +5,7 @@ disableKinds = ["taxonomy", "term"]
 
 [params]
   # Owed before public launch (D8). Replace with the real abuse contact.
-  abuseContact = "to be published before public launch"
+  abuseContact = "emiel@kollof.nl"
 
 [[menus.main]]
   name = "Guides"

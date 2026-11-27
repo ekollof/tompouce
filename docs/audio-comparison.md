@@ -696,9 +696,10 @@ sides; oscillator stretch renders through a streaming per-voice
 vocoder on the absolute 128-sample grid, with the source ADSR applied
 pre-vocoder like the deployed source node (`stretch-sine-tmp`
 0.999998/1.0002) and live stretch LFOs modulate the per-block factor
-with last value winning (`stretch-sine-lfo-tmp` 0.999998/1.0002;
-`lfo-stretch-static-tmp` stays diagnostic for the sample-side live
-path).
+with last value winning (`stretch-sine-lfo-tmp` 0.999998/1.0002).
+Stretched samples with a modulated factor stream the same baked input
+timeline per block (`lfo-stretch-static-tmp` 0.9992/1.0003); static
+stretch keeps the prepared buffer.
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

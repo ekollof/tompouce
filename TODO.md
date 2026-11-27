@@ -625,7 +625,8 @@ and measured divergences are recorded in the archive.
       40 ms pre-roll shifting stretch haps early is mirrored on both
       sides, which is why the gates start late. Oscillator stretch
       renders through a streaming per-voice vocoder
-      (`stretch-sine-tmp`, `stretch-sine-lfo-tmp` at 0.99); unvalued
+      (`stretch-sine-tmp`, `stretch-sine-lfo-tmp`,
+      `lfo-stretch-static-tmp` at 0.99); unvalued
       LFOs warn on both sides),
       bmod (inter-voice audio bus system). Bytebeat values gate
       (`bytebeat`, `bytebeat-nooffset-tmp`, `bytebeat-zerooffset-tmp`

@@ -122,6 +122,17 @@ typedef struct Voice {
     long long live_first; /* absolute onset sample of the first render */
     long long live_next;  /* absolute start of the next block to refill */
     long long live_frame; /* absolute sample the next drain renders */
+    /* Live stretched-sample transport (mirrors the baked preparation
+       input timeline sample for sample). */
+    double live_origin; /* source_start in seconds (onset minus 40 ms) */
+    double live_pos;    /* fractional source position in frames */
+    double live_step;   /* mapped playback step with pitch ratio */
+    double live_gate;   /* envelope gate in seconds */
+    double live_begin; /* source begin fraction (baked key.begin) */
+    int live_started;   /* source onset reached */
+    long long live_exit; /* absolute first sample with OOB transport, -1 */
+    int live_frames;    /* total rendered samples (baked frame count) */
+    long long live_stop; /* absolute end sample (first render + frames) */
     char token[24]; /* printable label for music_debug; not a path */
     // drum-specific
     double age;

@@ -254,3 +254,38 @@ const StretchBuffer *stretch_prepare(const AudioEvent *event) {
     free(work);
     return cache_publish(slot,&key,buffer);
 }
+
+/* Live-streaming scalars for a stretched-sample voice. Mirrors the key
+   derivation in stretch_prepare line for line (mapping, clamps, Float32
+   cast, onset snap and frame count) but stops before buffer allocation.
+   The caller renders the same input timeline streaming instead. */
+int stretch_live_key(const AudioEvent *event, StretchLiveKey *out) {
+    if (!event || !out || !isfinite(event->stretch) || event->stretch<=0 || event->stretch>17 || event->smp<0) return 0;
+    float *source; int length,channels;
+    smp_get_stereo(event->smp,&source,&length,&channels);
+    if (!source || length<1) return 0;
+    double step=event->smp_speed;
+    if (event->freq>0) step*=event->freq/(440*pow(2,(smp_base_midi(event->smp)-69)/12.0));
+    if (!isfinite(step) || !isfinite(event->time) || !isfinite(event->duration) || step==0) return 0;
+    step=(step<0?-1:1)*fmin(4096,fmax(.001,fabs(step)));
+    step=(double)(float)step;
+    double begin=event->dsp.p[DSP_BEGIN], end=event->dsp.p[DSP_END];
+    double gate=event->smp_gate?event->duration:length*(end-begin)/(fabs(step)*SR);
+    if (!isfinite(event->rel) || event->rel<0) return 0;
+    if (gate<=0 || gate+event->rel>90) return 0;
+    double onset=event->time*SR;
+    if (!isfinite(onset)) return 0;
+    double nearest=round(onset);
+    if (fabs(onset-nearest)<=10*DBL_EPSILON*fmax(1,fabs(onset))) onset=nearest;
+    double first_frame=ceil(onset);
+    double phase=fmod(first_frame,VOCODE_FFT); if (phase<0) phase+=VOCODE_FFT;
+    double fraction=onset-first_frame;
+    out->step=step; out->gate=gate; out->begin=begin;
+    /* The baked grid counts from an M-shifted origin (multiples of 2048
+       removed); in true absolute samples the source starts at the onset
+       minus the 40 ms preroll. Cursor arithmetic is unaffected mod 2048. */
+    out->origin=event->time-.04;
+    out->frames=(int)(ceil((phase+fraction-.04*SR+(gate+event->rel+.01)*SR)/VOCODE_HOP)*VOCODE_HOP-phase);
+    if (out->frames<0) out->frames=0;
+    return 1;
+}

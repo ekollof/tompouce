@@ -333,7 +333,7 @@ try {
     {name:'stretch-down-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).stretch(-2).late(.125)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'stretch-sine-tmp',sound:'sine',code:`note(60).s('sine').gain(.5).stretch(1).late(.125)`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'stretch-sine-lfo-tmp',sound:'sine',code:`note(60).s('sine').gain(.5).stretch(1).late(.125).lfo({control:'stretch',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
-    {name:'lfo-stretch-static-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).stretch(1).late(.125).lfo({control:'stretch',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:null},
+    {name:'lfo-stretch-static-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).stretch(1).late(.125).lfo({control:'stretch',rate:.5,depth:.5})`,cycles:1,cps:.5,window:2,correlation:.99},
     {name:'vib-static-sample-tmp',sound:'mono_fixture',fixture:true,mono:true,code:`s('mono_fixture').gain(.5).vib(6).vibmod(1)`,cycles:1,cps:.5,window:2,correlation:.99},
                     {name:'fx-pattern-gain',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(gain(.5))`,cycles:1,cps:.5,window:.6,correlation:.99},
     {name:'fx-pattern-lpf',sound:'sine',code:`note(69).s('sine').gain(.4).clip(.1).FX(lpf(800))`,cycles:1,cps:.5,window:.6,correlation:.99},

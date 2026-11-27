@@ -1202,13 +1202,22 @@ static const GenTarget *gen_target(const char *name, const cJSON *value, const c
             /* The orbit DJF node exists once any hap carries djf. */
             if (ev->has_djf) return &gen_targets[i];
         } else if (!strcmp(need, "stretch-voice")) {
-            /* The phase-vocoder node exists on plain-oscillator voices
-               carrying a static stretch value; without one the deployed
-               connection warns instead of modulating. */
-            if (ev->stretch > 0 && (ev->inst == INST_SINE ||
-                ev->inst == INST_SAW || ev->inst == INST_SQUARE ||
-                ev->inst == INST_TRI) && !ev->is_drum) return &gen_targets[i];
-            return NULL;
+            /* The phase-vocoder node exists whenever the hap carries a
+               static stretch value. Plain oscillators take the live path;
+               without a static value the deployed connection warns instead
+               of modulating. Other sounds resolve at the trigger: samples
+               with a prepared buffer take the live sample path, anything
+               else keeps warning. */
+            if (ev->stretch <= 0) return NULL;
+            if (sound && oscillator(sound) >= 0) {
+                if ((ev->inst == INST_SINE || ev->inst == INST_SAW ||
+                    ev->inst == INST_SQUARE || ev->inst == INST_TRI) &&
+                    !ev->is_drum) return &gen_targets[i];
+                return NULL;
+            }
+            if (!sound || !*sound || !strncmp(sound, "wt_", 3) || !strncmp(sound, "wt:", 3)) return NULL;
+            if (ev->inst == INST_NATIVE || ev->inst == INST_ADDITIVE) return NULL;
+            return &gen_targets[i];
         } else if (!strcmp(need, "wt-node")) {
             /* The wavetable source worklet always exposes its position
                and warp params, unlike its optional LFO worklet. */

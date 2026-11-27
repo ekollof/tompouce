@@ -1104,20 +1104,25 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 ## Collaboration (multiplayer)
 
 Design brief: `docs/multiplayer.md`. Director and wire codec exist
-(`director/`, `src/collab_proto.c`); the engine-side collab client
-(`src/collab.c`, transport, staged activation) does not yet.
+(`director/`, `src/collab_proto.c`); the engine-side collab client is new.
 
-- [ ] Hydra sandbox split (active, no collab dependency). `web/hydra.html`
-      becomes a token-holding parent shell (polls `/api/tool`, draws HUD and
-      the code overlay); the new tokenless `web/hydra-frame.html` runs the
-      `new Function` eval and WebGL in an opaque-origin
-      `sandbox="allow-scripts"` iframe fed by `postMessage`. Per-file CSP
-      (eval only inside the frame), `Permissions-Policy` denying
-      camera/microphone/geolocation/display-capture, no token string in the
-      frame. Acceptance: `tests/test_companion.py` green (frame has no
-      token, parent has no `unsafe-eval`, frame does), `scripts/companion.py`
-      serves the frame, `scripts/hydra-webgl-qa.mjs` drives the frame;
-      note if WebGL is unavailable here.
+- [ ] Collab client core, Phase 0 (active). `WITH_COLLAB` CMake option with
+      the libcurl ≥ 8.11.0 floor (OFF plus a message below it);
+      `src/collab_transport.c` (libcurl WebSocket per §6.2, runtime `wss`
+      check); `src/collab.c` session skeleton (Idle/Connecting/Backoff,
+      `--collab`/`--collab-nick`/`--join` flags, nick load/validate/generate/
+      persist per §18.3/D14); `tests/test_collab_transport.c` (offline
+      validation + loopback hello/welcome vs the real director, skipped
+      without director/sodium). Collab-off behavior byte-identical; full
+      serial suite green. Deferred to the next increments: `AudioEvent.slot`
+      plumbing, staged activation (`track_stage_program`), Yjs doc, clock
+      filter, consent UI, `/collab` command family.
+
+- [x] Hydra sandbox split. Token-holding parent shell plus tokenless
+      `web/hydra-frame.html` in an opaque-origin `sandbox="allow-scripts"`
+      iframe. Per-file CSP, `Permissions-Policy` denying camera/mic/
+      geolocation/display-capture. `tests/test_companion.py` and
+      `scripts/hydra-webgl-qa.mjs` updated and green.
 - [ ] `music_get_code` collab filtering (blocked on the collab client).
       Doc §6.2 specifies: in a room it returns only slots the viewer
       authored (shared slot 0 counts as remote). Needs session/slot state

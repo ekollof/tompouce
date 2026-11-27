@@ -7,6 +7,9 @@
 #include "banks.h"
 #include "csound_host.h"
 #include "javascript.h"
+#ifdef HAVE_COLLAB
+#include "collab.h"
+#endif
 #include <string.h>
 
 int main(int argc, char **argv) {
@@ -25,6 +28,11 @@ int main(int argc, char **argv) {
     const char *mcp_socket = NULL;
     double init_bpm = 120.0;
     const char *init_code = NULL;
+#ifdef HAVE_COLLAB
+    const char *collab_url = NULL;
+    const char *collab_nick = NULL;
+    const char *join_link = NULL;
+#endif
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mcp") == 0 || strcmp(argv[i], "mcp") == 0) mcp = 1;
         if (strcmp(argv[i], "--ui") == 0) ui = 1;
@@ -42,14 +50,80 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--mcp-socket") == 0 && i + 1 < argc)
             mcp_socket = argv[++i];
+#ifdef HAVE_COLLAB
+        if (strcmp(argv[i], "--collab") == 0 && i + 1 < argc)
+            collab_url = argv[++i];
+        if (strcmp(argv[i], "--collab-nick") == 0 && i + 1 < argc)
+            collab_nick = argv[++i];
+        if (strcmp(argv[i], "--join") == 0 && i + 1 < argc)
+            join_link = argv[++i];
+#endif
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("usage: tompouce [--mcp [--ui]] [--mcp-port N | --mcp-socket PATH] [--bpm N] [--block N] [--code ...]\n");
             printf("  --mcp --ui from a terminal serves MCP on 127.0.0.1:%d (or --mcp-port).\n", MCP_DEFAULT_PORT);
             puts("  --mcp-socket serves authenticated MCP on a named 0600 Unix socket (isolated per instance).");
+#ifdef HAVE_COLLAB
+            puts("  --collab URL connects the collab session (rooms arrive in Phase 1).");
+            puts("  --collab-nick NAME overrides the stored nickname for one run.");
+            puts("  --join LINK parses an invite link (joining lands with Phase 2 invites).");
+#endif
             puts("  --install-prebake switchangel downloads the pinned optional starter without overwriting existing files.");
             return 0;
         }
     }
+#ifdef HAVE_COLLAB
+    if (join_link) {
+        /* Phase 0: validate the link shape only. Parsing, the consent
+           prompt and joining land with Phase 2 invites (collab_link.c). */
+        const char *hash=strchr(join_link,'#');
+        int https=strncmp(join_link,"https://",8)==0;
+        int scheme=strncmp(join_link,"tompouce://join/",16)==0;
+        if ((!https && !scheme) || !hash || hash[1]==0) {
+            fprintf(stderr,"tompouce: --join needs an https:// or tompouce://join/ link with a fragment\n");
+            return 1;
+        }
+        printf("tompouce: link parsed (room joining lands with Phase 2 invites)\n");
+    }
+    if (collab_url || collab_nick) {
+        CollabConfig cfg;
+        char err[256]="";
+        memset(&cfg,0,sizeof(cfg));
+        if (collab_url) {
+            size_t n=strlen(collab_url);
+            if (n>=sizeof(cfg.url)) {
+                fprintf(stderr,"tompouce: --collab url too long\n");
+                return 1;
+            }
+            memcpy(cfg.url,collab_url,n+1);
+        }
+        if (collab_nick) {
+            size_t n=strlen(collab_nick);
+            if (n>=sizeof(cfg.nick_override)) {
+                fprintf(stderr,"tompouce: --collab-nick too long\n");
+                return 1;
+            }
+            memcpy(cfg.nick_override,collab_nick,n+1);
+        }
+        if (cfg.url[0]) {
+            if (collab_connect(&cfg,err,sizeof(err))) {
+                char nick[64]="";
+                collab_nick_get(nick,sizeof(nick));
+                printf("tompouce: collab handshake ok as %s (rooms arrive in Phase 1)\n",
+                    nick[0]?nick:"unknown");
+                if (err[0]) printf("tompouce: note: %s\n",err);
+            } else {
+                fprintf(stderr,"tompouce: %s\n",err[0]?err:"collab connect failed");
+                return 1;
+            }
+        } else {
+            char check[128]="";
+            if (!collab_nick_check(collab_nick,check,sizeof(check))) {
+                fprintf(stderr,"tompouce: %s\n",check);
+                return 1;
+            }
+        }
+    }
+#endif
     banks_ensure_default(); /* warm sample index in background */
     audio_set_bpm(init_bpm);
     if (init_code) mcp_set_init_code(init_code);

@@ -45,6 +45,23 @@ pkg_check_modules(REQUIRED_DEPS REQUIRED IMPORTED_TARGET
 find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
 find_path(LEVELDB_INCLUDE_DIR leveldb/c.h REQUIRED)
 
+# Collab client floor (docs/multiplayer.md section 6.5, decision D4): the
+# WebSocket transport needs libcurl >= 8.11.0 with wss. Below that the
+# client stays out of the build with a message instead of breaking.
+pkg_check_modules(LIBCURL_COLLAB QUIET IMPORTED_TARGET libcurl>=8.11.0)
+if(LIBCURL_COLLAB_FOUND)
+    set(WITH_COLLAB_DEFAULT ON)
+else()
+    set(WITH_COLLAB_DEFAULT OFF)
+endif()
+option(WITH_COLLAB "Build the collab client (libcurl WebSocket transport)" ${WITH_COLLAB_DEFAULT})
+if(WITH_COLLAB AND NOT LIBCURL_COLLAB_FOUND)
+    message(FATAL_ERROR "WITH_COLLAB needs libcurl >= 8.11.0 with WebSocket support")
+endif()
+if(NOT WITH_COLLAB AND NOT LIBCURL_COLLAB_FOUND)
+    message(STATUS "collab client: off, libcurl older than 8.11.0")
+endif()
+
 # A changed prefix must invalidate find_* results from the previous configure.
 function(tompouce_dependency_prefix name prefix)
     if(NOT DEFINED TOMPOUCE_PREVIOUS_${name}_PREFIX OR
@@ -262,6 +279,11 @@ if(LILV_FOUND)
     target_link_libraries(tompouce_core PUBLIC PkgConfig::LILV)
 endif()
 target_link_libraries(tompouce_core PUBLIC tompouce_options quickjs tree_sitter_javascript)
+if(WITH_COLLAB)
+    target_sources(tompouce_core PRIVATE src/collab_transport.c src/collab.c)
+    target_compile_definitions(tompouce_core PUBLIC HAVE_COLLAB)
+    message(STATUS "collab client: on (libcurl WebSocket transport)")
+endif()
 add_executable(tompouce src/main.c)
 target_link_libraries(tompouce PRIVATE tompouce_core)
 

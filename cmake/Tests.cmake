@@ -31,6 +31,15 @@ if(TEST_SODIUM_FOUND)
 else()
     message(STATUS "collab_loopback: skipped, libsodium not found")
 endif()
+if(WITH_COLLAB)
+    tompouce_test(collab_transport)
+    if(TARGET tompouce-director)
+        add_dependencies(test_collab_transport tompouce-director)
+        target_compile_definitions(test_collab_transport PRIVATE "TOMPOUCE_DIRECTOR_BIN=\"$<TARGET_FILE:tompouce-director>\"")
+    endif()
+else()
+    message(STATUS "collab_transport: skipped, WITH_COLLAB off")
+endif()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 set_tests_properties(carla_host PROPERTIES
@@ -405,15 +414,29 @@ foreach(name audio audio_performance stretch convolution_prepare room duck_onset
         add_dependencies(test_midi_sanitize test_midi)
     endif()
 endforeach()
+if(WITH_COLLAB)
+    add_executable(test_collab_transport_sanitize EXCLUDE_FROM_ALL tests/test_collab_transport.c)
+    set_target_properties(test_collab_transport_sanitize PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_compile_options(test_collab_transport_sanitize PRIVATE -UNDEBUG -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_collab_transport_sanitize PRIVATE -fsanitize=address,undefined)
+    target_link_libraries(test_collab_transport_sanitize PRIVATE tompouce_core)
+endif()
 target_link_libraries(test_websamp_security_sanitize PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security_sanitize PRIVATE -Wl,--export-dynamic)
+set(collab_security_command "")
+set(collab_security_depends "")
+if(WITH_COLLAB)
+    set(collab_security_command COMMAND $<TARGET_FILE:test_collab_transport>)
+    set(collab_security_depends test_collab_transport)
+endif()
 add_custom_target(test-security
     COMMAND $<TARGET_FILE:test_mcp_security>
     COMMAND $<TARGET_FILE:test_websamp_security>
     COMMAND $<TARGET_FILE:test_collab_proto>
+    ${collab_security_command}
     COMMAND $<TARGET_FILE:test_javascript> --prebake
     COMMAND "${Python3_EXECUTABLE}" tests/test_companion.py
-    DEPENDS test_mcp_security test_websamp_security test_collab_proto test_javascript
+    DEPENDS test_mcp_security test_websamp_security test_collab_proto ${collab_security_depends} test_javascript
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-security-sanitize
     COMMAND $<TARGET_FILE:test_mcp_security_sanitize>
@@ -440,6 +463,12 @@ endif()
 set(CARLA_SANITIZE_COMMAND COMMAND "${CMAKE_COMMAND}" -E env
     "TOMPOUCE_CARLA_TEST_HOST=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/carla-managed-sleep.sh"
     $<TARGET_FILE:test_carla_host_sanitize>)
+set(COLLAB_SANITIZE_COMMAND "")
+set(COLLAB_SANITIZE_DEPENDENCY "")
+if(WITH_COLLAB)
+    set(COLLAB_SANITIZE_COMMAND COMMAND $<TARGET_FILE:test_collab_transport_sanitize>)
+    set(COLLAB_SANITIZE_DEPENDENCY test_collab_transport_sanitize)
+endif()
 add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_convolution_prepare_sanitize>
     COMMAND $<TARGET_FILE:test_stretch_sanitize>
@@ -457,10 +486,11 @@ add_custom_target(test-sanitize
     COMMAND $<TARGET_FILE:test_websamp_sanitize>
     COMMAND $<TARGET_FILE:test_js_worker_sanitize>
     COMMAND $<TARGET_FILE:test_lv2_sanitize>
+    ${COLLAB_SANITIZE_COMMAND}
     ${LV2_SANITIZE_COMMAND}
     ${LIVE_LV2_SANITIZE_COMMAND}
     ${CARLA_SANITIZE_COMMAND}
-    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize test_live_lv2_sanitize test_carla_host_sanitize ${LV2_SANITIZE_DEPENDENCY}
+    DEPENDS test_convolution_prepare_sanitize test_stretch_sanitize test_dsp_sanitize test_audio_sanitize test_audio_performance_sanitize test_room_sanitize test_duck_onset_sanitize test_native_synth_sanitize test_editor_sanitize test_live_sliders_sanitize test_csound_sanitize test_midi_sanitize test_gm_webaudiofont_sanitize test_websamp_sanitize test_js_worker_sanitize test_lv2_sanitize test_lv2_worker_sanitize test_live_lv2_sanitize test_carla_host_sanitize ${LV2_SANITIZE_DEPENDENCY} ${COLLAB_SANITIZE_DEPENDENCY}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL)
 add_custom_target(test-terminal-sanitize
     COMMAND "${CMAKE_COMMAND}" -E env

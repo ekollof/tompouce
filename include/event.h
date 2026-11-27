@@ -182,6 +182,7 @@ typedef struct {
     int has_djf;        /* DJF node exists when the hap carries djf */
     double djf;         /* shared orbit DJF value when present */
     int orbit;          /* 0..N_ORBITS-1 */
+    uint16_t slot;      /* collab slot that authored this event (0 = local) */
     unsigned duck_mask; /* bit i selects a target orbit; JS ramps begin 10 ms early */
     double duck_attack; /* seconds to return to full level */
     double duck_depth;  /* 0..1 */

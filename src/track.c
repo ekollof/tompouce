@@ -88,6 +88,32 @@ int track_load_from_code(const char *code_buf) {
        after Stop, invalidates producers without withdrawing committed audio. */
     if (replace_javascript) event_queue_new_program(HUGE_VAL);
     else event_queue_clear();
+    track_activate_locked(program,metadata,music_cursor,boundary,tick,0);
+    pthread_mutex_unlock(&tracks_lock);
+    if (!continuous) scheduler_song_sync();
+    log_console("Loaded JavaScript/Strudel pattern, bpm %.0f",audio_get_bpm());
+    return 1;
+}
+
+/* Shared activation: swap in program/metadata at the given cursor. The
+   caller must hold tracks_lock; the program must be prepared (compile,
+   csound, samples) off the audio callback, and ownership transfers here.
+   keep_state preserves the local monitor and transport state across a room
+   activation; the immediate path resets it exactly as before. A superseded
+   staged program is dropped. */
+void track_activate_locked(JsProgram *program, cJSON *metadata,
+    double music_cursor, double boundary, double tick, int keep_state) {
+    int mute=0, solo=0, active=1, transport_revision=0;
+    if (keep_state && track_count==1) {
+        mute=tracks[0].mute;
+        solo=tracks[0].solo;
+        active=tracks[0].active;
+        transport_revision=tracks[0].transport_revision;
+    }
+    if (track_count==1 && tracks[0].pending) {
+        javascript_free(tracks[0].pending);
+        cJSON_Delete(tracks[0].pending_metadata);
+    }
     audio_set_csound(javascript_csound(program));
     audio_set_reference_mode(1);
     javascript_activate_sliders(program);
@@ -98,7 +124,11 @@ int track_load_from_code(const char *code_buf) {
     const cJSON *visuals = cJSON_GetObjectItemCaseSensitive(metadata,"visuals");
     t->visual_requests = cJSON_IsNumber(visuals) ? visuals->valueint & 3 : 0;
     t->compile_generation = event_queue_generation();
-    t->active = 1;
+    t->mute=mute;
+    t->solo=solo;
+    t->active = active;
+    t->transport_revision=transport_revision;
+    t->collab_clock=keep_state;
     snprintf(t->keyword,sizeof(t->keyword),"javascript");
     track_count = 1;
     const cJSON *tempo = cJSON_GetObjectItemCaseSensitive(metadata,"bpm");
@@ -110,8 +140,41 @@ int track_load_from_code(const char *code_buf) {
     t->cycle_index=music_cursor>=INT_MAX?INT_MAX:music_cursor<=0?0:(int)floor(music_cursor);
     t->next_cycle=isfinite(t->js_seconds)?t->js_origin+t->cycle_index*t->js_seconds:boundary;
     cJSON_Delete(metadata);
+}
+
+int track_stage_program(JsProgram *program, cJSON *metadata,
+    double activate_cycle, unsigned eval_seq) {
+    char *samples;
+    if (!program || !isfinite(activate_cycle)) return 0;
+    pthread_mutex_lock(&tracks_lock);
+    if (track_count!=1 || !tracks[0].javascript) {
+        pthread_mutex_unlock(&tracks_lock);
+        return 0;
+    }
+    /* Sample arguments resolve here, off the audio callback, exactly like
+       the immediate path. The generator only swaps pointers. */
+    samples=cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(metadata,"samples"));
+    websamp_load_arguments(samples);
+    free(samples);
+    if (tracks[0].pending) {
+        javascript_free(tracks[0].pending);
+        cJSON_Delete(tracks[0].pending_metadata);
+    }
+    tracks[0].pending=program;
+    tracks[0].pending_metadata=metadata;
+    tracks[0].pending_cycle=activate_cycle;
+    tracks[0].pending_seq=eval_seq;
     pthread_mutex_unlock(&tracks_lock);
-    if (!continuous) scheduler_song_sync();
-    log_console("Loaded JavaScript/Strudel pattern, bpm %.0f",audio_get_bpm());
     return 1;
+}
+
+void track_clear_pending(void) {
+    pthread_mutex_lock(&tracks_lock);
+    if (track_count==1 && tracks[0].pending) {
+        javascript_free(tracks[0].pending);
+        cJSON_Delete(tracks[0].pending_metadata);
+        tracks[0].pending=NULL;
+        tracks[0].pending_metadata=NULL;
+    }
+    pthread_mutex_unlock(&tracks_lock);
 }

@@ -801,6 +801,51 @@ int scheduler_editor_play_styles(double now, const char *editor, int *off, int *
    100 ms output latency. Accepted audio/OSC/Csound events
    are never withdrawn by a control change. External tempo pivots at the next
    query boundary; event-level tempo pivots at its onset inside that window. */
+/* One scheduled query window. Mirrors the loop body below; factored out so
+   a staged activation can split a window across two programs. Returns the
+   window end after callee adjustments. */
+static double query_segment(JsProgram *program, double begin, double end,
+    double now, double phase, int audible, unsigned generation,
+    double *seconds, double *anchor_cycle, double *anchor_time,
+    double *origin, int *event_tempo) {
+    JsAudioClock clock={.seconds=*seconds,.anchor_cycle=*anchor_cycle,
+        .anchor_time=*anchor_time,.end=end};
+    /* Like Cyclist, an error in one callback must not stop the driver's
+       later windows. Keep any tempo checkpoint already accepted. */
+    if (phase>=now && audible && isfinite(*seconds))
+        (void)js_audio_schedule_clock(program,&clock,begin,end,phase+.15,generation);
+    if (clock.seconds!=*seconds || clock.anchor_cycle!=*anchor_cycle ||
+        clock.anchor_time!=*anchor_time) *event_tempo=1;
+    *seconds=clock.seconds;
+    *anchor_cycle=clock.anchor_cycle;
+    *anchor_time=clock.anchor_time;
+    if (isfinite(*seconds)) *origin=*anchor_time-*anchor_cycle**seconds;
+    return clock.end;
+}
+
+/* Swap in the staged program. tracks_lock must be held. boundary is the
+   audio time of the staged cycle under the current anchors. Refreshes the
+   loop-local program handle and generation so querying continues on the
+   new program in the same window. */
+static void activate_staged_locked(JsProgram **program, unsigned *generation,
+    unsigned *transport_revision, double boundary) {
+    JsProgram *staged=tracks[0].pending;
+    cJSON *meta=tracks[0].pending_metadata;
+    unsigned seq=tracks[0].pending_seq;
+    double cycle=tracks[0].pending_cycle;
+    double tick=tracks[0].js_tick;
+    tracks[0].pending=NULL;
+    tracks[0].pending_metadata=NULL;
+    event_queue_new_program(HUGE_VAL);
+    javascript_free(*program);
+    track_activate_locked(staged,meta,cycle,boundary,tick,1);
+    *program=tracks[0].javascript;
+    javascript_retain(*program);
+    *generation=tracks[0].compile_generation;
+    *transport_revision=tracks[0].transport_revision;
+    log_console("collab: eval #%u live",seq);
+}
+
 static int schedule_live_javascript(double now) {
     if (track_count!=1 || !tracks[0].javascript) return 0;
     if (!audio_is_playing()) return 1;
@@ -840,21 +885,58 @@ static int schedule_live_javascript(double now) {
         begin+=missed*.05/seconds; end=begin; phase+=missed*.05;
     }
     while (query && phase<now+.2-1e-9) {
+        double pending_cycle=0, boundary=0, window_end;
+        unsigned pending_seq=0;
+        int have_pending=0, split=0;
         pthread_mutex_lock(&tracks_lock);
         int current=track_count==1 && tracks[0].compile_generation==generation && tracks[0].transport_revision==transport_revision;
+        have_pending=current && tracks[0].pending!=NULL;
+        if (have_pending) {
+            pending_cycle=tracks[0].pending_cycle;
+            pending_seq=tracks[0].pending_seq;
+        }
         pthread_mutex_unlock(&tracks_lock);
         if (!current) break;
+        /* Late path: the staged cycle is already behind the query cursor,
+           so the whole window belongs to the new program. */
+        if (have_pending && pending_cycle<=begin) {
+            pthread_mutex_lock(&tracks_lock);
+            if (track_count==1 && tracks[0].pending) {
+                boundary=isfinite(seconds)?anchor_time+(pending_cycle-anchor_cycle)*seconds:anchor_time;
+                activate_staged_locked(&program,&generation,
+                    &transport_revision,boundary);
+            }
+            pthread_mutex_unlock(&tracks_lock);
+            have_pending=0;
+        }
         phase=round(phase*10000)/10000;
         end=begin+.05/seconds;
-        JsAudioClock clock={.seconds=seconds,.anchor_cycle=anchor_cycle,.anchor_time=anchor_time,.end=end};
-        /* Like Cyclist, an error in one callback must not stop the driver's
-           later windows. Keep any tempo checkpoint already accepted. */
-        if (phase>=now && audible && isfinite(seconds))
-            (void)js_audio_schedule_clock(program,&clock,begin,end,phase+.15,generation);
-        if (clock.seconds!=seconds || clock.anchor_cycle!=anchor_cycle || clock.anchor_time!=anchor_time) event_tempo=1;
-        seconds=clock.seconds; anchor_cycle=clock.anchor_cycle; anchor_time=clock.anchor_time;
-        if (isfinite(seconds)) origin=anchor_time-anchor_cycle*seconds;
-        end=clock.end; begin=end; phase+=.05;
+        window_end=end;
+        /* Split path: the staged cycle falls inside this window. The head
+           queries the old program, then the tail queries the new one. */
+        split=have_pending && begin<pending_cycle && pending_cycle<end;
+        if (split) window_end=pending_cycle;
+        end=query_segment(program,begin,window_end,now,phase,audible,
+            generation,&seconds,&anchor_cycle,&anchor_time,&origin,
+            &event_tempo);
+        if (split) {
+            pthread_mutex_lock(&tracks_lock);
+            if (track_count==1 && tracks[0].pending) {
+                boundary=isfinite(seconds)?anchor_time+(pending_cycle-anchor_cycle)*seconds:anchor_time;
+                activate_staged_locked(&program,&generation,
+                    &transport_revision,boundary);
+            }
+            pthread_mutex_unlock(&tracks_lock);
+            if (end<window_end+.05/seconds && end<pending_cycle+.05/seconds) {
+                double tail_end=begin+.05/seconds;
+                if (tail_end<end) tail_end=end;
+                end=query_segment(program,end,tail_end,now,phase,audible,
+                    generation,&seconds,&anchor_cycle,&anchor_time,&origin,
+                    &event_tempo);
+            }
+            (void)pending_seq;
+        }
+        begin=end; phase+=.05;
     }
     if (isfinite(seconds)) javascript_update_visuals(program,now,origin,seconds);
     javascript_free(program);

@@ -521,7 +521,7 @@ is room-wide (§12.6), decided in D13. One slot's runtime exception is caught an
 | `src/websamp.c`, `include/websamp.h` | Add `websamp_prefetch(const char *token)` (NEW): a non-blocking enqueue of the download path that `websamp_acquire()` uses lazily today. Add a per-host consent hook for remote-authored `samples()` calls. |
 | `src/tui.c`, `src/tui_commands.h`, `src/tui_terminal.h` | Slot view, `/collab` and `:collab` commands (including `:join <link>`, `/join <link>`, the join consent prompt and `/collab invite --qr`), the top-level `/nick` command, remote cursors, status segment, F9 slot list in collab mode, edit capture (§9.3) and the remote-delta apply path that bypasses snapshot undo (§9.3). |
 | `src/mcp.c` | When collab is active, `music_set_code` writes into the local user's focused slot and `music_evaluate` becomes a room eval request. Add the NEW read-only tool `music_collab_status`, which `test_mcp_security` must bound. |
-| `web/hydra.html` / companion | If the composite contains remote-authored text, `music_get_code` returns only local-authored slots to the hydra page. Alternatively the page refuses to `new Function` until the user consents (`CAP_HYDRA`). |
+| `web/hydra.html` / companion | Hydra is a per-user display choice, defaulting to **local slots only**: in a room, `music_get_code` returns only slots the viewer authored (shared slot 0 counts as remote). `/collab allow hydra` (per-user, per-room-scoped, warned) opts that browser into rendering remote slots too; it is never room state and never owner-controlled. The page must be split before opt-in is recommended: a token-holding parent fetches code and draws HUD, while a tokenless opaque-origin iframe (`sandbox="allow-scripts"`, no `allow-same-origin`) receives code by `postMessage` and runs the `new Function` eval + WebGL there. Iframe CSP is `default-src 'none'`, `connect-src 'none'`, `img-src/media-src 'self'` plus a room asset allowlist path, `object-src 'none'`, `base-uri 'none'` (`unsafe-eval` lives only inside the iframe); `Permissions-Policy` denies camera, microphone, geolocation and display-capture; room assets serve from a path-confined companion directory (traversal refused), which is the unveil-style boundary. |
 | `src/main.c` | Add `--collab URL` (NEW), `--collab-nick NAME` (NEW) and **`--join LINK`** (NEW, the target of the `tompouce://` handler: parse, show the consent prompt, then connect). These sit next to the existing `--mcp`, `--mcp-port` and `--bpm` flags. |
 | `scripts/install.py`, `scripts/build-appimage.sh`, `packaging/aur/` | Register the `x-scheme-handler/tompouce` MIME handler (`Exec=tompouce --join %u`, `Terminal=true`), detect a libcurl older than 8.11.0 and build with `WITH_COLLAB=OFF` plus a message, and bundle a current libcurl in the AppImage (§6.5). The AppImage `.desktop` file is written near `scripts/build-appimage.sh:169`. |
 | `CMakeLists.txt` | `WITH_COLLAB`, `WITH_DIRECTOR`, `WITH_WEB_COLLAB` options, the libcurl and libsodium version checks, `tompouce_embed()` for `collab.js` and the web assets (§6.4). |
@@ -1718,7 +1718,7 @@ row is under `/collab` unless the row says otherwise.
 | `/collab tempo <bpm>` | `tempo_req` with `cps = bpm/240`. Plain `/bpm N` maps to this in collab mode, and so does `setcpm` in your own slot. |
 | `/collab quantum <live\|1/4\|1/2\|1\|2\|4\|8>` | Room quantum (owner only). Default `live`, like a local Alt+Enter (§8.7). |
 | `/collab latency [±ms\|auto]` | Show or trim `L_user`. `auto` resets to the backend-reported latency. |
-| `/collab allow <osc\|midi\|samples\|csound\|lv2\|outputs\|hydra> [target]` / `/collab deny …` | Consent gates (§13.2). |
+| `/collab allow <osc\|midi\|samples\|csound\|lv2\|outputs\|hydra> [target]` / `/collab deny …` | Consent gates (§13.2). `hydra` is a per-user display choice (local slots only vs rendering remote slots in your browser), never a room setting. |
 | `/collab kick\|ban <name>` / `/collab lock [on\|off]` | Owner moderation. `kick` and `ban` **always rotate the room key** (§14.6). |
 | `/collab start` / `/collab stop` | Room transport (owner only). |
 | `/collab status` | Prints room, members, RTT, `θ`, `ε` and drift to the console. |
@@ -1932,13 +1932,15 @@ authored by someone other than the local identity, including the shared slot
 | Csound | **Denied** until `/collab allow csound`. It is seccomp-confined already, but costs CPU. | `host_csound()` |
 | LV2 and Carla | **Denied** until `/collab allow lv2` | Where `lv2:` sources or `.out('carla')` resolve |
 | Named outputs `.out(name)` | **Denied** (falls back to target 0) | `audio_output_target()` call site |
-| Hydra page | **Denied** | `music_get_code` filtering or a page-side consent check |
+| Hydra page | **Local slots only** (default). `/collab allow hydra` opts *your* browser into rendering remote slots too: per-user, per-room-scoped, warned. Shared slot 0 counts as remote. | `music_get_code` filtering; tokenless opaque-origin eval iframe (§6.2) |
 | Query backend | **Forced QuickJS** | `force_quickjs` (§6.2) |
 | Memory, CPU | Existing limits: 128 MiB, 2 s compile, 0.2 s and 0.05 s query deadlines | Existing `initialize()` and `interrupted()` |
 | Query timeouts | **Strike rule (NEW):** three query deadline hits in 10 s from haps whose `slot` is remote mutes that slot locally. Show `⚠ slot muted: too slow`. | `js_audio.c` or the generator |
 
 Consent is stored in `collab.json` under `allow`. It is per capability and
-target, and it can be scoped to a room. The default can never be "allow all".
+target, and it can be scoped to a room. The `hydra` grant is a per-user
+display choice, never room state: it decides what *your* browser renders,
+and no owner or peer can set it for you. The default can never be "allow all".
 A denied capability is a **catchable** `Error` in JS (compile time) or a
 dropped event with a one-time warning (query time). It never aborts the
 composite.
@@ -2092,7 +2094,7 @@ thief.
 | T2 | Remote code sends OSC or MIDI to local devices or LAN | Member | Device control, LAN probing | Default deny, exact-target allowlist, gate on the generator by slot. | The user allows a broad target. |
 | T3 | Remote code triggers sample fetches that leak IP or SSRF | Member | Privacy, internal probing | Ask per host. The existing public-address and redirect check (`addr_is_public()`) stays. No proxy. | IP disclosure to approved hosts. |
 | T4 | CPU or memory exhaustion through code | Member | Audio dropouts, local DoS | Existing memory and interrupt limits, the strike rule, a per-slot `javascript_check` pre-pass. | Short dropouts before the strike rule fires. |
-| T5 | Remote code runs in Chromium through `/hydra` | Member | Browser-level compromise surface | Hydra receives only local-authored code unless `CAP_HYDRA` is granted. | — |
+| T5 | Remote code runs in Chromium through `/hydra` | Member | Browser-level compromise surface | Hydra shows local slots only unless the viewer grants `CAP_HYDRA` for that room (per-user display choice, never owner-controlled). The eval iframe is tokenless and opaque-origin with an asset-path allowlist (§6.2). | A user who opts in executes room JS in their browser; the sandbox bounds it to visuals plus the asset allowlist. |
 | T6 | Remote code autoloaded later without the profile | Member, then time | Bypasses consent | `state.json` skip, the `collab_origin` flag and its warning. | The user copies code by hand. |
 | T7 | Malformed frames crash client or director | Anyone connected | DoS, possible RCE | One shared `collab_proto.c` parser, size caps before parsing, fuzzing (§17.4), ASan/UBSan in CI. The director runs HTTP/1.1 only behind the TLS proxy (smaller parser surface, §6.5). | Parser bugs. |
 | T8 | Malicious Yjs updates crash or hang the CRDT | Member | DoS | Yjs runs in QuickJS with a memory cap and a 50 ms call deadline. A slot that times out is quarantined (§15). | The slot is lost until a snapshot comes from its owner. |
@@ -2910,6 +2912,10 @@ because `config.json` is read into a 4 KiB buffer. It holds no secrets.
 }
 ```
 
+`allow.hydra` is the Hydra display choice (§13.2): `false` (default) renders
+only your own slots in `/hydra`; `true` additionally renders remote slots in
+your browser, per-room-scoped and warned. It is never room state.
+
 `nick` is your nickname: a single user setting, not a room name or per-room
 setting, reused in every room. `/nick <name>` validates it (§13.5), rewrites
 this file atomically before applying it, and sends `profile_update` to the
@@ -3185,7 +3191,7 @@ comes before any public launch.
 - **Director logs, store files and a captured traffic dump contain no
   plaintext code.** A tampered ciphertext or a wrong signer is dropped.
 - Remote code cannot open `local:` modules, send OSC or MIDI, or reach the
-  hydra page. Tests prove it.
+  hydra page beyond the viewer's own slots. Tests prove it.
 - `test_collab_proto` and `test_collab_crypto` are in `test-security`.
 
 ### Phase 1.5: LAN discovery (decision D10)

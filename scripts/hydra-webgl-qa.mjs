@@ -14,6 +14,13 @@ const barePage = `<!doctype html>
 <script src="/hydra.js"></script></body></html>`;
 const realPage = (await fs.readFile(path.resolve('web/hydra.html'), 'utf8'))
   .replaceAll('COMPANION_TOKEN', 'test-token');
+/* The sandboxed frame keeps its opaque origin in production (asserted by
+   test_companion.py). The harness relaxes only the sandbox attribute so the
+   driver can reach into the frame; the frame document itself is unmodified
+   and still carries no token. */
+const realFrame = await fs.readFile(path.resolve('web/hydra-frame.html'), 'utf8');
+const testPage = realPage.replace('sandbox="allow-scripts"',
+  'sandbox="allow-scripts allow-same-origin"');
 const scope = Array.from({length:192}, (_, i) => Math.sin(i * .19) * .7);
 const scopeReply = JSON.stringify({result:{content:[{type:'text',
   text:JSON.stringify({scope,bpm:120,playing:1,generation:1})}]}});
@@ -106,7 +113,12 @@ const server = http.createServer(async (request, response) => {
       const index = /^\/page([1-4])$/.exec(request.url);
       if (index) activeCode = examples[Number(index[1]) - 1];
       response.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'});
-      response.end(realPage);
+      response.end(testPage);
+      return;
+    }
+    if (request.url === '/hydra-frame.html') {
+      response.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store'});
+      response.end(realFrame);
       return;
     }
     if (request.url === '/hydra.js' || request.url === '/patterns.js') {
@@ -304,14 +316,17 @@ try {
     }));
   }
 
-  /* The real page must read the source, evaluate its Hydra calls, switch from
-     the 2D scope fallback to WebGL, and show the code overlay. */
+  /* The real page must read the source, forward it to the frame, and show the
+     code overlay; the frame evaluates its Hydra calls and switches from the
+     2D scope fallback to WebGL. Globals live in the frame window. */
+  const frameWin = `document.getElementById("frame").contentWindow`;
   await browser.page(url + 'page');
-  await browser.until('window.Hydra && Hydra.ready === true', 10000);
+  await browser.until(`${frameWin}.Hydra && ${frameWin}.Hydra.ready === true`, 10000);
   await browser.until('document.getElementById("hud").textContent.indexOf("WebGL graph") >= 0', 10000);
   await browser.until('document.getElementById("source").textContent.indexOf("osc(6)") >= 0', 5000);
   const pageResult = await browser.evaluate(`(() => {
-    const gl = __hydraGL, canvas = document.getElementById('stage');
+    const win = ${frameWin};
+    const gl = win.__hydraGL, canvas = win.document.getElementById('stage');
     const data = new Uint8Array(canvas.width*canvas.height*4);
     gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,data);
     let min=999,max=-1;
@@ -320,7 +335,7 @@ try {
       if (value<min) min=value;
       if (value>max) max=value;
     }
-    return {min,max,display:getComputedStyle(canvas).display,
+    return {min,max,display:win.getComputedStyle(canvas).display,
       hud:document.getElementById('hud').textContent,
       source:document.getElementById('source').textContent,error:gl.getError()};
   })()`);
@@ -335,25 +350,26 @@ try {
   const exampleResults = [];
   for (let i=1;i<=4;i++) {
     await browser.page(url + 'page' + i);
-    await browser.until('window.Hydra && Hydra.ready === true', 10000);
+    await browser.until(`${frameWin}.Hydra && ${frameWin}.Hydra.ready === true`, 10000);
     await browser.until('document.getElementById("hud").textContent.indexOf("WebGL graph") >= 0', 10000);
-    await browser.until('window.__hydraCodeError === null', 5000);
-    if (i === 3) await browser.until('a.fft[0] > 0', 5000);
-    if (i === 4) await browser.until('s0.element && s0.element.tagName === "CANVAS" && s0.ready', 5000);
+    await browser.until(`${frameWin}.__hydraCodeError === null`, 5000);
+    if (i === 3) await browser.until(`${frameWin}.a.fft[0] > 0`, 5000);
+    if (i === 4) await browser.until(`${frameWin}.s0.element && ${frameWin}.s0.element.tagName === "CANVAS" && ${frameWin}.s0.ready`, 5000);
     await new Promise(resolve => setTimeout(resolve, 300));
     const result = await browser.evaluate(`(() => {
-      const gl=__hydraGL, canvas=document.getElementById('stage');
+      const win = ${frameWin};
+      const gl=win.__hydraGL, canvas=win.document.getElementById('stage');
       const data=new Uint8Array(canvas.width*canvas.height*4);
       gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,data);
       let min=999,max=-1,sum=0;
       for(let i=0;i<data.length;i+=4){const value=data[i]+data[i+1]+data[i+2];
         if(value<min)min=value;if(value>max)max=value;sum+=value;}
       return {error:gl.getError(),min,max,mean:sum/(data.length/4),
-        codeError:window.__hydraCodeError||null,
-        h:typeof H==='function'?H('3 4 5 [6 7]*2')():null,
-        fft:a.fft.slice(0,4),
-        s0:!!(s0.element&&s0.element.tagName==='CANVAS'),
-        output:!!window.__hydraOutput};
+        codeError:win.__hydraCodeError||null,
+        h:typeof win.H==='function'?win.H('3 4 5 [6 7]*2')():null,
+        fft:win.a.fft.slice(0,4),
+        s0:!!(win.s0.element&&win.s0.element.tagName==='CANVAS'),
+        output:!!win.__hydraOutput};
     })()`);
     exampleResults.push(result);
     if (result.error!==0 || result.mean<=0 || result.max<=result.min ||

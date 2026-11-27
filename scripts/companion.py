@@ -59,16 +59,29 @@ def main():
             super().setup()
             self.connection.settimeout(10)
 
-        def send(self, status, content, kind="application/json"):
+        def send(self, status, content, kind="application/json", name=""):
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(content)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            # The visualizer evaluates the current source with its own graph
-            # builders; the companion editor does not need eval.
-            eval_policy = " 'unsafe-eval'" if args.hydra else ""
-            self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'self' 'nonce-{style_nonce}'{eval_policy}; style-src 'self' 'nonce-{style_nonce}'; frame-ancestors 'none'; object-src 'none'")
+            # Evaluated Hydra code runs only in the tokenless frame. The
+            # parent shell must never gain eval; the companion editor does
+            # not need it either.
+            if name == "hydra-frame.html":
+                policy = (f"default-src 'none'; script-src 'self' 'nonce-{style_nonce}' 'unsafe-eval'; "
+                          f"style-src 'self' 'nonce-{style_nonce}'; img-src 'self' data: blob:; "
+                          "media-src 'self' data: blob:; connect-src 'none'; font-src 'none'; "
+                          "object-src 'none'; base-uri 'none'; frame-ancestors 'self'")
+            elif name == "hydra.html":
+                policy = (f"default-src 'self'; script-src 'self' 'nonce-{style_nonce}'; "
+                          f"style-src 'self' 'nonce-{style_nonce}'; frame-ancestors 'none'; object-src 'none'")
+            else:
+                policy = (f"default-src 'self'; script-src 'self' 'nonce-{style_nonce}'; "
+                          f"style-src 'self' 'nonce-{style_nonce}'; frame-ancestors 'none'; object-src 'none'")
+            self.send_header("Content-Security-Policy", policy)
+            self.send_header("Permissions-Policy",
+                             "camera=(), microphone=(), geolocation=(), display-capture=()")
             self.end_headers()
             self.wfile.write(content)
 
@@ -86,6 +99,7 @@ def main():
             files["/sounds.js"] = ("sounds.js", "text/javascript")
             if args.hydra:
                 files = {"/": ("hydra.html", "text/html; charset=utf-8"),
+                         "/hydra-frame.html": ("hydra-frame.html", "text/html; charset=utf-8"),
                          "/hydra.js": ("hydra.js", "text/javascript"),
                          "/patterns.js": ("dist/patterns.js", "text/javascript")}
             if self.path not in files:
@@ -93,10 +107,11 @@ def main():
                 return
             name, kind = files[self.path]
             content = (assets / name).read_bytes()
+            if name in ("index.html", "hydra.html", "hydra-frame.html"):
+                content = content.replace(b"EDITOR_STYLE_NONCE", style_nonce.encode())
             if name in ("index.html", "hydra.html"):
                 content = content.replace(b"COMPANION_TOKEN", token.encode())
-                content = content.replace(b"EDITOR_STYLE_NONCE", style_nonce.encode())
-            self.send(200, content, kind)
+            self.send(200, content, kind, name)
 
         def do_POST(self):
             origin = f"http://127.0.0.1:{self.server.server_port}"

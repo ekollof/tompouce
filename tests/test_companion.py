@@ -45,7 +45,12 @@ class HydraTest(unittest.TestCase):
         html = urllib.request.urlopen(cls.url).read().decode()
         assert "music_audio_scope" in html and "music_audio_spectrum" in html
         assert "COMPANION_TOKEN" not in html
-        assert 'src="/hydra.js"' in html and 'src="/patterns.js"' in html
+        assert 'sandbox="allow-scripts"' in html and 'src="/hydra-frame.html"' in html
+        assert 'src="/hydra.js"' not in html
+        frame = urllib.request.urlopen(cls.url + "/hydra-frame.html").read().decode()
+        assert 'src="/hydra.js"' in frame and 'src="/patterns.js"' in frame
+        assert "COMPANION_TOKEN" not in frame
+        assert "const token" not in frame and "X-Companion-Token" not in frame
         script = urllib.request.urlopen(cls.url + "/hydra.js").read().decode()
         for name in ("osc", "shape", "solid", "noise", "src", "rotate", "scale", "repeatX", "out"):
             assert name in script
@@ -89,9 +94,19 @@ class HydraTest(unittest.TestCase):
         nonce = re.search(r'<style nonce="([^"]+)"', html).group(1)
         with urllib.request.urlopen(self.url) as response:
             csp = response.headers["Content-Security-Policy"]
+            permissions = response.headers["Permissions-Policy"]
         assert f"script-src 'self' 'nonce-{nonce}'" in csp
         assert "script-src" in csp and "'unsafe-inline'" not in csp
-        assert "'unsafe-eval'" in csp
+        # The parent shell never evaluates code: eval lives only in the frame.
+        assert "'unsafe-eval'" not in csp
+        assert "microphone=()" in permissions and "camera=()" in permissions
+        with urllib.request.urlopen(self.url + "/hydra-frame.html") as response:
+            frame = response.read().decode()
+            frame_csp = response.headers["Content-Security-Policy"]
+        frame_nonce = re.search(r'<style nonce="([^"]+)"', frame).group(1)
+        assert f"script-src 'self' 'nonce-{frame_nonce}' 'unsafe-eval'" in frame_csp
+        assert "connect-src 'none'" in frame_csp
+        assert "frame-ancestors 'self'" in frame_csp
 
 
 class CompanionTest(unittest.TestCase):

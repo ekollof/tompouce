@@ -1101,6 +1101,42 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
       `TOMPOUCE_SIMD=c`/`avx2` runs. Keep applying this rule to any new kernel;
       do not add a global `-mavx2` build.
 
+## Collaboration (multiplayer)
+
+Design brief: `docs/multiplayer.md`. Director and wire codec exist
+(`director/`, `src/collab_proto.c`); the engine-side collab client
+(`src/collab.c`, transport, staged activation) does not yet.
+
+- [ ] Hydra sandbox split (active, no collab dependency). `web/hydra.html`
+      becomes a token-holding parent shell (polls `/api/tool`, draws HUD and
+      the code overlay); the new tokenless `web/hydra-frame.html` runs the
+      `new Function` eval and WebGL in an opaque-origin
+      `sandbox="allow-scripts"` iframe fed by `postMessage`. Per-file CSP
+      (eval only inside the frame), `Permissions-Policy` denying
+      camera/microphone/geolocation/display-capture, no token string in the
+      frame. Acceptance: `tests/test_companion.py` green (frame has no
+      token, parent has no `unsafe-eval`, frame does), `scripts/companion.py`
+      serves the frame, `scripts/hydra-webgl-qa.mjs` drives the frame;
+      note if WebGL is unavailable here.
+- [ ] `music_get_code` collab filtering (blocked on the collab client).
+      Doc §6.2 specifies: in a room it returns only slots the viewer
+      authored (shared slot 0 counts as remote). Needs session/slot state
+      in `src/collab.c` first.
+- [ ] `/collab allow hydra` opt-in plumbing (blocked on the collab client).
+      Doc §13.2/T5/§18.3 specify: per-user, per-room-scoped, warned display
+      choice, never room state. Needs `collab.json` allow handling first.
+- [ ] Room asset allowlist serving (blocked on collab rooms). The iframe CSP
+      already permits `img-src/media-src 'self'`; a path-confined
+      `/assets/<room>/` companion route is the unveil-style boundary when
+      rooms exist.
+- [ ] Front-door routing (decided, deploys with Phase 5 `web-collab/`).
+      httpd keeps the Hugo front door (`/`, `/guides/`, `/safety/`,
+      `/privacy/`, `/abuse/`). relayd path-matches `/j/*`, `/o/*`, `/v1/*`
+      and the WebSocket to the director on loopback; the director serves
+      one static app shell per `/j`, `/o` prefix (room id parsed
+      client-side, secrets stay in the fragment). No extra port, no CORS.
+      Salt owns the relayd/httpd configs — no hand edits on castor.
+
 ## Code quality
 
 - [x] Code style sweep. Audit the C sources against AGENTS.md: KNF style,

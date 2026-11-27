@@ -793,11 +793,11 @@ director for the room.
   for out-of-band comparison.
 - **Transport on LAN.** Plain `ws://` is acceptable here: everything sensitive
   is already sealed end to end, and skipping TLS/proxy setup is the point of
-  LAN mode. The client still gates it: `ws://` is allowed to loopback
-  addresses always, and to LAN addresses only with the explicit
-  `TOMPOUCE_COLLAB_INSECURE=1` opt-in (§18.3; warns on every connect).
-  D2's `--allow-plaintext` debug switch is **not** auto-enabled on
-  LAN; debug plaintext stays an explicit flag.
+  LAN mode. The client allows it to loopback and LAN addresses (RFC 1918
+  private ranges and link-local, v4 and v6) with no flag; anything else
+  needs `wss://` or the explicit `TOMPOUCE_COLLAB_INSECURE=1` opt-in
+  (§18.3, warns on every connect). D2's `--allow-plaintext` debug switch
+  is **not** auto-enabled on LAN; debug plaintext stays an explicit flag.
 - **Clock.** The §8 filter runs unchanged and is at its best on a LAN
   (sub-ms typical); nothing LAN-specific is needed.
 - **Firewall.** The host must allow inbound UDP 5353 to the mDNS multicast
@@ -894,7 +894,10 @@ the plaintext routing fields, as a best-effort relay check: `slot`, `q`,
 `at_cycle`, roles, ACL member ids, sizes and rates. Real enforcement is the
 clients' signature plus certificate/ACL re-check on receipt (§14.5); a
 malicious operator that widens a per-slot ACL among existing editors (T9) is
-caught there, and signed slot-ACL records are a later hardening.
+caught there, and signed slot-ACL records are a later hardening. Phase 1
+has no listener role and no per-slot write ACLs beyond owner-or-shared-slot-0;
+the certificate-carried roles and named write ACLs they imply arrive with
+Phase 2 (§14.2), so until then every joined member may write shared slot 0.
 
 A control frame that carries a field that must be sealed in
 plaintext (for example `body`) is rejected with `error{code:"e2e_required"}`
@@ -905,7 +908,7 @@ when the room is E2E.
 | `t` | Fields | Notes |
 |---|---|---|
 | `hello` | `proto:[1]`, `client:{name:"tompouce", version:"…"}`, `caps:["e2e","sliders"]` | First frame, sent within 5 s of connecting or the connection is closed. A client always lists `e2e`. |
-| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room` under the admission key derived from the room key with `crypto_kdf` context `"tpcadm01"` — the only key material the director holds, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
+| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room ‖ pk` under the admission key derived from the room key with `crypto_kdf` context `"tpcadm01"` — the only key material the director holds, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
 | `join` | `room`, `profile` (sealed `{nick, color?}`, §14.5 type 2) | Sent after `auth_ok`. |
 | `profile_update` | `enc` (sealed+signed profile record, §14.5 type 2, carrying `{nick, color?}`) | Cosmetic nick change. The director replaces the author field from the connection, rate-limits it, and relays `member_updated`; it never sees the nick. In Phase 1 this is the only way a name changes after joining. |
 | `ping` | `t0` (client monotonic µs, opaque to the server) | Clock sampling (§8.2). |
@@ -1232,23 +1235,38 @@ at_cycle = ceil64(c(T_act))               # round UP to a 1/64-cycle grid
   only makes the number exact and identical on all clients. It does not
   quantize musically.
 - `delay_j` is member *j*'s measured one-way delay δ/2 from the clock filter
-  (§8.2). The director measures each member's delay from its ping samples
-  and broadcasts the maximum as `clock.max_delay_ms`, so every client
-  computes the same `lead` without a separate per-member delay channel.
-  The director cannot read the client's `t0` (different monotonic epoch),
-  so it discards implied round trips above 5 s as clock garbage, keeps the
-  minimum, and caps each member's delay at 650 ms; with the 1 s lead cap a
-  lying or broken clock can only make the room wait, never desync it. The
-  proper fix is director-sent pings measured in the director's own timebase
-  (Phase 3, TODO). The 350 ms term is the compile-and-stage allowance (the
-  first compile can take longer; the compile time for typical programs is not
-  measured yet, so Phase 0 must benchmark it and tune this constant). The
-  floor is 250 ms, which matches the scheduler's 200 ms look-ahead plus one
-  50 ms window (`scheduler.c :: schedule_live_javascript`).
+  (§8.2). On the client that filter is sound NTP and works across the
+  internet. The director's own copy is not: it subtracts the client's `t0`
+  from its own clock, which is only meaningful when both share a monotonic
+  timebase (same host, i.e. loopback or LAN). Treat the director-side number
+  accordingly: implied round trips above 5 s are discarded as clock garbage,
+  the minimum is kept, and each member's delay is capped at 650 ms, with the
+  lead itself capped at 1 s — so a lying or broken clock can only make the
+  room wait, never desync it. In practice on a WAN the measured term
+  contributes ~nothing and the room runs at floor plus compile allowance
+  (~350–450 ms). The director broadcasts the capped maximum as
+  `clock.max_delay_ms`, so every client still computes the *same* `lead`
+  without a separate per-member channel. The proper fix is director-sent
+  pings measured in the director's own timebase (Phase 3, TODO). The 350 ms
+  term is the compile-and-stage allowance (the first compile can take
+  longer; the compile time for typical programs is not measured yet, so
+  Phase 0 must benchmark it and tune this constant). The floor is 250 ms,
+  which matches the scheduler's 200 ms look-ahead plus one 50 ms window
+  (`scheduler.c :: schedule_live_javascript`).
 - A member that is slower than `lead` activates **late**, at the next scheduler
   window after its compile finishes, which is exactly what a slow local compile
   does. It sends `ack{late_by}` and the UI shows `late by 180 ms` (§12.3). It does
   not stall the room.
+
+**Acceptance window for live evals.** A client applies a live `eval`
+broadcast only if its `at_cycle` is not behind the client's current cycle
+and not more than `lead` plus 2 s of slack ahead of it; anything outside
+is dropped with a `⚠` (a rogue director cannot schedule absurd
+activations). This check applies **only** to live `eval` broadcasts. The
+`last_eval` replay in `joined`, the stored-log replay after `synced`, and
+catch-up after a missed rotation or reconnect legitimately carry past
+cycles and bypass it: they rebuild shared state the client has not seen,
+and their contents are still signature-checked per §14.5.
 
 **Tempo changes** use the same rule. The `tempo_req` creates a new clock epoch
 with `c_e = c(T_act)` (the *cycle position is continuous*, only `cps` changes).
@@ -3002,9 +3020,11 @@ Environment variables (NEW):
 
 - `TOMPOUCE_COLLAB_SERVER` overrides the default server.
 - `TOMPOUCE_COLLAB_TRACE` is the test event trace from §17.2.
-- `TOMPOUCE_COLLAB_INSECURE=1` allows `ws://` to a non-loopback address. It
-  is for Phase 1/1.5 LAN use (E2E-sealed traffic) and prints a warning on
-  every connect.
+- `TOMPOUCE_COLLAB_INSECURE=1` allows `ws://` to a non-loopback,
+  non-LAN address (anything outside loopback and RFC 1918/link-local
+  ranges). It is for unusual LAN topologies and debugging; it prints a
+  warning on every connect. Plain `ws://` to loopback and LAN addresses
+  needs no flag.
 - `TOMPOUCE_COLLAB_PLAINTEXT=1` lets the client join a plaintext debug room
   (§14.10). Never needed with the public instance.
 
@@ -3013,6 +3033,11 @@ flags override it. Defaults shown are for a **self-hosted** director.
 `director.public.conf.example` (§18.4) holds the public-instance profile.
 
 ```
+# Self-hosted defaults below. The public instance overrides room_creation,
+# quotas and the store caps; see the §18.4 table (500 rooms max, 256 KiB /
+# 512 KiB store caps, 256 MiB global backstop) and TODO (config system,
+# store accounting).
+
 listen = 127.0.0.1:7420
 state_dir = /var/lib/tompouce-director
 public_url = https://bakery.andrath.nl     # used in links and the web pages
@@ -3087,11 +3112,11 @@ machine). The container and self-hosted path below stays Caddy-based.
   metadata (T20). DDoS protection should be at the network layer (provider
   scrubbing, rate limits) rather than a TLS-terminating reverse proxy.
 - Proxy idle timeouts must be ≥ 120 s (the clock ping runs every 2 s, §8.2).
-- Direct native TLS with certificates from `lego` or `certbot` and a `SIGHUP`
-  reload is the alternative where a reverse proxy is unwanted. VERIFY that
-  the director reloads certificates on `SIGHUP` without dropping
-  connections (TODO; until then a restart is required for cert rotation
-  and clients reconnect with resume, §10.4).
+- Direct native TLS with certificates from `lego` or `certbot` is the
+  alternative where a reverse proxy is unwanted. Certificate reload without
+  dropping connections (SIGHUP or equivalent) is a Phase 6 hardening item
+  (TODO); until then a restart is required for cert rotation and clients
+  reconnect with backoff and resume (§10.4).
 
 ```
 # Self-host/container path (Caddy). On castor the equivalent routing lives
@@ -3234,7 +3259,9 @@ comes before any public launch.
   `crypto_kdf(room key, context "tpcadm01")`. `auth` carries `room`, an
   ephemeral per-room `pk`, a signature over `"tompouce-collab-v1" ‖
   challenge ‖ room ‖ pk`, and `proof`, a keyed BLAKE2b of `challenge ‖
-  room` under the admission key. The proof is the Phase-1 stand-in for
+  room ‖ pk` under the admission key (binding the proof to the member key,
+  so a relayed challenge cannot mint membership for another key). The
+  proof is the Phase-1 stand-in for
   invite certificates: whoever derives the admission key is admitted as
   editor. A room is created by the first `auth` with `owner:true` (whose
   `pk` becomes `opk`). Frames are sealed with the room key and signed with
@@ -3444,10 +3471,8 @@ decided 2026-11-27 unless noted.
    (specified with Phase 2 roles; owner-only in practice until then).
    Grants are owner-signed (`{member, permission:"tempo", epoch}`, verified
    against `opk`); without a valid grant the director rejects `tempo_req`
-   from non-owners and clients ignore rogue tempo/transport broadcasts.
-   Clients also reject any `eval` whose `at_cycle` falls outside the
-   expected window (behind the current cycle, or more than lead + slack
-   ahead), so a rogue director cannot schedule absurd activations.
+   from non-owners and clients ignore rogue tempo/transport broadcasts
+   (acceptance window for live `eval`s in §8.7).
 3. **Stop semantics.** ~~Ctrl+. stops only local listening, and the room
    transport is owner-only. Right feel? Default: yes.~~ **Decided 2026-11-27:**
    yes, as specified.
@@ -3555,7 +3580,7 @@ decided 2026-11-27 unless noted.
 | V10 | Debian runtime package names for libwebsockets, cJSON and libsodium | container build |
 | V11 | Phase 0 benchmark of composite compile time, to tune `eval_compile_allowance_ms` | `js/`, `javascript.c` |
 | V12 | libsodium ≥ 1.0.20 is really needed for the symbols used (else lower the floor) | `collab_crypto.c` |
-| V13 | libwebsockets ≥ 4.5.8 and a build without HTTP/2; director reloads certificates on `SIGHUP` | `director/`, lws build flags |
+| V13 | libwebsockets ≥ 4.5.8 and a build without HTTP/2; design and implement certificate reload without dropping connections (SIGHUP or equivalent, Phase 6) | `director/`, lws build flags |
 | V14 | Caddy log filter syntax (no URI, no headers, masked IP) for self-hosts, and the relayd `match url log` removal for the public instance, plus systemd directive availability at ≥ 252 | §18.1, §18.4 |
 | V15 | QR encoder licence and pinning for the terminal and the web page | `collab_link.c`, `web-collab/` |
 | V16 | Exact distro libcurl versions (Debian stable, Fedora, Ubuntu) against the 8.11.0 floor | distro packages |

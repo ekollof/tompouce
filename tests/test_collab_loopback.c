@@ -341,7 +341,7 @@ int main(void) {
     uint8_t challenge[32];
     size_t challenge_len=0;
     char pk_b64[64], sig_b64[128], proof_b64[64];
-    uint8_t sig[64], proof[32], mac_msg[32+26];
+    uint8_t sig[64], proof[32], mac_msg[32+26+32];
     uint64_t eval_seq=0;
     int found_sync=0;
     uint64_t welcome_now=0, welcome_ms=0;
@@ -561,6 +561,7 @@ int main(void) {
     cJSON_Delete(msg);
     memcpy(mac_msg,challenge,32);
     memcpy(mac_msg+32,TEST_ROOM,26);
+    memcpy(mac_msg+32+26,bob.pk,32);
     {
         uint8_t m[18+32+26+32];
         cJSON *auth=cJSON_CreateObject();
@@ -849,6 +850,82 @@ int main(void) {
         off=cJSON_GetObjectItemCaseSensitive(room,"solos_off");
         CHECK(cJSON_IsTrue(off),"solos_off on b");
         cJSON_Delete(ru);
+    }
+    /* The admission proof binds the member key: a proof computed the old
+       way (challenge and room only) is rejected, so a challenge relayed
+       on plaintext LAN cannot mint membership for another key. */
+    {
+        TestClient mallory;
+        uint8_t m[18+32+26+32], msig[64], mproof[32], mac2[32+26];
+        cJSON *auth, *welcome;
+        const char *ch;
+        size_t chlen=0;
+        memset(&mallory,0,sizeof(mallory));
+        mallory.handle=ws_open(url);
+        CHECK(mallory.handle!=NULL,"mallory connect");
+        crypto_sign_keypair(mallory.pk,mallory.sk);
+        {
+            cJSON *hello=cJSON_CreateObject();
+            cJSON *proto=cJSON_CreateArray(), *caps=cJSON_CreateArray();
+            cJSON_AddStringToObject(hello,"t","hello");
+            cJSON_AddItemToArray(proto,cJSON_CreateNumber(1));
+            cJSON_AddItemToObject(hello,"proto",proto);
+            cJSON_AddItemToArray(caps,cJSON_CreateString("e2e"));
+            cJSON_AddItemToObject(hello,"caps",caps);
+            send_json(mallory.handle,hello);
+        }
+        welcome=expect_type(mallory.handle,"welcome");
+        ch=require_string(welcome,"challenge");
+        CHECK(cp_b64_decode(ch,challenge,sizeof(challenge),&chlen) &&
+            chlen==32,"mallory challenge");
+        cJSON_Delete(welcome);
+        memcpy(m,"tompouce-collab-v1",18);
+        memcpy(m+18,challenge,32);
+        memcpy(m+18+32,TEST_ROOM,26);
+        memcpy(m+18+32+26,mallory.pk,32);
+        CHECK(crypto_sign_detached(msig,NULL,m,sizeof(m),mallory.sk)==0,
+            "mallory sign");
+        memcpy(mac2,challenge,32);
+        memcpy(mac2+32,TEST_ROOM,26);
+        CHECK(crypto_generichash(mproof,sizeof(mproof),mac2,sizeof(mac2),
+            admission_key,sizeof(admission_key))==0,"mallory old proof");
+        b64e(mallory.pk,32,pk_b64,sizeof(pk_b64));
+        b64e(msig,64,sig_b64,sizeof(sig_b64));
+        b64e(mproof,32,proof_b64,sizeof(proof_b64));
+        auth=cJSON_CreateObject();
+        cJSON_AddStringToObject(auth,"t","auth");
+        cJSON_AddStringToObject(auth,"room",TEST_ROOM);
+        cJSON_AddStringToObject(auth,"pk",pk_b64);
+        cJSON_AddStringToObject(auth,"sig",sig_b64);
+        cJSON_AddStringToObject(auth,"proof",proof_b64);
+        send_json(mallory.handle,auth);
+        expect_error(mallory.handle,"auth");
+        /* Same handshake with the key bound in: admitted. */
+        {
+            uint8_t mac3[32+26+32];
+            memcpy(mac3,challenge,32);
+            memcpy(mac3+32,TEST_ROOM,26);
+            memcpy(mac3+32+26,mallory.pk,32);
+            CHECK(crypto_generichash(mproof,sizeof(mproof),mac3,
+                sizeof(mac3),admission_key,sizeof(admission_key))==0,
+                "mallory proof");
+            b64e(mproof,32,proof_b64,sizeof(proof_b64));
+            auth=cJSON_CreateObject();
+            cJSON_AddStringToObject(auth,"t","auth");
+            cJSON_AddStringToObject(auth,"room",TEST_ROOM);
+            cJSON_AddStringToObject(auth,"pk",pk_b64);
+            cJSON_AddStringToObject(auth,"sig",sig_b64);
+            cJSON_AddStringToObject(auth,"proof",proof_b64);
+            send_json(mallory.handle,auth);
+        }
+        msg=expect_type(mallory.handle,"auth_ok");
+        cJSON_Delete(msg);
+        {
+            cJSON *leave=cJSON_CreateObject();
+            cJSON_AddStringToObject(leave,"t","leave");
+            send_json(mallory.handle,leave);
+        }
+        client_close(&mallory);
     }
     /* Bob leaves; Alice sees member_left. */
     {

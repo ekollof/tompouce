@@ -381,7 +381,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 /* Bootstrap claim: only an admission-key holder can crown the
                    first owner of an opk-less room. The admission key is a
                    crypto_kdf of the room key the director never sees. */
-                uint8_t mac[32], material[32+26], proof[32];
+                uint8_t mac[32], material[32+26+32], proof[32];
                 size_t proof_len=0;
                 if (!config->has_admission_key ||
                     !cp_get_b64(obj,"proof",proof,sizeof(proof),
@@ -392,6 +392,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 }
                 memcpy(material,s->challenge,32);
                 memcpy(material+32,room_id,26);
+                memcpy(material+32+26,pk,32);
                 crypto_generichash(mac,sizeof(mac),material,sizeof(material),
                     config->admission_key,sizeof(config->admission_key));
                 if (sodium_memcmp(mac,proof,32)!=0) {
@@ -465,7 +466,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
     }
     if (cp_get_b64(obj,"proof",token,sizeof(token),&outlen) &&
         outlen==sizeof(token)) {
-        uint8_t mac[32], material[32+26];
+        uint8_t mac[32], material[32+26+32];
         DirectorMember *member;
         if (!config->has_admission_key) {
             send_error(s,CP_E_AUTH,"no admission key configured",
@@ -482,6 +483,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
         }
         memcpy(material,s->challenge,32);
         memcpy(material+32,room_id,26);
+        memcpy(material+32+26,pk,32);
         crypto_generichash(mac,sizeof(mac),material,sizeof(material),
             config->admission_key,sizeof(config->admission_key));
         if (sodium_memcmp(mac,token,32)!=0) {

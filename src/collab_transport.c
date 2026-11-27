@@ -36,13 +36,68 @@ static int ctr_host_is_loopback(const char *host, size_t len) {
     }
     return 1;
 }
-/* ws:// is plaintext: allow it only for loopback, or for a confirmed LAN
-   address with the explicit Phase 1/1.5 opt-in (section 18.3). wss:// may
-   go anywhere. */
+/* Strict dotted quad; -1 on any deviation. */
+static int ctr_parse_ipv4(const char *host, size_t len, uint8_t out[4]) {
+    unsigned i, parts=0, value=0, digits=0;
+    for (i=0;i<len;i++) {
+        if (host[i]=='.') {
+            if (!digits || parts>=3) return -1;
+            out[parts++]=(uint8_t)value;
+            value=0;
+            digits=0;
+        } else if (host[i]>='0' && host[i]<='9') {
+            value=value*10+(unsigned)(host[i]-'0');
+            if (++digits>3 || value>255) return -1;
+        } else {
+            return -1;
+        }
+    }
+    if (!digits || parts!=3) return -1;
+    out[3]=(uint8_t)value;
+    return 0;
+}
+/* First hextet of a bracket-stripped IPv6 literal; -1 if unparsable. */
+static int ctr_ipv6_first(const char *host, size_t len, unsigned *first) {
+    unsigned i, value=0, digits=0;
+    for (i=0;i<len;i++) {
+        char c=host[i];
+        unsigned d;
+        if (c==':') break;
+        if (c>='0' && c<='9') d=(unsigned)(c-'0');
+        else if (c>='a' && c<='f') d=(unsigned)(c-'a')+10;
+        else if (c>='A' && c<='F') d=(unsigned)(c-'A')+10;
+        else return -1;
+        value=value*16+d;
+        if (++digits>4 || value>0xffffu) return -1;
+    }
+    if (!digits) return -1;
+    *first=value;
+    return 0;
+}
+/* RFC 1918, IPv4/IPv6 link-local. Anything else is "the internet". */
+static int ctr_host_is_private(const char *host, size_t len, int bracketed) {
+    uint8_t ip[4];
+    unsigned first;
+    if (bracketed) {
+        if (len==3 && strncmp(host,"::1",3)==0) return 0;
+        if (ctr_ipv6_first(host,len,&first)!=0) return 0;
+        return first>=0xfe80u && first<=0xfebfu; /* fe80::/10 */
+    }
+    if (ctr_parse_ipv4(host,len,ip)!=0) return 0;
+    if (ip[0]==10) return 1; /* 10.0.0.0/8 */
+    if (ip[0]==172 && ip[1]>=16 && ip[1]<=31) return 1; /* 172.16.0.0/12 */
+    if (ip[0]==192 && ip[1]==168) return 1; /* 192.168.0.0/16 */
+    if (ip[0]==169 && ip[1]==254) return 1; /* 169.254.0.0/16 */
+    return 0;
+}
+/* ws:// is plaintext: allow it on loopback and LAN (RFC 1918/link-local)
+   addresses, or anywhere with the explicit Phase 1/1.5 opt-in
+   (section 18.3). wss:// may go anywhere. */
 int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
     size_t errlen) {
     const char *auth, *end, *at, *host;
     size_t hostlen;
+    int bracketed;
     if (insecure_used) *insecure_used=0;
     if (!url || !url[0]) {
         ctr_fail(err,errlen,"empty url");
@@ -66,6 +121,7 @@ int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
         at++;
     }
     host=auth;
+    bracketed=0;
     if (*host=='[') {
         const char *close=host+1;
         while (close<end && *close!=']') close++;
@@ -75,6 +131,7 @@ int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
         }
         host++;
         hostlen=(size_t)(close-host);
+        bracketed=1;
     } else {
         const char *colon=host;
         while (colon<end && *colon!=':') colon++;
@@ -85,6 +142,7 @@ int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
         return 0;
     }
     if (ctr_host_is_loopback(host,hostlen)) return 1;
+    if (ctr_host_is_private(host,hostlen,bracketed)) return 1;
     {
         const char *flag=getenv("TOMPOUCE_COLLAB_INSECURE");
         if (flag && strcmp(flag,"1")==0) {
@@ -92,7 +150,7 @@ int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
             return 1;
         }
     }
-    ctr_fail(err,errlen,"refusing plaintext ws:// to a non-loopback host (use wss://, or TOMPOUCE_COLLAB_INSECURE=1 for LAN)");
+    ctr_fail(err,errlen,"refusing plaintext ws:// to a non-LAN host (use wss://, or TOMPOUCE_COLLAB_INSECURE=1 to override)");
     return 0;
 }
 int ctr_websocket_supported(char *err, size_t errlen) {

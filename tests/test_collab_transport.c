@@ -77,24 +77,32 @@ int main(void) {
     CHECK(ctr_open("ws://127.0.0.1:1/",CP_SUBPROTOCOL,err,
         sizeof(err))==NULL,"refused port fails");
     CHECK(err[0]!=0,"error text set");
-    /* Plaintext ws:// leaves loopback only with the explicit LAN opt-in. */
+    /* Plaintext ws:// stays on loopback and LAN; anything else needs the
+       explicit opt-in. */
     {
         int insecure=0;
         CHECK(ctr_ws_policy_ok("ws://127.0.0.1:1/",NULL,err,sizeof(err)),"loopback policy");
         CHECK(ctr_ws_policy_ok("ws://localhost:80/x",NULL,NULL,0),"localhost policy");
         CHECK(ctr_ws_policy_ok("ws://[::1]:80/x",NULL,NULL,0),"ipv6 loopback policy");
+        CHECK(ctr_ws_policy_ok("ws://192.168.1.20:7420/v1",NULL,NULL,0),"rfc1918 /16");
+        CHECK(ctr_ws_policy_ok("ws://10.0.0.5/",NULL,NULL,0),"rfc1918 /8");
+        CHECK(ctr_ws_policy_ok("ws://172.16.0.1/",NULL,NULL,0),"rfc1918 /12 low");
+        CHECK(ctr_ws_policy_ok("ws://172.31.255.255/",NULL,NULL,0),"rfc1918 /12 high");
+        CHECK(ctr_ws_policy_ok("ws://169.254.10.20/",NULL,NULL,0),"link-local v4");
+        CHECK(ctr_ws_policy_ok("ws://[fe80::1]/",NULL,NULL,0),"link-local v6");
         CHECK(ctr_ws_policy_ok("wss://example.com:443/v1",NULL,NULL,0),"wss anywhere");
-        CHECK(!ctr_ws_policy_ok("ws://192.0.2.1:9/",NULL,err,sizeof(err)),"internet refused");
-        CHECK(strstr(err,"non-loopback")!=NULL,"policy text set");
-        CHECK(!ctr_ws_policy_ok("ws://user@192.0.2.1:9/",NULL,err,sizeof(err)),"userinfo refused");
-        CHECK(strstr(err,"non-loopback")!=NULL,"policy text set with userinfo");
+        CHECK(!ctr_ws_policy_ok("ws://8.8.8.8/",NULL,err,sizeof(err)),"public refused");
+        CHECK(strstr(err,"non-LAN")!=NULL,"policy text set");
+        CHECK(!ctr_ws_policy_ok("ws://172.32.0.1/",NULL,NULL,0),"172.32 not private");
+        CHECK(!ctr_ws_policy_ok("ws://user@192.0.2.1:9/",NULL,err,sizeof(err)),"userinfo smuggle refused");
+        CHECK(strstr(err,"non-LAN")!=NULL,"policy text set with userinfo");
         CHECK(!ctr_ws_policy_ok("http://127.0.0.1:1/",NULL,NULL,0),"http refused");
         CHECK(!ctr_ws_policy_ok("",NULL,NULL,0),"empty refused");
         CHECK(setenv("TOMPOUCE_COLLAB_INSECURE","1",1)==0,"setenv");
-        CHECK(ctr_ws_policy_ok("ws://192.0.2.1:9/",&insecure,err,sizeof(err)),"opt-in passes");
+        CHECK(ctr_ws_policy_ok("ws://8.8.8.8/",&insecure,err,sizeof(err)),"opt-in passes");
         CHECK(insecure,"opt-in reported");
         CHECK(unsetenv("TOMPOUCE_COLLAB_INSECURE")==0,"unsetenv");
-        CHECK(!ctr_ws_policy_ok("ws://192.0.2.1:9/",NULL,err,sizeof(err)),"opt-in cleared");
+        CHECK(!ctr_ws_policy_ok("ws://8.8.8.8/",NULL,NULL,0),"opt-in cleared");
     }
     CHECK(!ctr_send_text(NULL,"{}",2),"null send");
     {

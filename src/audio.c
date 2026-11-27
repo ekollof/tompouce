@@ -435,7 +435,6 @@ static int live_vocoder_eligible(const AudioEvent *ev, const Voice *v) {
     else if (ev->dsp.noise_mix != 0 || ev->dsp.source_noise) reason = 6;
     else for (int i = 0; i < LFO_SLOTS; i++) {
         int t = ev->lfo[i].tgt;
-        if (t == 5 || t == 7) { reason = 7; break; }
         if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN) {
             int gi = t - GEN_TGT_BASE;
             if ((gi >= GEN_FMI1 && gi <= GEN_FMI8) ||
@@ -447,23 +446,24 @@ static int live_vocoder_eligible(const AudioEvent *ev, const Voice *v) {
 
 /* Live stretched-sample voices need a modulated factor (static stretch
    keeps the baked buffer) and no source modulation the block refill
-   cannot reproduce exactly: no FM, no frequency/cents/vibrato LFOs. The
-   baked preparation already folds static pitch envelopes and vibrato
-   into its input timeline, which the refill replicates per sample. */
+   cannot reproduce exactly: no FM or vibrato LFOs (frequency/cents
+   slots step in the refill). The baked preparation already folds static
+   pitch envelopes and vibrato into its input timeline, which the refill
+   replicates per sample. */
 static int live_sample_eligible(const AudioEvent *ev, const Voice *v) {
     if (!ev->stretch_buffer) return 0;
     int modulated = 0;
-    for (int i = 0; i < LFO_SLOTS; i++)
-        if (ev->lfo[i].tgt == GEN_TGT_BASE+GEN_STRETCH && ev->lfo[i].hz > 0.0) {
-            modulated = 1; break;
-        }
+    for (int i = 0; i < LFO_SLOTS; i++) {
+        int t = ev->lfo[i].tgt;
+        if (!(ev->lfo[i].hz > 0.0)) continue;
+        if (t == GEN_TGT_BASE+GEN_STRETCH || t == 5 || t == 7) { modulated = 1; break; }
+    }
     if (!modulated) return 0;
     if (ev->wt_frames > 0) return 0;
     if (v->dsp.fm_active) return 0;
     if (ev->dsp.noise_mix != 0 || ev->dsp.source_noise) return 0;
     for (int i = 0; i < LFO_SLOTS; i++) {
         int t = ev->lfo[i].tgt;
-        if (t == 5 || t == 7) return 0;
         if (t >= GEN_TGT_BASE && t < GEN_TGT_BASE + NGEN) {
             int gi = t - GEN_TGT_BASE;
             if (gi == GEN_VIB || gi == GEN_VIBMOD) return 0;
@@ -1536,6 +1536,10 @@ static void voice_lfo_step_all(Voice *v, double *amp, double *freq,
                sample's value like the worklet's parameters read. */
             if (gi == GEN_STRETCH && v->live_voc > 0) continue;
         }
+        /* Source-frequency LFOs on live-vocoder voices step in the refill
+           that stages the next block, bending the source like the
+           pre-vocoder AudioParam. */
+        if (v->live_voc > 0 && (sl->tgt == 5 || sl->tgt == 7)) continue;
         double g = lfo_slot_output(sl, v->lfo_phase[li]);
         if (!isfinite(g)) {
             /* The deployed node reads the target AudioParam default
@@ -3332,6 +3336,41 @@ static double source_value(const Voice *v, double position, int channel) {
 #define source_value source_value_impl
 #endif
 
+/* Per-sample source-frequency LFO for live-vocoder refills. Mirrors
+   the drain's voice_lfo_step_all targets 5/7 plus its nonfinite
+   fallbacks: oscillator voices bend Hz directly, sample voices take the
+   deployed detune fallback in cents. Everything else keeps stepping in
+   the drain. */
+static void live_source_lfo_step(Voice *V, double age_j, double *freq_hz, double *cents, int *nf) {
+    for (int li = 0; li < LFO_SLOTS; li++) {
+        LfoSlot *sl = &V->vlfo[li];
+        if ((sl->tgt != 5 && sl->tgt != 7) || !(sl->hz > 0.0)) continue;
+        if (age_j < V->lfo_hold) continue;
+        double g = lfo_slot_output(sl, V->lfo_phase[li]);
+        if (!isfinite(g)) {
+            if (sl->tgt < GEN_TGT_BASE) *nf |= 1 << sl->tgt;
+            V->lfo_phase[li] += (2.0*M_PI*sl->hz)/SR;
+            if (V->lfo_phase[li] > 2.0*M_PI)
+                V->lfo_phase[li] -= 2.0*M_PI*floor(V->lfo_phase[li]/(2.0*M_PI));
+            continue;
+        }
+        V->lfo_phase[li] += (2.0*M_PI*sl->hz)/SR;
+        if (V->lfo_phase[li] > 2.0*M_PI)
+            V->lfo_phase[li] -= 2.0*M_PI*floor(V->lfo_phase[li]/(2.0*M_PI));
+        if (sl->tgt == 5) {
+            if (V->sampled_source) {
+                if (V->freq > 0 && V->freq+g > 0)
+                    *cents += 1200.0*log2((V->freq+g)/V->freq);
+            } else {
+                *freq_hz += g;
+                if (*freq_hz < 0.01) *freq_hz = 0.01;
+            }
+        } else {
+            *cents += g;
+        }
+    }
+}
+
 /* Per-sample stretch factor with last value winning, mirroring the
    worklet's pitchFactor[last] read. Steps only GEN_STRETCH slots;
    everything else steps in the drain. The base is the raw static shift
@@ -3391,8 +3430,17 @@ static void live_vocoder_refill_block(Voice *V) {
         if (age_j >= 0) {
             /* Same source computation as the scalar oscillator path:
                naive switch on the incremental phase, then the polyBLEP
-               override. FM, pitch envelopes and the transpose stay out
-               of the live path by eligibility. */
+               override. Source-frequency LFOs bend the per-sample pitch
+               like the pre-vocoder AudioParam; FM, pitch envelopes and
+               the transpose stay out of the live path by eligibility. */
+            double fj = f, fcents = 0;
+            int fnf = 0;
+            live_source_lfo_step(V, age_j, &fj, &fcents, &fnf);
+            if (fnf & (1<<5)) fj = 440.0;
+            if (!(fnf & (1<<7)) && fcents != 0) {
+                fj *= pow(2.0, fcents/1200.0);
+                if (fj < 0.01) fj = 0.01;
+            }
             double pwuse = pw;
             if (pwrate > 0) pwuse += sin(2*M_PI*age_j*pwrate)*pwsweep;
             switch (w) {
@@ -3423,14 +3471,14 @@ static void live_vocoder_refill_block(Voice *V) {
                 src = sin(V->phase);
                 break;
             }
-            if (w == INST_SAW) src = dsp_oscillator(0,V->phase,f,.5);
+            if (w == INST_SAW) src = dsp_oscillator(0,V->phase,fj,.5);
             else if (w == INST_SQUARE)
-                src = dsp_oscillator(1,V->phase,f,pwuse >= 0 ? pwuse : .5);
-            else if (w == INST_TRI) src = dsp_oscillator(2,V->phase,f,.5);
+                src = dsp_oscillator(1,V->phase,fj,pwuse >= 0 ? pwuse : .5);
+            else if (w == INST_TRI) src = dsp_oscillator(2,V->phase,fj,.5);
             /* The source-node ADSR shapes the vocoder input; the drain
                keeps only the release fade (see the release node). */
             src *= dsp_envelope(age_j,gate,ea,ed,esus,er);
-            V->phase += (2*M_PI*f)/SR;
+            V->phase += (2*M_PI*fj)/SR;
             if (V->phase > 2*M_PI || V->phase < -2*M_PI) V->phase = fmod(V->phase,2*M_PI);
         }
         live_vocoder_set_factor(voc, live_stretch_factor(V, age_j));
@@ -3485,7 +3533,19 @@ static void live_vocoder_refill_sample(Voice *V) {
                     if (channels == 1) staged_r = staged_l;
                 }
             }
-            position += step*dsp_pitch_multiplier(&V->dsp.control, age_j, V->live_gate);
+            /* Source-frequency LFOs bend the transport like the deployed
+               detune fallback, evaluated per sample from the pre-step
+               phases like the scalar path. */
+            double ratio = dsp_pitch_multiplier(&V->dsp.control, age_j, V->live_gate);
+            {
+                /* Sample voices take the cents branch of the stepper;
+                   fhz carries no meaning here. */
+                double fh = 0.0, cents = 0;
+                int nf = 0;
+                live_source_lfo_step(V, age_j, &fh, &cents, &nf);
+                if (!(nf & (1<<7)) && cents != 0) ratio *= pow(2.0, cents/1200.0);
+            }
+            position += step*ratio;
             if (V->dsp.control.p[DSP_LOOP] > 0 && loop_hi > loop_lo &&
                 ((step >= 0 && position >= loop_hi) ||
                 (step < 0 && position < loop_lo))) {

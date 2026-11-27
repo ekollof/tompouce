@@ -527,7 +527,11 @@ and measured divergences are recorded in the archive.
       Known LFO-adjacent gaps, all verified against the reference:
       procedural-drum fixed tone (snare 200 Hz tone ignores pitch LFO);
       wavetable-sample cents (position stepping lives inside the wavetable
-      voice); stretched source-frequency LFO (upstream target unclear);
+      voice); stretched source-frequency LFOs bend the pre-vocoder
+      source: `s`/`freq`/`note` all target the source `frequency` param,
+      so oscillator voices bend Hz per sample while sampled voices take
+      the detune fallback in cents (`stretch-sine-freq-lfo-tmp`,
+      `lfo-freq-stretch-static-tmp`, `lfo-freq-sample-tmp` at 0.99);
       negative-base `pow(curve)` on filter LFOs through the new curve slot
       (unmeasured); live phase uses the render-path base (the site's own live
       path disagrees with its render path). Newly gated generic targets:

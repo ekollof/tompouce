@@ -699,7 +699,13 @@ pre-vocoder like the deployed source node (`stretch-sine-tmp`
 with last value winning (`stretch-sine-lfo-tmp` 0.999998/1.0002).
 Stretched samples with a modulated factor stream the same baked input
 timeline per block (`lfo-stretch-static-tmp` 0.9992/1.0003); static
-stretch keeps the prepared buffer.
+stretch keeps the prepared buffer. Stretched source-frequency LFOs bend
+the pre-vocoder source (`s`/`freq`/`note` all target the source
+`frequency` node): oscillator voices bend Hz per sample and sampled
+voices take the detune fallback in cents, both stepped in the refill
+(`stretch-sine-freq-lfo-tmp` 0.999998/1.0002,
+`lfo-freq-stretch-static-tmp` 0.999997/1.0003, `lfo-freq-sample-tmp`
+1.0/1.0003).
 Generic tremolophase, wtdc/warpdc and dry match the deployed
 no-op (the `phase`/`dc` params do not exist and the dry node is never
 registered): `lfo-tremolophase-inert` 0.99968/1.0002, `lfo-wtdc-inert` 1.0/1.0003,

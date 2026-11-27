@@ -13,6 +13,24 @@ foreach(name ai websamp editor terminal_render javascript dsp examples csound js
         audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2 carla_host collab_proto)
     tompouce_test(${name})
 endforeach()
+# Loopback integration against a real director. Needs libsodium for the
+# scripted clients' Ed25519 auth; skips at runtime when no director binary
+# is present (TOMPOUCE_DIRECTOR_BIN overrides the path).
+pkg_check_modules(TEST_SODIUM QUIET IMPORTED_TARGET libsodium>=1.0.20)
+if(TEST_SODIUM_FOUND)
+    add_executable(test_collab_loopback tests/test_collab_loopback.c)
+    set_target_properties(test_collab_loopback PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    target_compile_options(test_collab_loopback PRIVATE -UNDEBUG)
+    target_link_libraries(test_collab_loopback PRIVATE tompouce_core PkgConfig::TEST_SODIUM)
+    if(TARGET tompouce-director)
+        add_dependencies(test_collab_loopback tompouce-director)
+        target_compile_definitions(test_collab_loopback PRIVATE "TOMPOUCE_DIRECTOR_BIN=\"$<TARGET_FILE:tompouce-director>\"")
+    endif()
+    add_test(NAME collab_loopback COMMAND test_collab_loopback)
+    set_tests_properties(collab_loopback PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 120)
+else()
+    message(STATUS "collab_loopback: skipped, libsodium not found")
+endif()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
 target_link_options(test_websamp_security PRIVATE -Wl,--export-dynamic)
 set_tests_properties(carla_host PROPERTIES

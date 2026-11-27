@@ -2941,8 +2941,14 @@ comes before any public launch.
 - A minimal director: a single implicit room, `--insecure-lan` plaintext
   `ws://` transport (TLS is Phase 2), slot 0 only.
 - **E2E is on.** Both clients are given a pre-shared room key
-  (`--room-key-file`); frames are sealed with the key and signed with
-  ephemeral Ed25519 keys. No identities or certificates yet.
+  (`--room-key-file`, 32 bytes on the director). `auth` carries `room`, an
+  ephemeral per-room `pk`, a signature over `"tompouce-collab-v1" ‖
+  challenge ‖ room ‖ pk`, and `proof`, a keyed BLAKE2b of `challenge ‖
+  room` under the room key. The proof is the Phase-1 stand-in for invite
+  certificates: whoever holds the room key is admitted as editor. A room
+  is created by the first `auth` with `owner:true` (whose `pk` becomes
+  `opk`). Frames are sealed with the key and signed with ephemeral
+  Ed25519 keys. No identities or certificates yet.
   `--allow-plaintext` exists for debugging only.
 - Client transport (libcurl WebSocket), `collab_crypto.c`, `collab_doc` with
   Yjs, editor diff capture and remote apply, remote cursors.

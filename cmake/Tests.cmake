@@ -10,7 +10,7 @@ function(tompouce_test name)
     endif()
 endfunction()
 foreach(name ai websamp editor terminal_render javascript dsp examples csound js_worker rational signal_wave
-        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2 carla_host)
+        audio audio_performance prep_profile prep_deadlines prep_cpu stretch convolution_prepare room duck_onset terminal_graphics audio_output native_synth live_sliders midi gm_webaudiofont mcp_security websamp_security lv2 lv2_worker live_lv2 carla_host collab_proto)
     tompouce_test(${name})
 endforeach()
 target_link_libraries(test_websamp_security PRIVATE ${CMAKE_DL_LIBS})
@@ -392,9 +392,10 @@ target_link_options(test_websamp_security_sanitize PRIVATE -Wl,--export-dynamic)
 add_custom_target(test-security
     COMMAND $<TARGET_FILE:test_mcp_security>
     COMMAND $<TARGET_FILE:test_websamp_security>
+    COMMAND $<TARGET_FILE:test_collab_proto>
     COMMAND $<TARGET_FILE:test_javascript> --prebake
     COMMAND "${Python3_EXECUTABLE}" tests/test_companion.py
-    DEPENDS test_mcp_security test_websamp_security test_javascript
+    DEPENDS test_mcp_security test_websamp_security test_collab_proto test_javascript
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 add_custom_target(test-security-sanitize
     COMMAND $<TARGET_FILE:test_mcp_security_sanitize>

@@ -146,6 +146,22 @@ if(WITH_V8)
     endif()
 endif()
 
+# Standalone collab director. Deliberately outside tompouce_core: a server
+# must not link the engine. Shares only the protocol codec sources.
+option(WITH_DIRECTOR "Build the standalone tompouce-director server" OFF)
+if(WITH_DIRECTOR)
+    pkg_check_modules(LIBWEBSOCKETS REQUIRED IMPORTED_TARGET libwebsockets>=4.5.8)
+    pkg_check_modules(LIBSODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.20)
+    pkg_check_modules(LIBCJSON REQUIRED IMPORTED_TARGET libcjson)
+    add_executable(tompouce-director director/main.c director/session.c
+        director/room.c src/collab_proto.c)
+    target_include_directories(tompouce-director PRIVATE include director)
+    target_compile_options(tompouce-director PRIVATE -Wall -Wextra -Werror -pedantic)
+    target_link_libraries(tompouce-director PRIVATE PkgConfig::LIBWEBSOCKETS PkgConfig::LIBSODIUM PkgConfig::LIBCJSON m)
+    add_test(NAME director_starts COMMAND tompouce-director --version)
+    set_tests_properties(director_starts PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" TIMEOUT 60)
+endif()
+
 option(WITH_CSOUND "Enable Csound when available" ON)
 set(default_csound "")
 foreach(candidate "$ENV{HOME}/.local/opt/tompouce-csound7" "$ENV{HOME}/.local/opt/strudelterm-csound7")

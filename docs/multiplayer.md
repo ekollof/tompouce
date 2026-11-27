@@ -1,4 +1,11 @@
-# Tompouce Collab: multi-user jamming design
+# Tompouce Jam mode: multi-user jamming design
+
+> **Naming.** What players see is called **Jam mode**: joining a room, the
+> roster, the slot list. Underneath it the code, the config file
+> (`collab.json`), the engine flags (`--collab`), the F2/`:`
+> `/collab` commands and the wire protocol (`tompouce.collab.v1`) keep
+> their `collab` names, so this brief uses both: "Jam mode" for the
+> experience, `collab…` for the implementation.
 
 Status: design brief for an implementing agent. Nothing here exists yet unless
 it is cited as an existing file or function.
@@ -90,7 +97,7 @@ their answers in place).
 | D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 | D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
-| D12 | 2026-11-27 | **F7 shows the room roster in collab mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
+| D12 | 2026-11-27 | **F7 shows the room roster in Jam mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
 | D13 | 2026-11-27 | **Room-wide solos with attribution, per branch.** `S$:` solos work per branch like upstream (label starts with `S`), muting non-soloed branches for everyone (union across slots and members, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. The owner can switch soloing off room-wide without touching code. | §12.2, §12.5, §12.6 |
 | D14 | 2026-11-27 | **Nicknames are user-chosen, persistent and cosmetic.** `/nick <name>` on the F2 command line sets **the user's** sealed display name; it is stored in `collab.json` and reused in every room and later session. It is not a room nickname or a per-room setting. If unset, the client generates a pronounceable `adjective-noun` nick once before the first join and saves it. A nick is not an identity: it is not unique, and roles, ownership and ACLs still come only from keys and certificates. | §2, §7, §12.1, §12.5, §13.5, §18.3 |
 
@@ -306,7 +313,7 @@ them.
   - It calls `event_queue_new_program(HUGE_VAL)`.
   - `event_queue_new_program(double boundary)` **drops** queued events with
     `time >= boundary`. Passing `HUGE_VAL` drops nothing, which is why a
-    local hot-swap never withdraws accepted notes. A collab activation must
+    local hot-swap never withdraws accepted notes. A Jam-mode activation must
     do the same (§8.7).
 - Output latency is not exposed numerically. `audio_output.h` only has
   `audio_output_latency_label()` and `audio_output_queue_label()`, which
@@ -474,7 +481,7 @@ Thread rules, from `docs/architecture.md` and `AGENTS.md`:
 - The UI thread alone touches Notcurses and editor state.
 - The collab thread never touches editor state and never holds `tracks_lock`
   across I/O.
-- The audio callback is unchanged. Collab adds no JS execution, I/O,
+- The audio callback is unchanged. Jam mode adds no JS execution, I/O,
   allocation or locking to it.
 - Every queue is bounded. A slow or malicious peer must not block playback.
 - All collab status and errors go to the console ring through
@@ -519,14 +526,14 @@ per-branch with a room-wide union (§12.6), decided in D13. One slot's runtime e
 | `src/audio_output.c`, `include/audio_output.h` | Add **`double audio_output_latency_seconds(void)`** (NEW). Use the backend-reported output latency: PipeWire `pw_stream_get_time_n()` delay, PulseAudio `pa_stream_get_latency()`, PortAudio `Pa_GetStreamInfo()->outputLatency`, OpenAL buffers × frames / rate. Return `NAN` when it is unknown. VERIFY each backend's API. |
 | `include/event.h`, `src/js_audio.c`, `src/osc_output.c`, `src/midi.c` | Add a per-event **origin tag**: `AudioEvent` gains `uint16_t slot` (NEW). Derive it from the namespaced branch id in the hap's `id` control. Gate OSC and MIDI emission through `collab_capability_allowed(slot, CAP_OSC/CAP_MIDI_OUT, target)` (NEW) **on the generator, before preparation**. `osc_output.h` already says "Prepare on the generator. Send on the consumer, never in audio", so the check goes in `osc_output_prepare()`'s caller. |
 | `src/websamp.c`, `include/websamp.h` | Add `websamp_prefetch(const char *token)` (NEW): a non-blocking enqueue of the download path that `websamp_acquire()` uses lazily today. Add a per-host consent hook for remote-authored `samples()` calls. |
-| `src/tui.c`, `src/tui_commands.h`, `src/tui_terminal.h` | Slot view, `/collab` and `:collab` commands (including `:join <link>`, `/join <link>`, the join consent prompt and `/collab invite --qr`), the top-level `/nick` command, remote cursors, status segment, F9 slot list in collab mode, edit capture (§9.3) and the remote-delta apply path that bypasses snapshot undo (§9.3). |
+| `src/tui.c`, `src/tui_commands.h`, `src/tui_terminal.h` | Slot view, `/collab` and `:collab` commands (including `:join <link>`, `/join <link>`, the join consent prompt and `/collab invite --qr`), the top-level `/nick` command, remote cursors, status segment, F9 slot list in Jam mode, edit capture (§9.3) and the remote-delta apply path that bypasses snapshot undo (§9.3). |
 | `src/mcp.c` | When collab is active, `music_set_code` writes into the local user's focused slot and `music_evaluate` becomes a room eval request. Add the NEW read-only tool `music_collab_status`, which `test_mcp_security` must bound. |
 | `web/hydra.html` / companion | Hydra is a per-user display choice, defaulting to **local slots only**: in a room, `music_get_code` returns only slots the viewer authored (shared slot 0 counts as remote). `/collab allow hydra` (per-user, per-room-scoped, warned) opts that browser into rendering remote slots too; it is never room state and never owner-controlled. The page must be split before opt-in is recommended: a token-holding parent fetches code and draws HUD, while a tokenless opaque-origin iframe (`sandbox="allow-scripts"`, no `allow-same-origin`) receives code by `postMessage` and runs the `new Function` eval + WebGL there. Iframe CSP is `default-src 'none'`, `connect-src 'none'`, `img-src/media-src 'self'` plus a room asset allowlist path, `object-src 'none'`, `base-uri 'none'` (`unsafe-eval` lives only inside the iframe); `Permissions-Policy` denies camera, microphone, geolocation and display-capture; room assets serve from a path-confined companion directory (traversal refused), which is the unveil-style boundary. |
 | `src/main.c` | Add `--collab URL` (NEW), `--collab-nick NAME` (NEW) and **`--join LINK`** (NEW, the target of the `tompouce://` handler: parse, show the consent prompt, then connect). These sit next to the existing `--mcp`, `--mcp-port` and `--bpm` flags. |
 | `scripts/install.py`, `scripts/build-appimage.sh`, `packaging/aur/` | Register the `x-scheme-handler/tompouce` MIME handler (`Exec=tompouce --join %u`, `Terminal=true`), detect a libcurl older than 8.11.0 and build with `WITH_COLLAB=OFF` plus a message, and bundle a current libcurl in the AppImage (§6.5). The AppImage `.desktop` file is written near `scripts/build-appimage.sh:169`. |
 | `CMakeLists.txt` | `WITH_COLLAB`, `WITH_DIRECTOR`, `WITH_WEB_COLLAB` options, the libcurl and libsodium version checks, `tompouce_embed()` for `collab.js` and the web assets (§6.4). |
 | `cmake/Tests.cmake` | Register the new tests (§17), add them to the sanitize lists and add `test_collab_proto` to the `test-security` target. |
-| `docs/` | Add `docs/collab.md` (user guide and protocol reference) and update the modules table in `docs/architecture.md` with the new rows. Add a wiki page `docs/wiki/Collaborative-Jamming.md`, and remember that the wiki sync rules in `AGENTS.md` apply. Update the README key list for the collab-mode bindings. |
+| `docs/` | Add `docs/collab.md` (user guide and protocol reference) and update the modules table in `docs/architecture.md` with the new rows. Add a wiki page `docs/wiki/Collaborative-Jamming.md`, and remember that the wiki sync rules in `AGENTS.md` apply. Update the README key list for the Jam-mode bindings. |
 
 ### 6.3 New server: `tompouce-director`
 
@@ -767,7 +774,7 @@ director for the room.
   installed `tompouce-director` as a managed child process bound to the LAN
   interface (loopback stays up too), then advertises it. If the binary is
   not installed, the command fails with the install pointer instead of a
-  socket error. Quitting collab mode stops the child. There is deliberately
+  socket error. Quitting Jam mode stops the child. There is deliberately
   no election protocol: the first binder wins, and a second host just shows
   up as a second advertisement for the joiner to pick between.
 - **Discovery.** A minimal built-in mDNS announcer and browser over UDP
@@ -1171,7 +1178,7 @@ a_sch(c)  = a(c) − L_out − L_user                      # output-latency comp
 - The scheduler's own 100 ms look-ahead is **not** latency: it is how far
   ahead of `a_sch` events are queued. It does not need compensation.
 
-Scheduler integration (NEW `scheduler_collab_align()`): in collab mode the
+Scheduler integration (NEW `scheduler_collab_align()`): in Jam mode the
 generator stops deriving `js_origin` from `boundary = now + .1` and derives
 the anchors from the room clock:
 
@@ -1414,14 +1421,14 @@ const char *text)`):
   diff. That keeps `collab_shadow` consistent: local edits are always
   submitted before remote deltas are applied on top.
 
-**Undo in collab slots:**
+**Undo in Jam-mode slots:**
 
 - Snapshot undo (`struct undo_snap`) would revert other people's edits. While
   the focused buffer is a collab slot, `Ctrl+Z`, `Ctrl+Y` and vi `u`/`Ctrl+R`
   call `cd_undo(slot)` and `cd_redo(slot)` instead. Those use a
   `Y.UndoManager` scoped to `Y.Text("code")` and tracking only the local
   origin.
-- The local snapshot stack is cleared when entering collab mode and restored
+- The local snapshot stack is cleared when entering Jam mode and restored
   when leaving it (§10.5).
 
 **Viewing:** the editor shows **one slot at a time**, the focused slot, so the
@@ -1456,7 +1463,7 @@ same choice Flok makes (`EvalMessage.body`, §16).
 
 **Tempo.**
 
-- In collab mode, `setcps` and `setcpm` inside slot code do **not** change
+- In Jam mode, `setcps` and `setcpm` inside slot code do **not** change
   local tempo directly. After compiling, if `metadata.tempoBySlot` is set for
   the evaluated slot and its author is the local user with the `tempo`
   permission, the client sends `tempo_req`.
@@ -1476,7 +1483,7 @@ same choice Flok makes (`EvalMessage.body`, §16).
   them to `Date.now()`) are non-deterministic. Leave them, and log a one-time
   warning when the source uses them in a remote-profile compile.
 - **Startup prebakes** (`prebake.strudel` and the F6 prebake list) differ per
-  machine. In collab mode `run_startup_prebake = false` by default. A room can
+  machine. In Jam mode `run_startup_prebake = false` by default. A room can
   carry shared setup in slot 0 instead. `collab.json` has
   `"local_prebake": true` to override, with a warning that output may
   diverge.
@@ -1662,7 +1669,7 @@ the author hears exactly what the room hears.
    `welcome.now_us` jumped backwards (a director restart). It then re-runs
    the burst.
 
-### 10.5 Entering and leaving collab mode (local state)
+### 10.5 Entering and leaving Jam mode (local state)
 
 - **Enter:**
   - Stash the local session: `current_code`, the song list (via
@@ -1768,7 +1775,7 @@ row is under `/collab` unless the row says otherwise.
 | `/collab slot <n\|name>` | Focus a slot (also Ctrl+N and Ctrl+B, §12.2). |
 | `/collab slot rename\|delete\|share <name>` | Slot admin. `share` grants write to named members. |
 | `/collab mute <slot>` / `/collab solo <slot>` | **Local** listening only. This does not change the room or break sync; it filters by `AudioEvent.slot`. Room-wide code solos (§12.6) compose on top of this local monitor mute. |
-| `/collab tempo <bpm>` | `tempo_req` with `cps = bpm/240`. Plain `/bpm N` maps to this in collab mode, and so does `setcpm` in your own slot. |
+| `/collab tempo <bpm>` | `tempo_req` with `cps = bpm/240`. Plain `/bpm N` maps to this in Jam mode, and so does `setcpm` in your own slot. |
 | `/collab quantum <live\|1/4\|1/2\|1\|2\|4\|8>` | Room quantum (owner only). Default `live`, like a local Alt+Enter (§8.7). |
 | `/collab latency [±ms\|auto]` | Show or trim `L_user`. `auto` resets to the backend-reported latency. |
 | `/collab allow <osc\|midi\|samples\|csound\|lv2\|outputs\|hydra> [target]` / `/collab deny …` | Consent gates (§13.2). `hydra` is a per-user display choice (local slots only vs rendering remote slots in your browser), never a room setting. |
@@ -1779,7 +1786,7 @@ row is under `/collab` unless the row says otherwise.
 
 ### 12.2 Keybindings
 
-These keep to existing conventions. In collab mode F7/F9 (and Ctrl+N/B)
+These keep to existing conventions. In Jam mode F7/F9 (and Ctrl+N/B)
 are repurposed as the room roster and slot list; no other F-keys change.
 F7's solo job *is* the room-level list, so the repurpose fits its existing
 meaning (details under F7 below).
@@ -1793,13 +1800,13 @@ meaning (details under F7 below).
   0.35–0.45 s later (§8.7), not at the next bar. The status line counts down
   to activation: `⏱ c40.1 (0.3s)`.
 - **Ctrl+N / Ctrl+B** (next and previous track today) become **next and
-  previous slot** in collab mode, the same "move through buffers" idea.
-- **F9** (track list today) shows the **slot list** in collab mode. Each row
+  previous slot** in Jam mode, the same "move through buffers" idea.
+- **F9** (track list today) shows the **slot list** in Jam mode. Each row
   shows color, slot name, owner's nick, state and the last eval cycle. The
   states are `editing`, `queued c131`, `live`, `⚠ error`, `muted (local)` and
   `missing sounds`. Enter focuses a slot.
 - **F7, F8 and Ctrl+T** (song mode, hold, copy to track) are disabled in
-  collab mode, except that **F7 opens the room roster** (§12.5): the key
+  Jam mode, except that **F7 opens the room roster** (§12.5): the key
   would otherwise print "unavailable", and a room-level list is the
   closest collab analogue to its solo job. They print `song mode is
   unavailable in a room` for F8 and Ctrl+T.
@@ -1893,7 +1900,7 @@ The **F4** internals pane gets a "collab" block:
 
 ### 12.5 Room roster (F7)
 
-F7 is dead in collab mode (song mode is off), so it shows the room roster:
+F7 is dead in Jam mode (song mode is off), so it shows the room roster:
 who is here, in whose color, doing what. F9 stays the slot list (§12.2); F4 stays
 the internals pane (§12.3).
 
@@ -1959,7 +1966,7 @@ Attribution must make clear who soloed what, in three places:
 
 **Authorship gutter.** The editor gutter shows a one-cell color chip per
 line for the member who last edited it (`:set collab_blame`, on by
-default in collab mode; the F7 roster is the legend). `collab.c` tracks it
+default in Jam mode; the F7 roster is the legend). `collab.c` tracks it
 from applied updates: authorship is taken from the verified Ed25519
 signature on the frame (author `pk` mapped through the verified member
 list), never from the director-set plaintext `member` header field, which
@@ -2548,7 +2555,7 @@ slot name, sample list or sound.
 | Join code or passphrase wrong | AEAD open fails locally | "wrong code or passphrase"; no retry limit server-side (the server cannot tell), the client adds a short delay. |
 | Web front end unavailable | HTTPS error | Rooms and links keep working through the client; `:join <link>` needs no page (§6.4). |
 | Director refuses creation (quota, PoW too hard) | `error quota` / `rate` | Show the reason; retry later or self-host. |
-| libcurl too old or no `wss` | Runtime `curl_version_info()` | Collab stays disabled with a clear message (§6.5). |
+| libcurl too old or no `wss` | Runtime `curl_version_info()` | Jam mode stays disabled with a clear message (§6.5). |
 | CRDT corruption or timeout in Yjs | Exception or timeout in `collab_doc` | Quarantine the slot doc, show `⚠ resyncing`, drop the local doc and replay from the director's snapshot and log. Unsent local edits are kept as text and offered back as a paste. |
 | Snapshot owner offline | `snapshot_req` unanswered for 30 s | Ask the next editor with access. If the log reaches its hard cap, the director refuses new updates for that slot (`error size`) until someone sends a snapshot. |
 | Missing samples | Prefetch failure or no manifest entry | The existing fallback, a visible `⚠ missing sounds` in F9. |

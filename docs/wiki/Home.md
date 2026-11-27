@@ -27,6 +27,7 @@ Press F5 to evaluate and Ctrl+P to play or stop.
 | [Sounds and samples](https://github.com/ekollof/tompouce/wiki/Sounds-and-Samples) | F6, drum machines, GM synths, wavetables and imports |
 | [Visuals and themes](https://github.com/ekollof/tompouce/wiki/Visuals-and-Themes) | Inline views, Kitty graphics and live recoloring |
 | [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations) | Browser controls, MCP, MIDI and OSC |
+| [Collaborative jamming](https://github.com/ekollof/tompouce/wiki/Collaborative-Jamming) | Jam mode: playing together, the Bakery server, and the current build status |
 | [Development](https://github.com/ekollof/tompouce/wiki/Development) | CMake/Ninja, tests, SIMD convolution dispatch and contributions |
 | [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting) | Silence, failed evaluation, missing sounds and tutorial updates |
 | [Learn Strudel](https://github.com/ekollof/tompouce/wiki/Learn-Strudel) | Official workshops, reference pages and practice ideas |

@@ -7,6 +7,7 @@
 - [Sounds and samples](https://github.com/ekollof/tompouce/wiki/Sounds-and-Samples)
 - [Visuals and themes](https://github.com/ekollof/tompouce/wiki/Visuals-and-Themes)
 - [Companion and integrations](https://github.com/ekollof/tompouce/wiki/Companion-and-Integrations)
+- [Collaborative jamming](https://github.com/ekollof/tompouce/wiki/Collaborative-Jamming)
 - [Development](https://github.com/ekollof/tompouce/wiki/Development)
 - [Troubleshooting](https://github.com/ekollof/tompouce/wiki/Troubleshooting)
 - [Learn Strudel](https://github.com/ekollof/tompouce/wiki/Learn-Strudel)

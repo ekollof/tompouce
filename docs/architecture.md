@@ -71,13 +71,17 @@ console ring buffer feeds both UI console pane and music_get_console.
 | `src/common.c` | timing, `trim`, `strdup_safe`, console ring buffer | `log_console`, `console_line`, `now_seconds` |
 | `src/audio.c` | tempo (`bpm` 20–400), note→MIDI→freq, voice pool, PortAudio callback | `audio_set_bpm`, `audio_trigger_event`, `note_name_to_midi`, `midi_to_freq` |
 | `src/slider.c` | live values and source-site bindings; UI synchronizes source | `slider_bind`, `slider_nudge` |
-| `src/track.c` | source → QuickJS program and transport clock + `current_code` | `track_load_from_code` |
-| `src/scheduler.c` | generator + consumer threads, sorted event queue | `scheduler_init/shutdown/start`, `event_queue_push/clear` |
+| `src/track.c` | source → QuickJS program and transport clock + `current_code`; staged room programs for Jam mode (`track_stage_program`, shared activate path) | `track_load_from_code`, `track_stage_program`, `track_activate_locked` |
+| `src/scheduler.c` | generator + consumer threads, sorted event queue; Jam-mode window splitting with a no-rewind late path | `scheduler_init/shutdown/start`, `event_queue_push/clear` |
 | `src/prep_pool.c` | bounded general preparation workers plus the serial generated-room lane | `prep_pool_start/stop`, `prep_pool_submit`, `prep_pool_submit_serial` |
 | `src/ai.c` | LLM request worker, offline fallback | `ai_request_async`, `ai_poll_result` |
 | `src/tui.c`, `src/tui_terminal.h` | Notcurses UI, editor state, vi mode, cursor, resize | `tui_init/run/shutdown`, `tui_frame` |
 | `src/mcp.c` | MCP server, frame reader, UI orchestration | `mcp_run`, `handle_request`, `mcp_read_frame` |
-| `src/main.c` | mode dispatch (`--mcp`, `--mcp --ui`) | `main` |
+| `src/collab.c`, `include/collab.h` | Jam-mode session lifecycle, transport handshake, per-user nickname (load/validate/generate/persist) | `collab_connect`, `collab_disconnect`, `collab_nick_get`, `collab_nick_set` |
+| `src/collab_transport.c`, `include/collab_transport.h` | libcurl WebSocket transport for Jam mode (runtime `wss` floor, loopback/LAN `ws://` policy) | `ctr_open`, `ctr_send_text`, `ctr_send_binary`, `ctr_recv`, `ctr_fd` |
+| `src/collab_proto.c`, `include/collab_proto.h` | shared Jam-mode wire codec (engine and director validate identically) | `cp_parse_control`, `cp_parse_binary`, `cp_type_from_string` |
+| `director/` | standalone room server (no engine linkage): admission, ordering, relay, opaque store | `tompouce-director --listen`, `--admission-key-file` |
+| `src/main.c` | mode dispatch (`--mcp`, `--mcp --ui`, `--collab URL`, `--collab-nick`, `--join LINK`) | `main` |
 
 ## Data flow
 
@@ -91,6 +95,8 @@ console ring buffer feeds both UI console pane and music_get_console.
 3. The generator queries bounded 50 ms windows, prepares native events outside
    the track lock, and publishes them into the time-sorted event queue.
    Visual queries and source mappings use the same retained program.
+   In Jam mode a staged program can split a query window at its activation
+   cycle; a late activation never rewinds the query cursor.
 4. The consumer thread pops events due within 2 ms and calls
    `audio_trigger_event()`, which replaces the earliest inserted voice if all
    128 are busy, independently of its target time or gain. A separate pool of

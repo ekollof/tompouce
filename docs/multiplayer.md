@@ -30,6 +30,10 @@ default, local-equivalent `live` eval, recent-software floors).
 > Phase 1.5: first-come-first-serve LAN director over built-in mDNS,
 > join-code handshake, same E2E as the internet path.
 >
+> **Revision note, 2026-11-27 (ekollof), room roster (D12).** §12.5: F7
+> shows members with color, role, focused slot and activity state; F9
+> stays the slot list, F4 the internals pane.
+>
 > **Revision note, 2026-11-27 (ekollof), static web presence (D11).** No
 > user accounts, no Flask/Django/FastCGI: the site is the front-door pages
 > plus static setup guides; `relayd` terminates TLS straight to the
@@ -73,6 +77,7 @@ questions are in §20.
 | D9 | 2026-11-27 | **The public director runs on OpenBSD 8.0** (`castor.hackerheaven.org`; the public name is expected to resolve there). The director and its service files must therefore be portable: POSIX C11 only, no Linux-only APIs, LibreSSL-compatible TLS use, dual-stack sockets, and OpenBSD `rc.d` supervision next to the systemd unit. | §6.5, §18.1, §18.4 |
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 | D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
+| D12 | 2026-11-27 | **F7 shows the room roster in collab mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -1676,7 +1681,9 @@ existing completion code.
 
 ### 12.2 Keybindings
 
-These keep to existing conventions. **No F-keys are reassigned.**
+These keep to existing conventions. No F-keys are reassigned, with one
+carve-out: F7's solo job is the room-level list, so in collab mode —
+where it would otherwise do nothing — it shows the room roster (§12.5).
 
 - **F5, Ctrl+Enter, Alt+Enter** in a collab slot send a room eval for the
   focused slot. By default it activates `live`, at one shared instant about
@@ -1689,7 +1696,10 @@ These keep to existing conventions. **No F-keys are reassigned.**
   are `editing`, `queued c131`, `live`, `⚠ error`, `muted (local)` and
   `missing sounds`. Enter focuses a slot.
 - **F7, F8 and Ctrl+T** (song mode, hold, copy to track) are disabled in
-  collab mode. They print `song mode is unavailable in a room`.
+  collab mode, except that **F7 opens the room roster** (§12.5): the key
+  would otherwise print "unavailable", and a room-level list is the
+  closest collab analogue to its solo job. They print `song mode is
+  unavailable in a room` for F8 and Ctrl+T.
 - **Ctrl+G** (NEW, if VERIFY confirms it is free) jumps to the slot of the
   member who evaluated most recently: "go to the action". In vi normal mode
   this is `gs` (NEW, VERIFY that it is unused in `tui_vi.h`).
@@ -1756,6 +1766,30 @@ The **F4** internals pane gets a "collab" block:
   text, and none is planned. Watching half-written patterns — typos
   included — is part of the jam, not a privacy problem. (Sound still only
   changes on eval.)
+
+### 12.5 Room roster (F7)
+
+F7 is dead in collab mode (song mode is off), so it shows the room roster:
+who is here, in whose color, doing what. F9 stays the slot list; F4 stays
+the internals pane (§12.3).
+
+- **Header row:** room short id, quantum (`live`/`q1`/…), member count,
+  clock `ε`, E2E lock state. Same data as the status segment, one glance.
+- **One row per member**, in join order: color chip + name, role
+  (`owner`/`editor`/`listener`), focused slot (`slot 3 "bass"`), and state:
+  `typing…` (CRDT update in the last 3 s), `eval @c128` (last evaluated
+  cycle), `late +180ms` (from the last `ack`), `syncing…`, or
+  `reconnecting`. No per-member latency numbers here — those live in F4.
+- **Keys:** Enter (or `j`/`k` + Enter) jumps to that member's focused slot,
+  like a chosen "go to the action" (cf. Ctrl+G for the latest evaluator).
+  `q`/Esc closes. No moderation actions here: kick/ban stay owner-only
+  commands (`/collab kick`), per the client-only rule (§14.6), so the
+  roster never becomes an accidental moderation UI.
+- **Data sources, all local:** awareness states (name, color, focused
+  slot), the `joined` member list, per-member last-update timestamps kept
+  by `collab.c` when remote updates apply, and the clock filter's
+  per-member delay. Nothing is fetched for the panel; it renders cached
+  state, so opening it never blocks on the network.
 
 ## 13. Security
 

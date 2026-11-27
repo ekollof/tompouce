@@ -2706,7 +2706,8 @@ director binary runs it; only the configuration differs. The machine is
 `castor.hackerheaven.org` (OpenBSD 8.0, ~1 GiB RAM, reachable over SSH
 only through the operator's bastion host); the public name
 `bakery.andrath.nl` is expected to resolve there — confirm the DNS mapping
-before launch.
+before launch. The box is salt-managed, so deployment lands through the
+operator's configuration management, not direct edits on the machine.
 
 **Model.** **Account-less.** There are no user accounts, passwords or e-mail
 addresses (D5). A room exists because someone solved a proof-of-work and

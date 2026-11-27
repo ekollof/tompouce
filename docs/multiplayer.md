@@ -34,6 +34,11 @@ default, local-equivalent `live` eval, recent-software floors).
 > shows members with color, role, focused slot and activity state; F9
 > stays the slot list, F4 the internals pane.
 >
+> **Revision note, 2026-11-27 (ekollof), batch 1 answers (D13).** Q2 stays
+> owner-only with grants, Q3 stays as specified, Q4 goes room-wide with
+> attribution (§12.6: union solos, status/F7/F9 indicators, authorship
+> gutter).
+>
 > **Revision note, 2026-11-27 (ekollof), static web presence (D11).** No
 > user accounts, no Flask/Django/FastCGI: the site is the front-door pages
 > plus static setup guides; `relayd` terminates TLS straight to the
@@ -78,6 +83,7 @@ questions are in §20.
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 | D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
 | D12 | 2026-11-27 | **F7 shows the room roster in collab mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
+| D13 | 2026-11-27 | **Room-wide solos with attribution.** `S$:` solos mute non-soloed slots for everyone (union across slots, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. | §6.4, §12.5, §12.6 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -487,7 +493,9 @@ fallback.
 
 | File | Change |
 |---|---|
-| `js/runtime.mjs` | Add **`globalThis.__compileSlots(slotsJson, bpm, prebake)`** (NEW). Each slot is transpiled through `prepare()` and run in its **own** async `Function` scope inside the one runtime, so `const melody` in two slots does not collide. Each slot gets its own `collecting` map, `hush()` and `each`/`all` scope. Branch ids are namespaced `"<slot>/<label>"`, so a slot's solo (`S$:`) stays inside it (open question 4). One slot's runtime exception is caught and reported per slot. The returned metadata adds `slots: [{id, ok, error, voices, locationsBase}]`, plus a `tempoBySlot` map. Keep `__compile` unchanged for non-collab use, sharing helpers rather than copying them. In the remote profile, `Math.random` is reseeded deterministically (§9.4). |
+| `js/runtime.mjs` | Add **`globalThis.__compileSlots(slotsJson, bpm, prebake)`** (NEW). Each slot is transpiled through `prepare()` and run in its **own** async `Function` scope inside the one runtime, so `const melody` in two slots does not collide. Each slot gets its own `collecting` map, `hush()` and `each`/`all` scope. Branch ids are namespaced `"<slot>/<label>"`, so authorship stays
+attributable for play highlights and the gutter (§12.6); solo scope itself
+is room-wide (§12.6), decided in D13. One slot's runtime exception is caught and reported per slot. The returned metadata adds `slots: [{id, ok, error, voices, locationsBase}]`, plus a `tempoBySlot` map. Keep `__compile` unchanged for non-collab use, sharing helpers rather than copying them. In the remote profile, `Math.random` is reseeded deterministically (§9.4). |
 | `src/javascript.c` | Add **`JsProfile`** (NEW) to `compile_program()`, with a matching entry point `javascript_compile_slots(const CollabSlotText *slots, int n, double bpm, JsProgram *previous, const JsProfile *profile, cJSON **metadata, char *err, int errlen)` (NEW). The profile has these flags: `allow_local_modules`, `allow_named_prebakes`, `allow_midi_manifest`, `allow_midi_in`, `allow_csound`, `run_startup_prebake`, `force_quickjs`. When a flag is off, the host function throws a catchable `Error("<capability> is disabled for room code (see /collab allow)")`. Do not remove the function from the realm, so error messages stay clear. With `force_quickjs`, the program never binds the query worker; this is the per-program equivalent of `worker_backend_enabled()` returning 0. |
 | `src/track.c` | Add **`track_stage_program(JsProgram *, cJSON *metadata, double activate_cycle, unsigned eval_seq)`** (NEW). It stores a pending program in a new `Track.pending_*` group. It does not swap it in. Extract today's swap block into a static `track_activate_locked()` so the immediate path and the staged path share one code path. |
 | `include/track.h` | Add fields: `JsProgram *pending; double pending_cycle; unsigned pending_seq; cJSON *pending_metadata; int collab_clock;` (NEW). |
@@ -1669,7 +1677,7 @@ existing completion code.
 | `/collab slot new <name>` | Create a slot you own and focus it. |
 | `/collab slot <n\|name>` | Focus a slot (also Ctrl+N and Ctrl+B, §12.2). |
 | `/collab slot rename\|delete\|share <name>` | Slot admin. `share` grants write to named members. |
-| `/collab mute <slot>` / `/collab solo <slot>` | **Local** listening only. This does not change the room or break sync; it filters by `AudioEvent.slot`. |
+| `/collab mute <slot>` / `/collab solo <slot>` | **Local** listening only. This does not change the room or break sync; it filters by `AudioEvent.slot`. Room-wide code solos (§12.6) compose on top of this local monitor mute. |
 | `/collab tempo <bpm>` | `tempo_req` with `cps = bpm/240`. Plain `/bpm N` maps to this in collab mode, and so does `setcpm` in your own slot. |
 | `/collab quantum <live\|1/4\|1/2\|1\|2\|4\|8>` | Room quantum (owner only). Default `live`, like a local Alt+Enter (§8.7). |
 | `/collab latency [±ms\|auto]` | Show or trim `L_user`. `auto` resets to the backend-reported latency. |
@@ -1811,6 +1819,38 @@ the internals pane (§12.3).
   by `collab.c` when remote updates apply, and the clock filter's
   per-member delay. Nothing is fetched for the panel; it renders cached
   state, so opening it never blocks on the network.
+
+### 12.6 Room-wide solos and the authorship gutter (decision D13)
+
+`S$:` solos are room-wide, not per-slot. When one or more evaluated slots
+carry an active solo selection, every client mutes all non-soloed slots
+locally at the output stage — the same filter `/collab solo` uses, but
+driven by shared room state instead of a local command, so everyone hears
+the same mix. Multiple simultaneous solos union (no fights, no
+last-wins); the union is deterministic because every client computes it
+from the same composite. A slot whose code fails to compile contributes
+no solo (consistent with the per-slot error fallback, §9.4). `/collab
+solo` stays a local-only monitor mute on top of this; the two compose.
+Solo state is room state, so late joiners hear it as soon as they build
+the composite.
+
+Attribution must make clear who soloed what, in three places:
+
+- **Status bar:** the collab segment shows `SOLO` plus the soloing
+  member name(s) in their color(s) while any solo is active.
+- **F7 roster (§12.5):** the header shows `SOLO by X (slot 3 "bass")`,
+  and the soloing member's row is highlighted. The per-row state gains a
+  `soloing` value.
+- **F9 slot list:** soloed slots get a `SOLO` marker in the owner's color.
+
+**Authorship gutter.** The editor gutter shows a one-cell color chip per
+line for the member who last edited it (`:set collab_blame`, on by
+default in collab mode; the F7 roster is the legend). `collab.c` tracks it
+from applied updates: the binary frame header carries the author member
+id in plaintext (content stays sealed), and local edits count as self.
+On each apply the lines inside the diff hunks take the edit's author;
+lines outside keep theirs. The gutter is display-only and never affects
+editing, undo or evaluation.
 
 ## 13. Security
 
@@ -3190,12 +3230,17 @@ design. Each states a default the implementer will use if you do not answer.
    behind `public_url`.~~ **Decided 2026-11-27 (D8):** ekollof hosts it at
    `bakery.andrath.nl`.
    ToS, privacy text and abuse contact remain owed before public launch.
-2. **Who controls tempo?** Owner only by default, with grants to editors, or
-   anyone with a slot? Default: owner only, grantable.
-3. **Stop semantics.** Ctrl+. stops only local listening, and the room
-   transport is owner-only. Right feel? Default: yes.
-4. **Solo labels across slots.** `S$:` solos within its own slot only, not
-   room-wide. Default: per slot.
+2. **Who controls tempo?** ~~Owner only by default, with grants to editors, or
+   anyone with a slot? Default: owner only, grantable.~~ **Decided 2026-11-27:**
+   owner only, with grants to editors (the default stands).
+3. **Stop semantics.** ~~Ctrl+. stops only local listening, and the room
+   transport is owner-only. Right feel? Default: yes.~~ **Decided 2026-11-27:**
+   yes, as specified.
+4. **Solo labels across slots.** ~~`S$:` solos within its own slot only, not
+   room-wide. Default: per slot.~~ **Decided 2026-11-27 (D13):** solos are
+   room-wide and union across slots, with attribution in the status bar, the
+   F7 roster and the F9 list, plus a per-line authorship gutter in the editor
+   (§12.6).
 5. **Shared slot 0.** Always present, opt-in per room, or not at all?
    Default: opt-in per room, on for a new room.
 6. **Ableton Link bridge.** Publish room tempo and phase to local Link peers

@@ -187,6 +187,24 @@ int collab_nick_check(const char *name, char *err, size_t errlen) {
     char normalized[NICK_BYTES_MAX+1];
     return nick_normalize(name,normalized,sizeof(normalized),err,errlen)>=0;
 }
+/* --- capability gates (section 13.2) --- */
+static int collab_test_allow_remote=0;
+void collab_capability_set_test(int allow_remote) {
+    collab_test_allow_remote=allow_remote?1:0;
+}
+int collab_capability_allowed(uint16_t slot, CollabCap cap,
+    const char *target) {
+    (void)target;
+    if (slot==0) return 1;
+    switch (cap) {
+    case COLLAB_CAP_OSC:
+    case COLLAB_CAP_MIDI_OUT:
+        break;
+    default:
+        return 0;
+    }
+    return collab_test_allow_remote;
+}
 /* --- generated default (section 18.3): adjective-noun, one CSPRNG byte
    per word masked to 7 bits over embedded 128-entry lists. --- */
 static const char *const nick_first[128]={

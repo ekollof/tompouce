@@ -1106,17 +1106,18 @@ voice renderer below. Other non-PipeWire backend underruns remain unmeasured.
 Design brief: `docs/multiplayer.md`. Director and wire codec exist
 (`director/`, `src/collab_proto.c`); the engine-side collab client is new.
 
-- [ ] Collab client core, Phase 0 (active). `WITH_COLLAB` CMake option with
-      the libcurl ≥ 8.11.0 floor (OFF plus a message below it);
-      `src/collab_transport.c` (libcurl WebSocket per §6.2, runtime `wss`
-      check); `src/collab.c` session skeleton (Idle/Connecting/Backoff,
-      `--collab`/`--collab-nick`/`--join` flags, nick load/validate/generate/
-      persist per §18.3/D14); `tests/test_collab_transport.c` (offline
-      validation + loopback hello/welcome vs the real director, skipped
-      without director/sodium). Collab-off behavior byte-identical; full
-      serial suite green. Deferred to the next increments: `AudioEvent.slot`
-      plumbing, staged activation (`track_stage_program`), Yjs doc, clock
-      filter, consent UI, `/collab` command family.
+- [ ] Collab client core, Phase 0 (active). Done: `WITH_COLLAB` CMake
+      option with the libcurl ≥ 8.11.0 floor; `src/collab_transport.c`
+      (libcurl WebSocket per §6.2, runtime `wss` check, loopback-only
+      `ws://` gate); `src/collab.c` session skeleton, nick
+      load/validate/generate/persist (D14), per-user `ws://` display-choice
+      groundwork; `AudioEvent.slot` plumbing; staged activation
+      (`track_stage_program`, window split, no-rewind late path) with the
+      local-equivalence test; capability gates wired with a test-driven
+      default (`tests/test_collab_cap.c`). Full serial suite green and both
+      build flavors verified. Still open in Phase 0: Yjs doc integration,
+      clock filter, consent UI, `/collab` command family, and the composite
+      compile-time benchmark (blocked on `__compileSlots`, in progress).
 
 - [x] Hydra sandbox split. Token-holding parent shell plus tokenless
       `web/hydra-frame.html` in an opaque-origin `sandbox="allow-scripts"`

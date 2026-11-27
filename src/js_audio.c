@@ -11,6 +11,9 @@
 #include "stretch.h"
 #include "prep_pool.h"
 #include "prep_profile.h"
+#ifdef HAVE_COLLAB
+#include "collab.h"
+#endif
 #include <ctype.h>
 #include "js_number.h"
 
@@ -2507,8 +2510,23 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
         AudioEvent event;
         if (audio_event_values(hap,plan->origin,plan->seconds,&event,0)) {
             double cycle=control(hap,"begin",0,-1e12,1e12);
+#ifdef HAVE_COLLAB
+            if (!collab_capability_allowed(event.slot,COLLAB_CAP_OSC,NULL)) {
+                javascript_warn_once(program,"collab-cap",
+                    "OSC output is disabled for room code (see /collab allow)");
+                return;
+            }
+#endif
             if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {
                 event.osc_only=1; event.generation=generation;
+#ifdef HAVE_COLLAB
+                if (midi && !collab_capability_allowed(event.slot,
+                        COLLAB_CAP_MIDI_OUT,NULL)) {
+                    javascript_warn_once(program,"collab-cap",
+                        "MIDI output is disabled for room code (see /collab allow)");
+                    midi=0;
+                }
+#endif
                 if (midi && midi_prepare_dominant(program,value,hap,plan->seconds,&event)) event.midi_only=1;
                 event_queue_push(&event);
             } else javascript_warn_control(program,"OSC (invalid address, value or packet limit)");
@@ -2536,6 +2554,14 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
     if (!audio_event_values(hap,plan->origin,plan->seconds,&event,0)) return;
     event.generation=generation; event.duck_mask=0;
     if (midi) {
+#ifdef HAVE_COLLAB
+        if (!collab_capability_allowed(event.slot,COLLAB_CAP_MIDI_OUT,
+                NULL)) {
+            javascript_warn_once(program,"collab-cap",
+                "MIDI output is disabled for room code (see /collab allow)");
+            return;
+        }
+#endif
         if (!midi_prepare_dominant(program,value,hap,plan->seconds,&event)) return;
         event.midi_only=1;
     }

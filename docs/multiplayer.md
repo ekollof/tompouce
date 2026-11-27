@@ -66,8 +66,9 @@ default, local-equivalent `live` eval, recent-software floors).
 ## Decisions log
 
 Revision 2, 2026-11-26. Andrath answered the first round of open questions.
-Decisions below override anything in the first revision. The remaining open
-questions are in §20.
+Decisions below override anything in the first revision. All open questions
+in §20 are now decided (second round, ekollof, 2026-11-27: Q1–Q15 carry
+their answers in place).
 
 | # | Date | Decision | Where it lands |
 |---|---|---|---|
@@ -88,7 +89,13 @@ questions are in §20.
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
 public), Q9 (libcurl floor: require 8.11+, no fallback), Q12 (succession:
-no auto-transfer).
+no auto-transfer). Resolved in the second round (2026-11-27): Q1 operator
+and domain (D8, D9), Q2 tempo (owner-only, grantable), Q3 stop semantics,
+Q4 room-wide solos with attribution (D13), Q5 shared slot 0, Q6 no Link
+bridge, Q7 propose the Flok clock extension, Q8 hybrid naming, Q9 local
+imports (accept), Q10 no moderators, Q11 Argon2id with generated-only
+passphrases, Q12 client-only web console, Q13 PoW plus kill-switch, Q14
+front-door-only web, Q15 everyone waits — see §20 for each.
 
 ---
 

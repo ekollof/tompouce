@@ -2559,6 +2559,23 @@ Cap the daemon with `login.conf` (`datasize`, `openfiles`) instead of
 the systemd `MemoryMax`/`LimitNOFILE` lines, and prefer `pledge`/`unveil`
 in the director on OpenBSD.
 
+**Self-hosting note.** Anyone can run a director, not just the public
+instance: it is one binary with no account database (D5) — rooms, keys
+and the opt-in blob store live under `--state-dir`. On Linux with systemd:
+
+1. Install `tompouce-director`, the unit above and a minimal
+   `/etc/tompouce/director.conf` (see §18.3 for the keys).
+2. `systemctl enable --now tompouce-director`. It listens on loopback by
+   default; put Caddy or nginx in front for TLS (example below), or pass
+   `--cert`/`--key` for native TLS.
+3. Point clients at it with `default_server` in `collab.json`, or share
+   `tompouce://join/<host>/<room>…` links (§14.3).
+
+The public instance (§18.4) is a convenience, not a requirement: the
+protocol and the E2E guarantees are identical against a self-hosted
+director, and the opaque store means the operator — you, in that case —
+cannot read room content either.
+
 Reverse proxy example (Caddy):
 
 ```

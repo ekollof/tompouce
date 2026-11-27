@@ -1752,6 +1752,10 @@ The **F4** internals pane gets a "collab" block:
   instead of background.
 - The slot list (F9) and the editor title show `slot-name — owner` in the
   owner's color.
+- Typing is always shared: there is no draft, preview or "share" step for
+  text, and none is planned. Watching half-written patterns — typos
+  included — is part of the jam, not a privacy problem. (Sound still only
+  changes on eval.)
 
 ## 13. Security
 

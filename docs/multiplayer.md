@@ -3300,7 +3300,9 @@ design. Each states a default the implementer will use if you do not answer.
 15. **Room latency feel.** A room eval waits `lead` (about 350–450 ms) instead
     of the local 200–350 ms, so everyone changes together (§8.7). Acceptable,
     or should an author's own client be allowed to hot-swap sooner and
-    "catch up" (breaks determinism)? Default: everyone waits.
+    "catch up" (breaks determinism)? Default: everyone waits.~~ **Decided
+   2026-11-27:** everyone waits (the default stands); the status-bar
+   countdown keeps the ~0.4 s legible.
 
 ## Appendix A: implementation checklist for the agent
 

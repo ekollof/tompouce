@@ -7,7 +7,7 @@
    snapshot plus capped update log, room clock epochs, no ACLs yet (every
    joined member edits every slot; roles arrive with Phase 2 invites).
    No I/O here; the server loop in main.c owns sockets and timers. */
-#define DIRECTOR_ROOMS_MAX 256
+#define DIRECTOR_ROOMS_MAX 512
 #define DIRECTOR_MEMBERS_MAX 16
 #define DIRECTOR_SLOTS_MAX 16
 #define DIRECTOR_LOG_CAP 256
@@ -74,7 +74,12 @@ typedef struct {
     uint8_t opk[32];
     int has_opk;
     uint64_t eval_seq;
-    uint64_t epoch_seq;
+    /* Key epoch: bumped only by key rotation. Frames sealed under an older
+       epoch are stale. Never moves on transport or tempo changes. */
+    uint64_t key_epoch;
+    /* Clock sequence: bumped by transport and tempo epochs. Advertised as
+       clock.seq so clients can order epoch broadcasts. */
+    uint64_t clock_seq;
     /* Clock epoch: cycle c_e at server time t_us with tempo cps. */
     uint64_t epoch_num;
     unsigned epoch_den;
@@ -95,6 +100,7 @@ typedef struct {
     unsigned quantum_den;
     int locked;
     unsigned max_members;
+    int solos_off;
 } DirectorRoom;
 /* Monotonic server time in microseconds. */
 uint64_t director_now_us(void);
@@ -116,7 +122,7 @@ void director_member_remove(DirectorRoom *room, DirectorMember *member);
 /* Room cycle c(t) under the current epoch. */
 double director_cycle_at(const DirectorRoom *room, uint64_t now_us);
 /* Activation instant for an eval/tempo: ceil64(c(now+lead)) with
-   lead = max(250 ms, max member delay + 350 ms). */
+   lead = max(250 ms, max member delay + 350 ms), capped at 1 s. */
 void director_activation_at(const DirectorRoom *room, uint64_t now_us,
     uint64_t *num, unsigned *den, uint64_t *act_us);
 /* Opaque store: replace snapshot (kind 3) or append to the log. */

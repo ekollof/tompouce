@@ -36,8 +36,8 @@ typedef struct {
 typedef struct {
     const char *listen_host;
     int listen_port;
-    uint8_t room_key[32];
-    int has_room_key;
+    uint8_t admission_key[32];
+    int has_admission_key;
     int allow_plaintext;
     const char *server_name;
     const char *server_version;

@@ -16,7 +16,7 @@ static void on_signal(int signum) {
     (void)signum;
     stop_service=1;
 }
-static int read_room_key(const char *path, uint8_t *key) {
+static int read_admission_key(const char *path, uint8_t *key) {
     FILE *file=fopen(path,"rb");
     size_t got;
     if (!file) {
@@ -26,18 +26,20 @@ static int read_room_key(const char *path, uint8_t *key) {
     got=fread(key,1,32,file);
     fclose(file);
     if (got!=32) {
-        fprintf(stderr,"tompouce-director: room key must be 32 bytes\n");
+        fprintf(stderr,"tompouce-director: admission key must be 32 bytes\n");
         return 0;
     }
     return 1;
 }
 static void usage(const char *program) {
     fprintf(stderr,
-        "usage: %s [--listen [HOST:]PORT] [--room-key-file PATH]\n"
+        "usage: %s [--listen [HOST:]PORT] [--admission-key-file PATH]\n"
         "       [--allow-plaintext] [--version]\n"
         "\n"
         "  --listen            bind address, default 127.0.0.1:7420\n"
-        "  --room-key-file     32-byte preshared room key for LAN bootstrap\n"
+        "  --admission-key-file  32-byte admission key for LAN bootstrap\n"
+        "                      (crypto_kdf of the room key, context \"tpcadm01\";\n"
+        "                      the director never sees the room key itself)\n"
         "  --allow-plaintext   accept binary frames with the plaintext bit\n"
         "  --version           print the version and exit\n",
         program);
@@ -113,9 +115,9 @@ int main(int argc, char **argv) {
             config.allow_plaintext=1;
             continue;
         }
-        if (!strcmp(argv[i],"--room-key-file") && i+1<argc) {
-            if (!read_room_key(argv[++i],config.room_key)) return 1;
-            config.has_room_key=1;
+        if (!strcmp(argv[i],"--admission-key-file") && i+1<argc) {
+            if (!read_admission_key(argv[++i],config.admission_key)) return 1;
+            config.has_admission_key=1;
             continue;
         }
         if (!strcmp(argv[i],"--listen") && i+1<argc) {

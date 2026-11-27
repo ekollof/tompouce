@@ -91,7 +91,7 @@ their answers in place).
 | D10 | 2026-11-27 | **LAN discovery with first-come-first-serve director.** Two tompouces on one network find each other over built-in mDNS (no Avahi dependency); whoever starts hosting first spawns the local director and advertises it, others join by on-screen join code. Same E2E handshake as the internet path; `ws://` is acceptable on LAN because everything sensitive is already sealed. | §6.6, §12, §14.4, §19 |
 | D11 | 2026-11-27 | **The public web presence is static only.** The site is the §6.4 front-door pages plus explanatory setup guides (rooms, join methods, E2E-or-otherwise options, LAN mode). No user accounts (D5 stands), no dynamic backend — no Flask, Django or FastCGI; `relayd` TLS-terminates straight to the director, which serves the static assets itself. | §6.4, §18.4 |
 | D12 | 2026-11-27 | **F7 shows the room roster in collab mode.** Song mode stays off, but the otherwise-dead F7 key opens a members panel (color, role, focused slot, typing/eval/late state); moderation stays in owner commands. | §12.2, §12.5 |
-| D13 | 2026-11-27 | **Room-wide solos with attribution.** `S$:` solos mute non-soloed slots for everyone (union across slots, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. | §12.2, §12.5, §12.6 |
+| D13 | 2026-11-27 | **Room-wide solos with attribution, per branch.** `S$:` solos work per branch like upstream (label starts with `S`), muting non-soloed branches for everyone (union across slots and members, deterministic from the shared composite); who soloed shows in the status bar, F7 and F9, plus a per-line authorship gutter in the editor. The owner can switch soloing off room-wide without touching code. | §12.2, §12.5, §12.6 |
 | D14 | 2026-11-27 | **Nicknames are user-chosen, persistent and cosmetic.** `/nick <name>` on the F2 command line sets **the user's** sealed display name; it is stored in `collab.json` and reused in every room and later session. It is not a room nickname or a per-room setting. If unset, the client generates a pronounceable `adjective-noun` nick once before the first join and saves it. A nick is not an identity: it is not unique, and roles, ownership and ACLs still come only from keys and certificates. | §2, §7, §12.1, §12.5, §13.5, §18.3 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
@@ -510,12 +510,12 @@ fallback.
 | File | Change |
 |---|---|
 | `js/runtime.mjs` | Add **`globalThis.__compileSlots(slotsJson, bpm, prebake)`** (NEW). Each slot is transpiled through `prepare()` and run in its **own** async `Function` scope inside the one runtime, so `const melody` in two slots does not collide. Each slot gets its own `collecting` map, `hush()` and `each`/`all` scope. Branch ids are namespaced `"<slot>/<label>"`, so authorship stays
-attributable for play highlights and the gutter (§12.6); solo scope itself
-is room-wide (§12.6), decided in D13. One slot's runtime exception is caught and reported per slot. The returned metadata adds `slots: [{id, ok, error, voices, locationsBase}]`, plus a `tempoBySlot` map. Keep `__compile` unchanged for non-collab use, sharing helpers rather than copying them. In the remote profile, `Math.random` is reseeded deterministically (§9.4). |
+attributable for play highlights and the gutter (§12.6); solo scope is
+per-branch with a room-wide union (§12.6), decided in D13. One slot's runtime exception is caught and reported per slot. The returned metadata adds `slots: [{id, ok, error, voices, locationsBase}]`, plus a `tempoBySlot` map. Keep `__compile` unchanged for non-collab use, sharing helpers rather than copying them. In the remote profile, `Math.random` is reseeded deterministically (§9.4). |
 | `src/javascript.c` | Add **`JsProfile`** (NEW) to `compile_program()`, with a matching entry point `javascript_compile_slots(const CollabSlotText *slots, int n, double bpm, JsProgram *previous, const JsProfile *profile, cJSON **metadata, char *err, int errlen)` (NEW). The profile has these flags: `allow_local_modules`, `allow_named_prebakes`, `allow_midi_manifest`, `allow_midi_in`, `allow_csound`, `run_startup_prebake`, `force_quickjs`. When a flag is off, the host function throws a catchable `Error("<capability> is disabled for room code (see /collab allow)")`. Do not remove the function from the realm, so error messages stay clear. With `force_quickjs`, the program never binds the query worker; this is the per-program equivalent of `worker_backend_enabled()` returning 0. |
 | `src/track.c` | Add **`track_stage_program(JsProgram *, cJSON *metadata, double activate_cycle, unsigned eval_seq)`** (NEW). It stores a pending program in a new `Track.pending_*` group. It does not swap it in. Extract today's swap block into a static `track_activate_locked()` so the immediate path and the staged path share one code path. |
 | `include/track.h` | Add fields: `JsProgram *pending; double pending_cycle; unsigned pending_seq; cJSON *pending_metadata; int collab_clock;` (NEW). |
-| `src/scheduler.c` | In `schedule_live_javascript()`: when `pending` is set and a query window `[begin, end)` contains `pending_cycle`, **split the window**. Query `[begin, pending_cycle)` on the old program and `[pending_cycle, end)` on the new one. Call **`event_queue_new_program(HUGE_VAL)`**, exactly as local `track_load_from_code()` does, so already-accepted notes survive (§4.5; passing the activation time instead would *drop* queued notes at or after it, and the first revision of this document had that wrong). If `pending_cycle` is already behind the query cursor `js_phase`, activate at `js_phase` (late path, §8.7). Add the NEW `scheduler_collab_align(const CollabClockSnapshot *)`, which sets the anchors (`js_anchor_cycle`, `js_anchor_time`, `js_seconds`) from the room clock and applies the bounded slew from §8.6 without bumping `transport_revision`. |
+| `src/scheduler.c` | In `schedule_live_javascript()`: when `pending` is set and a query window `[begin, end)` contains `pending_cycle`, **split the window**. Query `[begin, pending_cycle)` on the old program and `[pending_cycle, end)` on the new one. Call **`event_queue_new_program(HUGE_VAL)`**, exactly as local `track_load_from_code()` does, so already-accepted notes survive (§4.5; passing the activation time instead would *drop* queued notes at or after it, and the first revision of this document had that wrong). If `pending_cycle` is already behind the query cursor, activate now but **never rewind the cursor**: the new program is anchored at the shared cycle and its first new notes come from the next window (the `js_phase + .1` region, exactly like a local load), so no window is ever queried twice. Add the NEW `scheduler_collab_align(const CollabClockSnapshot *)`, which sets the anchors (`js_anchor_cycle`, `js_anchor_time`, `js_seconds`) from the room clock and applies the bounded slew from §8.6 without bumping `transport_revision`. |
 | `src/audio_output.c`, `include/audio_output.h` | Add **`double audio_output_latency_seconds(void)`** (NEW). Use the backend-reported output latency: PipeWire `pw_stream_get_time_n()` delay, PulseAudio `pa_stream_get_latency()`, PortAudio `Pa_GetStreamInfo()->outputLatency`, OpenAL buffers × frames / rate. Return `NAN` when it is unknown. VERIFY each backend's API. |
 | `include/event.h`, `src/js_audio.c`, `src/osc_output.c`, `src/midi.c` | Add a per-event **origin tag**: `AudioEvent` gains `uint16_t slot` (NEW). Derive it from the namespaced branch id in the hap's `id` control. Gate OSC and MIDI emission through `collab_capability_allowed(slot, CAP_OSC/CAP_MIDI_OUT, target)` (NEW) **on the generator, before preparation**. `osc_output.h` already says "Prepare on the generator. Send on the consumer, never in audio", so the check goes in `osc_output_prepare()`'s caller. |
 | `src/websamp.c`, `include/websamp.h` | Add `websamp_prefetch(const char *token)` (NEW): a non-blocking enqueue of the download path that `websamp_acquire()` uses lazily today. Add a per-host consent hook for remote-authored `samples()` calls. |
@@ -617,6 +617,17 @@ the key to their Tompouce client. **The page never sends the room key, the
 invite secret or a passphrase to the server.** Those live in the URL
 fragment (`#…`), which browsers do not include in requests.
 
+**What exists today vs what is planned.** The live public site at
+`bakery.andrath.nl` is the static Hugo front door (`/`, `/guides/`,
+`/safety/`, `/privacy/`, `/abuse/`), served by httpd on castor — guides and
+policy pages, no room logic. The per-room app pages below (`/j/*`, `/o/*`,
+`/v1/*`, the WebSocket) are **Phase 5** (`web-collab/`): they do not exist
+yet, and the create-room page in particular is **not in v1** — rooms are
+created from the client (`/collab host`) until then. When Phase 5 lands,
+relayd path-routes `/j/*`, `/o/*`, `/v1/*` and the WebSocket to the director
+on loopback while httpd keeps the front door (recorded in TODO; Salt owns
+the relayd/httpd configs).
+
 **Stack (recommendation: a static, build-time-bundled vanilla ES module
 site, served by the director itself).**
 
@@ -652,14 +663,14 @@ the address bar after reading it when the user chooses "hide link".
 
 **Pages.**
 
-| Path | Page | What it does |
+| Path | Page | What it does (all Phase 5 except the guides) |
 |---|---|---|
-| `/` | **Create room** | Solves the proof-of-work, generates the owner key and room key **in the browser**, calls `POST /v1/rooms` with only the **public** owner key, and redirects to the owner console. Shows a loud warning that the **owner link is the room's master key** and must be saved. Also offers the command to create a room from the client (`/collab host`). |
-| `/o/<room>#v=1&s=<owner-seed>&k=<K>&e=<epoch>` | **Owner console** | Opens a WebSocket as the owner (only the signature of the challenge leaves the browser). Lists members (nicks decrypted locally), lists invites, creates invites (role, expiry, single-use or multi-use, join-code method), revokes invites, locks or unlocks the room, deletes the room. Kick with key rotation is **client-only in v1** (§14.6) to keep the page small; the console tells the owner to use `/collab kick`. |
-| `/j/<room>#v=1&o=<opk>&n=<invite-id>&i=<invite-seed>&k=<K>&e=<epoch>` | **Invite landing** | Shows the room's short id, the owner fingerprint, the role and expiry (from `GET /v1/invites/<id>`, which needs only the public id), and four actions: **Open in Tompouce** (the `tompouce://` link with the same fragment), **Copy join command** (`/collab join <https link>`), **Show QR**, **Install instructions**. No secret is ever sent. |
-| `/j/<room>` with no fragment | **Join with code** | Asks for the join code (read from the path or typed) and the passphrase, fetches the wrapped invite with `GET /v1/codes/<code>`, **unwraps it locally** (Argon2id in WebAssembly), then behaves like the landing page. |
+| `/` | **Create room** | Phase 5. Solves the proof-of-work, generates the owner key and room key **in the browser**, calls `POST /v1/rooms` with only the **public** owner key, and redirects to the owner console. Shows a loud warning that the **owner link is the room's master key** and must be saved. Also offers the command to create a room from the client (`/collab host`). |
+| `/o/<room>#v=1&s=<owner-seed>&k=<K>&e=<epoch>` | **Owner console** | Phase 5. Opens a WebSocket as the owner (only the signature of the challenge leaves the browser). Lists members (nicks decrypted locally), lists invites, creates invites (role, expiry, single-use or multi-use, join-code method), revokes invites, locks or unlocks the room, deletes the room. Kick with key rotation is **client-only in v1** (§14.6) to keep the page small; the console tells the owner to use `/collab kick`. |
+| `/j/<room>#v=1&o=<opk>&n=<invite-id>&i=<invite-seed>&k=<K>&e=<epoch>` | **Invite landing** | Phase 5. Shows the room's short id, the owner fingerprint, the role and expiry (from `GET /v1/invites/<id>`, which needs only the public id), and four actions: **Open in Tompouce** (the `tompouce://` link with the same fragment), **Copy join command** (`/collab join <https link>`), **Show QR**, **Install instructions**. No secret is ever sent. |
+| `/j/<room>` with no fragment | **Join with code** | Phase 5. Asks for the join code (read from the path or typed) and the passphrase, fetches the wrapped invite with `GET /v1/codes/<code>`, **unwraps it locally** (Argon2id in WebAssembly), then behaves like the landing page. |
 | `/about`, `/privacy` | Static text | States what the server sees and what it does not (§14.9). |
-| `/guide`, `/guide/*` | Static setup guides | Plain pages explaining how to set up rooms and connect people to your Tompouce: public rooms, E2E invite links, join codes, and LAN discovery (decision D11). No accounts, no forms that submit secrets, no JavaScript beyond the shared header. |
+| `/guide`, `/guide/*` | Static setup guides | Phase 5 app-side copies; the live equivalents today are the Hugo `/guides/` on the front door (decision D11). Plain pages explaining how to set up rooms and connect people to your Tompouce: public rooms, E2E invite links, join codes, and LAN discovery. No accounts, no forms that submit secrets, no JavaScript beyond the shared header. |
 
 **What the page does not do.** It does not play audio, evaluate code, host a
 code editor, or act as a full client. It is a front door. Co-editing and
@@ -726,7 +737,7 @@ these and fails with a clear message, or turns collab off, instead of limping.
 | **Yjs / y-protocols / lib0** | Latest 13.6.x / 1.0.x / 0.2.x at implementation time, **pinned** in `js/package-lock.json` | Update deliberately, not automatically. Both ends must be able to read each other's updates, so a bundled version bump is a protocol note. |
 | **esbuild, Node** (build time only) | esbuild 0.25.12 (the version `web/` and `js/` already pin) or newer; Node ≥ 22 LTS | Node never runs at runtime. |
 | **Browsers** (web front end) | Evergreen: ES2022 modules, WebAssembly, Clipboard API | No polyfills. |
-| **Caddy** (public instance reverse proxy) | ≥ 2.8 | Automatic ACME. |
+| **Caddy** (self-host/container reverse proxy) | ≥ 2.8 | Automatic ACME. (Not on castor: relayd+httpd there, §18.4.) |
 | **OpenBSD** (public director host, decision D9) | **8.0**, `castor.hackerheaven.org` | Portable code only: POSIX C11, no Linux-only APIs (`epoll`, `timerfd`/`eventfd`/`signalfd`, `prctl`, `malloc_trim`, `getrandom(2)` — use `poll(2)`-family I/O through libwebsockets and `arc4random`/`getentropy` via libsodium `randombytes`), no direct OpenSSL-3-only calls (the host ships LibreSSL; talk TLS through libcurl/libwebsockets), dual-stack sockets (the host resolves to IPv6), and small-machine caps (§13.6 sized for ~1 GiB RAM). Ship an OpenBSD `rc.d` script next to the systemd unit (§18.1); keep `sd_notify` optional as today. Prefer `pledge`/`unveil` confinement on OpenBSD, following the repo's seccomp posture for helper processes. |
 | **systemd** | ≥ 252 | For the hardening directives in §18.1 (VERIFY each directive). |
 | Existing: C11 compiler, CMake ≥ 3.20, Notcurses ≥ 3.0.9, QuickJS (vendored) | unchanged | Whatever `CMakeLists.txt` already requires. |
@@ -764,23 +775,28 @@ director for the room.
   POSIX C in the client — no Avahi/Bonjour dependency, which would be a new
   toolchain-weight dependency with poor OpenBSD story, against the grain of
   §6.1. Service type `_tompouce-collab._tcp.local`. TXT records carry only
-  `v` (protocol version), `fp` (director/room public-key fingerprint, which
-  is public key material the joiner needs for trust-on-first-use) and
-  `join=code`. They never carry room names, member lists, sample manifests
-  or anything else: multicast is plaintext, and the E2E posture (D2)
-  extends to the LAN.
+  `v` (protocol version), `fp` (the host's ephemeral per-session public-key
+  fingerprint, shown on the host screen for trust-on-first-use comparison;
+  there is no director identity key in Phase 1.5) and `join=code`. They never
+  carry room names, member lists, sample manifests or anything else:
+  multicast is plaintext, and the E2E posture (D2) extends to the LAN.
 - **Joining.** `/collab join` lists discovered directors with their
   fingerprints. The host's screen shows the 12-character join code
   (`XXXX-XXXX-XXXX`); the 16-character passphrase travels a second channel
   (read aloud across the room, or shown separately) — the two-channel split
   of §14.4, with no URL fragments on a LAN. The joiner types both parts in
   and proceeds with the standard E2E handshake. In Phase 1.5 the code wraps
-  the room key itself (same wrapping, passphrase-derived kw); cert-wrapped
-  invites arrive with Phase 2 rooms and identities. Trust is TOFU: both
-  screens show the fingerprint for out-of-band comparison.
+  the room key itself (same wrapping, passphrase-derived kw); there is no
+  `/v1/codes` lookup on the LAN director — that endpoint arrives with the
+  Phase 5 web front end. Cert-wrapped invites arrive with Phase 2 rooms and
+  identities. Trust is TOFU: both screens show the host-key fingerprint
+  for out-of-band comparison.
 - **Transport on LAN.** Plain `ws://` is acceptable here: everything sensitive
   is already sealed end to end, and skipping TLS/proxy setup is the point of
-  LAN mode. D2's `--allow-plaintext` debug switch is **not** auto-enabled on
+  LAN mode. The client still gates it: `ws://` is allowed to loopback
+  addresses always, and to LAN addresses only with the explicit
+  `TOMPOUCE_COLLAB_INSECURE=1` opt-in (§18.3; warns on every connect).
+  D2's `--allow-plaintext` debug switch is **not** auto-enabled on
   LAN; debug plaintext stays an explicit flag.
 - **Clock.** The §8 filter runs unchanged and is at its best on a LAN
   (sub-ms typical); nothing LAN-specific is needed.
@@ -889,7 +905,7 @@ when the room is E2E.
 | `t` | Fields | Notes |
 |---|---|---|
 | `hello` | `proto:[1]`, `client:{name:"tompouce", version:"…"}`, `caps:["e2e","sliders"]` | First frame, sent within 5 s of connecting or the connection is closed. A client always lists `e2e`. |
-| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room` under the room key, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
+| `auth` | `pk` (per-room Ed25519 public key, 32 B), `sig` (signature over `"tompouce-collab-v1" ‖ challenge ‖ room ‖ pk`), `room` (opaque room id), `proof?` (Phase-1-only keyed BLAKE2b of `challenge ‖ room` under the admission key derived from the room key with `crypto_kdf` context `"tpcadm01"` — the only key material the director holds, §19), and exactly one of `owner:true`, `invite:{id, ipk, msig}` or `resume` (32 B) | Proves possession of `pk`. `owner:true` is accepted only when `pk` equals the room's registered `opk`. `invite.msig` is the invite key's signature over `"tpc-member-v1" ‖ room ‖ pk` (§14.2). The director verifies the invite and consumes one use atomically. `proof` is accepted only in Phase 1 (preshared-bootstrap rooms); Phase-2 rooms reject it with `error{code:"auth"}`. Known members reconnect with `pk` alone, or `resume`. |
 | `join` | `room`, `profile` (sealed `{nick, color?}`, §14.5 type 2) | Sent after `auth_ok`. |
 | `profile_update` | `enc` (sealed+signed profile record, §14.5 type 2, carrying `{nick, color?}`) | Cosmetic nick change. The director replaces the author field from the connection, rate-limits it, and relays `member_updated`; it never sees the nick. In Phase 1 this is the only way a name changes after joining. |
 | `ping` | `t0` (client monotonic µs, opaque to the server) | Clock sampling (§8.2). |
@@ -907,7 +923,7 @@ when the room is E2E.
 | `member_kick` / `member_ban` | `member`, `kcert` (owner-signed kick certificate, §14.6), `reason?` | Owner only. A ban is keyed by `pk` and optionally by IP prefix. Always followed by `rekey`. |
 | `rekey` | `epoch`, `entries:[{member, sealed}]`, `osig` | Owner only. One sealed copy of `K_epoch` per remaining member (§14.6). |
 | `rekey_ack` | `epoch` | A member confirms it holds the new key. |
-| `room_update` | `locked?`, `quantum?`, `max_members?` | Owner only. |
+| `room_update` | `locked?`, `quantum?`, `max_members?`, `solos_off?` | Owner only. `solos_off` makes every client ignore solo flags (§12.6). |
 | `room_delete` | — | Owner only. Wipes the store, invites and codes. |
 | `sealed_msg` | `enc`, `to?` (member id) | Ephemeral relay of chat, manifests and similar sealed records. Not stored. Late joiners get manifests because members re-announce on `member_joined`. |
 | `leave` | — | Clean exit. |
@@ -935,7 +951,7 @@ client (through libcurl) before a WebSocket exists.
 |---|---|---|
 | `welcome` | `proto:1`, `caps:[…]`, `challenge` (32 B), `server:{name, version, source}`, `limits:{…}`, `now_us` | `source` is the AGPL source URL. |
 | `auth_ok` | `member_pk`, `resume` (32 B, valid 10 min, for reconnect) | |
-| `joined` | `room:{quantum, locked, e2e:true, epoch, opk}`, `you:{member, role, color_idx}`, `members:[{member, pk, role, color_idx, profile, cert?}]`, `slots:[{slot, slot_name, owner, acl, muted, last_eval?}]`, `clock:{…}`, `pending_rekey?:{epoch, sealed}` | `cert` is `{id, ipk, role, epoch, expires, max_uses, osig, msig}`: the chain a client verifies against `opk` (§14.2). The owner has no `cert`. `last_eval` is the latest `eval` per slot (`{eval_seq, at_cycle, q, author, enc}`, slot implied), sealed, so a late joiner can build the composite at once (§10.3). If this member missed a rotation, `pending_rekey` carries its sealed key envelope. After `joined`, the director streams stored snapshots and logs as binary frames, then sends `synced`. |
+| `joined` | `room:{quantum, locked, solos_off?, e2e:true, epoch, opk}`, `you:{member, role, color_idx}`, `members:[{member, pk, role, color_idx, profile, cert?}]`, `slots:[{slot, slot_name, owner, acl, muted, last_eval?}]`, `clock:{…}`, `pending_rekey?:{epoch, sealed}` | `cert` is `{id, ipk, role, epoch, expires, max_uses, osig, msig}`: the chain a client verifies against `opk` (§14.2). The owner has no `cert`. `last_eval` is the latest `eval` per slot (`{eval_seq, at_cycle, q, author, enc}`, slot implied), sealed, so a late joiner can build the composite at once (§10.3). If this member missed a rotation, `pending_rekey` carries its sealed key envelope. After `joined`, the director streams stored snapshots and logs as binary frames, then sends `synced`. |
 | `synced` | `slots:[ids]` | Marks the end of the initial store replay. |
 | `pong` | `t0` (echo), `t1` (server receive µs), `t2` (server send µs) | |
 | `clock` | `epoch:{c:[n,d], t_us, cps}`, `next?:{c:[n,d], t_us, cps}`, `running:bool`, `seq`, `max_delay_ms?` | Broadcast on every epoch change. `next` announces a scheduled tempo change ahead of its activation. `max_delay_ms` is the director-measured maximum one-way delay over connected members; clients use it for the `lead` computation (§8.7) instead of guessing other members' delays. |
@@ -945,6 +961,7 @@ client (through libcurl) before a WebSocket exists.
 | `member_kicked` | `member`, `pk`, `kcert`, `epoch_next` | Relayed so every client drops the member from its trusted set before it seals anything else under the old key. |
 | `rekey` | `epoch`, `sealed` (this member's envelope), `osig` | See §14.6. |
 | `slot_created` / `slot_updated` / `slot_deleted` | slot object | |
+| `room_updated` | `room:{quantum, locked, solos_off, max_members}` | Broadcast after every accepted `room_update` (owner only). |
 | `sealed_msg` | `from` (member id), `enc` | Relayed. |
 | `slider` | as the client message, plus `author` | |
 | `invites` | `invites:[{id, role, expires, uses, max_uses, revoked}]` | Reply to `invite_list`. |
@@ -983,17 +1000,27 @@ How the header fields are filled:
   for each new `resume` session, and the director tracks it per
   `(member, session)`.
 - **`epoch`:** the key epoch the payload is sealed under. The director
-  rejects a frame whose epoch is older than the current epoch after the
+  rejects a frame whose epoch is older than the current key epoch after the
   rotation grace window (§14.6) with `error{code:"epoch"}`. It never
-  decrypts anything.
+  decrypts anything. Key epoch and clock sequence are separate counters:
+  transport starts and tempo changes bump only `clock.seq` in `clock`
+  broadcasts, so they never invalidate sealed frames.
 - **`flags`:** bit0 = plaintext debug payload. A director in normal mode drops
   and counts any frame with bit0 set and closes the connection with 1008 after
   three. Other bits must be 0.
 - **`len`:** must equal `frame_length − 20`.
-- **Permission checks:** the director checks `slot` against the sender's
-  ACL from the plaintext header **before** storing or relaying. Clients check
-  the sealed author signature and the ACL again before applying, so a
-  malicious director cannot forge writes.
+- **Permission checks:** the director checks `slot` against the sender's role
+  from the plaintext header **before** storing or relaying. Shared slot 0
+  accepts writes and snapshots from any editor; any other slot needs its
+  owner or the room owner (per-slot write ACLs beyond ownership arrive with
+  Phase 2 certificates). Clients check the sealed author signature and the
+  ACL again before applying, so a malicious director cannot forge writes.
+- **Signature check:** for sealed frames the director verifies the Ed25519
+  signature over `"tpc-frame-v1" ‖ room ‖ epoch ‖ slot ‖ kind ‖ seq ‖
+  author_pk ‖ nonce ‖ ciphertext ‖ tag` against the sender's registered `pk`
+  (§14.5) without decrypting anything. A bad signature is `error{code:"perm"}`
+  (close with 1008 at three strikes); a too-short payload is
+  `error{code:"schema"}`. Plaintext debug frames skip this check.
 
 ### 7.5 Example session
 
@@ -1195,6 +1222,7 @@ behavior as closely as a network allows:
 
 ```text
 lead     = max(250 ms, max_over_connected_members(delay_j) + 350 ms)
+lead     = min(lead, 1 s)              # bounded even if every sample lies
 T_act    = S_now + lead                   # server monotonic µs
 at_cycle = ceil64(c(T_act))               # round UP to a 1/64-cycle grid
 ```
@@ -1207,11 +1235,16 @@ at_cycle = ceil64(c(T_act))               # round UP to a 1/64-cycle grid
   (§8.2). The director measures each member's delay from its ping samples
   and broadcasts the maximum as `clock.max_delay_ms`, so every client
   computes the same `lead` without a separate per-member delay channel.
-  The 350 ms term is the compile-and-stage allowance (the first compile
-  can take longer; the compile time for typical programs is not measured
-  yet, so Phase 0 must benchmark it and tune this constant). The floor is 250 ms, which
-  matches the scheduler's 200 ms look-ahead plus one 50 ms window
-  (`scheduler.c :: schedule_live_javascript`).
+  The director cannot read the client's `t0` (different monotonic epoch),
+  so it discards implied round trips above 5 s as clock garbage, keeps the
+  minimum, and caps each member's delay at 650 ms; with the 1 s lead cap a
+  lying or broken clock can only make the room wait, never desync it. The
+  proper fix is director-sent pings measured in the director's own timebase
+  (Phase 3, TODO). The 350 ms term is the compile-and-stage allowance (the
+  first compile can take longer; the compile time for typical programs is not
+  measured yet, so Phase 0 must benchmark it and tune this constant). The
+  floor is 250 ms, which matches the scheduler's 200 ms look-ahead plus one
+  50 ms window (`scheduler.c :: schedule_live_javascript`).
 - A member that is slower than `lead` activates **late**, at the next scheduler
   window after its compile finishes, which is exactly what a slow local compile
   does. It sends `ack{late_by}` and the UI shows `late by 180 ms` (§12.3). It does
@@ -1243,9 +1276,10 @@ that is what keeps the room deterministic. The status bar shows the countdown
 3. The generator splits the query window exactly at the audio time of
    `at_cycle` (§6.2). Old program for `[begin, at)`, new program for
    `[at, end)`. If the activation time is already behind the scheduler's
-   query cursor `js_phase` (the client is late), activate at `js_phase`
-   instead. Never re-query a window that already produced queued events, or
-   old and new notes would double.
+   query cursor (the client is late), the new program still takes over from
+   the cursor — the cursor never rewinds, so no window is ever queried
+   twice and no notes double. Its first new notes sound from the next
+   window onward, the `js_phase + .1` region, exactly like a local load.
 4. **The scheduler must not drop already queued events at activation.** Use
    `event_queue_new_program(HUGE_VAL)`, the same call local
    `track_load_from_code` makes (§4.5). Passing the activation time as the
@@ -1712,6 +1746,7 @@ row is under `/collab` unless the row says otherwise.
 | `/collab rotate` | Rotate the room key now (owner only, §14.6). |
 | `/collab slot new <name>` | Create a slot you own and focus it. |
 | `/collab slot mute <slot>` / `/collab slot unmute <slot>` | Owner-only. Sets or clears the room-wide `muted` flag on a slot (`slot_update{muted}`, §7); every client filters that slot at the output stage. This is moderation, distinct from the local-only `/collab mute` below. |
+| `/collab slot solos on\|off` | Owner-only. Room-wide solo override (`room_update{solos_off}`, §7, §12.6): `off` makes every client ignore solo flags without touching anyone's code. |
 | `/collab slot <n\|name>` | Focus a slot (also Ctrl+N and Ctrl+B, §12.2). |
 | `/collab slot rename\|delete\|share <name>` | Slot admin. `share` grants write to named members. |
 | `/collab mute <slot>` / `/collab solo <slot>` | **Local** listening only. This does not change the room or break sync; it filters by `AudioEvent.slot`. Room-wide code solos (§12.6) compose on top of this local monitor mute. |
@@ -1871,17 +1906,28 @@ the internals pane (§12.3).
 
 ### 12.6 Room-wide solos and the authorship gutter (decision D13)
 
-`S$:` solos are room-wide, not per-slot. When one or more evaluated slots
-carry an active solo selection, every client mutes all non-soloed slots
-locally at the output stage — the same filter `/collab solo` uses, but
-driven by shared room state instead of a local command, so everyone hears
-the same mix. Multiple simultaneous solos union (no fights, no
-last-wins); the union is deterministic because every client computes it
-from the same composite. A slot whose code fails to compile contributes
-no solo (consistent with the per-slot error fallback, §9.4). `/collab
-solo` stays a local-only monitor mute on top of this; the two compose.
-Solo state is room state, so late joiners hear it as soon as they build
-the composite.
+Solo works per **branch**, like upstream Strudel, not per slot. In the
+composite each branch keeps its name (`S$:` is a branch whose label starts
+with `S`, §9.4): when any evaluated branch is soloed, every client mutes
+all non-soloed *branches* locally at the output stage — the same filter
+`/collab solo` uses, but driven by shared room state instead of a local
+command, so everyone hears the same mix. Multiple simultaneous solos union
+across slots and members (no fights, no last-wins; upstream clears the
+pattern list on the first soloed branch and keeps only soloed ones, and
+the union here follows the same rule at room scope); the union is
+deterministic because every client computes it from the same composite. A
+branch whose code fails to compile contributes no solo (consistent with
+the per-slot error fallback, §9.4). `/collab solo` stays a local-only
+monitor mute on top of this; the two compose. Solo state is room state,
+so late joiners hear it as soon as they build the composite.
+
+Any editor can solo and thereby silence everyone else's branches for the
+whole room, so the owner gets an override: `/collab slot solos off`
+(owner only) makes every client ignore solo flags in the composite;
+`/collab slot solos on` (the default) restores them. The override is room
+state (`room_update{solos_off}`, `joined.room.solos_off`), announced like
+the other room flags. It does not edit anyone's code — it only changes
+whether the flag is honored.
 
 Attribution must make clear who soloed what, in three places:
 
@@ -1890,16 +1936,18 @@ Attribution must make clear who soloed what, in three places:
 - **F7 roster (§12.5):** the header shows `SOLO by X (slot 3 "bass")`,
   and the soloing member's row is highlighted. The per-row state gains a
   `soloing` value.
-- **F9 slot list:** soloed slots get a `SOLO` marker in the owner's color.
+- **F9 slot list:** slots with a soloed branch get a `SOLO` marker in the
+  owner's color.
 
 **Authorship gutter.** The editor gutter shows a one-cell color chip per
 line for the member who last edited it (`:set collab_blame`, on by
 default in collab mode; the F7 roster is the legend). `collab.c` tracks it
-from applied updates: the binary frame header carries the author member
-id in plaintext (content stays sealed), and local edits count as self.
-On each apply the lines inside the diff hunks take the edit's author;
-lines outside keep theirs. The gutter is display-only and never affects
-editing, undo or evaluation.
+from applied updates: authorship is taken from the verified Ed25519
+signature on the frame (author `pk` mapped through the verified member
+list), never from the director-set plaintext `member` header field, which
+is routing only. Local edits count as self. On each apply the lines
+inside the diff hunks take the edit's author; lines outside keep theirs.
+The gutter is display-only and never affects editing, undo or evaluation.
 
 ## 13. Security
 
@@ -2070,13 +2118,12 @@ to the same rates, so honest clients never trip these.
 
 **Registration kill-switch (botnet backstop, decided with Q13).** PoW
 prices out casual abuse but not a botnet, and E2E rules out content
-moderation — so the public instance has a no-protocol-change lever:
-`room_creation` in the director config is `open` (anyone passing PoW),
-`invite-only` (creation additionally requires an unused creation token
-the operator issued out of band: operator infrastructure, not a
-user-facing tier; one optional field on the existing
-`POST /v1/rooms`), or `closed` (no new rooms at
-all).
+moderation — so the public instance has a no-protocol-change lever, the
+same `room_creation` knob as §18.3: normally `open-pow` (anyone passing
+PoW), flipped to `invite-only` (creation additionally requires an unused
+creation token the operator issued out of band: operator infrastructure,
+not a user-facing tier; one optional field on the existing `POST
+/v1/rooms`) or `closed` (no new rooms at all).
 The operator flips it without restarting rooms in flight, and flips
 back when the wave passes. Adaptive PoW difficulty stays the day-to-day
 control; the kill-switch is the fire escape.
@@ -2608,7 +2655,7 @@ Follow the existing harness conventions:
 | `tests/test_collab_clock.c` | Synthetic ping streams with a known offset (±10 s), drift (±200 ppm), symmetric and asymmetric jitter, outliers and a step. Asserts estimate error ≤ `δ_min/2 + 0.5 ms` after 30 s, drift error ≤ 5 ppm, the correct slew and re-anchor decisions, and exact rational quantization. |
 | `tests/test_collab_doc.c` | Three replicas, 10k random edits including multi-byte UTF-8, delivered in random order with duplicates. They converge to identical text. Byte↔UTF-16 conversion. Undo affects only local-origin edits. A malicious update (random bytes, huge length fields) causes an exception or quarantine, never a crash, and stays within memory and deadline. |
 | `tests/test_javascript.c` (extend) | `__compileSlots`: scope isolation (`const x` in two slots), per-slot exceptions and last-good substitution, namespaced branch ids, `locationsBase` mapping, `setcpm` reporting without applying. The remote profile denies `local:`, prebakes, manifests, MIDI-in and Csound with catchable errors, with no side effects (no file opened; check with a fixture directory and `inotify` or mtime), and forces QuickJS. Seeded `Math.random` is reproducible. |
-| `tests/test_scheduler_collab.c` | Staged activation splits windows exactly at `pending_cycle`. Run the generator offline as `tests/render_audio.c` does, and compare event onsets against the expected `a_sch(c)` within 1 sample. A tempo epoch change at a boundary. Accepted notes survive activation (`event_queue_new_program(HUGE_VAL)`). **Local-equivalence parity:** a staged activation at the current cycle matches `track_load_from_code` replacing a playing program, event for event (§4.5). A late activation clamps to `js_phase` with no doubled notes. |
+| `tests/test_scheduler_collab.c` | Staged activation splits windows exactly at `pending_cycle`. Run the generator offline as `tests/render_audio.c` does, and compare event onsets against the expected `a_sch(c)` within 1 sample. A tempo epoch change at a boundary. Accepted notes survive activation (`event_queue_new_program(HUGE_VAL)`). **Local-equivalence parity:** a staged activation at the current cycle matches `track_load_from_code` replacing a playing program, event for event (§4.5). A late activation never rewinds the cursor, with no doubled notes. |
 | `tests/test_editor.c` (extend) | `editor_apply_remote` keeps the cursor and selection, skips undo, and remaps auto-pairs. Diff capture produces a minimal UTF-8-safe replace. |
 | `tests/test_mcp_security.c` (extend) | `music_collab_status` response bounded. With collab active, `music_set_code` cannot write to a slot the user does not own. |
 | `tests/test_osc.py`, `tests/test_midi.c` (extend) | A remote-slot event is dropped until consent is granted; a local-slot event passes. |
@@ -2793,7 +2840,10 @@ WantedBy=multi-user.target
 - To use native TLS instead of a reverse proxy, add `--cert` and `--key`
   through `LoadCredential=`.
 
-OpenBSD `rc.d` script (NEW `rc.d/tompouce_director`), same shape:
+OpenBSD `rc.d` script (NEW `rc.d/tompouce_director`), same shape.
+`rc_reload=NO`: config changes and cert rotation need a restart for now
+(SIGHUP reload is a TODO; clients reconnect with backoff and resume,
+§10.4, so a restart drops no room permanently).
 
 ```sh
 #!/bin/sh
@@ -2836,17 +2886,18 @@ protocol and the E2E guarantees are identical against a self-hosted
 director, and the opaque store means the operator — you, in that case —
 cannot read room content either.
 
-Reverse proxy example (Caddy):
+Reverse proxy example (Caddy, self-hosted):
 
 ```
-bakery.andrath.nl {
+jam.example.org {
     reverse_proxy 127.0.0.1:7420
 }
 ```
 
 Caddy handles the WebSocket upgrade and ACME. (The director serves the web
-pages and the HTTP API as well as `/v1`, so the public deployment proxies
-everything; §18.4 has the full block.) The director must trust
+pages and the HTTP API as well as `/v1`, so a self-hosted deployment can
+proxy everything through one host; on castor that role belongs to relayd,
+§18.4.) The director must trust
 `X-Forwarded-For` **only** when started with `--trust-proxy 127.0.0.1`, so
 per-IP limits see real addresses.
 
@@ -2973,7 +3024,10 @@ eval_lead_min_ms = 250
 eval_compile_allowance_ms = 350
 store_slot_bytes = 1048576
 store_room_bytes = 16777216
-room_creation = admin-token              # admin-token | token | open-pow | open
+room_creation = admin-token              # admin-token | token | open-pow | invite-only | closed | open
+                                             # open-pow: anyone may create after PoW (public default)
+                                             # invite-only / closed: the registration kill-switch (§13.6)
+                                             # admin-token / token / open: self-hosted and LAN use
 allow_plaintext = false                  # debug opt-out of E2E (§14.10); never on the public instance
 blob_store = off                         # off | on (user-sound ciphertext blobs, §11.2)
 invite_max_ttl_days = 7
@@ -3014,21 +3068,34 @@ addresses.
 
 **TLS, ACME and the front door.**
 
+On castor (the public host) TLS terminates at the operator's own relayd
+(ACME via Salt), which forwards to httpd on loopback port 8080; httpd serves
+the static Hugo front door. When Phase 5 lands, relayd path-routes `/j/*`,
+`/o/*`, `/v1/*` and the WebSocket upgrade to the director on loopback, and
+httpd keeps `/`, `/guides/`, `/safety/`, `/privacy/` and `/abuse/`
+(recorded in TODO; Salt owns both configs, so no hand edits on the
+machine). The container and self-hosted path below stays Caddy-based.
+
 - Terminate TLS **at the operator's own Caddy** (≥ 2.8, automatic ACME
   certificates via Let's Encrypt, HTTP→HTTPS redirect, HSTS from the
   director's headers, TLS 1.2+ with 1.3 preferred) on the same host,
   proxying everything to the director on `127.0.0.1:7420`. WebSocket upgrade
-  is automatic.
+  is automatic. (Self-host/container path; on castor this role is relayd's,
+  see above.)
 - **Do not put a TLS-terminating third party (a CDN or "proxy" mode) in front
   of the public instance.** It could serve altered pages and would see
   metadata (T20). DDoS protection should be at the network layer (provider
   scrubbing, rate limits) rather than a TLS-terminating reverse proxy.
 - Proxy idle timeouts must be ≥ 120 s (the clock ping runs every 2 s, §8.2).
 - Direct native TLS with certificates from `lego` or `certbot` and a `SIGHUP`
-  reload is the alternative where Caddy is unwanted. VERIFY that the director
-  reloads certificates on `SIGHUP` without dropping connections.
+  reload is the alternative where a reverse proxy is unwanted. VERIFY that
+  the director reloads certificates on `SIGHUP` without dropping
+  connections (TODO; until then a restart is required for cert rotation
+  and clients reconnect with resume, §10.4).
 
 ```
+# Self-host/container path (Caddy). On castor the equivalent routing lives
+# in the Salt-managed relayd/httpd configs; do not run Caddy there.
 bakery.andrath.nl {
     reverse_proxy 127.0.0.1:7420 { flush_interval -1 }
     log {
@@ -3058,10 +3125,11 @@ overrides of the §18.3 self-hosted defaults above):
 | Room creation | `room_creation = open-pow` | No accounts. Cost to the creator instead of an identity. |
 | **Proof-of-work** | `GET /v1/pow` gives `{salt, bits, expires_s}`; the creator finds `nonce` with `SHA-256(salt ‖ nonce ‖ opk)` having ≥ `bits` leading zero bits. Adaptive: 18 bits when idle (about a second), rising toward 26 as creation rate or room count grows. | Binds the work to the owner key, so it cannot be pre-computed or reused. |
 | Rooms per source | 5 creations per day and 20 active rooms per /24 (IPv4) or /56 (IPv6) | Stops one source from filling the instance. |
-| Global cap | `max_rooms = 20000`; above 90% PoW difficulty maxes out, at 100% creation returns `quota` | Predictable resource bound. |
+| Global cap | `max_rooms = 500`; above 90% PoW difficulty maxes out, at 100% creation returns `quota` | Fits a 1 GiB box together with the store cap below. The static rooms table holds 512 (`DIRECTOR_ROOMS_MAX`); raise it before raising this. |
 | Room lifetime | Deleted after `room_idle_days = 14` without a connection, with all invites and codes. The owner reconnecting resets the clock. | Self-cleaning, no accounts needed. |
 | Members and slots | 16 members, 16 slots (the §7.1 limits) | |
-| Store | `store_slot_bytes = 262144`, `store_room_bytes = 4194304` | Ciphertext is not compressible; keeps worst case bounded: 20000 × 4 MiB = 80 GB, in practice far lower. Tune after Phase 6 measurements. |
+| Store | `store_slot_bytes = 262144`, `store_room_bytes = 524288` (512 KiB) | Ciphertext is not compressible. Worst case is bounded: 500 rooms × 512 KiB = 256 MiB. Tune after Phase 6 measurements. |
+| Store total | `store_total_bytes = 268435456` (256 MiB, NEW with the config system; enforced across all rooms, `error quota` past it) | The global backstop so many small rooms cannot add up past the box. Until the config system and its accounting land (TODO), the protocol caps (1 MiB snapshot, 64 KiB frames, 256-entry log ring) are the only bound — do not raise room counts past the static table until then. |
 | Invites and codes | 64 invites and 16 active codes per room, TTL ≤ 7 days | |
 | Connections | 10 new connections per minute per IP (burst 20), 64 concurrent per IP, global `LimitNOFILE` sized to the cap | See §13.6. |
 | Lookups | `GET /v1/codes/<code>` 5 per minute per IP, `GET /v1/invites/<id>` 30 per minute, `GET /v1/pow` 30 per minute | Enumeration defense (T24). |
@@ -3073,8 +3141,8 @@ overrides of the §18.3 self-hosted defaults above):
 **Operations.**
 
 - **Packaging:** the container from §18.2 or the systemd unit from §18.1,
-  behind the operator's Caddy. Run as `DynamicUser`, read-only filesystem,
-  no capabilities.
+  behind Caddy for self-hosts (on castor: relayd+httpd via Salt, §18.4).
+  Run as `DynamicUser`, read-only filesystem, no capabilities.
 - **Health and metrics:** `GET /healthz` (public, constant response) and
   `/metrics` (Prometheus text, bound to loopback only): rooms, members,
   connections, eval rate, rate-limit drops by type, PoW difficulty, store
@@ -3085,6 +3153,13 @@ overrides of the §18.3 self-hosted defaults above):
   keys, no codes, no names. Operational logs keep IP addresses for **at most
   7 days** (for abuse control), then drop them. State on disk is ciphertext,
   public keys and hashed invite data only. `/privacy` states this (§14.9).
+  The TLS terminator and any reverse proxy in front of the public instance
+  must not log request URLs or paths: `/j/<room>` and `/o/<room>` carry the
+  room id in clear, and `Referer` can leak which room a browser visited.
+  On castor that means dropping relayd's `match url log` and any httpd
+  access-log URI for this vhost (Salt owns those configs — no hand edits).
+  Until the proxy logs are clean, treat the room id as operator-visible
+  metadata, same as T32.
 - **Backups:** `state_dir` backup is optional and contains only ciphertext and
   invite metadata. A restore returns rooms without the ability to read them.
   Losing state loses rooms, not security.
@@ -3128,7 +3203,8 @@ comes before any public launch.
 - `__compileSlots` and `javascript_compile_slots()` with `JsProfile`.
 - Staged activation, `track_stage_program()` with the window split and the
   **local-equivalent hot swap**: activation at a cycle uses
-  `event_queue_new_program(HUGE_VAL)` and clamps to `js_phase` when late (§8.7).
+  `event_queue_new_program(HUGE_VAL)` and never rewinds the query cursor
+  when late (§8.7).
 - `audio_output_latency_seconds()`.
 - `AudioEvent.slot` plumbing.
 - The capability gates, wired but driven by a test flag.
@@ -3152,15 +3228,17 @@ comes before any public launch.
 
 - A minimal director: a single implicit room, `--insecure-lan` plaintext
   `ws://` transport (TLS is Phase 2), slot 0 only.
-- **E2E is on.** Both clients are given a pre-shared room key
-  (`--room-key-file`, 32 bytes on the director). `auth` carries `room`, an
+- **E2E is on.** Both clients hold the pre-shared room key, which never
+  leaves them. The director gets only a derived **admission key**:
+  `--admission-key-file` carries 32 bytes of
+  `crypto_kdf(room key, context "tpcadm01")`. `auth` carries `room`, an
   ephemeral per-room `pk`, a signature over `"tompouce-collab-v1" ‖
   challenge ‖ room ‖ pk`, and `proof`, a keyed BLAKE2b of `challenge ‖
-  room` under the room key. The proof is the Phase-1 stand-in for invite
-  certificates: whoever holds the room key is admitted as editor. A room
-  is created by the first `auth` with `owner:true` (whose `pk` becomes
-  `opk`). Frames are sealed with the key and signed with ephemeral
-  Ed25519 keys. No identities or certificates yet.
+  room` under the admission key. The proof is the Phase-1 stand-in for
+  invite certificates: whoever derives the admission key is admitted as
+  editor. A room is created by the first `auth` with `owner:true` (whose
+  `pk` becomes `opk`). Frames are sealed with the room key and signed with
+  ephemeral Ed25519 keys. No identities or certificates yet.
   `--allow-plaintext` exists for debugging only.
 - Client transport (libcurl WebSocket), `collab_crypto.c`, `collab_doc` with
   Yjs, editor diff capture and remote apply, remote cursors.
@@ -3346,11 +3424,13 @@ comes before any public launch.
 - The documentation states clearly that phase is not aligned with browser
   peers.
 
-## 20. Open questions for Andrath
+## 20. Decided questions for the record
 
-The first revision's questions Q1, Q2, Q3, Q8, Q9 and Q12 are decided (see the
-Decisions log). These remain, renumbered, with new ones from the revised
-design. Each states a default the implementer will use if you do not answer.
+All questions below are decided (the strikethrough holds the superseded
+default, the bold text the decision). Kept in place so an implementer can
+see what was considered and why. The first revision's questions Q1, Q2, Q3,
+Q8, Q9 and Q12 were decided earlier (see the Decisions log); the rest were
+decided 2026-11-27 unless noted.
 
 1. **Operator and domain of the public instance.** ~~Who runs it, on which
    domain, with which ToS, privacy text and abuse contact (§18.4)? Default:
@@ -3362,13 +3442,21 @@ design. Each states a default the implementer will use if you do not answer.
    anyone with a slot? Default: owner only, grantable.~~ **Decided 2026-11-27:**
    owner only, with grants to editors via a per-room `tempo` holder list
    (specified with Phase 2 roles; owner-only in practice until then).
+   Grants are owner-signed (`{member, permission:"tempo", epoch}`, verified
+   against `opk`); without a valid grant the director rejects `tempo_req`
+   from non-owners and clients ignore rogue tempo/transport broadcasts.
+   Clients also reject any `eval` whose `at_cycle` falls outside the
+   expected window (behind the current cycle, or more than lead + slack
+   ahead), so a rogue director cannot schedule absurd activations.
 3. **Stop semantics.** ~~Ctrl+. stops only local listening, and the room
    transport is owner-only. Right feel? Default: yes.~~ **Decided 2026-11-27:**
    yes, as specified.
 4. **Solo labels across slots.** ~~`S$:` solos within its own slot only, not
-   room-wide. Default: per slot.~~ **Decided 2026-11-27 (D13):** solos are
-   room-wide and union across slots, with attribution in the status bar, the
-   F7 roster and the F9 list, plus a per-line authorship gutter in the editor
+   room-wide. Default: per slot.~~ **Decided 2026-11-27 (D13, per-branch
+   refinement):** solos work per branch like upstream and union
+   room-wide, with attribution in the status bar, the F7 roster and the
+   F9 list, plus a per-line authorship gutter in the editor; the owner
+   gets a room-wide solos on/off override that never touches code
    (§12.6).
 5. **Shared slot 0.** ~~Always present, opt-in per room, or not at all?
    Default: opt-in per room, on for a new room.~~ **Decided 2026-11-27:**
@@ -3397,7 +3485,10 @@ design. Each states a default the implementer will use if you do not answer.
     Argon2id-wrapped blob, so that even a human-chosen passphrase resists
     offline attack? Default: Argon2id with generated 80-bit passphrases (§14.4).~~
    **Decided 2026-11-27:** Argon2id with generated-only passphrases (no
-   human-chosen option in the UI, which dissolves the PAKE question).
+   human-chosen option in the UI, which dissolves the PAKE question). If
+   the 128 MiB pass fails on a constrained phone browser, the page does
+   not silently weaken the KDF: it directs the joiner to finish in the
+   terminal client (`/collab join` with the code), which unwraps natively.
 12. **Web console power.** ~~Should the web owner console also kick and
     rotate keys (more JS and more attack surface), or stay client-only for
     that (current design)? Default: client-only in v1.~~ **Decided
@@ -3410,12 +3501,12 @@ design. Each states a default the implementer will use if you do not answer.
     registration kill-switch backstop (§13.6). No user-facing token or
     CAPTCHA tiers; the kill-switch's operator-issued creation token is
     infrastructure, not a user tier.
-14. **Browser as a client.** Is a later browser-based joiner (Strudel in the
+14. **Browser as a client.** ~~Is a later browser-based joiner (Strudel in the
     page) desired, or does the web front end stay a front door only
     (current design)? Default: front door only.~~ **Decided 2026-11-27:** front door only. A browser
    joiner could never phase-align anyway: browser WebAudio rendering does
    not match the native engine, so it would always hear a different mix.
-15. **Room latency feel.** A room eval waits `lead` (about 350–450 ms) instead
+15. **Room latency feel.** ~~A room eval waits `lead` (about 350–450 ms) instead
     of the local 200–350 ms, so everyone changes together (§8.7). Acceptable,
     or should an author's own client be allowed to hot-swap sooner and
     "catch up" (breaks determinism)? Default: everyone waits.~~ **Decided
@@ -3465,7 +3556,7 @@ design. Each states a default the implementer will use if you do not answer.
 | V11 | Phase 0 benchmark of composite compile time, to tune `eval_compile_allowance_ms` | `js/`, `javascript.c` |
 | V12 | libsodium ≥ 1.0.20 is really needed for the symbols used (else lower the floor) | `collab_crypto.c` |
 | V13 | libwebsockets ≥ 4.5.8 and a build without HTTP/2; director reloads certificates on `SIGHUP` | `director/`, lws build flags |
-| V14 | Caddy log filter syntax (no URI, no headers, masked IP), and systemd directive availability at ≥ 252 | §18.1, §18.4 |
+| V14 | Caddy log filter syntax (no URI, no headers, masked IP) for self-hosts, and the relayd `match url log` removal for the public instance, plus systemd directive availability at ≥ 252 | §18.1, §18.4 |
 | V15 | QR encoder licence and pinning for the terminal and the web page | `collab_link.c`, `web-collab/` |
 | V16 | Exact distro libcurl versions (Debian stable, Fedora, Ubuntu) against the 8.11.0 floor | distro packages |
 | V17 | `x-scheme-handler/tompouce` registration works in the installer, AUR and AppImage paths | `scripts/install.py`, `scripts/build-appimage.sh`, `packaging/aur/` |

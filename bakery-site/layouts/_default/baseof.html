@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Static pages only: no scripts, no forms, no plugins. (Permissions-Policy
+       and frame-ancestors need real response headers; those ride with the
+       Salt-managed httpd/relayd config on castor, not this file.) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'self'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>{{ if .IsHome }}{{ .Site.Title }}{{ else }}{{ .Title }} · Bakery{{ end }}</title>
   <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}The public Tompouce jam room server: host a room, share an invite, play together. End-to-end encrypted, no accounts.{{ end }}">
   <link rel="canonical" href="{{ .Permalink }}">

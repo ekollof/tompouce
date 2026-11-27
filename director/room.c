@@ -142,6 +142,9 @@ void director_activation_at(const DirectorRoom *room, uint64_t now_us,
             room->members[i].delay_us>delay)
             delay=room->members[i].delay_us;
     if (delay+350000u>lead) lead=delay+350000u;
+    /* Bounded even if every sample is attacker-controlled: a late member
+       activates at the next window (section 8.7), nobody stalls the room. */
+    if (lead>1000000u) lead=1000000u;
     cycle=director_cycle_at(room,now_us+lead);
     target=ceil(cycle*64.0-1e-9);
     if (target<0) target=0;

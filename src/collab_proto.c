@@ -23,6 +23,7 @@ static const CpTypeName type_names[] = {
     {"slot_created",CP_T_SLOT_CREATED},{"slot_updated",CP_T_SLOT_UPDATED},
     {"slot_deleted",CP_T_SLOT_DELETED},{"invites",CP_T_INVITES},
     {"error",CP_T_ERROR},{"kicked",CP_T_KICKED},
+    {"room_updated",CP_T_ROOM_UPDATED},
 };
 const char *cp_error_string(CpError error) {
     switch (error) {

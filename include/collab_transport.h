@@ -9,6 +9,11 @@ typedef struct CollabTransport CollabTransport;
 /* Runtime floor: libcurl >= 8.11.0 with the "wss" protocol. Fills err on
    failure; returns nonzero when a collab connection may be attempted. */
 int ctr_websocket_supported(char *err, size_t errlen);
+/* URL policy, testable without connecting: ws:// stays on loopback unless
+   TOMPOUCE_COLLAB_INSECURE=1 opts into LAN use; wss:// may go anywhere.
+   Sets *insecure_used when the opt-in applied. */
+int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
+    size_t errlen);
 /* Opens a ws:// or wss:// URL offering subprotocol (for example
    CP_SUBPROTOCOL). Returns NULL with err set on failure. */
 CollabTransport *ctr_open(const char *url, const char *subprotocol,

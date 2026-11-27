@@ -1141,6 +1141,45 @@ Design brief: `docs/multiplayer.md`. Director and wire codec exist
       one static app shell per `/j`, `/o` prefix (room id parsed
       client-side, secrets stay in the fragment). No extra port, no CORS.
       Salt owns the relayd/httpd configs — no hand edits on castor.
+- [ ] Castor proxy log + header hardening (blocked on the Salt change,
+      reviewer note 2026-11-27). relayd's `match url log` (and any httpd
+      access-log URI for the bakery vhost) records `/j/<room>` paths, which
+      contradicts the privacy page; drop URL/path logging there (IPs stay,
+      7-day rule). Same change adds `Permissions-Policy: camera=(),
+      microphone=(), geolocation=(), display-capture=()` and
+      `frame-ancestors 'none'` response headers for the static site (the
+      Hugo pages already carry a meta CSP; meta cannot set those two).
+      Docs: §18.4 logging paragraph.
+- [ ] Director-driven ping round (Phase 3, reviewer note 2026-11-27).
+      Today the director estimates delay from client `t0` stamps it cannot
+      read (mixed timebases); garbage samples are dropped above 5 s RTT
+      and the lead is capped at 1 s. Proper fix per §8.2: the director
+      sends `ping_req{t1}` on its own clock, the client echoes immediately,
+      and the director smooths (min-filter) the true RTT for `lead`.
+      Client clock filter (§8.2–§8.3) is unchanged.
+- [ ] Eval acceptance window + signed tempo grants (Phase 2, reviewer note
+      2026-11-27). Owner-signed grants (`{member, permission, epoch}`
+      verified against `opk`, Q2); director enforces the holder list,
+      clients reject rogue tempo/transport broadcasts and any `eval` with
+      `at_cycle` outside [current cycle, current + lead + slack]. Needs
+      the collab client eval path first.
+- [ ] Solo override application (Phase 2, reviewer note 2026-11-27).
+      Director side done (`room_update{solos_off}`, `room_updated`,
+      `joined.room.solos_off`). Still needed: client composite honors
+      `solos_off` when evaluating solo flags per branch (§12.6).
+- [ ] Store accounting + config system (Phase 6, reviewer note
+      2026-11-27). Enforce `store_slot_bytes`, `store_room_bytes` (public:
+      256 KiB / 512 KiB) and the global `store_total_bytes` backstop
+      (256 MiB), plus the unified `room_creation` knob
+      (`open-pow`/`invite-only`/`closed`, self-host adds `admin-token`,
+      `token`, `open`), when `POST /v1/rooms` and config-file parsing land.
+      Until then: public caps stay at/below 500 rooms (static table holds
+      512) and the protocol caps (1 MiB snapshot, 64 KiB frames, 256-entry
+      log ring) are the only bound.
+- [ ] SIGHUP config/cert reload (Phase 6, reviewer note 2026-11-27).
+      `rc_reload` stays NO until the director reloads TLS certificates
+      without dropping rooms; restarts plus client resume cover rotation
+      in the meantime. VERIFY item V13 tracks the lws reload behavior.
 
 ## Code quality
 

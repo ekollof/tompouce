@@ -13,6 +13,8 @@ static void test_control_ok(void) {
     assert(cp_type_from_string("welcome")==CP_T_WELCOME);
     assert(!strcmp(cp_type_string(CP_T_WELCOME),"welcome"));
     assert(cp_type_from_string("nope")==CP_T_UNKNOWN);
+    assert(cp_type_from_string("room_updated")==CP_T_ROOM_UPDATED);
+    assert(!strcmp(cp_type_string(CP_T_ROOM_UPDATED),"room_updated"));
     assert(cp_error_string(CP_E_SIZE)!=NULL);
     assert(!strcmp(cp_error_string(CP_E_PROTO),"proto"));
 }

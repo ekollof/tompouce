@@ -378,11 +378,12 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 }
             }
             if (!room->has_opk) {
-                /* Bootstrap claim: only a room-key holder can crown the
-                   first owner of an opk-less room. */
+                /* Bootstrap claim: only an admission-key holder can crown the
+                   first owner of an opk-less room. The admission key is a
+                   crypto_kdf of the room key the director never sees. */
                 uint8_t mac[32], material[32+26], proof[32];
                 size_t proof_len=0;
-                if (!config->has_room_key ||
+                if (!config->has_admission_key ||
                     !cp_get_b64(obj,"proof",proof,sizeof(proof),
                     &proof_len) || proof_len!=sizeof(proof)) {
                     send_error(s,CP_E_AUTH,"proof required to claim",
@@ -392,7 +393,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
                 memcpy(material,s->challenge,32);
                 memcpy(material+32,room_id,26);
                 crypto_generichash(mac,sizeof(mac),material,sizeof(material),
-                    config->room_key,sizeof(config->room_key));
+                    config->admission_key,sizeof(config->admission_key));
                 if (sodium_memcmp(mac,proof,32)!=0) {
                     send_error(s,CP_E_AUTH,"bad proof",msg->has_id,msg->id);
                     return;
@@ -466,8 +467,8 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
         outlen==sizeof(token)) {
         uint8_t mac[32], material[32+26];
         DirectorMember *member;
-        if (!config->has_room_key) {
-            send_error(s,CP_E_AUTH,"no preshared room key configured",
+        if (!config->has_admission_key) {
+            send_error(s,CP_E_AUTH,"no admission key configured",
                 msg->has_id,msg->id);
             return;
         }
@@ -482,7 +483,7 @@ static void handle_auth(DirectorSession *s, const CpMsg *msg,
         memcpy(material,s->challenge,32);
         memcpy(material+32,room_id,26);
         crypto_generichash(mac,sizeof(mac),material,sizeof(material),
-            config->room_key,sizeof(config->room_key));
+            config->admission_key,sizeof(config->admission_key));
         if (sodium_memcmp(mac,token,32)!=0) {
             send_error(s,CP_E_AUTH,"bad proof",msg->has_id,msg->id);
             return;
@@ -563,7 +564,7 @@ static void build_clock(cJSON *obj, const DirectorRoom *room) {
         }
     }
     cJSON_AddBoolToObject(clock,"running",room->running);
-    cJSON_AddNumberToObject(clock,"seq",(double)room->epoch_seq);
+    cJSON_AddNumberToObject(clock,"seq",(double)room->clock_seq);
     cJSON_AddItemToObject(obj,"clock",clock);
 }
 static void handle_join(DirectorSession *s, const CpMsg *msg) {
@@ -606,8 +607,9 @@ static void handle_join(DirectorSession *s, const CpMsg *msg) {
     cJSON_AddStringToObject(out,"t","joined");
     json_add_cycle(robj,"quantum",room->quantum_num,room->quantum_den);
     cJSON_AddBoolToObject(robj,"locked",room->locked);
+    cJSON_AddBoolToObject(robj,"solos_off",room->solos_off);
     cJSON_AddBoolToObject(robj,"e2e",1);
-    cJSON_AddNumberToObject(robj,"epoch",(double)room->epoch_seq);
+    cJSON_AddNumberToObject(robj,"epoch",(double)room->key_epoch);
     if (room->has_opk) {
         cp_b64_encode(room->opk,sizeof(room->opk),opk,sizeof(opk));
         cJSON_AddStringToObject(robj,"opk",opk);
@@ -794,11 +796,20 @@ static void handle_ping(DirectorSession *s, const CpMsg *msg) {
     now=director_now_us();
     if (s->member) {
         uint64_t rtt=now>t0?now-t0:0;
-        if (!s->member->has_rtt || rtt<s->member->min_rtt_us) {
-            s->member->min_rtt_us=rtt;
-            s->member->has_rtt=1;
-            s->member->delay_us=rtt/2;
-            s->member->has_delay=1;
+        /* t0 is the client's monotonic clock, unreadable here: anything
+           absurd is clock garbage, not network delay (a client sending
+           t0=0 would otherwise push the whole room's lead to our uptime).
+           Proper per-member delay needs director-sent pings (section 8.2,
+           Phase 3); until then, smooth hard and cap hard. */
+        if (rtt<=5000000u) {
+            if (!s->member->has_rtt || rtt<s->member->min_rtt_us) {
+                uint64_t delay=rtt/2;
+                if (delay>650000u) delay=650000u;
+                s->member->min_rtt_us=rtt;
+                s->member->has_rtt=1;
+                s->member->delay_us=delay;
+                s->member->has_delay=1;
+            }
         }
         s->member->last_seen_us=now;
     }
@@ -961,11 +972,11 @@ static void handle_transport_req(DirectorSession *s, const CpMsg *msg) {
         s->room->epoch_num=0;
         s->room->epoch_den=1;
         s->room->epoch_us=director_now_us();
-        s->room->epoch_seq++;
+        s->room->clock_seq++;
         s->room->has_next=0;
     } else if (!strcmp(action,"stop")) {
         s->room->running=0;
-        s->room->epoch_seq++;
+        s->room->clock_seq++;
     } else {
         send_error(s,CP_E_SCHEMA,"action must be start|stop",msg->has_id,
             msg->id);
@@ -1180,6 +1191,40 @@ static void handle_room_update(DirectorSession *s, const CpMsg *msg) {
                 return;
             }
             s->room->max_members=max_members;
+        }
+    }
+    {
+        const cJSON *off=cJSON_GetObjectItemCaseSensitive(
+            (const cJSON *)obj,"solos_off");
+        if (off) {
+            if (!cJSON_IsBool(off)) {
+                send_error(s,CP_E_SCHEMA,"solos_off must be bool",
+                    msg->has_id,msg->id);
+                return;
+            }
+            s->room->solos_off=cJSON_IsTrue(off);
+        }
+    }
+    {
+        cJSON *out=cJSON_CreateObject(), *robj=cJSON_CreateObject();
+        char *text;
+        if (!out || !robj) {
+            cJSON_Delete(out);
+            cJSON_Delete(robj);
+            return;
+        }
+        cJSON_AddStringToObject(out,"t","room_updated");
+        json_add_cycle(robj,"quantum",s->room->quantum_num,
+            s->room->quantum_den);
+        cJSON_AddBoolToObject(robj,"locked",s->room->locked);
+        cJSON_AddBoolToObject(robj,"solos_off",s->room->solos_off);
+        cJSON_AddNumberToObject(robj,"max_members",
+            (double)s->room->max_members);
+        cJSON_AddItemToObject(out,"room",robj);
+        text=json_print(out);
+        if (text) {
+            director_broadcast_text(s->room,NULL,text,strlen(text));
+            free(text);
         }
     }
     if (msg->has_id) send_ack(s,msg->id);
@@ -1399,9 +1444,22 @@ static void handle_binary(DirectorSession *s, const uint8_t *frame,
         send_error(s,CP_E_SCHEMA,"slot out of range",0,0);
         return;
     }
-    if ((uint64_t)hdr.epoch<s->room->epoch_seq) {
+    if ((uint64_t)hdr.epoch<s->room->key_epoch) {
         send_error(s,CP_E_EPOCH,"stale epoch",0,0);
         return;
+    }
+    /* The director never decrypts, but it does check who may write and
+       that the author actually signed the frame (section 14.5). The
+       signature binds author_pk, so a malicious director cannot forge
+       writes and a malicious member cannot forge another member's. */
+    {
+        DirectorSlot *state=&s->room->slots[hdr.slot];
+        int writable=s->member->is_owner || hdr.slot==0 ||
+            (state->used && state->owner==s->member->id);
+        if (!writable) {
+            send_error(s,CP_E_PERM,"slot owner or room owner",0,0);
+            return;
+        }
     }
     if (hdr.flags&CP_BIN_FLAG_PLAINTEXT) {
         if (!config->allow_plaintext) {
@@ -1411,6 +1469,47 @@ static void handle_binary(DirectorSession *s, const uint8_t *frame,
                 send_error(s,CP_E_PERM,"plaintext not allowed",0,0);
             return;
         }
+    } else {
+        uint8_t ad[79];
+        uint8_t *msg;
+        size_t body_len;
+        if (payload_len<24+16+64) {
+            if (director_strike(s->room,s->member,director_now_us())>=3)
+                close_with(s,1008,"bad frame");
+            else
+                send_error(s,CP_E_SCHEMA,"frame too short to sign",0,0);
+            return;
+        }
+        body_len=payload_len-64;
+        memcpy(ad,"tpc-frame-v1",12);
+        memcpy(ad+12,s->room->id,26);
+        ad[38]=(uint8_t)((hdr.epoch>>8)&0xff);
+        ad[39]=(uint8_t)(hdr.epoch&0xff);
+        ad[40]=(uint8_t)((hdr.slot>>8)&0xff);
+        ad[41]=(uint8_t)(hdr.slot&0xff);
+        ad[42]=hdr.kind;
+        ad[43]=(uint8_t)((hdr.seq>>24)&0xff);
+        ad[44]=(uint8_t)((hdr.seq>>16)&0xff);
+        ad[45]=(uint8_t)((hdr.seq>>8)&0xff);
+        ad[46]=(uint8_t)(hdr.seq&0xff);
+        memcpy(ad+47,s->member->pk,32);
+        msg=malloc(sizeof(ad)+body_len);
+        if (!msg) {
+            send_error(s,CP_E_INTERNAL,"out of memory",0,0);
+            return;
+        }
+        memcpy(msg,ad,sizeof(ad));
+        memcpy(msg+sizeof(ad),payload,body_len);
+        if (crypto_sign_verify_detached(payload+body_len,msg,
+                sizeof(ad)+body_len,s->member->pk)!=0) {
+            free(msg);
+            if (director_strike(s->room,s->member,director_now_us())>=3)
+                close_with(s,1008,"bad signature");
+            else
+                send_error(s,CP_E_PERM,"bad signature",0,0);
+            return;
+        }
+        free(msg);
     }
     director_store_frame(s->room,hdr.slot,s->member->id,hdr.seq,hdr.epoch,
         hdr.kind,payload,payload_len,hdr.kind==3);
@@ -1558,7 +1657,7 @@ void director_session_sweep(uint64_t now_us, const DirectorConfig *config) {
             s->room->epoch_den=s->room->next_den;
             s->room->epoch_us=s->room->next_us;
             s->room->epoch_cps=s->room->next_cps;
-            s->room->epoch_seq++;
+            s->room->clock_seq++;
             s->room->has_next=0;
             broadcast_clock(s->room);
         }

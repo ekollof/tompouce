@@ -1,6 +1,7 @@
 #include "collab_transport.h"
 #include <curl/curl.h>
 #include <poll.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -22,6 +23,77 @@ static void ctr_fail(char *err, size_t errlen, const char *what) {
     if (!err || errlen==0) return;
     snprintf(err,errlen,"collab: %s",what);
     err[errlen-1]=0;
+}
+static int ctr_host_is_loopback(const char *host, size_t len) {
+    size_t i;
+    if (len==9 && strncmp(host,"localhost",9)==0) return 1;
+    if (len==3 && strncmp(host,"::1",3)==0) return 1;
+    /* 127.0.0.0/8, numeric only: anything else is not loopback. */
+    if (len<7 || len>15 || strncmp(host,"127.",4)!=0) return 0;
+    for (i=4;i<len;i++) {
+        if (host[i]=='.') continue;
+        if (host[i]<'0' || host[i]>'9') return 0;
+    }
+    return 1;
+}
+/* ws:// is plaintext: allow it only for loopback, or for a confirmed LAN
+   address with the explicit Phase 1/1.5 opt-in (section 18.3). wss:// may
+   go anywhere. */
+int ctr_ws_policy_ok(const char *url, int *insecure_used, char *err,
+    size_t errlen) {
+    const char *auth, *end, *at, *host;
+    size_t hostlen;
+    if (insecure_used) *insecure_used=0;
+    if (!url || !url[0]) {
+        ctr_fail(err,errlen,"empty url");
+        return 0;
+    }
+    if (strncmp(url,"wss://",6)==0) {
+        return 1;
+    }
+    if (strncmp(url,"ws://",5)!=0) {
+        ctr_fail(err,errlen,"collab url must start with ws:// or wss://");
+        return 0;
+    }
+    auth=url+5;
+    end=auth+strcspn(auth,"/?#");
+    at=auth;
+    while (at<end) {
+        if (*at=='@') {
+            auth=at+1;
+            break;
+        }
+        at++;
+    }
+    host=auth;
+    if (*host=='[') {
+        const char *close=host+1;
+        while (close<end && *close!=']') close++;
+        if (close>=end) {
+            ctr_fail(err,errlen,"collab url has a bad IPv6 host");
+            return 0;
+        }
+        host++;
+        hostlen=(size_t)(close-host);
+    } else {
+        const char *colon=host;
+        while (colon<end && *colon!=':') colon++;
+        hostlen=(size_t)(colon-host);
+    }
+    if (hostlen==0) {
+        ctr_fail(err,errlen,"collab url has no host");
+        return 0;
+    }
+    if (ctr_host_is_loopback(host,hostlen)) return 1;
+    {
+        const char *flag=getenv("TOMPOUCE_COLLAB_INSECURE");
+        if (flag && strcmp(flag,"1")==0) {
+            if (insecure_used) *insecure_used=1;
+            return 1;
+        }
+    }
+    ctr_fail(err,errlen,"refusing plaintext ws:// to a non-loopback host (use wss://, or TOMPOUCE_COLLAB_INSECURE=1 for LAN)");
+    return 0;
 }
 int ctr_websocket_supported(char *err, size_t errlen) {
     curl_version_info_data *info=curl_version_info(CURLVERSION_NOW);
@@ -65,6 +137,12 @@ CollabTransport *ctr_open(const char *url, const char *subprotocol,
     if (strncmp(url,"ws://",5)!=0 && strncmp(url,"wss://",6)!=0) {
         ctr_fail(err,errlen,"collab url must start with ws:// or wss://");
         return NULL;
+    }
+    {
+        int insecure_used=0;
+        if (!ctr_ws_policy_ok(url,&insecure_used,err,errlen)) return NULL;
+        if (insecure_used)
+            fprintf(stderr,"collab: warning: plaintext ws:// to a non-loopback host (TOMPOUCE_COLLAB_INSECURE=1)\n");
     }
     if (strlen(subprotocol)>64) {
         ctr_fail(err,errlen,"subprotocol too long");

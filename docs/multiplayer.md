@@ -18,9 +18,8 @@ default, local-equivalent `live` eval, recent-software floors).
 > composite). No decision (D1–D7, §20 defaults) was changed.
 >
 > **Revision note, 2026-11-27 (ekollof), Q1 decided (D8).** ekollof hosts
-> the public director and provides the domain/subdomain; the hostname is
-> still to be chosen. §20 Q1 is resolved; Q2–Q15 keep their defaults
-> pending owner answers.
+> the public director at `bakery.andrath.nl`. §20 Q1 is resolved; Q2–Q15
+> keep their defaults pending owner answers.
 
 > **How to read this document**
 > - `path/file.c :: function()` refers to code that **exists today**. It was
@@ -56,7 +55,7 @@ questions are in §20.
 | D5 | 2026-11-26 | Derived from D1 and D2: **account-less, capability-based access.** The room owner holds a room-scoped owner key that is the root of trust. Invites are owner-signed certificates, so a malicious server cannot invent members. The old `public` room flag is removed (a public listener link is just a multi-use listener invite). | §13.5, §14 |
 | D6 | 2026-11-26 | Derived from D2: the **shared user-sound blob store is off on the public instance** (the operator cannot scan E2E blobs) and opt-in on self-hosted directors. | §11.2, §18.4 |
 | D7 | 2026-11-26 | Derived from D5: **automatic owner succession is removed.** The owner key is the trust root, so ownership moves only by handing over the owner key (owner link). Delegated moderators are an open question. | §13.5, §20 |
-| D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director and provides the domain (a subdomain to be chosen). Until the hostname is chosen, every example and default keeps using the `jam.example.org` placeholder behind the `public_url` setting, which is the single place the real name lands. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
+| D8 | 2026-11-27 | **Public instance operator and domain.** ekollof hosts the official public director at `bakery.andrath.nl`. Examples, invite links and defaults use that hostname through the `public_url` setting. ToS, privacy text and abuse contact are still owed before public launch. | §18.4, §20 |
 
 Resolved from the first revision's questions: Q1 (public hosting: yes), Q2
 (E2E default: yes), Q3 (quantum: `live`), Q8 (user-sound sharing: off on
@@ -890,7 +889,7 @@ Values are shortened. The room id is opaque.
 
 ```text
 C→S  {"t":"hello","proto":[1],"client":{"name":"tompouce","version":"0.2.0"},"caps":["e2e"]}
-S→C  {"t":"welcome","proto":1,"caps":["e2e"],"challenge":"q8Zk…","server":{"name":"jam.example.org","version":"0.2.0","source":"https://github.com/ekollof/tompouce"},"limits":{"ctrl":16384,"update":65536,"eval_body":262144},"now_us":91233441021}
+S→C  {"t":"welcome","proto":1,"caps":["e2e"],"challenge":"q8Zk…","server":{"name":"bakery.andrath.nl","version":"0.2.0","source":"https://github.com/ekollof/tompouce"},"limits":{"ctrl":16384,"update":65536,"eval_body":262144},"now_us":91233441021}
 C→S  {"t":"auth","pk":"Hk3…","sig":"9fA…","room":"mfrggzdfmztwq2lknnwg23tpoa","invite":{"id":"Zx9…","ipk":"Lm2…","msig":"Ab7…"}}
 S→C  {"t":"auth_ok","member_pk":"Hk3…","resume":"Pq…"}
 C→S  {"t":"join","room":"mfrggzdfmztwq2lknnwg23tpoa","profile":"<sealed {name:andrath}>"}
@@ -1954,9 +1953,9 @@ hold any `isk`.
 **Format.** Parameters are base64url (no padding) in the **fragment**:
 
 ```text
-https://jam.example.org/j/<room>#v=1&o=<opk>&n=<invite_id>&i=<isk_seed>&k=<K_e>&e=<epoch>
-tompouce://join/jam.example.org/<room>#v=1&o=<opk>&n=<invite_id>&i=<isk_seed>&k=<K_e>&e=<epoch>
-https://jam.example.org/o/<room>#v=1&s=<osk_seed>&k=<K_e>&e=<epoch>        (owner link)
+https://bakery.andrath.nl/j/<room>#v=1&o=<opk>&n=<invite_id>&i=<isk_seed>&k=<K_e>&e=<epoch>
+tompouce://join/bakery.andrath.nl/<room>#v=1&o=<opk>&n=<invite_id>&i=<isk_seed>&k=<K_e>&e=<epoch>
+https://bakery.andrath.nl/o/<room>#v=1&s=<osk_seed>&k=<K_e>&e=<epoch>        (owner link)
 ```
 
 About 220 characters. A fragment is never sent in an HTTP request, never in
@@ -2524,7 +2523,7 @@ WantedBy=multi-user.target
 Reverse proxy example (Caddy):
 
 ```
-jam.example.org {
+bakery.andrath.nl {
     reverse_proxy 127.0.0.1:7420
 }
 ```
@@ -2583,7 +2582,7 @@ because `config.json` is read into a 4 KiB buffer. It holds no secrets.
 ```json
 {
   "name": "andrath",
-  "default_server": "https://jam.example.org",
+  "default_server": "https://bakery.andrath.nl",
   "latency_ms": { "PipeWire": 0, "PulseAudio": 8, "JACK": 0, "ALSA": 0, "OpenAL": 0 },
   "local_prebake": false,
   "ascii_status": false,
@@ -2630,7 +2629,7 @@ flags override it. Defaults shown are for a **self-hosted** director.
 ```
 listen = 127.0.0.1:7420
 state_dir = /var/lib/tompouce-director
-public_url = https://jam.example.org     # used in links and the web pages
+public_url = https://bakery.andrath.nl     # used in links and the web pages
 web = true                               # serve the web front end (§6.4); false = API only
 web_root =                               # empty = embedded assets; a path = serve from disk (dev)
 max_rooms = 256
@@ -2690,7 +2689,7 @@ addresses.
   reloads certificates on `SIGHUP` without dropping connections.
 
 ```
-jam.example.org {
+bakery.andrath.nl {
     reverse_proxy 127.0.0.1:7420 { flush_interval -1 }
     log {
         output file /var/log/caddy/jam.log {
@@ -2976,10 +2975,9 @@ design. Each states a default the implementer will use if you do not answer.
 
 1. **Operator and domain of the public instance.** ~~Who runs it, on which
    domain, with which ToS, privacy text and abuse contact (§18.4)? Default:
-   a placeholder `jam.example.org`, and the implementer builds everything
-   behind `public_url`.~~ **Decided 2026-11-27 (D8):** ekollof hosts it and
-   provides the domain/subdomain; the hostname is still to be chosen, so the
-   `jam.example.org` placeholder and the single `public_url` setting stand.
+   a placeholder `bakery.andrath.nl`, and the implementer builds everything
+   behind `public_url`.~~ **Decided 2026-11-27 (D8):** ekollof hosts it at
+   `bakery.andrath.nl`.
    ToS, privacy text and abuse contact remain owed before public launch.
 2. **Who controls tempo?** Owner only by default, with grants to editors, or
    anyone with a slot? Default: owner only, grantable.

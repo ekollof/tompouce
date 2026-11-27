@@ -5,6 +5,7 @@
    (Unlicense); real FFT adapted from fft.js, Fedor Indutny 2017 (MIT). */
 #include "vocoder.h"
 #include "stretch_fft_simd.h"
+#include "vocoder_tails_simd.h"
 #include <pthread.h>
 #include <math.h>
 #include <string.h>
@@ -69,9 +70,9 @@ void vocoder_transform(const float *input, float *sum, double factor,
     unsigned cursor, VocoderComplex *freq, VocoderComplex *shifted) {
     float magnitudes[VOCODE_FFT/2+1]; int peaks[VOCODE_FFT/2+1]; int count=0;
     float windowed[VOCODE_FFT];
-    for (unsigned i=0;i<VOCODE_FFT;i++) windowed[i]=(float)((double)input[i]*voc_hann[i]*1.62);
+    vocoder_window(windowed,input,voc_hann);
     vocoder_real_fft(freq,windowed); memset(shifted,0,VOCODE_FFT*sizeof(*shifted));
-    for (int i=0;i<=VOCODE_FFT/2;i++) magnitudes[i]=(float)(freq[i].re*freq[i].re+freq[i].im*freq[i].im);
+    vocoder_magnitudes(magnitudes,freq);
     for (int i=2;i<VOCODE_FFT/2-1;i++) {
         float mag=magnitudes[i];
         if (magnitudes[i-1]>=mag || magnitudes[i-2]>=mag || magnitudes[i+1]>=mag || magnitudes[i+2]>=mag) continue;
@@ -92,13 +93,9 @@ void vocoder_transform(const float *input, float *sum, double factor,
             shifted[dest].im+=freq[bin].im*re+freq[bin].re*im;
         }
     }
-    for (int i=1;i<VOCODE_FFT/2;i++) shifted[VOCODE_FFT-i]=(VocoderComplex){shifted[i].re,-shifted[i].im};
+    vocoder_mirror(shifted);
     vocoder_fft(shifted,1);
-    for (unsigned i=0;i<VOCODE_FFT;i++) {
-        float sample=(float)shifted[i].re;
-        sample=(float)((double)sample*voc_hann[i]*1.62);
-        sum[i]=(float)(sum[i]+sample/(VOCODE_FFT/VOCODE_HOP));
-    }
+    vocoder_ola(sum,shifted,voc_hann);
 }
 
 /* Streaming per-voice vocoder. The caller stages 128 input samples,

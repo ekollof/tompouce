@@ -198,6 +198,14 @@ scalar. It is byte-exact against C in both directions; 2,000
 forward+inverse pairs measured 45.8-47.5 ms versus 60.2-61.5 ms for C
 (1.29-1.34x). The forward real transform remains scalar, and stretch PCM gates
 pass.
+The vocoder's elementwise tail loops (Hann window in, bin magnitudes,
+conjugate mirror, windowed overlap-add out) now use a dispatched AVX2 kernel
+(`src/vocoder_tails_simd.c`) with a portable C fallback. Each output element
+keeps the scalar operation order under `no-fma`, so backends agree bit for
+bit (`test_vocoder_tails_simd`, plus the live-vs-baked bit-exact stretch
+test); window+magnitudes measured 0.97 ms versus 1.66 ms for C over 2,000
+calls (1.72x). Stretch PCM gates pass under forced `TOMPOUCE_SIMD=c` and
+`avx2` runs.
 A 10 s stretch preparation measured ~206 ms, split into ~48 ms for the
 forward real transform (23.5%) and ~74 ms for the complex transform. An AVX2
 forward real-FFT kernel is byte-exact against the legacy layout but measured

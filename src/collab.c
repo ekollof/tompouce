@@ -1,7 +1,11 @@
 #include "collab.h"
 #include "collab_proto.h"
 #include "collab_transport.h"
+#include "javascript.h"
+#include "track.h"
+#include "audio.h"
 #include <cjson/cJSON.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,12 +193,14 @@ int collab_nick_check(const char *name, char *err, size_t errlen) {
 }
 /* --- capability gates (section 13.2) --- */
 static int collab_test_allow_remote=0;
+/* Consent lookup lives below; declared here for the gate. */
+static int collab_consent_has(CollabCap cap, const char *room,
+    const char *target);
 void collab_capability_set_test(int allow_remote) {
     collab_test_allow_remote=allow_remote?1:0;
 }
 int collab_capability_allowed(uint16_t slot, CollabCap cap,
     const char *target) {
-    (void)target;
     if (slot==0) return 1;
     switch (cap) {
     case COLLAB_CAP_OSC:
@@ -203,7 +209,11 @@ int collab_capability_allowed(uint16_t slot, CollabCap cap,
     default:
         return 0;
     }
-    return collab_test_allow_remote;
+    if (collab_test_allow_remote) return 1;
+    /* Consent is room-scoped with exact targets; a missing target or room
+       never matches. Call sites must pass the real target. */
+    if (!target || !target[0]) return 0;
+    return collab_consent_has(cap,collab_room_tag(),target);
 }
 /* --- generated default (section 18.3): adjective-noun, one CSPRNG byte
    per word masked to 7 bits over embedded 128-entry lists. --- */
@@ -259,6 +269,86 @@ static int nick_random_bytes(uint8_t *out, size_t len) {
     }
 }
 /* --- collab.json (section 18.3) --- */
+static int collab_json_path(char *buf, size_t cap);
+static int collab_config_dir(char *buf, size_t cap);
+static char *collab_read_file(const char *path, size_t *outlen);
+/* Atomic save of a collab.json root (0600, tmp+rename). Consumes root. */
+static int collab_json_write(cJSON *root) {
+    char path[1100], dir[1024], tmp[1120];
+    char *printed=NULL;
+    size_t length;
+    int fd, ok=0;
+    FILE *file=NULL;
+    if (!root) return 0;
+    if (!collab_json_path(path,sizeof(path))) {
+        cJSON_Delete(root);
+        return 0;
+    }
+    if (!collab_config_dir(dir,sizeof(dir))) {
+        cJSON_Delete(root);
+        return 0;
+    }
+    mkdir(dir,0700);
+    printed=cJSON_Print(root);
+    cJSON_Delete(root);
+    if (!printed) return 0;
+    length=strlen(printed);
+    if (snprintf(tmp,sizeof(tmp),"%s/.collab.json.XXXXXX",dir)>=(int)sizeof(tmp)) {
+        free(printed);
+        return 0;
+    }
+    fd=mkstemp(tmp);
+    if (fd<0) {
+        free(printed);
+        return 0;
+    }
+    if (fchmod(fd,0600)!=0) {
+        close(fd);
+        unlink(tmp);
+        free(printed);
+        return 0;
+    }
+    file=fdopen(fd,"w");
+    if (!file) {
+        close(fd);
+        unlink(tmp);
+        free(printed);
+        return 0;
+    }
+    if (fwrite(printed,1,length,file)!=length || fputc('\n',file)==EOF) {
+        fclose(file);
+        unlink(tmp);
+        free(printed);
+        return 0;
+    }
+    if (fclose(file)!=0) {
+        unlink(tmp);
+        free(printed);
+        return 0;
+    }
+    if (rename(tmp,path)!=0) {
+        unlink(tmp);
+        free(printed);
+        return 0;
+    }
+    free(printed);
+    ok=1;
+    return ok;
+}
+/* Parsed collab.json root, or a fresh object when missing/unreadable. */
+static cJSON *collab_json_load(void) {
+    char path[1100];
+    char *text=NULL;
+    cJSON *root=NULL;
+    if (!collab_json_path(path,sizeof(path))) return NULL;
+    text=collab_read_file(path,NULL);
+    if (text) {
+        root=cJSON_Parse(text);
+        free(text);
+        if (root) return root;
+    }
+    return cJSON_CreateObject();
+}
 static int collab_config_dir(char *buf, size_t cap) {
     const char *base=getenv("XDG_CONFIG_HOME");
     if (base && base[0]=='/') {
@@ -332,73 +422,16 @@ static int collab_load_stored_nick(char *buf, size_t cap) {
     return ok;
 }
 static int collab_store_nick(const char *nick) {
-    char path[1100], dir[1024], tmp[1120];
-    char *text=NULL;
     cJSON *root=NULL;
-    FILE *file=NULL;
-    char *printed=NULL;
-    size_t length;
-    int fd, ok=0;
-    if (!collab_json_path(path,sizeof(path))) return 0;
-    if (!collab_config_dir(dir,sizeof(dir))) return 0;
-    mkdir(dir,0700);
-    text=collab_read_file(path,NULL);
-    if (text) {
-        root=cJSON_Parse(text);
-        free(text);
-    }
-    if (!root) root=cJSON_CreateObject();
+    if (!nick) return 0;
+    root=collab_json_load();
     if (!root) return 0;
     cJSON_DeleteItemFromObjectCaseSensitive(root,"nick");
     if (!cJSON_AddStringToObject(root,"nick",nick)) {
         cJSON_Delete(root);
         return 0;
     }
-    printed=cJSON_Print(root);
-    cJSON_Delete(root);
-    if (!printed) return 0;
-    length=strlen(printed);
-    if (snprintf(tmp,sizeof(tmp),"%s/.collab.json.tmp",dir)>=(int)sizeof(tmp)) {
-        free(printed);
-        return 0;
-    }
-    fd=mkstemp(tmp);
-    if (fd<0) {
-        free(printed);
-        return 0;
-    }
-    if (fchmod(fd,0600)!=0) {
-        close(fd);
-        unlink(tmp);
-        free(printed);
-        return 0;
-    }
-    file=fdopen(fd,"w");
-    if (!file) {
-        close(fd);
-        unlink(tmp);
-        free(printed);
-        return 0;
-    }
-    if (fwrite(printed,1,length,file)!=length || fputc('\n',file)==EOF) {
-        fclose(file);
-        unlink(tmp);
-        free(printed);
-        return 0;
-    }
-    if (fclose(file)!=0) {
-        unlink(tmp);
-        free(printed);
-        return 0;
-    }
-    if (rename(tmp,path)!=0) {
-        unlink(tmp);
-        free(printed);
-        return 0;
-    }
-    free(printed);
-    ok=1;
-    return ok;
+    return collab_json_write(root);
 }
 static void collab_set_nick(const char *nick) {
     size_t n=strlen(nick);
@@ -474,6 +507,7 @@ void collab_disconnect(void) {
     ctr_close(collab_transport);
     collab_transport=NULL;
     collab_url[0]=0;
+    collab_room_reset();
     collab_current_state=COLLAB_IDLE;
 }
 static int collab_hello(CollabTransport *ct, char *err, size_t errlen) {
@@ -577,6 +611,518 @@ int collab_connect(const CollabConfig *cfg, char *err, size_t errlen) {
     if (fail[0] && err && errlen>0) {
         snprintf(err,errlen,"%s",fail);
         err[errlen-1]=0;
+    }
+    return 1;
+}
+/* --- consent allowlist (sections 13.2, 18.3) --- */
+/* Per capability, room-scoped exact-target allows. Bounded static tables:
+   consent is checked per event on the generator, so no allocation there. */
+#define COLLAB_ALLOW_ROOMS_MAX 16
+#define COLLAB_ALLOW_TARGETS_MAX 16
+#define COLLAB_ALLOW_ROOM_MAX 128
+#define COLLAB_ALLOW_TARGET_MAX 256
+typedef struct {
+    char room[COLLAB_ALLOW_ROOM_MAX+1];
+    char targets[COLLAB_ALLOW_TARGETS_MAX][COLLAB_ALLOW_TARGET_MAX+1];
+    int ntargets;
+} CollabAllowRoom;
+static CollabAllowRoom collab_allow_osc[COLLAB_ALLOW_ROOMS_MAX];
+static CollabAllowRoom collab_allow_midi[COLLAB_ALLOW_ROOMS_MAX];
+static int collab_consent_loaded=0;
+static const char *collab_cap_key(CollabCap cap) {
+    switch (cap) {
+    case COLLAB_CAP_OSC: return "osc";
+    case COLLAB_CAP_MIDI_OUT: return "midi_out";
+    }
+    return NULL;
+}
+static CollabAllowRoom *collab_allow_table(CollabCap cap) {
+    switch (cap) {
+    case COLLAB_CAP_OSC: return collab_allow_osc;
+    case COLLAB_CAP_MIDI_OUT: return collab_allow_midi;
+    }
+    return NULL;
+}
+static int collab_allow_valid(const char *room, const char *target) {
+    size_t rl, tl;
+    if (!room || !target) return 0;
+    rl=strlen(room);
+    tl=strlen(target);
+    return rl>0 && rl<=COLLAB_ALLOW_ROOM_MAX && tl>0 &&
+        tl<=COLLAB_ALLOW_TARGET_MAX;
+}
+static int collab_allow_room_index(CollabAllowRoom *table, const char *room) {
+    int i, free_slot=-1;
+    for (i=0;i<COLLAB_ALLOW_ROOMS_MAX;i++) {
+        if (!table[i].room[0]) {
+            if (free_slot<0) free_slot=i;
+            continue;
+        }
+        if (!strcmp(table[i].room,room)) return i;
+    }
+    return free_slot;
+}
+static int collab_consent_has(CollabCap cap, const char *room,
+    const char *target) {
+    CollabAllowRoom *table=collab_allow_table(cap);
+    int i, j;
+    if (!table || !collab_allow_valid(room,target)) return 0;
+    for (i=0;i<COLLAB_ALLOW_ROOMS_MAX;i++) {
+        if (strcmp(table[i].room,room)) continue;
+        for (j=0;j<table[i].ntargets;j++) {
+            if (!strcmp(table[i].targets[j],target)) return 1;
+        }
+    }
+    return 0;
+}
+/* Push the in-memory tables into root under "allow". */
+static int collab_consent_save_json(cJSON *root) {
+    cJSON *allow=NULL, *capobj=NULL, *roomobj=NULL;
+    int c, i, j;
+    static const CollabCap caps[]={COLLAB_CAP_OSC,COLLAB_CAP_MIDI_OUT};
+    if (!root) return 0;
+    cJSON_DeleteItemFromObjectCaseSensitive(root,"allow");
+    allow=cJSON_CreateObject();
+    if (!allow) return 0;
+    for (c=0;c<2;c++) {
+        CollabAllowRoom *table=collab_allow_table(caps[c]);
+        capobj=cJSON_CreateObject();
+        if (!capobj) {
+            cJSON_Delete(allow);
+            return 0;
+        }
+        for (i=0;i<COLLAB_ALLOW_ROOMS_MAX;i++) {
+            cJSON *list;
+            if (!table[i].room[0]) continue;
+            list=cJSON_CreateArray();
+            if (!list) {
+                cJSON_Delete(allow);
+                return 0;
+            }
+            for (j=0;j<table[i].ntargets;j++) {
+                if (!cJSON_AddItemToArray(list,
+                        cJSON_CreateString(table[i].targets[j]))) {
+                    cJSON_Delete(list);
+                    cJSON_Delete(allow);
+                    return 0;
+                }
+            }
+            roomobj=list;
+            if (!cJSON_AddItemToObject(capobj,table[i].room,roomobj)) {
+                cJSON_Delete(roomobj);
+                cJSON_Delete(allow);
+                return 0;
+            }
+        }
+        if (!cJSON_AddItemToObject(allow,collab_cap_key(caps[c]),capobj)) {
+            cJSON_Delete(capobj);
+            cJSON_Delete(allow);
+            return 0;
+        }
+    }
+    if (!cJSON_AddItemToObject(root,"allow",allow)) {
+        cJSON_Delete(allow);
+        return 0;
+    }
+    return 1;
+}
+static void collab_consent_clear(void) {
+    memset(collab_allow_osc,0,sizeof(collab_allow_osc));
+    memset(collab_allow_midi,0,sizeof(collab_allow_midi));
+}
+/* Rebuild the in-memory tables from collab.json. Malformed entries are
+   skipped; bounds from the static tables apply. */
+static void collab_consent_load(void) {
+    char path[1100];
+    char *text=NULL;
+    cJSON *root=NULL, *allow=NULL;
+    int c;
+    static const CollabCap caps[]={COLLAB_CAP_OSC,COLLAB_CAP_MIDI_OUT};
+    collab_consent_clear();
+    collab_consent_loaded=1;
+    if (!collab_json_path(path,sizeof(path))) return;
+    text=collab_read_file(path,NULL);
+    if (!text) return;
+    root=cJSON_Parse(text);
+    free(text);
+    if (!root) return;
+    allow=cJSON_GetObjectItemCaseSensitive(root,"allow");
+    if (!cJSON_IsObject(allow)) {
+        cJSON_Delete(root);
+        return;
+    }
+    for (c=0;c<2;c++) {
+        CollabAllowRoom *table=collab_allow_table(caps[c]);
+        const cJSON *capobj=cJSON_GetObjectItemCaseSensitive(allow,
+            collab_cap_key(caps[c]));
+        const cJSON *roomobj=NULL;
+        if (!cJSON_IsObject(capobj)) continue;
+        cJSON_ArrayForEach(roomobj,capobj) {
+            const cJSON *target=NULL;
+            int ri;
+            if (!roomobj->string || !roomobj->string[0] ||
+                strlen(roomobj->string)>COLLAB_ALLOW_ROOM_MAX) continue;
+            if (!cJSON_IsArray(roomobj)) continue;
+            ri=collab_allow_room_index(table,roomobj->string);
+            if (ri<0 || table[ri].room[0]) continue;
+            snprintf(table[ri].room,sizeof(table[ri].room),"%s",
+                roomobj->string);
+            cJSON_ArrayForEach(target,roomobj) {
+                if (!cJSON_IsString(target) || !target->valuestring ||
+                    !target->valuestring[0] ||
+                    strlen(target->valuestring)>COLLAB_ALLOW_TARGET_MAX)
+                    continue;
+                if (table[ri].ntargets>=COLLAB_ALLOW_TARGETS_MAX) break;
+                snprintf(table[ri].targets[table[ri].ntargets],
+                    sizeof(table[ri].targets[table[ri].ntargets]),"%s",
+                    target->valuestring);
+                table[ri].ntargets++;
+            }
+            if (!table[ri].ntargets) table[ri].room[0]=0;
+        }
+    }
+    cJSON_Delete(root);
+}
+void collab_consent_reload(void) {
+    collab_consent_load();
+}
+int collab_allow(CollabCap cap, const char *room, const char *target) {
+    CollabAllowRoom *table=collab_allow_table(cap);
+    cJSON *root=NULL;
+    int ri, i;
+    if (!table || !collab_allow_valid(room,target)) return 0;
+    if (!collab_consent_loaded) collab_consent_load();
+    ri=collab_allow_room_index(table,room);
+    if (ri<0) return 0;
+    if (!table[ri].room[0]) {
+        snprintf(table[ri].room,sizeof(table[ri].room),"%s",room);
+        table[ri].ntargets=0;
+    }
+    for (i=0;i<table[ri].ntargets;i++) {
+        if (!strcmp(table[ri].targets[i],target)) return 1;
+    }
+    if (table[ri].ntargets>=COLLAB_ALLOW_TARGETS_MAX) return 0;
+    snprintf(table[ri].targets[table[ri].ntargets],
+        sizeof(table[ri].targets[table[ri].ntargets]),"%s",target);
+    table[ri].ntargets++;
+    /* Fail closed: roll back when the file cannot be written. */
+    root=collab_json_load();
+    if (!root || !collab_consent_save_json(root) ||
+        !collab_json_write(root)) {
+        table[ri].ntargets--;
+        if (!table[ri].ntargets) table[ri].room[0]=0;
+        return 0;
+    }
+    return 1;
+}
+int collab_deny(CollabCap cap, const char *room, const char *target) {
+    CollabAllowRoom *table=collab_allow_table(cap);
+    cJSON *root=NULL;
+    int ri, i, found=-1;
+    char saved[COLLAB_ALLOW_TARGET_MAX+1];
+    if (!table || !collab_allow_valid(room,target)) return 0;
+    if (!collab_consent_loaded) collab_consent_load();
+    for (ri=0;ri<COLLAB_ALLOW_ROOMS_MAX;ri++) {
+        if (strcmp(table[ri].room,room)) continue;
+        for (i=0;i<table[ri].ntargets;i++) {
+            if (!strcmp(table[ri].targets[i],target)) {
+                found=i;
+                break;
+            }
+        }
+        break;
+    }
+    if (ri>=COLLAB_ALLOW_ROOMS_MAX || found<0) return 1;
+    snprintf(saved,sizeof(saved),"%s",table[ri].targets[found]);
+    table[ri].ntargets--;
+    memmove(table[ri].targets[found],table[ri].targets[found+1],
+        (size_t)(table[ri].ntargets-found)*sizeof(table[ri].targets[0]));
+    if (!table[ri].ntargets) table[ri].room[0]=0;
+    root=collab_json_load();
+    if (!root || !collab_consent_save_json(root) ||
+        !collab_json_write(root)) {
+        /* Roll back: restore the room and target. */
+        int r2=collab_allow_room_index(table,room);
+        if (r2<0) return 0;
+        if (!table[r2].room[0]) {
+            snprintf(table[r2].room,sizeof(table[r2].room),"%s",room);
+            table[r2].ntargets=0;
+        }
+        if (table[r2].ntargets<COLLAB_ALLOW_TARGETS_MAX) {
+            snprintf(table[r2].targets[table[r2].ntargets],
+                sizeof(table[r2].targets[table[r2].ntargets]),"%s",saved);
+            table[r2].ntargets++;
+        }
+        return 0;
+    }
+    return 1;
+}
+const char *collab_room_tag(void) {
+    return collab_url;
+}
+int collab_slot_from_id(const char *id) {
+    long slot;
+    char *end;
+    if (!id || !*id || !isdigit((unsigned char)*id)) return 0;
+    slot=strtol(id,&end,10);
+    if (end==id || slot<0 || slot>1023) return 0;
+    if (*end && *end!='/') return 0;
+    return (int)slot;
+}
+/* --- room composite (sections 9.4, 10.3) --- */
+#define COLLAB_ROOM_SLOTS_MAX 32
+#define COLLAB_ROOM_BODY_MAX (256*1024)
+typedef struct {
+    int slot;
+    int remote;
+    char *body;      /* last evaluated body */
+    char *last_good; /* last body that compiled clean */
+    char error[256];
+    int ok;
+} CollabRoomSlot;
+static CollabRoomSlot collab_room[COLLAB_ROOM_SLOTS_MAX];
+static int collab_room_n=0;
+void collab_room_reset(void) {
+    int i;
+    for (i=0;i<collab_room_n;i++) {
+        free(collab_room[i].body);
+        free(collab_room[i].last_good);
+    }
+    memset(collab_room,0,sizeof(collab_room));
+    collab_room_n=0;
+}
+static int collab_room_find(int slot) {
+    int i;
+    for (i=0;i<collab_room_n;i++) {
+        if (collab_room[i].slot==slot) return i;
+    }
+    return -1;
+}
+int collab_room_set_slot(int slot, const char *body, size_t bodylen,
+    int remote) {
+    size_t length;
+    char *copy=NULL;
+    int at, i;
+    if (slot<0 || slot>1023 || !body) return 0;
+    length=strlen(body);
+    if (length!=bodylen || length>COLLAB_ROOM_BODY_MAX) return 0;
+    copy=malloc(length+1);
+    if (!copy) return 0;
+    memcpy(copy,body,length+1);
+    at=collab_room_find(slot);
+    if (at>=0) {
+        free(collab_room[at].body);
+        collab_room[at].body=copy;
+        collab_room[at].remote=remote?1:0;
+        collab_room[at].ok=0;
+        collab_room[at].error[0]=0;
+        return 1;
+    }
+    if (collab_room_n>=COLLAB_ROOM_SLOTS_MAX) {
+        free(copy);
+        return 0;
+    }
+    for (at=0;at<collab_room_n;at++) {
+        if (collab_room[at].slot>slot) break;
+    }
+    for (i=collab_room_n;i>at;i--) collab_room[i]=collab_room[i-1];
+    collab_room[at].slot=slot;
+    collab_room[at].remote=remote?1:0;
+    collab_room[at].body=copy;
+    collab_room[at].last_good=NULL;
+    collab_room[at].error[0]=0;
+    collab_room[at].ok=0;
+    collab_room_n++;
+    return 1;
+}
+const char *collab_room_slot_error(int slot) {
+    int at=collab_room_find(slot);
+    if (at<0 || collab_room[at].ok) return NULL;
+    return collab_room[at].error;
+}
+static void collab_room_fail(char *err, size_t errlen, const char *what) {
+    if (err && errlen>0) {
+        snprintf(err,errlen,"%s",what);
+        err[errlen-1]=0;
+    }
+}
+/* Compile the current bodies; on per-slot failure substitute last-good
+   bodies once and recompile. Author-facing ok/error always describe the
+   current body; *n_ok counts slots contributing audio (ok or substituted
+   clean). Updates last_good for ok slots. */
+static JsProgram *collab_room_compile(JsProfile profile, JsProgram *previous,
+    cJSON **metadata, char *fail, size_t faillen, int *n_ok) {
+    CollabSlotText texts[COLLAB_ROOM_SLOTS_MAX];
+    JsProgram *program=NULL;
+    cJSON *meta=NULL, *slots=NULL;
+    int i, ok=0, substituted_any=0;
+    int substituted[COLLAB_ROOM_SLOTS_MAX]={0};
+    int audible[COLLAB_ROOM_SLOTS_MAX]={0};
+    *n_ok=0;
+    if (metadata) *metadata=NULL;
+    for (i=0;i<collab_room_n;i++) {
+        texts[i].slot=collab_room[i].slot;
+        texts[i].text=collab_room[i].body;
+    }
+    program=javascript_compile_slots(texts,collab_room_n,audio_get_bpm(),
+        previous,&profile,&meta,fail,faillen);
+    if (!program) return NULL;
+    if (previous &&
+        !javascript_prepare_csound_from(program,meta,previous,fail,faillen)) {
+        javascript_free(program);
+        cJSON_Delete(meta);
+        return NULL;
+    }
+    slots=meta?cJSON_GetObjectItemCaseSensitive(meta,"slots"):NULL;
+    if (!cJSON_IsArray(slots) ||
+        cJSON_GetArraySize(slots)!=collab_room_n) {
+        snprintf(fail,faillen,"room compile returned no slot report");
+        javascript_free(program);
+        cJSON_Delete(meta);
+        return NULL;
+    }
+    /* Substitute last-good bodies for failing slots and compile once more:
+       every client derives the same composite from the same input, and one
+       member's typo never silences the room. */
+    for (i=0;i<collab_room_n;i++) {
+        const cJSON *entry=cJSON_GetArrayItem(slots,i);
+        const cJSON *entry_ok=entry?cJSON_GetObjectItemCaseSensitive(entry,
+            "ok"):NULL;
+        const cJSON *entry_id=entry?cJSON_GetObjectItemCaseSensitive(entry,
+            "id"):NULL;
+        int at=cJSON_IsNumber(entry_id)?collab_room_find(entry_id->valueint):
+            -1;
+        const cJSON *entry_err=entry?cJSON_GetObjectItemCaseSensitive(entry,
+            "error"):NULL;
+        if (at<0) continue;
+        collab_room[at].ok=cJSON_IsTrue(entry_ok);
+        if (cJSON_IsString(entry_err) && entry_err->valuestring) {
+            snprintf(collab_room[at].error,sizeof(collab_room[at].error),
+                "%s",entry_err->valuestring);
+        } else collab_room[at].error[0]=0;
+        audible[at]=collab_room[at].ok;
+        if (!collab_room[at].ok && collab_room[at].last_good) {
+            texts[i].text=collab_room[at].last_good;
+            substituted[i]=1;
+            substituted_any=1;
+        }
+    }
+    if (substituted_any) {
+        JsProgram *retry=NULL;
+        cJSON *retry_meta=NULL;
+        char retry_fail[256]="";
+        retry=javascript_compile_slots(texts,collab_room_n,
+            audio_get_bpm(),previous,&profile,&retry_meta,retry_fail,
+            sizeof(retry_fail));
+        if (retry) {
+            if (previous && !javascript_prepare_csound_from(retry,
+                    retry_meta,previous,retry_fail,sizeof(retry_fail))) {
+                javascript_free(retry);
+                cJSON_Delete(retry_meta);
+            } else {
+                javascript_free(program);
+                cJSON_Delete(meta);
+                program=retry;
+                meta=retry_meta;
+                slots=cJSON_GetObjectItemCaseSensitive(meta,"slots");
+                for (i=0;i<collab_room_n && cJSON_IsArray(slots);i++) {
+                    const cJSON *entry=cJSON_GetArrayItem(slots,i);
+                    const cJSON *entry_ok=entry?
+                        cJSON_GetObjectItemCaseSensitive(entry,"ok"):NULL;
+                    const cJSON *entry_id=entry?
+                        cJSON_GetObjectItemCaseSensitive(entry,"id"):NULL;
+                    int at=cJSON_IsNumber(entry_id)?collab_room_find(
+                        entry_id->valueint):-1;
+                    const cJSON *entry_err=entry?
+                        cJSON_GetObjectItemCaseSensitive(entry,"error"):NULL;
+                    if (at<0) continue;
+                    if (substituted[i]) {
+                        /* The current body stays failed for the author;
+                           the room plays the substituted last-good. */
+                        if (cJSON_IsTrue(entry_ok)) audible[at]=1;
+                        continue;
+                    }
+                    collab_room[at].ok=cJSON_IsTrue(entry_ok);
+                    if (cJSON_IsString(entry_err) && entry_err->valuestring) {
+                        snprintf(collab_room[at].error,
+                            sizeof(collab_room[at].error),"%s",
+                            entry_err->valuestring);
+                    } else collab_room[at].error[0]=0;
+                    audible[at]=collab_room[at].ok;
+                }
+            }
+        }
+    }
+    for (i=0;i<collab_room_n;i++) {
+        if (collab_room[i].ok) {
+            free(collab_room[i].last_good);
+            collab_room[i].last_good=NULL;
+            if (collab_room[i].body) {
+                collab_room[i].last_good=strdup(collab_room[i].body);
+                if (!collab_room[i].last_good) {
+                    collab_room[i].ok=0;
+                    audible[i]=0;
+                    snprintf(collab_room[i].error,
+                        sizeof(collab_room[i].error),"out of memory");
+                    continue;
+                }
+            }
+            audible[i]=1;
+        }
+        if (audible[i]) ok++;
+    }
+    *n_ok=ok;
+    if (metadata) *metadata=meta;
+    else cJSON_Delete(meta);
+    return program;
+}
+int collab_room_apply(double at_cycle, unsigned eval_seq, char *err,
+    size_t errlen) {
+    JsProgram *program=NULL, *previous=NULL;
+    cJSON *metadata=NULL;
+    char fail[256]="";
+    JsProfile profile;
+    int i, any_remote=0, n_ok=0;
+    if (!isfinite(at_cycle) || at_cycle<0) {
+        collab_room_fail(err,errlen,"room eval needs a finite at_cycle");
+        return 0;
+    }
+    if (collab_room_n==0) {
+        collab_room_fail(err,errlen,"room has no slots");
+        return 0;
+    }
+    for (i=0;i<collab_room_n;i++) {
+        if (collab_room[i].remote) {
+            any_remote=1;
+            break;
+        }
+    }
+    profile=any_remote?js_profile_remote():js_profile_local();
+    pthread_mutex_lock(&tracks_lock);
+    if (track_count==1 && tracks[0].javascript) {
+        previous=tracks[0].javascript;
+        javascript_retain(previous);
+    }
+    pthread_mutex_unlock(&tracks_lock);
+    program=collab_room_compile(profile,previous,&metadata,fail,sizeof(fail),
+        &n_ok);
+    javascript_free(previous);
+    if (!program) {
+        /* The previous program keeps playing; never silence the room. */
+        collab_room_fail(err,errlen,fail[0]?fail:"room compile failed");
+        return 0;
+    }
+    if (!n_ok) {
+        javascript_free(program);
+        cJSON_Delete(metadata);
+        collab_room_fail(err,errlen,"every room slot failed");
+        return 0;
+    }
+    if (!track_stage_program(program,metadata,at_cycle,eval_seq)) {
+        javascript_free(program);
+        cJSON_Delete(metadata);
+        collab_room_fail(err,errlen,"no live track to stage into");
+        return 0;
     }
     return 1;
 }

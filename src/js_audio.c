@@ -1600,6 +1600,15 @@ static int audio_event_values(const cJSON *hap, double origin, double seconds, A
     memset(ev,0,sizeof(*ev));
     ev->scope_mask = (unsigned)control(hap,"scopeMask",0,0,4294967295.0);
     ev->out_target = audio_output_target(text_control(v,"_out"));
+#ifdef HAVE_COLLAB
+    /* Room authorship rides the M1 namespaced hap id ("N/..." or bare
+       "N"); single programs carry no id and stay slot 0. */
+    {
+        const cJSON *hap_id=cJSON_GetObjectItemCaseSensitive(v,"id");
+        if (cJSON_IsString(hap_id))
+            ev->slot=(uint16_t)collab_slot_from_id(hap_id->valuestring);
+    }
+#endif
     /* Superdough analyze(id) attaches the voice to a shared analyser node.
        fft is an exponent: fftSize = 2 ** (fft + 5), default 8 (8192). */
     ev->analyser_id = (int)round(control(v,"analyze",0,0,(double)N_ANALYSERS));
@@ -2512,10 +2521,34 @@ static void commit_immediate_hap(JsProgram *program, const HapPlan *plan, unsign
         if (audio_event_values(hap,plan->origin,plan->seconds,&event,0)) {
             double cycle=control(hap,"begin",0,-1e12,1e12);
 #ifdef HAVE_COLLAB
-            if (!collab_capability_allowed(event.slot,COLLAB_CAP_OSC,NULL)) {
-                javascript_warn_once(program,"collab-cap",
-                    "OSC output is disabled for room code (see /collab allow)");
-                return;
+            {
+                /* Consent needs the exact target (section 13.2); mirror
+                   osc_output_prepare's host/port defaults. An invalid
+                   target matches nothing and stays denied. */
+                const cJSON *host=cJSON_GetObjectItemCaseSensitive(value,
+                    "oschost");
+                const cJSON *port=cJSON_GetObjectItemCaseSensitive(value,
+                    "oscport");
+                const char *name=cJSON_IsString(host)?host->valuestring:NULL;
+                char target[72];
+                if (!name) name="127.0.0.1";
+                if (!strcmp(name,"localhost")) name="127.0.0.1";
+                if (strlen(name)>64 || (port && (!cJSON_IsNumber(port) ||
+                        !isfinite(port->valuedouble) || port->valuedouble<1 ||
+                        port->valuedouble>65535 ||
+                        port->valuedouble!=floor(port->valuedouble)))) {
+                    name=NULL;
+                }
+                if (name) {
+                    snprintf(target,sizeof(target),"%s:%d",name,
+                        port?port->valueint:57120);
+                } else target[0]=0;
+                if (!collab_capability_allowed(event.slot,COLLAB_CAP_OSC,
+                        target[0]?target:NULL)) {
+                    javascript_warn_once(program,"collab-cap",
+                        "OSC output is disabled for room code (see /collab allow)");
+                    return;
+                }
             }
 #endif
             if (osc_output_prepare(&event.osc,value,cycle,1/plan->seconds,event.duration)) {

@@ -142,6 +142,33 @@ int main(void) {
     CHECK(!collab_nick_set("a\x01" "b",err,sizeof(err)),"bad nick refused");
     CHECK(collab_nick_get(nick,sizeof(nick)),"stored nick kept");
     CHECK(strcmp(nick,"Test Name")==0,"stored nick kept value");
+    /* The normalized nick was saved to collab.json (mkstemp template fix). */
+    {
+        char path[1024], *text=NULL;
+        FILE *file=NULL;
+        long length;
+        snprintf(path,sizeof(path),"%s/tompouce/collab.json",tmpdir);
+        file=fopen(path,"rb");
+        CHECK(file!=NULL,"collab.json written");
+        CHECK(fseek(file,0,SEEK_END)==0,"seek end");
+        length=ftell(file);
+        CHECK(length>0 && length<65536,"collab.json size");
+        rewind(file);
+        text=malloc((size_t)length+1);
+        CHECK(text!=NULL,"oom");
+        CHECK(fread(text,1,(size_t)length,file)==(size_t)length,"read back");
+        fclose(file);
+        text[length]=0;
+        CHECK(strstr(text,"\"Test Name\"")!=NULL,"nick persisted");
+        free(text);
+    }
+    /* Fresh config dir for the loopback: connect must generate and save. */
+    {
+        char template2[]="/tmp/tompouce-collab-loop-XXXXXX";
+        char *tmpdir2=mkdtemp(template2);
+        CHECK(tmpdir2!=NULL,"mkdtemp loop");
+        CHECK(setenv("XDG_CONFIG_HOME",tmpdir2,1)==0,"xdg loop");
+    }
     /* Loopback hello/welcome against a real director. */
     binary=getenv("TOMPOUCE_DIRECTOR_BIN");
     if (!binary || !*binary) binary="./build/tompouce-director";

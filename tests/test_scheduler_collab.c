@@ -66,8 +66,8 @@ static int compile_slot(const char *code, JsProgram **prog, cJSON **meta) {
     javascript_free(previous);
     return *prog!=NULL;
 }
-/* Copy the accepted queue in cycle order. Asserts the collab slot tag
-   stays local-only until attribution arrives (Phase 1). */
+/* Copy the accepted queue in cycle order. Local single programs carry no
+   hap id and stay slot 0; room composites tag events per slot. */
 static int drain(EvKey *out, int cap) {
     QNode *node;
     int n=0;

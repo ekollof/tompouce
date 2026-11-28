@@ -1155,15 +1155,33 @@ green, docs updated. Milestones map to brief §19 phases.
       the clean tree too (indirect-only, no direct leaks, none from the new
       code) — pre-existing, not from this milestone.
 
-### M2 — Live shared eval (next)
+### M2 — Live shared eval (doing)
 
-- [ ] Client eval path: auth with proof, `join` + `profile`, `eval_req`,
-      remote apply into the composite, activation at the shared instant
-      (§8.7, incl. the live-`eval` acceptance window).
+- [x] Slot attribution end to end: M1 namespaced hap ids parse into
+      `event.slot` in `audio_event_values` (single programs stay 0); the OSC
+      gate passes the exact `host:port` target mirroring
+      `osc_output_prepare` defaults.
+- [x] Room composite + eval-apply in `src/collab.c`: slot table with
+      per-slot remote flags, ascending composite, remote profile whenever any
+      slot is remote, last-good substitution with one recompile, staging at an
+      explicit `at_cycle` through `track_stage_program`, per-slot errors via
+      `collab_room_slot_error`, fail-closed rejects. New
+      `tests/test_collab_room.c` (composite order + slot tags on the queue,
+      last-good survival, reject paths, consent store + persistence).
+- [x] Consent store: per-capability exact-target room-scoped allowlist in
+      `collab.json` (`collab_allow`/`collab_deny`/`collab_consent_reload`,
+      atomic save, default deny, slot 0 exempt). Also fixed the shared
+      `mkstemp` template (no `XXXXXX` suffix), which silently broke nick
+      persistence too; the transport test now asserts the written file.
+- [ ] Client eval path over the network: auth with proof, `join` + `profile`,
+      `eval_req` (needs `collab_crypto.c`: sealed frames, Ed25519, admission
+      proof), remote apply into the composite, activation at the shared
+      instant (§8.7, incl. the live-`eval` acceptance window).
 - [ ] `/collab` command family and the F2 `/nick` command; `profile_update` /
       `member_updated` flow; consent UI basics (allow/deny).
 - [ ] Room-wide solo union application incl. `solos_off`; no-plaintext-on-LAN
-      rules enforced client-side.
+      rules enforced client-side; MIDI output target plumbing (gate still
+      takes NULL and denies).
 - [ ] Acceptance: loopback two-client test (typing converges ≤ 200 ms,
       same `at_cycle`, `room_us` within 20 ms, bad-signature/tampered frames
       dropped), nick generation/persistence/propagation, `test-security`

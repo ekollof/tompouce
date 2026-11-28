@@ -1183,10 +1183,21 @@ green, docs updated. Milestones map to brief §19 phases.
       atomic save, default deny, slot 0 exempt). Also fixed the shared
       `mkstemp` template (no `XXXXXX` suffix), which silently broke nick
       persistence too; the transport test now asserts the written file.
-- [ ] Client eval path over the network: auth with proof, `join` + `profile`,
-      `eval_req` (needs `collab_crypto.c`: sealed frames, Ed25519, admission
-      proof), remote apply into the composite, activation at the shared
-      instant (§8.7, incl. the live-`eval` acceptance window).
+- [ ] Client eval path over the network: auth with proof (done, this
+      slice), `join` + `profile` (done), `eval_req` send + eval receive
+      (done: decrypt, author check, per-slot seq gate, apply at the shared
+      instant, ack), the live-`eval` acceptance window (§8.7).
+- [x] Client flow against the real director (`collab_join_room`,
+      `collab_eval_send`, `collab_poll`): sealed nick profile, `joined`
+      verify (e2e, epoch, opk) + per-slot `last_eval` replay with one
+      staged activation, bogus-seal and duplicate-seq drops, member table
+      with verified nicks and `member-N` fallback. New
+      `tests/test_collab_flow.c` (Alice on the public API with a live
+      engine + scripted raw Bob: join, eval both ways with slot tags on
+      the queue, ack relay, drop paths).
+- [x] Provisional room→local cycle mapping at join (anchor epoch to the
+      local cursor; past instants activate now). M4 replaces it with the
+      clock filter (drift, tempo skew, cross-machine delay, late_by).
 - [ ] `/collab` command family and the F2 `/nick` command; `profile_update` /
       `member_updated` flow; consent UI basics (allow/deny).
 - [ ] Room-wide solo union application incl. `solos_off`; no-plaintext-on-LAN

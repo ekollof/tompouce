@@ -407,8 +407,9 @@ int main(void) {
     CHECK(keyfd>=0,"mkstemp");
     memset(room_key,0x5a,sizeof(room_key));
     /* The director holds only the admission key: crypto_kdf of the room
-       key, context "tpcadm01". Clients keep the room key itself. */
-    CHECK(crypto_kdf_derive_from_key(admission_key,sizeof(admission_key),1,
+       key, id 0, context "tpcadm01" (brief section 14.1 pin). Clients
+       keep the room key itself. */
+    CHECK(crypto_kdf_derive_from_key(admission_key,sizeof(admission_key),0,
         "tpcadm01",room_key)==0,"kdf");
     CHECK(write(keyfd,admission_key,sizeof(admission_key))==sizeof(admission_key),"key");
     close(keyfd);

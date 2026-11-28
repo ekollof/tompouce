@@ -72,6 +72,31 @@ int collab_room_set_slot(int slot, const char *body, size_t bodylen,
 const char *collab_room_slot_error(int slot);
 int collab_room_apply(double at_cycle, unsigned eval_seq, char *err,
     size_t errlen);
+/* Room session: auth/join/eval flow (M2, sections 7.3, 10.3, 14.5).
+   Requires a connected transport. Keys live only in memory; the room key
+   never leaves the client. All control records are sealed; the director
+   only sees routing fields. */
+int collab_join_room(const char *room_id, const uint8_t room_key[32],
+    int as_owner, char *err, size_t errlen);
+int collab_joined(void);
+int collab_synced(void);
+/* Sends an eval for slot with the author's per-slot seq. The director
+   assigns eval_seq/at_cycle and broadcasts; the sender applies its own
+   broadcast like everyone else. */
+int collab_eval_send(int slot, const char *body, char *err, size_t errlen);
+/* Processes one inbound frame (timeout_ms<0 waits up to the deadline).
+   Returns 1 when a frame was processed, 0 on timeout, -1 on fatal error
+   (kicked, banned, auth failure: already disconnected). */
+int collab_poll(int timeout_ms);
+/* Last applied director eval_seq (0 when none). Advances only on
+   successful activation, so a duplicate broadcast is observable by its
+   absence. */
+uint64_t collab_last_eval_seq(void);
+uint32_t collab_self_id(void);
+int collab_member_count(void);
+/* Display nick for a member: verified sealed profile, else "member-<id>".
+   Returns 1 for a verified nick, 0 for the fallback. */
+int collab_member_nick(uint32_t id, char *buf, size_t cap);
 #else
 static inline int collab_capability_allowed(uint16_t slot, CollabCap cap,
     const char *target) {
@@ -107,6 +132,26 @@ static inline const char *collab_room_slot_error(int slot) {
 static inline int collab_room_apply(double at_cycle, unsigned eval_seq,
     char *err, size_t errlen) {
     (void)at_cycle; (void)eval_seq; (void)err; (void)errlen; return 0;
+}
+static inline int collab_join_room(const char *room_id,
+    const uint8_t room_key[32], int as_owner, char *err, size_t errlen) {
+    (void)room_id; (void)room_key; (void)as_owner; (void)err; (void)errlen;
+    return 0;
+}
+static inline int collab_joined(void) { return 0; }
+static inline int collab_synced(void) { return 0; }
+static inline int collab_eval_send(int slot, const char *body, char *err,
+    size_t errlen) {
+    (void)slot; (void)body; (void)err; (void)errlen; return 0;
+}
+static inline int collab_poll(int timeout_ms) {
+    (void)timeout_ms; return 0;
+}
+static inline uint64_t collab_last_eval_seq(void) { return 0; }
+static inline uint32_t collab_self_id(void) { return 0; }
+static inline int collab_member_count(void) { return 0; }
+static inline int collab_member_nick(uint32_t id, char *buf, size_t cap) {
+    (void)id; (void)buf; (void)cap; return 0;
 }
 #endif
 #endif

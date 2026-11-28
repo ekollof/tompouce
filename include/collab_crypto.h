@@ -28,6 +28,8 @@
 #define CCR_CTRL_EVAL 1
 #define CCR_CTRL_PROFILE 2
 int ccr_init(void);
+/* Room id shape: 26 chars [a-z2-7]. */
+int ccr_room_ok(const char *room_id);
 /* Master seed (section 14.1): load or create
    <config>/tompouce/collab/identity.key (0600, 32 random bytes). */
 int ccr_identity_load_or_create(uint8_t seed[CCR_SEED_BYTES], char *err,

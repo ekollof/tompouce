@@ -1,11 +1,15 @@
 #include "collab.h"
+#include "collab_crypto.h"
 #include "collab_proto.h"
 #include "collab_transport.h"
+#include "common.h"
 #include "javascript.h"
 #include "track.h"
 #include "audio.h"
 #include <cjson/cJSON.h>
 #include <ctype.h>
+#include <math.h>
+#include <sodium.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -193,6 +197,8 @@ int collab_nick_check(const char *name, char *err, size_t errlen) {
 }
 /* --- capability gates (section 13.2) --- */
 static int collab_test_allow_remote=0;
+static uint8_t collab_challenge[CCR_CHALLENGE_BYTES];
+static int collab_have_challenge=0;
 /* Consent lookup lives below; declared here for the gate. */
 static int collab_consent_has(CollabCap cap, const char *room,
     const char *target);
@@ -503,11 +509,15 @@ int collab_nick_set(const char *name, char *err, size_t errlen) {
     return 1;
 }
 /* --- session (section 10.1, Phase 0 subset) --- */
+/* Forward declarations for the M2 flow state below. */
+static void collab_session_reset(void);
 void collab_disconnect(void) {
     ctr_close(collab_transport);
     collab_transport=NULL;
     collab_url[0]=0;
+    collab_have_challenge=0;
     collab_room_reset();
+    collab_session_reset();
     collab_current_state=COLLAB_IDLE;
 }
 static int collab_hello(CollabTransport *ct, char *err, size_t errlen) {
@@ -558,6 +568,18 @@ static int collab_hello(CollabTransport *ct, char *err, size_t errlen) {
         if (err && errlen>0)
             snprintf(err,errlen,"collab: expected welcome");
         goto done;
+    }
+    {
+        const cJSON *challenge=cJSON_GetObjectItemCaseSensitive(welcome,
+            "challenge");
+        size_t outlen=0;
+        collab_have_challenge=0;
+        if (cJSON_IsString(challenge) && challenge->valuestring &&
+            cp_b64_decode(challenge->valuestring,collab_challenge,
+                sizeof(collab_challenge),&outlen) &&
+            outlen==sizeof(collab_challenge)) {
+            collab_have_challenge=1;
+        }
     }
     ok=1;
 done:
@@ -1125,4 +1147,976 @@ int collab_room_apply(double at_cycle, unsigned eval_seq, char *err,
         return 0;
     }
     return 1;
+}
+/* --- room session flow (M2, sections 7.3, 10.3, 14.5, 14.7) --- */
+#define COLLAB_MAX_MEMBERS 16
+typedef struct {
+    uint32_t id;
+    uint8_t pk[CCR_PK_BYTES];
+    char role[8];
+    char nick[64];
+    int has_nick;
+} CollabMember;
+static CollabMember collab_members[COLLAB_MAX_MEMBERS];
+static int collab_nmembers=0;
+static uint32_t collab_self_member=0;
+static int collab_have_self=0;
+static uint8_t collab_self_pk[CCR_PK_BYTES];
+static uint8_t collab_self_sk[CCR_SK_BYTES];
+static int collab_have_keys=0;
+static uint8_t collab_roomkey[CCR_KEY_BYTES];
+static int collab_have_roomkey=0;
+static uint8_t collab_sub_frame[CCR_KEY_BYTES];
+static uint8_t collab_sub_ctrl[CCR_KEY_BYTES];
+static uint8_t collab_admission[CCR_KEY_BYTES];
+static uint16_t collab_key_epoch=0;
+static uint8_t collab_opk[CCR_PK_BYTES];
+static int collab_have_opk=0;
+static char collab_roomid[CCR_ROOM_ID_LEN+1];
+static int collab_joined_flag=0;
+static int collab_synced_flag=0;
+static uint8_t collab_resume[32];
+static int collab_have_resume=0;
+static uint64_t collab_author_seq[CP_SLOTS_MAX];
+static struct {
+    uint32_t author;
+    uint64_t seq;
+    int seen;
+} collab_last_seen[CP_SLOTS_MAX];
+static uint64_t collab_last_eval_applied=0;
+static int collab_solos_off=0;
+/* Provisional room→local cycle mapping (M4 replaces it with the clock
+   filter). The join anchors the room epoch to the local cursor: later
+   director at_cycle values land at local_cursor + (at - room_now), where
+   room_now advances at the room tempo from the join instant. Exact when
+   room and local tempo agree (the loopback/test case); tempo skew,
+   drift and cross-machine delay are M4's job. */
+static double collab_epoch_c=0.0;
+static double collab_join_audio=0.0;
+static double collab_room_cps=0.5;
+static void collab_session_reset(void) {
+    int i;
+    sodium_memzero(collab_self_sk,sizeof(collab_self_sk));
+    sodium_memzero(collab_roomkey,sizeof(collab_roomkey));
+    sodium_memzero(collab_sub_frame,sizeof(collab_sub_frame));
+    sodium_memzero(collab_sub_ctrl,sizeof(collab_sub_ctrl));
+    sodium_memzero(collab_admission,sizeof(collab_admission));
+    sodium_memzero(collab_resume,sizeof(collab_resume));
+    memset(collab_members,0,sizeof(collab_members));
+    collab_nmembers=0;
+    collab_self_member=0;
+    collab_have_self=0;
+    collab_have_keys=0;
+    collab_have_roomkey=0;
+    collab_key_epoch=0;
+    collab_have_opk=0;
+    collab_roomid[0]=0;
+    collab_joined_flag=0;
+    collab_synced_flag=0;
+    collab_have_resume=0;
+    collab_solos_off=0;
+    collab_last_eval_applied=0;
+    collab_epoch_c=0.0;
+    collab_join_audio=0.0;
+    collab_room_cps=0.5;
+    for (i=0;i<CP_SLOTS_MAX;i++) {
+        collab_author_seq[i]=0;
+        collab_last_seen[i].seen=0;
+    }
+}
+static void collab_fail(char *err, size_t errlen, const char *what) {
+    if (err && errlen>0) {
+        snprintf(err,errlen,"%s",what);
+        err[errlen-1]=0;
+    }
+}
+/* Receive one frame; text goes to *text_out (caller frees), binary to
+   *bin_out (caller frees). Exactly one of them is set. Returns 1 on a
+   frame, 0 on timeout, -1 on close/error. */
+static int collab_recv_frame(char **text_out, uint8_t **bin_out,
+    size_t *binlen_out, int timeout_ms) {
+    int is_binary=0;
+    uint8_t *payload=NULL;
+    size_t length=0;
+    *text_out=NULL;
+    *bin_out=NULL;
+    if (binlen_out) *binlen_out=0;
+    if (!collab_transport) return -1;
+    if (!ctr_recv(collab_transport,&is_binary,&payload,&length,timeout_ms) ||
+        !payload) {
+        free(payload);
+        return 0;
+    }
+    if (is_binary) {
+        *bin_out=payload;
+        if (binlen_out) *binlen_out=length;
+        return 1;
+    }
+    *text_out=malloc(length+1);
+    if (!*text_out) {
+        free(payload);
+        return -1;
+    }
+    memcpy(*text_out,payload,length);
+    (*text_out)[length]=0;
+    free(payload);
+    return 1;
+}
+static int collab_send_json(cJSON *obj) {
+    char *text;
+    int ok;
+    if (!obj || !collab_transport) return 0;
+    text=cJSON_PrintUnformatted(obj);
+    if (!text) return 0;
+    ok=ctr_send_text(collab_transport,text,strlen(text));
+    free(text);
+    return ok;
+}
+/* malloc'd base64url of in (no padding). */
+static char *collab_b64enc(const uint8_t *in, size_t len) {
+    size_t cap=4*((len+2)/3)+1;
+    char *out=malloc(cap);
+    if (!out) return NULL;
+    out[cp_b64_encode(in,len,out,cap)]=0;
+    return out;
+}
+static int collab_member_find(uint32_t id) {
+    int i;
+    for (i=0;i<collab_nmembers;i++) {
+        if (collab_members[i].id==id) return i;
+    }
+    return -1;
+}
+/* Verify a sealed type-2 profile against the member key and store the
+   nick (validated) or drop it. Forged renames never render. */
+static void collab_member_profile(int index, const char *sealed_b64) {
+    CollabMember *member;
+    uint8_t *enc=NULL, *plain=NULL;
+    size_t enclen=0, plainlen=0, b64len;
+    char nick[64], color[64];
+    if (index<0 || index>=collab_nmembers || !sealed_b64) return;
+    member=&collab_members[index];
+    member->has_nick=0;
+    member->nick[0]=0;
+    b64len=strlen(sealed_b64);
+    if (!b64len || b64len>2*CP_COMPOSITE_MAX) return;
+    enc=malloc(b64len*3/4+4);
+    if (!enc) return;
+    if (!cp_b64_decode(sealed_b64,enc,b64len*3/4+4,&enclen)) {
+        free(enc);
+        return;
+    }
+    if (ccr_open_ctrl_typed(collab_sub_ctrl,collab_roomid,collab_key_epoch,
+            CCR_CTRL_PROFILE,0,member->pk,enc,enclen,&plain,&plainlen,
+            NULL,NULL,NULL)!=1) {
+        free(enc);
+        free(plain);
+        return;
+    }
+    free(enc);
+    if (ccr_profile_parse((const char *)plain,plainlen,nick,sizeof(nick),
+            color,sizeof(color)) &&
+        collab_nick_check(nick,NULL,0)) {
+        snprintf(member->nick,sizeof(member->nick),"%s",nick);
+        member->has_nick=1;
+    }
+    sodium_memzero(plain,plainlen);
+    free(plain);
+}
+static void collab_member_add(uint32_t id, const uint8_t *pk,
+    const char *role, const char *profile_b64) {
+    CollabMember *member;
+    int at=collab_member_find(id);
+    if (at<0) {
+        if (collab_nmembers>=COLLAB_MAX_MEMBERS) return;
+        at=collab_nmembers++;
+    }
+    member=&collab_members[at];
+    member->id=id;
+    memcpy(member->pk,pk,CCR_PK_BYTES);
+    snprintf(member->role,sizeof(member->role),"%s",role?role:"editor");
+    member->has_nick=0;
+    member->nick[0]=0;
+    if (profile_b64) collab_member_profile(at,profile_b64);
+}
+/* Forward declarations for the expect loop. */
+static int collab_handle_text(cJSON *obj);
+/* Receive until a text frame with t==want (or timeout_ms total).
+   Other text frames dispatch normally; binary replay is skipped.
+   Returns the parsed owned object (caller frees with cJSON_Delete). */
+static cJSON *collab_expect(const char *want, int timeout_ms, char *err,
+    size_t errlen) {
+    uint64_t deadline=(uint64_t)now_seconds()*1000+(uint64_t)timeout_ms;
+    while (collab_transport) {
+        char *text=NULL;
+        uint8_t *bin=NULL;
+        size_t binlen=0;
+        cJSON *obj=NULL;
+        CpMsg msg;
+        int64_t left;
+        uint64_t now=(uint64_t)now_seconds()*1000;
+        int step;
+        if (now>=deadline) {
+            collab_fail(err,errlen,"collab: timed out waiting for reply");
+            return NULL;
+        }
+        left=(int64_t)(deadline-now);
+        step=left>2000?2000:(int)left;
+        if (!collab_recv_frame(&text,&bin,&binlen,step)) {
+            free(text);
+            free(bin);
+            continue;
+        }
+        if (bin) {
+            free(bin);
+            continue;
+        }
+        obj=cJSON_Parse(text);
+        free(text);
+        if (!obj) continue;
+        {
+            char *flat=cJSON_PrintUnformatted(obj);
+            CpError parse=CP_E_PROTO;
+            if (flat) {
+                parse=cp_parse_control(flat,strlen(flat),&msg);
+                free(flat);
+            }
+            if (parse!=CP_E_NONE) {
+                cJSON_Delete(obj);
+                continue;
+            }
+        }
+        cp_msg_free(&msg);
+        {
+            const cJSON *type=cJSON_GetObjectItemCaseSensitive(obj,"t");
+            int is_want=cJSON_IsString(type) && type->valuestring &&
+                !strcmp(type->valuestring,want);
+            if (is_want) return obj;
+            collab_handle_text(obj);
+            cJSON_Delete(obj);
+        }
+    }
+    collab_fail(err,errlen,"collab: disconnected while waiting");
+    return NULL;
+}
+/* Map a director at_cycle (room frame) into local pending cycles.
+   Past instants land on the current cursor: the staged path activates
+   them at the next window without rewinding, like a late local load. */
+static double collab_pending_for(double at_cycle) {
+    double room_now, local_cursor, pending;
+    room_now=collab_epoch_c+(audio_time_now()-collab_join_audio)*
+        collab_room_cps;
+    pthread_mutex_lock(&tracks_lock);
+    local_cursor=(track_count==1 && tracks[0].javascript)?
+        tracks[0].js_cursor:room_now;
+    pthread_mutex_unlock(&tracks_lock);
+    pending=at_cycle<=room_now?local_cursor:local_cursor+
+        (at_cycle-room_now);
+    return pending;
+}
+/* --- eval receive path --- */
+/* Applies one decrypted eval record: per-(author,slot) seq gate, room
+   update, shared-instant staging, author ack. Returns 1 when activated. */
+static int collab_apply_eval_text(uint32_t author, int slot,
+    uint64_t eval_seq, double at_cycle, const char *body) {
+    char fail[256]="";
+    uint64_t capped=eval_seq>0xffffffffu?0xffffffffu:(uint64_t)eval_seq;
+    if (!collab_room_set_slot(slot,body,strlen(body),
+            author!=collab_self_member)) {
+        log_console("Jam: eval #%llu from member %u rejected (slot)",
+            (unsigned long long)eval_seq,author);
+        return 0;
+    }
+    if (!collab_room_apply(collab_pending_for(at_cycle),(unsigned)capped,
+            fail,sizeof(fail))) {
+        log_console("Jam: eval #%llu did not stage: %s",
+            (unsigned long long)eval_seq,fail[0]?fail:"no reason");
+        return 0;
+    }
+    collab_last_eval_applied=eval_seq;
+    return 1;
+}
+static int collab_send_ack(uint64_t eval_seq) {
+    cJSON *ack=cJSON_CreateObject();
+    int ok;
+    if (!ack) return 0;
+    cJSON_AddStringToObject(ack,"t","ack");
+    cJSON_AddNumberToObject(ack,"ref",(double)(eval_seq>0xffffffffu?
+        0xffffffffu:eval_seq));
+    ok=collab_send_json(ack);
+    cJSON_Delete(ack);
+    return ok;
+}
+static int collab_handle_eval(cJSON *obj) {
+    const void *vo=obj;
+    uint32_t slot32=0, author32=0;
+    uint64_t seq=0, num=0;
+    unsigned den=1;
+    double at_cycle;
+    const char *enc=NULL;
+    int slot;
+    uint8_t *raw=NULL, *plain=NULL;
+    size_t rawlen=0, plainlen=0, b64len;
+    char *body=NULL;
+    int body_slot=-1;
+    uint64_t body_seq=0;
+    int applied=0;
+    if (!cp_get_u32(vo,"slot",&slot32) || slot32>=CP_SLOTS_MAX) return 1;
+    if (!cp_get_u32(vo,"author",&author32)) return 1;
+    {
+        const cJSON *seq_item=cJSON_GetObjectItemCaseSensitive(obj,
+            "eval_seq");
+        if (!cJSON_IsNumber(seq_item) || !(seq_item->valuedouble>=0) ||
+            seq_item->valuedouble>=9007199254740992.0 ||
+            seq_item->valuedouble!=(double)(uint64_t)seq_item->valuedouble)
+            return 1;
+        seq=(uint64_t)seq_item->valuedouble;
+    }
+    if (!cp_get_cycle(vo,"at_cycle",&num,&den)) return 1;
+    at_cycle=(double)num/(double)den;
+    if (!isfinite(at_cycle) || at_cycle<0) return 1;
+    if (!cp_get_string(vo,"enc",&enc,2*CP_COMPOSITE_MAX) || !enc) return 1;
+    slot=(int)slot32;
+    {
+        int at=collab_member_find(author32);
+        uint8_t *author_pk;
+        int rc;
+        if (at<0) {
+            /* Unknown author: not in the verified member set. */
+            return 1;
+        }
+        author_pk=collab_members[at].pk;
+        b64len=strlen(enc);
+        raw=malloc(b64len*3/4+4);
+        if (!raw) return 1;
+        if (!cp_b64_decode(enc,raw,b64len*3/4+4,&rawlen)) {
+            free(raw);
+            return 1;
+        }
+        rc=ccr_open_ctrl_typed(collab_sub_ctrl,collab_roomid,
+            collab_key_epoch,CCR_CTRL_EVAL,(uint16_t)slot,author_pk,raw,
+            rawlen,&plain,&plainlen,NULL,NULL,NULL);
+        free(raw);
+        if (rc!=1) {
+            /* Stale epoch, forgery or undecryptable: drop and count it.
+               Ten failures from one member in a minute warn (M-later). */
+            free(plain);
+            return 1;
+        }
+    }
+    if (!ccr_eval_parse((const char *)plain,plainlen,&body_slot,&body_seq,
+            &body) ||
+        body_slot!=slot) {
+        sodium_memzero(plain,plainlen);
+        free(plain);
+        free(body);
+        return 1;
+    }
+    sodium_memzero(plain,plainlen);
+    free(plain);
+    {
+        int seen=collab_last_seen[slot].seen;
+        uint32_t last_author=collab_last_seen[slot].author;
+        uint64_t last_seq=collab_last_seen[slot].seq;
+        if (seen && last_author==author32 && body_seq<=last_seq) {
+            /* Duplicate or stale per-slot author seq: already applied. */
+            free(body);
+            return 1;
+        }
+        collab_last_seen[slot].author=author32;
+        collab_last_seen[slot].seq=body_seq;
+        collab_last_seen[slot].seen=1;
+    }
+    applied=collab_apply_eval_text(author32,slot,seq,at_cycle,body);
+    free(body);
+    if (applied) collab_send_ack(seq);
+    return 1;
+}
+/* --- frame dispatch (shared by poll and the join drain) --- */
+/* Returns 1 handled, -1 fatal (caller disconnects). */
+static int collab_handle_text(cJSON *obj) {
+    const cJSON *type=cJSON_GetObjectItemCaseSensitive(obj,"t");
+    const char *name=cJSON_IsString(type)?type->valuestring:"";
+    if (!strcmp(name,"eval")) return collab_handle_eval(obj);
+    if (!strcmp(name,"member_joined") || !strcmp(name,"member_updated")) {
+        const cJSON *member=cJSON_GetObjectItemCaseSensitive(obj,"member");
+        const cJSON *mid=cJSON_IsObject(member)?
+            cJSON_GetObjectItemCaseSensitive(member,"member"):NULL;
+        const cJSON *mpk=cJSON_IsObject(member)?
+            cJSON_GetObjectItemCaseSensitive(member,"pk"):NULL;
+        const cJSON *role=cJSON_IsObject(member)?
+            cJSON_GetObjectItemCaseSensitive(member,"role"):NULL;
+        const cJSON *profile=cJSON_IsObject(member)?
+            cJSON_GetObjectItemCaseSensitive(member,"profile"):NULL;
+        uint8_t pk[CCR_PK_BYTES];
+        size_t outlen=0;
+        uint32_t id;
+        if (!cJSON_IsNumber(mid)) return 1;
+        id=(uint32_t)mid->valuedouble;
+        if (!cJSON_IsString(mpk) ||
+            !cp_b64_decode(mpk->valuestring,pk,sizeof(pk),&outlen) ||
+            outlen!=sizeof(pk)) {
+            return 1;
+        }
+        collab_member_add(id,pk,
+            cJSON_IsString(role)?role->valuestring:"editor",
+            cJSON_IsString(profile)?profile->valuestring:NULL);
+        if (id==collab_self_member) collab_have_self=1;
+        return 1;
+    }
+    if (!strcmp(name,"member_left")) {
+        const cJSON *member=cJSON_GetObjectItemCaseSensitive(obj,"member");
+        const cJSON *mid=cJSON_IsObject(member)?
+            cJSON_GetObjectItemCaseSensitive(member,"member"):NULL;
+        int at;
+        if (!cJSON_IsNumber(mid)) return 1;
+        at=collab_member_find((uint32_t)mid->valuedouble);
+        if (at>=0) {
+            collab_members[at].has_nick=0;
+            collab_members[at].nick[0]=0;
+        }
+        return 1;
+    }
+    if (!strcmp(name,"room_updated")) {
+        const cJSON *room=cJSON_GetObjectItemCaseSensitive(obj,"room");
+        const cJSON *solos=cJSON_IsObject(room)?
+            cJSON_GetObjectItemCaseSensitive(room,"solos_off"):NULL;
+        if (cJSON_IsBool(solos)) collab_solos_off=cJSON_IsTrue(solos);
+        return 1;
+    }
+    if (!strcmp(name,"synced")) {
+        collab_synced_flag=1;
+        return 1;
+    }
+    if (!strcmp(name,"ack")) {
+        const cJSON *ref=cJSON_GetObjectItemCaseSensitive(obj,"ref");
+        const cJSON *late=cJSON_GetObjectItemCaseSensitive(obj,"late_by");
+        if (cJSON_IsNumber(late))
+            log_console("Jam: peer applied eval #%d %.0f ms late",
+                cJSON_IsNumber(ref)?ref->valueint:-1,late->valuedouble);
+        return 1;
+    }
+    if (!strcmp(name,"error")) {
+        const cJSON *code=cJSON_GetObjectItemCaseSensitive(obj,"code");
+        const cJSON *msg=cJSON_GetObjectItemCaseSensitive(obj,"msg");
+        log_console("Jam: director error %s: %s",
+            cJSON_IsString(code)?code->valuestring:"?",
+            cJSON_IsString(msg)?msg->valuestring:"?");
+        if (cJSON_IsString(code) && (!strcmp(code->valuestring,"auth") ||
+                !strcmp(code->valuestring,"banned"))) {
+            return -1;
+        }
+        return 1;
+    }
+    if (!strcmp(name,"kicked")) {
+        const cJSON *reason=cJSON_GetObjectItemCaseSensitive(obj,"reason");
+        log_console("Jam: removed from room%s%s",
+            cJSON_IsString(reason)?": ":"",
+            cJSON_IsString(reason)?reason->valuestring:"");
+        return -1;
+    }
+    /* joined/auth_ok/welcome/pong/clock and future types: nothing to do
+       here (clock filter lands in M4). */
+    (void)name;
+    return 1;
+}
+int collab_poll(int timeout_ms) {
+    char *text=NULL;
+    uint8_t *bin=NULL;
+    size_t binlen=0;
+    cJSON *obj=NULL;
+    CpMsg msg;
+    int rc;
+    if (!collab_transport) return -1;
+    rc=collab_recv_frame(&text,&bin,&binlen,timeout_ms);
+    if (rc<=0) {
+        free(text);
+        free(bin);
+        return rc;
+    }
+    if (bin) {
+        /* Binary doc updates replay with the store; Yjs apply lands with
+           shared editing (M-later). */
+        free(bin);
+        return 1;
+    }
+    obj=cJSON_Parse(text);
+    free(text);
+    if (!obj) return 1;
+    {
+        char *flat=cJSON_PrintUnformatted(obj);
+        CpError parse=CP_E_PROTO;
+        memset(&msg,0,sizeof(msg));
+        if (flat) {
+            parse=cp_parse_control(flat,strlen(flat),&msg);
+            free(flat);
+        }
+        if (parse!=CP_E_NONE) {
+            cJSON_Delete(obj);
+            return 1;
+        }
+    }
+    cp_msg_free(&msg);
+    rc=collab_handle_text(obj);
+    cJSON_Delete(obj);
+    if (rc<0) collab_disconnect();
+    return rc;
+}
+/* --- join (section 14.7) --- */
+int collab_joined(void) {
+    return collab_joined_flag;
+}
+int collab_synced(void) {
+    return collab_synced_flag;
+}
+uint64_t collab_last_eval_seq(void) {
+    return collab_last_eval_applied;
+}
+uint32_t collab_self_id(void) {
+    return collab_self_member;
+}
+int collab_member_count(void) {
+    return collab_nmembers;
+}
+int collab_member_nick(uint32_t id, char *buf, size_t cap) {
+    int at;
+    if (!buf || !cap) return 0;
+    at=collab_member_find(id);
+    if (at>=0 && collab_members[at].has_nick) {
+        snprintf(buf,cap,"%s",collab_members[at].nick);
+        return 1;
+    }
+    snprintf(buf,cap,"member-%u",id);
+    return 0;
+}
+/* Sends auth with a fresh member keypair, a proof when claiming, and
+   returns after auth_ok. The challenge comes from the welcome frame. */
+static int collab_auth(const char *room_id, int as_owner, char *err,
+    size_t errlen) {
+    uint8_t sig[CCR_SIG_BYTES], mac[CCR_KEY_BYTES];
+    char *pk_b64=NULL, *sig_b64=NULL, *proof_b64=NULL;
+    cJSON *auth=NULL, *reply=NULL;
+    int ok=0;
+    if (!collab_have_keys || !collab_have_roomkey ||
+        !collab_have_challenge) {
+        collab_fail(err,errlen,"collab: no keys or challenge for auth");
+        return 0;
+    }
+    if (!ccr_auth_sign(collab_self_sk,collab_challenge,room_id,
+            collab_self_pk,sig) ||
+        !ccr_proof(collab_admission,collab_challenge,room_id,
+            collab_self_pk,mac)) {
+        collab_fail(err,errlen,"collab: could not sign auth");
+        return 0;
+    }
+    pk_b64=collab_b64enc(collab_self_pk,sizeof(collab_self_pk));
+    sig_b64=collab_b64enc(sig,sizeof(sig));
+    proof_b64=collab_b64enc(mac,sizeof(mac));
+    sodium_memzero(sig,sizeof(sig));
+    sodium_memzero(mac,sizeof(mac));
+    if (!pk_b64 || !sig_b64 || !proof_b64) {
+        free(pk_b64);
+        free(sig_b64);
+        free(proof_b64);
+        collab_fail(err,errlen,"collab: out of memory");
+        return 0;
+    }
+    auth=cJSON_CreateObject();
+    if (!auth) {
+        free(pk_b64);
+        free(sig_b64);
+        free(proof_b64);
+        collab_fail(err,errlen,"collab: out of memory");
+        return 0;
+    }
+    cJSON_AddStringToObject(auth,"t","auth");
+    cJSON_AddStringToObject(auth,"room",room_id);
+    cJSON_AddStringToObject(auth,"pk",pk_b64);
+    cJSON_AddStringToObject(auth,"sig",sig_b64);
+    cJSON_AddStringToObject(auth,"proof",proof_b64);
+    if (as_owner) cJSON_AddTrueToObject(auth,"owner");
+    free(pk_b64);
+    free(sig_b64);
+    free(proof_b64);
+    if (!collab_send_json(auth)) {
+        cJSON_Delete(auth);
+        collab_fail(err,errlen,"collab: auth send failed");
+        return 0;
+    }
+    cJSON_Delete(auth);
+    reply=collab_expect("auth_ok",10000,err,errlen);
+    if (!reply) return 0;
+    {
+        const cJSON *resume=cJSON_GetObjectItemCaseSensitive(reply,"resume");
+        size_t outlen=0;
+        if (cJSON_IsString(resume) && resume->valuestring &&
+            cp_b64_decode(resume->valuestring,collab_resume,
+                sizeof(collab_resume),&outlen) &&
+            outlen==sizeof(collab_resume)) {
+            collab_have_resume=1;
+        }
+    }
+    cJSON_Delete(reply);
+    ok=1;
+    return ok;
+}
+/* Seals our nick as a type-2 profile record under the current epoch. */
+static char *collab_sealed_profile(void) {
+    char nick[64];
+    char *json=NULL;
+    uint8_t *enc=NULL;
+    size_t enclen=0;
+    char *out=NULL;
+    if (!collab_nick_get(nick,sizeof(nick))) return NULL;
+    json=ccr_profile_json(nick,NULL);
+    if (!json) return NULL;
+    if (!ccr_seal_ctrl(collab_sub_ctrl,collab_roomid,collab_key_epoch,
+            CCR_CTRL_PROFILE,0,collab_self_pk,collab_self_sk,
+            (const uint8_t *)json,strlen(json),&enc,&enclen)) {
+        free(json);
+        return NULL;
+    }
+    free(json);
+    out=collab_b64enc(enc,enclen);
+    sodium_memzero(enc,enclen);
+    free(enc);
+    return out;
+}
+int collab_join_room(const char *room_id, const uint8_t room_key[32],
+    int as_owner, char *err, size_t errlen) {
+    uint8_t master[CCR_SEED_BYTES];
+    uint8_t pk[CCR_PK_BYTES], sk[CCR_SK_BYTES];
+    cJSON *join=NULL, *joined=NULL;
+    const cJSON *room=NULL, *members=NULL, *slots=NULL, *you=NULL;
+    double max_cycle=-1;
+    uint64_t max_seq=0;
+    int have_apply=0;
+    if (!collab_transport || collab_current_state!=COLLAB_CONNECTED) {
+        collab_fail(err,errlen,"collab: connect first");
+        return 0;
+    }
+    if (!room_id || !room_key) {
+        collab_fail(err,errlen,"collab: room id and key required");
+        return 0;
+    }
+    if (!ccr_room_ok(room_id)) {
+        collab_fail(err,errlen,"collab: bad room id");
+        return 0;
+    }
+    collab_session_reset();
+    collab_room_reset();
+    if (!ccr_identity_load_or_create(master,NULL,0)) {
+        collab_fail(err,errlen,"collab: no identity seed");
+        return 0;
+    }
+    if (!ccr_room_keypair(master,room_id,pk,sk)) {
+        sodium_memzero(master,sizeof(master));
+        collab_fail(err,errlen,"collab: no member key");
+        return 0;
+    }
+    sodium_memzero(master,sizeof(master));
+    memcpy(collab_self_pk,pk,sizeof(pk));
+    memcpy(collab_self_sk,sk,sizeof(sk));
+    sodium_memzero(sk,sizeof(sk));
+    collab_have_keys=1;
+    memcpy(collab_roomkey,room_key,CCR_KEY_BYTES);
+    collab_have_roomkey=1;
+    ccr_admission_key(room_key,collab_admission);
+    ccr_subkey(room_key,2,collab_sub_ctrl);
+    ccr_subkey(room_key,1,collab_sub_frame);
+    collab_key_epoch=0;
+    snprintf(collab_roomid,sizeof(collab_roomid),"%s",room_id);
+    if (!collab_auth(room_id,as_owner,err,errlen)) {
+        collab_session_reset();
+        return 0;
+    }
+    {
+        char *profile=collab_sealed_profile();
+        if (!profile) {
+            collab_fail(err,errlen,"collab: could not seal profile");
+            collab_session_reset();
+            return 0;
+        }
+        join=cJSON_CreateObject();
+        if (!join) {
+            free(profile);
+            collab_fail(err,errlen,"collab: out of memory");
+            collab_session_reset();
+            return 0;
+        }
+        cJSON_AddStringToObject(join,"t","join");
+        cJSON_AddStringToObject(join,"room",room_id);
+        cJSON_AddStringToObject(join,"profile",profile);
+        free(profile);
+        if (!collab_send_json(join)) {
+            cJSON_Delete(join);
+            collab_fail(err,errlen,"collab: join send failed");
+            collab_session_reset();
+            return 0;
+        }
+        cJSON_Delete(join);
+    }
+    joined=collab_expect("joined",10000,err,errlen);
+    if (!joined) {
+        collab_session_reset();
+        return 0;
+    }
+    room=cJSON_GetObjectItemCaseSensitive(joined,"room");
+    you=cJSON_GetObjectItemCaseSensitive(joined,"you");
+    if (!cJSON_IsObject(room) ||
+        !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(room,"e2e"))) {
+        cJSON_Delete(joined);
+        collab_fail(err,errlen,"collab: room is not end-to-end");
+        collab_session_reset();
+        return 0;
+    }
+    {
+        const cJSON *epoch=cJSON_GetObjectItemCaseSensitive(room,"epoch");
+        const cJSON *opk=cJSON_GetObjectItemCaseSensitive(room,"opk");
+        size_t outlen=0;
+        if (cJSON_IsNumber(epoch) && epoch->valuedouble>=0 &&
+            epoch->valuedouble<65536)
+            collab_key_epoch=(uint16_t)epoch->valuedouble;
+        if (cJSON_IsString(opk) && opk->valuestring &&
+            cp_b64_decode(opk->valuestring,collab_opk,sizeof(collab_opk),
+                &outlen) &&
+            outlen==sizeof(collab_opk)) {
+            collab_have_opk=1;
+        }
+    }
+    {
+        const cJSON *mid=cJSON_IsObject(you)?
+            cJSON_GetObjectItemCaseSensitive(you,"member"):NULL;
+        if (!cJSON_IsNumber(mid)) {
+            cJSON_Delete(joined);
+            collab_fail(err,errlen,"collab: no member id");
+            collab_session_reset();
+            return 0;
+        }
+        collab_self_member=(uint32_t)mid->valuedouble;
+        collab_have_self=1;
+    }
+    members=cJSON_GetObjectItemCaseSensitive(joined,"members");
+    if (cJSON_IsArray(members)) {
+        const cJSON *entry=NULL;
+        cJSON_ArrayForEach(entry,members) {
+            const cJSON *mid=cJSON_GetObjectItemCaseSensitive(entry,
+                "member");
+            const cJSON *mpk=cJSON_GetObjectItemCaseSensitive(entry,"pk");
+            const cJSON *role=cJSON_GetObjectItemCaseSensitive(entry,
+                "role");
+            const cJSON *profile=cJSON_GetObjectItemCaseSensitive(entry,
+                "profile");
+            uint8_t pk[CCR_PK_BYTES];
+            size_t outlen=0;
+            if (!cJSON_IsNumber(mid) || !cJSON_IsString(mpk) ||
+                !cp_b64_decode(mpk->valuestring,pk,sizeof(pk),&outlen) ||
+                outlen!=sizeof(pk)) {
+                continue;
+            }
+            collab_member_add((uint32_t)mid->valuedouble,pk,
+                cJSON_IsString(role)?role->valuestring:"editor",
+                cJSON_IsString(profile)?profile->valuestring:NULL);
+        }
+    }
+    /* Anchor the provisional room→local mapping (M4 owns the real
+       filter): the epoch start is adopted at the join instant. */
+    {
+        const cJSON *clock=cJSON_GetObjectItemCaseSensitive(joined,"clock");
+        const cJSON *epoch=cJSON_IsObject(clock)?
+            cJSON_GetObjectItemCaseSensitive(clock,"epoch"):NULL;
+        const cJSON *c=cJSON_IsObject(epoch)?
+            cJSON_GetObjectItemCaseSensitive(epoch,"c"):NULL;
+        const cJSON *cps=cJSON_IsObject(epoch)?
+            cJSON_GetObjectItemCaseSensitive(epoch,"cps"):NULL;
+        uint64_t num=0;
+        unsigned den=1;
+        if (cp_get_cycle(epoch,"c",&num,&den) && cJSON_IsArray(c)) {
+            collab_epoch_c=(double)num/(double)den;
+        }
+        if (cJSON_IsNumber(cps) && cps->valuedouble>0 &&
+            cps->valuedouble<=4) {
+            collab_room_cps=cps->valuedouble;
+        }
+        collab_join_audio=audio_time_now();
+    }
+    slots=cJSON_GetObjectItemCaseSensitive(joined,"slots");    if (cJSON_IsArray(slots)) {
+        const cJSON *entry=NULL;
+        cJSON_ArrayForEach(entry,slots) {
+            const cJSON *slot_item=cJSON_GetObjectItemCaseSensitive(entry,
+                "slot");
+            const cJSON *last=cJSON_GetObjectItemCaseSensitive(entry,
+                "last_eval");
+            const cJSON *enc_item, *author, *seq_item, *cycle;
+            uint8_t *raw=NULL, *plain=NULL;
+            size_t rawlen=0, plainlen=0, b64len;
+            uint64_t seq=0, num=0;
+            unsigned den=1;
+            char *body=NULL;
+            int body_slot=-1;
+            uint64_t body_seq=0;
+            int slot;
+            if (!cJSON_IsObject(last) || !cJSON_IsNumber(slot_item))
+                continue;
+            slot=(int)slot_item->valuedouble;
+            if (slot<0 || slot>=CP_SLOTS_MAX) continue;
+            enc_item=cJSON_GetObjectItemCaseSensitive(last,"enc");
+            author=cJSON_GetObjectItemCaseSensitive(last,"author");
+            seq_item=cJSON_GetObjectItemCaseSensitive(last,"seq");
+            cycle=cJSON_GetObjectItemCaseSensitive(last,"at_cycle");
+            if (!cJSON_IsString(enc_item) || !enc_item->valuestring ||
+                !cJSON_IsNumber(author) || !cJSON_IsNumber(seq_item) ||
+                !cycle) {
+                continue;
+            }
+            {
+                int at=collab_member_find((uint32_t)author->valuedouble);
+                uint8_t *apk;
+                int rc;
+                if (at<0) continue;
+                apk=collab_members[at].pk;
+                b64len=strlen(enc_item->valuestring);
+                if (!b64len || b64len>2*CP_COMPOSITE_MAX) continue;
+                raw=malloc(b64len*3/4+4);
+                if (!raw) continue;
+                if (!cp_b64_decode(enc_item->valuestring,raw,b64len*3/4+4,
+                        &rawlen)) {
+                    free(raw);
+                    continue;
+                }
+                rc=ccr_open_ctrl_typed(collab_sub_ctrl,collab_roomid,
+                    collab_key_epoch,CCR_CTRL_EVAL,(uint16_t)slot,apk,raw,
+                    rawlen,&plain,&plainlen,NULL,NULL,NULL);
+                free(raw);
+                if (rc!=1) {
+                    free(plain);
+                    continue;
+                }
+            }
+            if (!ccr_eval_parse((const char *)plain,plainlen,&body_slot,
+                    &body_seq,&body) ||
+                body_slot!=slot) {
+                sodium_memzero(plain,plainlen);
+                free(plain);
+                free(body);
+                continue;
+            }
+            sodium_memzero(plain,plainlen);
+            free(plain);
+            seq=(uint64_t)seq_item->valuedouble;
+            if (!cp_get_cycle(last,"at_cycle",&num,&den)) {
+                free(body);
+                continue;
+            }
+            if (!collab_room_set_slot(slot,body,strlen(body),
+                    (uint32_t)author->valuedouble!=collab_self_member)) {
+                free(body);
+                continue;
+            }
+            free(body);
+            collab_last_seen[slot].author=(uint32_t)author->valuedouble;
+            collab_last_seen[slot].seq=body_seq;
+            collab_last_seen[slot].seen=1;
+            {
+                double at=(double)num/(double)den;
+                if (at>max_cycle) {
+                    max_cycle=at;
+                    max_seq=seq;
+                    have_apply=1;
+                }
+            }
+        }
+    }
+    cJSON_Delete(joined);
+    if (have_apply && isfinite(max_cycle) && max_cycle>=0) {
+        char fail[256]="";
+        uint64_t capped=max_seq>0xffffffffu?0xffffffffu:max_seq;
+        if (!collab_room_apply(collab_pending_for(max_cycle),
+                (unsigned)capped,fail,sizeof(fail))) {
+            log_console("Jam: replay did not stage: %s",
+                fail[0]?fail:"no reason");
+        }
+    }
+    collab_joined_flag=1;
+    /* Drain the stored replay; live frames dispatch normally. */
+    {
+        uint64_t deadline=(uint64_t)now_seconds()*1000+30000;
+        while (!collab_synced_flag && collab_transport) {
+            uint64_t now=(uint64_t)now_seconds()*1000;
+            int64_t left;
+            int step, got;
+            if (now>=deadline) {
+                collab_fail(err,errlen,"collab: replay timed out");
+                collab_disconnect();
+                return 0;
+            }
+            left=(int64_t)(deadline-now);
+            step=left>2000?2000:(int)left;
+            got=collab_poll(step);
+            if (got<0) {
+                collab_fail(err,errlen,"collab: replay failed");
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+int collab_eval_send(int slot, const char *body, char *err, size_t errlen) {
+    char *json=NULL;
+    uint8_t *enc=NULL;
+    size_t enclen=0, length;
+    char *b64=NULL;
+    cJSON *req=NULL;
+    uint64_t seq;
+    int ok=0;
+    if (!collab_transport || !collab_joined_flag || !collab_have_roomkey ||
+        !collab_have_keys) {
+        collab_fail(err,errlen,"collab: join a room first");
+        return 0;
+    }
+    if (slot<0 || slot>=CP_SLOTS_MAX || !body) {
+        collab_fail(err,errlen,"collab: bad slot or body");
+        return 0;
+    }
+    length=strlen(body);
+    if (length>CP_EVAL_BODY_MAX) {
+        collab_fail(err,errlen,"collab: body exceeds 256 KiB");
+        return 0;
+    }
+    seq=++collab_author_seq[slot];
+    if (!seq) seq=++collab_author_seq[slot];
+    json=ccr_eval_json(slot,seq,body);
+    if (!json) {
+        collab_fail(err,errlen,"collab: bad eval record");
+        return 0;
+    }
+    if (!ccr_seal_ctrl(collab_sub_ctrl,collab_roomid,collab_key_epoch,
+            CCR_CTRL_EVAL,(uint16_t)slot,collab_self_pk,collab_self_sk,
+            (const uint8_t *)json,strlen(json),&enc,&enclen)) {
+        free(json);
+        collab_fail(err,errlen,"collab: could not seal eval");
+        return 0;
+    }
+    free(json);
+    b64=collab_b64enc(enc,enclen);
+    sodium_memzero(enc,enclen);
+    free(enc);
+    if (!b64) {
+        collab_fail(err,errlen,"collab: out of memory");
+        return 0;
+    }
+    req=cJSON_CreateObject();
+    if (!req) {
+        free(b64);
+        collab_fail(err,errlen,"collab: out of memory");
+        return 0;
+    }
+    cJSON_AddStringToObject(req,"t","eval_req");
+    cJSON_AddNumberToObject(req,"slot",(double)slot);
+    cJSON_AddStringToObject(req,"enc",b64);
+    free(b64);
+    ok=collab_send_json(req);
+    cJSON_Delete(req);
+    if (!ok) collab_fail(err,errlen,"collab: eval_req send failed");
+    return ok;
 }

@@ -11,7 +11,7 @@
 /* E2E crypto (docs/multiplayer.md sections 13.5, 14.1, 14.5). Fail closed:
    every entry point validates lengths and room ids before touching sodium,
    and every failure path wipes stack key material it can. */
-static int ccr_room_ok(const char *room_id) {
+int ccr_room_ok(const char *room_id) {
     size_t i;
     if (!room_id) return 0;
     for (i=0;i<CCR_ROOM_ID_LEN;i++) {

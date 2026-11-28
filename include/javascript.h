@@ -16,6 +16,30 @@ JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, ch
 /* Live evaluation applies loaders at their call sites, sharing session state. */
 JsProgram *javascript_compile_from(const char *code, double bpm, JsProgram *previous,
                                  cJSON **metadata, char *error, int errorlen);
+/* Room composite: one slot's source per entry, evaluated in order. */
+typedef struct {
+    int slot;
+    const char *text;
+} CollabSlotText;
+/* Per-program capability profile (docs/multiplayer.md section 13.2).
+   Local compiles use js_profile_local() (everything allowed); room
+   composites use js_profile_remote() (local modules, prebakes, MIDI
+   manifests and input, and Csound denied with a catchable error; the
+   startup prebake skipped; the query worker never bound). */
+typedef struct {
+    int allow_local_modules;
+    int allow_named_prebakes;
+    int allow_midi_manifest;
+    int allow_midi_in;
+    int allow_csound;
+    int run_startup_prebake;
+    int force_quickjs;
+} JsProfile;
+JsProfile js_profile_local(void);
+JsProfile js_profile_remote(void);
+JsProgram *javascript_compile_slots(const CollabSlotText *slots, int nslots,
+    double bpm, JsProgram *previous, const JsProfile *profile,
+    cJSON **metadata, char *error, int errorlen);
 void javascript_free(JsProgram *program);
 void javascript_retain(JsProgram *program);
 /* Diagnostics: 1 when this program's queries run in a separate worker. */

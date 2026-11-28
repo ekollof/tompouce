@@ -1134,23 +1134,26 @@ green, docs updated. Milestones map to brief §19 phases.
 - [x] Bakery site live at <https://bakery.andrath.nl/> with setup guides,
       safety/privacy/rules pages and a meta CSP.
 
-### M1 — Room composite compile (doing, uncommitted)
+### M1 — Room composite compile (done)
 
-- [ ] `__compileSlots` in `js/runtime.mjs`: per-slot isolated eval, namespaced
+- [x] `__compileSlots` in `js/runtime.mjs`: per-slot isolated eval, namespaced
       `"<slot>/<label>"` branch ids, union of soloed branches, `tempoBySlot`,
       `locationsBase`, per-slot `{ok, error}` without failing the room.
-- [ ] `JsProfile` + `javascript_compile_slots()` in C: remote-profile denials
+- [x] `JsProfile` + `javascript_compile_slots()` in C: remote-profile denials
       (local modules, prebakes, MIDI manifest/input, Csound) as catchable
       errors with no side effects, `force_quickjs`, seeded `Math.random`.
-      (In progress: `JsProfile` declarations and the shared `finish_compile`
-      helper are uncommitted in `include/javascript.h` / `src/javascript.c`;
-      the slots entry point, profile enforcement and `__compileSlots` still
-      to land.)
-- [ ] Extend `tests/test_javascript.c`; `npm --prefix js run build`, rebuild C
+- [x] Extended `tests/test_javascript.c`; `npm --prefix js run build`, rebuilt C
       to re-embed the bundle.
-- [ ] Acceptance: scope isolation (`const x` in two slots), per-slot errors,
+- [x] Acceptance: scope isolation (`const x` in two slots), per-slot errors,
       namespaced hap ids, no weaker-option paths, deterministic seeded random,
       full suite green.
+- Notes: attribution rides the hap value via `fmap`, not
+      `withState`+`setControls` — the pinned core never merges state controls
+      into hap values (verified: even single-program `$:` haps carry no `id`),
+      so the latter would silently vanish. `id` is allowlisted in
+      `warn_unknown_controls`. `scheduler_collab_sanitize` leaks at exit on
+      the clean tree too (indirect-only, no direct leaks, none from the new
+      code) — pre-existing, not from this milestone.
 
 ### M2 — Live shared eval (next)
 

@@ -88,6 +88,16 @@ struct JsProgram {
     /* Unique per compile_program call: two evaluations of identical source
        must not share the worker's state. */
     unsigned compile_serial;
+    /* Capability profile for this program (section 13.2). Local compiles
+       allow everything; room composites deny local modules, prebakes,
+       MIDI manifests and input, and Csound, skip the startup prebake and
+       never bind the query worker. */
+    JsProfile profile;
+    /* Jam-mode composite slot bases (JS string units) for highlight mapping;
+       nslots==0 for single-source programs. */
+    int nslots;
+    int slot_ids[32];
+    int slot_bases[32];
 };
 /* Programs that depend on QuickJS-only host features keep using QuickJS. */
 static int worker_compatible(const JsProgram *p, const cJSON *metadata) {
@@ -275,10 +285,21 @@ static JSValue host_slider_read(JSContext *ctx, JSValueConst self, int argc, JSV
     return JS_NewFloat64(ctx,value);
 }
 
+/* Plain catchable Error for remote-profile denials (§13.2). Any throw is
+   catchable in JS; the point is a clear message, not a missing function. */
+static JSValue room_denied(JSContext *ctx, const char *what) {
+    JSValue error = JS_NewError(ctx);
+    if (JS_IsException(error)) return JS_EXCEPTION;
+    JS_SetPropertyStr(ctx, error, "message", JS_NewString(ctx, what));
+    return JS_Throw(ctx, error);
+}
 /* MIDI controller input reads. The port argument only selects the
    subscription; values merge across senders like a single controller. */
 static JSValue host_midi_open(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
+    JsProgram *p=JS_GetContextOpaque(ctx);
+    if (p && !p->profile.allow_midi_in)
+        return room_denied(ctx,"MIDI input is disabled for room code (see /collab allow)");
     if (!argc) return JS_NewInt32(ctx,0);
     if (JS_IsNumber(argv[0])) {
         int32_t ordinal;
@@ -298,6 +319,8 @@ static JSValue host_midi_open(JSContext *ctx, JSValueConst self, int argc, JSVal
 static JSValue host_midi_manifest(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
     JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->profile.allow_midi_manifest)
+        return room_denied(ctx,"MIDI manifests are disabled for room code (see /collab allow)");
     if (!p->loading_allowed) return JS_ThrowReferenceError(ctx,"MIDI manifests load only during evaluation");
     if (argc!=1 || !JS_IsString(argv[0])) return JS_ThrowTypeError(ctx,"manifest requires a name");
     size_t length; const char *name=JS_ToCStringLen(ctx,&length,argv[0]);
@@ -469,6 +492,8 @@ static char *dup_bytes(const char *text, size_t size) {
 static JSValue host_prebake(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
     JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->profile.allow_named_prebakes)
+        return room_denied(ctx,"named prebakes are disabled for room code (see /collab allow)");
     if (!p->loading_allowed || p->prebake_files>=16)
         return JS_ThrowReferenceError(ctx,"load at most 16 prebakes during evaluation, before pattern queries");
     if (argc!=1 || !JS_IsString(argv[0]))return JS_ThrowTypeError(ctx,"prebake requires a file name");
@@ -564,6 +589,7 @@ int javascript_store_prebake(const char *text, char *error, size_t error_size) {
 static JSModuleDef *module_loader(JSContext *ctx, const char *name, void *opaque) {
     JsProgram *p = opaque;
     if (!strncmp(name,"local:",6)) {
+        if (!p->profile.allow_local_modules) { room_denied(ctx,"local modules are disabled for room code (see /collab allow)"); return NULL; }
         if (!p->loading_allowed) { JS_ThrowReferenceError(ctx,"load local modules during evaluation, before pattern queries"); return NULL; }
         size_t size;
         char *source = local_module_source(ctx,name+6,&size);
@@ -714,6 +740,8 @@ CsoundProgram *javascript_csound(JsProgram *p) { return p ? p->csound : NULL; }
 static JSValue host_csound(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
     (void)self;
     JsProgram *p=JS_GetContextOpaque(ctx);
+    if (!p->profile.allow_csound)
+        return room_denied(ctx,"Csound is disabled for room code (see /collab allow)");
     if (!p->loading_allowed || now_seconds()>p->deadline || p->orchestra_calls>=16)
         return JS_ThrowTypeError(ctx,"load Csound only during evaluation (16 loads maximum)");
     if (argc!=2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1]))
@@ -967,6 +995,131 @@ static cJSON *json_value(JSContext *ctx, JSValue value) {
 static int utf8_offset(const char *s, int units);
 static int visual_source_matches(const char *compiled, const char *editor);
 
+/* Per-program capability profiles (docs/multiplayer.md section 13.2). */
+JsProfile js_profile_local(void) {
+    JsProfile profile={1,1,1,1,1,1,0};
+    return profile;
+}
+JsProfile js_profile_remote(void) {
+    JsProfile profile={0,0,0,0,0,0,1};
+    return profile;
+}
+/* Runs the named compile entry with the given args (ownership of fn and
+   args transfers here), pumps the promise, parses metadata and binds the
+   query worker unless forced off. `code` is the evaluated source used for
+   visual offset validation. Shared by __compile and __compileSlots. */
+static JsProgram *finish_compile(JsProgram *p, const char *code, double bpm,
+    int force_quickjs, const char *entry, JSValue *args, int nargs,
+    cJSON **metadata, char *error, int n) {
+    JSContext *ctx=p->context;
+    JSValue fn=global_function(ctx,entry);
+    JSValue value=JS_EXCEPTION;
+    int i, bad=JS_IsException(fn);
+    for (i=0;!bad && i<nargs;i++) bad=JS_IsException(args[i]);
+    if (!bad) value=JS_Call(ctx,fn,JS_UNDEFINED,nargs,args);
+    for (i=0;i<nargs;i++) JS_FreeValue(ctx,args[i]);
+    JS_FreeValue(ctx,fn);
+    while (!JS_IsException(value) && JS_PromiseState(ctx, value) == JS_PROMISE_PENDING) {
+        JSContext *job_ctx=NULL;
+        int result=JS_ExecutePendingJob(p->runtime,&job_ctx);
+        if (result<=0 || now_seconds()>p->deadline) break;
+    }
+    JSValue result=JS_UNDEFINED;
+    if (JS_IsException(value)) result=JS_GetException(ctx);
+    else if (JS_PromiseState(ctx,value)==JS_PROMISE_REJECTED) result=JS_PromiseResult(ctx,value);
+    else if (JS_PromiseState(ctx,value)==JS_PROMISE_FULFILLED) {
+        result=JS_PromiseResult(ctx,value);
+        cJSON *json=json_value(ctx,result);
+        JS_FreeValue(ctx,result);
+        JS_FreeValue(ctx,value);
+        if (json) {
+            const cJSON *site;
+            cJSON_ArrayForEach(site,cJSON_GetObjectItemCaseSensitive(json,"visualSites")) {
+                const cJSON *offset=cJSON_GetObjectItemCaseSensitive(site,"offset");
+                const cJSON *id=cJSON_GetObjectItemCaseSensitive(site,"id");
+                const cJSON *kind=cJSON_GetObjectItemCaseSensitive(site,"kind");
+                if (p->nvisual_sites>=32 || !cJSON_IsNumber(offset) || !cJSON_IsNumber(id) || !cJSON_IsNumber(kind) ||
+                    offset->valuedouble<0 || offset->valuedouble>(double)strlen(code) ||
+                    id->valuedouble<0 || id->valuedouble>=32 || floor(id->valuedouble)!=id->valuedouble ||
+                    kind->valuedouble<1 || kind->valuedouble>VISUAL_KINDS || floor(kind->valuedouble)!=kind->valuedouble) continue;
+                int vi=p->nvisual_sites++;
+                p->visual_sites[vi].offset=utf8_offset(code,offset->valueint);
+                p->visual_sites[vi].kind=kind->valueint;
+                p->visual_sites[vi].id=id->valueint;
+                p->visual_sites[vi].mask=1u<<id->valueint;
+                visual_options(&p->visual_sites[vi].options,kind->valueint,cJSON_GetObjectItemCaseSensitive(site,"options"));
+            }
+            if (p->nvisual_sites) {
+                p->visual_notes=calloc(VISUAL_CACHE_NOTES,sizeof(*p->visual_notes));
+                if (!p->visual_notes) { cJSON_Delete(json); javascript_free(p); return NULL; }
+            }
+            p->loading_allowed=0;
+            if (!force_quickjs && worker_backend_enabled() && worker_compatible(p,json)) {
+                int delegated=worker_bind(p,isfinite(bpm)?bpm:120);
+                atomic_store(&p->worker_delegated,delegated);
+                if (delegated) log_console("query backend: worker for this program");
+            }
+            if (metadata) *metadata=json; else cJSON_Delete(json);
+            return p;
+        }
+        javascript_free(p);
+        return NULL;
+    }
+    if (JS_IsUndefined(result) && error && n>0)
+        snprintf(error,(size_t)n,"JavaScript evaluation did not settle within its execution budget");
+    else exception_text(ctx,result,error,n);
+    JS_FreeValue(ctx,result);
+    JS_FreeValue(ctx,value);
+    javascript_free(p);
+    return NULL;
+}
+/* Loads the confined startup prebake (prebake.strudel plus the enabled
+   list). Returns owned text (possibly empty) with its length in *len_out,
+   or NULL with error set on failure. */
+static char *startup_prebake(JsProgram *p, size_t *len_out, char *error, int n) {
+    JSContext *ctx = p->context;
+    size_t prebake_length=0;
+    char *prebake=config_script_source(ctx,"prebake.strudel",1,&prebake_length);
+    if (!prebake && JS_HasException(ctx)) {
+        JSValue failure=JS_GetException(ctx);
+        exception_text(ctx,failure,error,n); JS_FreeValue(ctx,failure);
+        return NULL;
+    }
+    size_t enabled_length=0;
+    char *enabled=NULL;
+    if (prebake_store_enabled_source(&enabled,&enabled_length)<0) {
+        snprintf(error,(size_t)n,"enabled prebakes: unsafe or unreadable list");
+        free(prebake); return NULL;
+    }
+    if (enabled && !enabled_length) { free(enabled); enabled=NULL; }
+    if (enabled && enabled_length) {
+        size_t total=prebake_length+1+enabled_length;
+        if (total>1024*1024) {
+            free(enabled); free(prebake);
+            snprintf(error,(size_t)n,"prebake setup exceeds 1 MiB");
+            return NULL;
+        }
+        char *combined=malloc(total+1);
+        if (!combined) {
+            free(enabled); free(prebake); return NULL;
+        }
+        size_t used=0;
+        if (prebake_length) { memcpy(combined,prebake,prebake_length); used=prebake_length; }
+        combined[used++]='\n';
+        memcpy(combined+used,enabled,enabled_length); used+=enabled_length;
+        combined[used]=0;
+        free(prebake); free(enabled);
+        prebake=combined; prebake_length=used;
+    }
+    p->prebake_bytes=prebake_length;
+    *len_out=prebake_length;
+    if (!prebake) {
+        /* No startup prebake configured: same empty text compile_program
+           used to pass, kept non-NULL so callers treat NULL as failure. */
+        prebake=calloc(1,1);
+    }
+    return prebake;
+}
 static JsProgram *compile_program(const char *code, double bpm, JsProgram *previous, int eager,
                                   cJSON **metadata, char *error, int n) {
     if (metadata) *metadata = NULL;
@@ -976,6 +1129,7 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
     if (!p) return NULL;
     atomic_init(&p->refs,1);
     p->eager_csound=eager;
+    p->profile=js_profile_local();
     p->compile_serial = atomic_fetch_add(&compile_serial_counter,1)+1;
     if (eager) {
         pthread_mutex_lock(&stashed_csound_lock);
@@ -996,96 +1150,128 @@ static JsProgram *compile_program(const char *code, double bpm, JsProgram *previ
     if (!p->source || !p->visual_source || !initialize(p, error, n)) { javascript_free(p); return NULL; }
     JSContext *ctx = p->context;
     size_t prebake_length=0;
-    char *prebake=config_script_source(ctx,"prebake.strudel",1,&prebake_length);
-    if (!prebake && JS_HasException(ctx)) {
-        JSValue failure=JS_GetException(ctx);
-        exception_text(ctx,failure,error,n); JS_FreeValue(ctx,failure);
-        javascript_free(p); return NULL;
-    }
-    size_t enabled_length=0;
-    char *enabled=NULL;
-    if (prebake_store_enabled_source(&enabled,&enabled_length)<0) {
-        snprintf(error,(size_t)n,"enabled prebakes: unsafe or unreadable list");
-        free(prebake); javascript_free(p); return NULL;
-    }
-    if (enabled && !enabled_length) { free(enabled); enabled=NULL; }
-    if (enabled && enabled_length) {
-        size_t total=prebake_length+1+enabled_length;
-        if (total>1024*1024) {
-            free(enabled); free(prebake);
-            snprintf(error,(size_t)n,"prebake setup exceeds 1 MiB");
-            javascript_free(p); return NULL;
-        }
-        char *combined=malloc(total+1);
-        if (!combined) {
-            free(enabled); free(prebake); javascript_free(p); return NULL;
-        }
-        size_t used=0;
-        if (prebake_length) { memcpy(combined,prebake,prebake_length); used=prebake_length; }
-        combined[used++]='\n';
-        memcpy(combined+used,enabled,enabled_length); used+=enabled_length;
-        combined[used]=0;
-        free(prebake); free(enabled);
-        prebake=combined; prebake_length=used;
-    }
-    p->prebake_bytes=prebake_length;
-    JSValue fn = global_function(ctx, "__compile");
+    char *prebake=startup_prebake(p,&prebake_length,error,n);
+    if (!prebake) { javascript_free(p); return NULL; }
     JSValue args[3] = {JS_NewString(ctx,code),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120),
         JS_NewStringLen(ctx,prebake?prebake:"",prebake_length)};
     /* Keep the confined text for the worker; javascript_free owns it now. */
     p->prebake_source = prebake;
-    JSValue value = JS_IsException(args[0]) || JS_IsException(args[1]) || JS_IsException(args[2]) ?
-        JS_EXCEPTION : JS_Call(ctx, fn, JS_UNDEFINED, 3, args);
-    JS_FreeValue(ctx, args[0]); JS_FreeValue(ctx,args[1]); JS_FreeValue(ctx,args[2]); JS_FreeValue(ctx, fn);
-    while (!JS_IsException(value) && JS_PromiseState(ctx, value) == JS_PROMISE_PENDING) {
-        JSContext *job_ctx = NULL;
-        int result = JS_ExecutePendingJob(p->runtime, &job_ctx);
-        if (result <= 0 || now_seconds() > p->deadline) break;
+    return finish_compile(p, code, bpm, 0, "__compile", args, 3, metadata, error, n);
+}
+
+/* Room composite compile for Jam mode (docs/multiplayer.md sections 6.2,
+   9.4, 13.2). Texts are evaluated slot by slot in __compileSlots; a NULL
+   profile fails safe to the remote profile. Bounds mirror the protocol caps
+   (§7): 1..32 slots, 256 KiB per slot, 1 MiB composite. */
+JsProgram *javascript_compile_slots(const CollabSlotText *slots, int nslots,
+    double bpm, JsProgram *previous, const JsProfile *profile,
+    cJSON **metadata, char *error, int errorlen) {
+    if (metadata) *metadata = NULL;
+    if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "could not initialize JavaScript runtime");
+    JsProfile prof = profile ? *profile : js_profile_remote();
+    if (!slots || nslots < 1 || nslots > 32) {
+        if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "room compile needs 1..32 slots");
+        return NULL;
     }
-    JSValue result = JS_UNDEFINED;
-    if (JS_IsException(value)) result = JS_GetException(ctx);
-    else if (JS_PromiseState(ctx, value) == JS_PROMISE_REJECTED) result = JS_PromiseResult(ctx, value);
-    else if (JS_PromiseState(ctx, value) == JS_PROMISE_FULFILLED) {
-        result = JS_PromiseResult(ctx, value);
-        cJSON *json = json_value(ctx, result);
-        JS_FreeValue(ctx, result); JS_FreeValue(ctx, value);
-        if (json) {
-            const cJSON *site;
-            cJSON_ArrayForEach(site,cJSON_GetObjectItemCaseSensitive(json,"visualSites")) {
-                const cJSON *offset = cJSON_GetObjectItemCaseSensitive(site,"offset");
-                const cJSON *id = cJSON_GetObjectItemCaseSensitive(site,"id");
-                const cJSON *kind = cJSON_GetObjectItemCaseSensitive(site,"kind");
-                if (p->nvisual_sites >= 32 || !cJSON_IsNumber(offset) || !cJSON_IsNumber(id) || !cJSON_IsNumber(kind) ||
-                    offset->valuedouble < 0 || offset->valuedouble > (double)strlen(code) ||
-                    id->valuedouble < 0 || id->valuedouble >= 32 || floor(id->valuedouble) != id->valuedouble ||
-                    kind->valuedouble < 1 || kind->valuedouble > VISUAL_KINDS || floor(kind->valuedouble) != kind->valuedouble) continue;
-                int i = p->nvisual_sites++;
-                p->visual_sites[i].offset = utf8_offset(code,offset->valueint);
-                p->visual_sites[i].kind = kind->valueint;
-                p->visual_sites[i].id = id->valueint;
-                p->visual_sites[i].mask = 1u << id->valueint;
-                visual_options(&p->visual_sites[i].options,kind->valueint,cJSON_GetObjectItemCaseSensitive(site,"options"));
-            }
-            if (p->nvisual_sites) {
-                p->visual_notes = calloc(VISUAL_CACHE_NOTES,sizeof(*p->visual_notes));
-                if (!p->visual_notes) { cJSON_Delete(json); javascript_free(p); return NULL; }
-            }
-            p->loading_allowed = 0;
-            if (worker_backend_enabled() && worker_compatible(p,json)) {
-                int delegated = worker_bind(p,isfinite(bpm) ? bpm : 120);
-                atomic_store(&p->worker_delegated,delegated);
-                if (delegated) log_console("query backend: worker for this program");
-            }
-            if (metadata) *metadata = json; else cJSON_Delete(json);
-            return p;
+    size_t total = 0;
+    for (int i = 0; i < nslots; i++) {
+        if (!slots[i].text || slots[i].slot < 0 || slots[i].slot > 1023) {
+            if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "room slot %d is invalid", i);
+            return NULL;
         }
-        javascript_free(p); return NULL;
+        size_t len = strlen(slots[i].text);
+        if (len > 256*1024) {
+            if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "room slot %d exceeds 256 KiB", slots[i].slot);
+            return NULL;
+        }
+        for (int j = 0; j < i; j++) {
+            if (slots[j].slot == slots[i].slot) {
+                if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "duplicate room slot %d", slots[i].slot);
+                return NULL;
+            }
+        }
+        if (total + len + 1 > 1024*1024) {
+            if (error && errorlen > 0) snprintf(error, (size_t)errorlen, "room composite exceeds 1 MiB");
+            return NULL;
+        }
+        total += len + 1;
     }
-    if (JS_IsUndefined(result) && error && n > 0)
-        snprintf(error,(size_t)n,"JavaScript evaluation did not settle within its execution budget");
-    else exception_text(ctx, result, error, n);
-    JS_FreeValue(ctx, result); JS_FreeValue(ctx, value);
-    javascript_free(p); return NULL;
+    char *composite = malloc(total + 1);
+    if (!composite) return NULL;
+    size_t used = 0;
+    int bases[32];
+    for (int i = 0; i < nslots; i++) {
+        size_t len = strlen(slots[i].text);
+        bases[i] = (int)used;
+        memcpy(composite + used, slots[i].text, len);
+        used += len;
+        composite[used++] = '\n';
+    }
+    composite[used] = 0;
+    cJSON *array = cJSON_CreateArray();
+    if (!array) { free(composite); return NULL; }
+    for (int i = 0; i < nslots; i++) {
+        cJSON *entry = cJSON_CreateObject();
+        if (!entry || !cJSON_AddNumberToObject(entry, "id", slots[i].slot) ||
+            !cJSON_AddStringToObject(entry, "code", slots[i].text) ||
+            !cJSON_AddItemToArray(array, entry)) {
+            cJSON_Delete(entry); cJSON_Delete(array); free(composite); return NULL;
+        }
+    }
+    char *slotstext = cJSON_PrintUnformatted(array);
+    cJSON_Delete(array);
+    if (!slotstext) { free(composite); return NULL; }
+    JsProgram *p = calloc(1, sizeof(*p));
+    if (!p) { free(composite); free(slotstext); return NULL; }
+    atomic_init(&p->refs,1);
+    p->eager_csound = previous != NULL;
+    p->profile = prof;
+    p->compile_serial = atomic_fetch_add(&compile_serial_counter,1)+1;
+    if (p->eager_csound) {
+        pthread_mutex_lock(&stashed_csound_lock);
+        p->csound=previous && previous->csound?previous->csound:stashed_csound;
+        csound_program_retain(p->csound);
+        pthread_mutex_unlock(&stashed_csound_lock);
+    }
+    p->sliders=slider_bank_create();
+    if (!p->sliders) { csound_program_free(p->csound); free(p); free(composite); free(slotstext); return NULL; }
+    if (pthread_mutex_init(&p->lock,NULL) != 0) { csound_program_free(p->csound); slider_bank_free(p->sliders); free(p); free(composite); free(slotstext); return NULL; }
+    p->lock_ready = 1;
+    if (pthread_mutex_init(&p->spans_lock,NULL) != 0) { javascript_free(p); free(composite); free(slotstext); return NULL; }
+    p->lock_ready = 2;
+    p->deadline = now_seconds() + 2.0;
+    p->loading_allowed = 1;
+    p->source = composite;
+    p->visual_source = strdup_safe(composite);
+    if (!p->visual_source || !initialize(p, error, errorlen)) { javascript_free(p); free(slotstext); return NULL; }
+    /* javascript_free owns p->source (= composite) from here on; slotstext
+       is only the JS argument. */
+    composite = NULL;
+    JSContext *ctx = p->context;
+    char *prebake = NULL;
+    size_t prebake_length = 0;
+    if (prof.run_startup_prebake) {
+        prebake = startup_prebake(p, &prebake_length, error, errorlen);
+        if (!prebake) { javascript_free(p); free(slotstext); return NULL; }
+    } else {
+        prebake = calloc(1, 1);
+        if (!prebake) { javascript_free(p); free(slotstext); return NULL; }
+        p->prebake_bytes = 0;
+    }
+    JSValue args[3] = {JS_NewString(ctx, slotstext),JS_NewFloat64(ctx,isfinite(bpm) ? bpm : 120),
+        JS_NewStringLen(ctx,prebake,prebake_length)};
+    free(slotstext);
+    /* Keep the confined text for the worker; javascript_free owns it now. */
+    p->prebake_source = prebake;
+    JsProgram *done = finish_compile(p, p->source, bpm, prof.force_quickjs,
+        "__compileSlots", args, 3, metadata, error, errorlen);
+    if (!done) return NULL;
+    done->nslots = nslots;
+    for (int i = 0; i < nslots; i++) {
+        done->slot_ids[i] = slots[i].slot;
+        done->slot_bases[i] = bases[i];
+    }
+    return done;
 }
 
 JsProgram *javascript_compile(const char *code, double bpm, cJSON **metadata, char *error, int n) {
@@ -1195,6 +1381,24 @@ void javascript_cache_spans(JsProgram *p, const cJSON *haps, double origin, doub
         const cJSON *a = cJSON_GetObjectItemCaseSensitive(hap, "begin");
         const cJSON *b = cJSON_GetObjectItemCaseSensitive(hap, "end");
         if (!cJSON_IsNumber(a) || !cJSON_IsNumber(b)) continue;
+        /* Composite haps carry namespaced "<slot>/..." branch ids with
+           slot-local highlight offsets; shift them into the composite
+           source with the slot's locationsBase. Single-source programs
+           keep base 0. */
+        int base = 0;
+        if (p->nslots > 0) {
+            const cJSON *value = cJSON_GetObjectItemCaseSensitive(hap, "value");
+            const cJSON *id = value ? cJSON_GetObjectItemCaseSensitive(value, "id") : NULL;
+            if (cJSON_IsString(id) && id->valuestring) {
+                char *end = NULL;
+                long slot = strtol(id->valuestring, &end, 10);
+                if (end != id->valuestring && slot >= 0 && slot <= 1023 && (*end == 0 || *end == '/')) {
+                    for (int i = 0; i < p->nslots; i++) {
+                        if (p->slot_ids[i] == (int)slot) { base = p->slot_bases[i]; break; }
+                    }
+                }
+            }
+        }
         VisualNote style;
         int styled=visual_note(&style,hap,origin,seconds);
         const cJSON *loc;
@@ -1202,12 +1406,13 @@ void javascript_cache_spans(JsProgram *p, const cJSON *haps, double origin, doub
             const cJSON *lo = cJSON_GetObjectItemCaseSensitive(loc, "start");
             const cJSON *hi = cJSON_GetObjectItemCaseSensitive(loc, "end");
             if (!cJSON_IsNumber(lo) || !cJSON_IsNumber(hi) || lo->valuedouble < 0 ||
-                hi->valuedouble <= lo->valuedouble || hi->valuedouble > (double)INT_MAX) continue;
+                hi->valuedouble <= lo->valuedouble || hi->valuedouble > (double)INT_MAX ||
+                lo->valuedouble > (double)INT_MAX - base) continue;
             unsigned i = p->head++ % JS_SPANS;
             p->spans[i].begin = origin + a->valuedouble * seconds;
             p->spans[i].end = origin + b->valuedouble * seconds;
-            p->spans[i].off = utf8_offset(p->source, lo->valueint);
-            p->spans[i].len = utf8_offset(p->source, hi->valueint) - p->spans[i].off;
+            p->spans[i].off = utf8_offset(p->source, lo->valueint + base);
+            p->spans[i].len = utf8_offset(p->source, hi->valueint + base) - p->spans[i].off;
             p->spans[i].color=styled?style.color:0;
             p->spans[i].flags=styled?style.flags:0;
         }

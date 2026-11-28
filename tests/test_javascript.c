@@ -816,6 +816,195 @@ static void test_lv2param_control(void) {
    ignored by the current site and retain only the chain's default gain.
    Legacy step descriptors keep outer-control precedence; K() graph sources
    remain outside the scale/gain boundary. */
+/* Jam-mode room composite (M1): per-slot isolated eval, namespaced branch
+   ids, per-slot errors, locationsBase mapping, tempo reporting without
+   applying, deterministic eval-time random, and remote-profile denials. */
+static void test_collab_slots(void) {
+    char error[1024];
+    JsProfile remote=js_profile_remote();
+    /* Scope isolation: the same const in two slots must not collide. */
+    {
+        CollabSlotText slots[]={{0,"const melody=note(60); melody"},{1,"const melody=note(67); melody"}};
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,2,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots isolation: %s\n",error);
+        assert(program && metadata);
+        cJSON *sm=cJSON_GetObjectItemCaseSensitive(metadata,"slots");
+        assert(cJSON_IsArray(sm) && cJSON_GetArraySize(sm)==2);
+        const cJSON *s0=cJSON_GetArrayItem(sm,0), *s1=cJSON_GetArrayItem(sm,1);
+        assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s0,"ok")));
+        assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s1,"ok")));
+        assert(cJSON_GetObjectItemCaseSensitive(s0,"locationsBase")->valuedouble==0);
+        assert(cJSON_GetObjectItemCaseSensitive(s1,"locationsBase")->valuedouble==(double)(strlen(slots[0].text)+1));
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==2);
+        int notes[2]={0,0}, count=0;
+        const cJSON *hap=NULL;
+        cJSON_ArrayForEach(hap,haps) {
+            const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+            const cJSON *note=value?cJSON_GetObjectItemCaseSensitive(value,"note"):NULL;
+            if (count<2 && cJSON_IsNumber(note)) notes[count++]=note->valueint;
+        }
+        assert(count==2 && ((notes[0]==60 && notes[1]==67)||(notes[0]==67 && notes[1]==60)));
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Namespaced branch ids: authorship stays attributable per slot. */
+    {
+        CollabSlotText slots[]={{0,"$: note(60).s('sine')"},{3,"$: note(64).s('sine')"}};
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,2,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots ids: %s\n",error);
+        assert(program);
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==2);
+        int seen0=0, seen3=0;
+        const cJSON *hap=NULL;
+        cJSON_ArrayForEach(hap,haps) {
+            const cJSON *value=cJSON_GetObjectItemCaseSensitive(hap,"value");
+            const cJSON *id=value?cJSON_GetObjectItemCaseSensitive(value,"id"):NULL;
+            assert(cJSON_IsString(id));
+            if (!strncmp(id->valuestring,"0/",2)) seen0=1;
+            if (!strncmp(id->valuestring,"3/",2)) seen3=1;
+        }
+        assert(seen0 && seen3);
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Per-slot exception: one slot's throw must not silence the other. */
+    {
+        CollabSlotText slots[]={{0,"throw new Error('boom')"},{1,"$: note(64).s('sine')"}};
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,2,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots error: %s\n",error);
+        assert(program && metadata);
+        cJSON *sm=cJSON_GetObjectItemCaseSensitive(metadata,"slots");
+        assert(cJSON_IsArray(sm) && cJSON_GetArraySize(sm)==2);
+        const cJSON *s0=cJSON_GetArrayItem(sm,0), *s1=cJSON_GetArrayItem(sm,1);
+        assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(s0,"ok")));
+        assert(strstr(cJSON_GetObjectItemCaseSensitive(s0,"error")->valuestring,"boom"));
+        assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s1,"ok")));
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==1);
+        const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+        assert(cJSON_GetObjectItemCaseSensitive(value,"note")->valueint==64);
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Tempo is reported per slot and never applied to the room clock. */
+    {
+        CollabSlotText slots[]={{0,"setcpm(180); $: note(60).s('sine')"}};
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,1,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots tempo: %s\n",error);
+        assert(program && metadata);
+        assert(!cJSON_GetObjectItemCaseSensitive(metadata,"bpm"));
+        const cJSON *tbs=cJSON_GetObjectItemCaseSensitive(metadata,"tempoBySlot");
+        assert(cJSON_IsObject(tbs));
+        const cJSON *t0=cJSON_GetObjectItemCaseSensitive(tbs,"0");
+        /* Same unit as __compile's bpm field: single-compile the same code
+           and compare. The room query still uses the passed-in bpm. */
+        char error2[1024]; cJSON *single_meta=NULL;
+        JsProgram *single=javascript_compile(slots[0].text,120,&single_meta,error2,sizeof(error2));
+        assert(single && single_meta);
+        const cJSON *single_bpm=cJSON_GetObjectItemCaseSensitive(single_meta,"bpm");
+        assert(cJSON_IsNumber(t0) && cJSON_IsNumber(single_bpm) && t0->valuedouble==single_bpm->valuedouble);
+        cJSON_Delete(single_meta); javascript_free(single);
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==1);
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Deterministic eval-time random: the same composite compiles the same. */
+    {
+        CollabSlotText slots[]={{0,"const n=60+(Math.random()*12|0); $: note(n).s('sine')"}};
+        cJSON *first_meta=NULL, *second_meta=NULL;
+        JsProgram *first=javascript_compile_slots(slots,1,120,NULL,&remote,&first_meta,error,sizeof(error));
+        if (!first) fprintf(stderr,"slots random: %s\n",error);
+        assert(first);
+        cJSON_Delete(first_meta);
+        cJSON *first_haps=javascript_query(first,0,1);
+        assert(cJSON_IsArray(first_haps) && cJSON_GetArraySize(first_haps)==1);
+        char *first_text=cJSON_PrintUnformatted(first_haps);
+        cJSON_Delete(first_haps); javascript_free(first);
+        JsProgram *second=javascript_compile_slots(slots,1,120,NULL,&remote,&second_meta,error,sizeof(error));
+        assert(second);
+        cJSON_Delete(second_meta);
+        cJSON *second_haps=javascript_query(second,0,1);
+        assert(cJSON_IsArray(second_haps) && cJSON_GetArraySize(second_haps)==1);
+        char *second_text=cJSON_PrintUnformatted(second_haps);
+        cJSON_Delete(second_haps); javascript_free(second);
+        assert(first_text && second_text && !strcmp(first_text,second_text));
+        free(first_text); free(second_text);
+    }
+    /* Remote-profile denials: catchable, no side effects, good slot plays.
+       The local: name is well-formed (passes normalize) but nonexistent, so
+       a "disabled" error proves the profile check runs before any file
+       access. */
+    {
+        CollabSlotText slots[]={
+            {0,"$: note(60).s('sine')"},
+            {1,"import melody from 'local:no-such-module-xyz.js'; note(melody)"},
+            {2,"await loadPrebake('no-such-prebake-xyz.strudel')"},
+            {3,"await midimaps('no-such-manifest-xyz.json')"},
+            {4,"await midin(0)"},
+            {5,"loadCsound('instr noSuchXyz\\nendin')"},
+        };
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,6,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots denials: %s\n",error);
+        assert(program && metadata);
+        cJSON *sm=cJSON_GetObjectItemCaseSensitive(metadata,"slots");
+        assert(cJSON_IsArray(sm) && cJSON_GetArraySize(sm)==6);
+        assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(sm,0),"ok")));
+        for (int i=1;i<6;i++) {
+            const cJSON *entry=cJSON_GetArrayItem(sm,i);
+            assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(entry,"ok")));
+            assert(strstr(cJSON_GetObjectItemCaseSensitive(entry,"error")->valuestring,"disabled for room code"));
+        }
+        assert(!javascript_uses_query_worker(program));
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==1);
+        const cJSON *value=cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(haps,0),"value");
+        assert(cJSON_GetObjectItemCaseSensitive(value,"note")->valueint==60);
+        cJSON_Delete(haps); javascript_free(program);
+    }
+    /* Highlight mapping: slot 1 spans shift by its locationsBase. */
+    {
+        CollabSlotText slots[]={{0,"$: note(\"c4 e4\")"},{1,"$: note(\"c4 e4\")"}};
+        cJSON *metadata=NULL;
+        JsProgram *program=javascript_compile_slots(slots,2,120,NULL,&remote,&metadata,error,sizeof(error));
+        if (!program) fprintf(stderr,"slots spans: %s\n",error);
+        assert(program);
+        cJSON_Delete(metadata);
+        cJSON *haps=javascript_query(program,0,1);
+        assert(cJSON_IsArray(haps) && cJSON_GetArraySize(haps)==4);
+        javascript_cache_spans(program,haps,0,2);
+        cJSON_Delete(haps);
+        double base1=(double)(strlen(slots[0].text)+1);
+        int off[64], len[64], count=javascript_play_styles(program,.1,off,len,NULL,NULL,64);
+        assert(count>0);
+        int below=0, above=0;
+        for (int i=0;i<count;i++) {
+            if (off[i]<base1) below=1; else above=1;
+        }
+        assert(below && above);
+        javascript_free(program);
+    }
+    /* API misuse fails the whole compile. */
+    {
+        CollabSlotText dup[]={{0,"$: note(60)"},{0,"$: note(64)"}};
+        cJSON *metadata=NULL;
+        assert(!javascript_compile_slots(dup,2,120,NULL,&remote,&metadata,error,sizeof(error)) && !metadata);
+        assert(!javascript_compile_slots(NULL,0,120,NULL,&remote,&metadata,error,sizeof(error)) && !metadata);
+        CollabSlotText nullprof[]={{7,"$: note(60).s('sine')"}};
+        JsProgram *program=javascript_compile_slots(nullprof,1,120,NULL,NULL,&metadata,error,sizeof(error));
+        assert(program && metadata);
+        cJSON_Delete(metadata); javascript_free(program);
+    }
+}
+
 static void test_analyser_controls(void) {
     JsProgram *program=NULL;
     cJSON *haps=query("note(60).analyze(7).fft(4)",&program);
@@ -2451,6 +2640,7 @@ int main(int argc, char **argv) {
     assert(cJSON_GetArraySize(haps)==0);
     cJSON_Delete(haps); javascript_free(program);
     test_analyser_controls();
+    test_collab_slots();
     test_hydra_learn_examples();
     test_fx_shared_routing();
     puts("JavaScript/Strudel runtime ok");

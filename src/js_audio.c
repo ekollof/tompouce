@@ -2095,7 +2095,8 @@ static void warn_unknown_controls(JsProgram *program, const cJSON *value) {
             "wt","warp","warpmode","wtrate","wtdepth","wtshape","wtskew","wtsync","wtdc",
             "wtattack","wtdecay","wtsustain","wtrelease","wtenv","wtphaserand",
             "warprate","warpdepth","warpshape","warpskew","warpsync","warpdc",
-            "warpattack","warpdecay","warpsustain","warprelease","warpenv",NULL};
+            "warpattack","warpdecay","warpsustain","warprelease","warpenv",
+            "id",NULL};
         int implemented = 0;
         for (int i = 0; known[i]; i++) if (!strcmp(name,known[i])) { implemented = 1; break; }
         if (!implemented) javascript_warn_control(program,name);

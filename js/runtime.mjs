@@ -1091,6 +1091,132 @@ globalThis.__compile = async (code, bpm = 120, prebake = '') => {
   return JSON.stringify({ bpm: tempo, samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, collecting.size), csound: csoundUsed ? orchestraCalls : null, sliders: liveSliderReaders.size });
 };
 
+/* Room composite for Jam mode (docs/multiplayer.md section 9.4). slotsJson
+   is an array of {id, code}. Each slot is transpiled through prepare() and
+   run in its own async Function scope inside the one runtime, so
+   `const melody` in two slots does not collide. Each slot gets its own
+   collecting map, hush and each/all scope; branch ids are namespaced
+   "<slot>/<label>", and solo filtering is a room-wide union over the merged
+   branches. One slot's exception is caught and reported per slot, so one
+   member's typo never silences the room. setcpm/setcps are captured per
+   slot into tempoBySlot and never applied: the room clock owns tempo.
+   Math.random is reseeded deterministically for the composite and restored
+   afterwards. Visual sites accumulate with composite-shifted offsets, and
+   locationsBase maps each slot's local offsets into the composite source
+   (slot texts joined with "\n"). A slot's all() transforms apply to the
+   final stack in slot order; per-branch each() stays per slot. */
+globalThis.__compileSlots = async (slotsJson, bpm = 120, prebake = '') => {
+  hydraWarned = false;
+  resetPrebakes();
+  midiMaps.clear();
+  liveSliderReaders.clear();
+  const slots = JSON.parse(slotsJson);
+  if (!Array.isArray(slots) || !slots.length || slots.length > 32)
+    throw new Error('__compileSlots requires 1..32 slots');
+  const seen = new Set();
+  for (const slot of slots) {
+    if (!slot || typeof slot.code !== 'string' || !Number.isInteger(slot.id) || slot.id < 0 || slot.id > 1023)
+      throw new Error('__compileSlots slot needs an integer id and code string');
+    if (slot.code.length > 262144) throw new Error('__compileSlots slot exceeds 256 KiB');
+    if (seen.has(slot.id)) throw new Error('__compileSlots duplicate slot id');
+    seen.add(slot.id);
+  }
+  const shiftLoc = (loc, base) => {
+    if (Array.isArray(loc)) return loc.map((entry, i) => (i < 2 && typeof entry === 'number') ? entry + base : entry);
+    if (loc && typeof loc === 'object') {
+      const out = { ...loc };
+      if (typeof out.start === 'number') out.start += base;
+      if (typeof out.end === 'number') out.end += base;
+      return out;
+    }
+    return loc;
+  };
+  const origRandom = Math.random;
+  let seed = 0xC0FFEE >>> 0;
+  Math.random = () => {
+    seed ^= (seed << 13) >>> 0; seed >>>= 0;
+    seed ^= seed >>> 17; seed ^= (seed << 5) >>> 0; seed >>>= 0;
+    return (seed >>> 0) / 4294967296;
+  };
+  try {
+    collecting = new Map(); anonymous = 0; eachTransform = undefined; allTransforms = [];
+    sampleCalls = []; tempo = undefined; initialBpm = bpm; visuals = 0; visualSites = []; visualTiles = new Map(); aliases = new Map();
+    queryCps = undefined;
+    orchestraCalls = []; csoundUsed = false; pianoUsed = false;
+    visualProbes = []; visualAliases.clear();
+    compiledVisualSites = visualSites;
+    nextProbe = 0;
+    if (prebake) {
+      await runPrebake(prebake);
+      collecting = new Map(); anonymous = 0;
+    }
+    resetDefaultValues();
+    const merged = [];
+    const slotResults = [];
+    const tempoBySlot = {};
+    const allLocations = [];
+    const slotAllTransforms = [];
+    let base = 0;
+    for (const slot of slots) {
+      const locationsBase = base;
+      base += slot.code.length + 1;
+      const sitesBefore = visualSites.length;
+      collecting = new Map(); anonymous = 0; eachTransform = undefined; allTransforms = [];
+      sampleCalls = [];
+      tempo = undefined;
+      let ok = true, error = '', voices = 0;
+      try {
+        const result = prepare(slot.code);
+        for (const loc of (result.miniLocations ?? [])) allLocations.push(shiftLoc(loc, locationsBase));
+        for (let i = sitesBefore; i < visualSites.length; i++) visualSites[i].offset += locationsBase;
+        if (nextProbe < visualSites.length) nextProbe = visualSites.length;
+        const value = await Function(`"use strict";return (async()=>{${observeBranches(result.output)}})()`)();
+        let pattern = value === hydraPlaceholder ? core.silence : value;
+        if (pattern === undefined) pattern = core.silence;
+        if (!core.isPattern(pattern)) pattern = core.reify(pattern);
+        if (tempo !== undefined) tempoBySlot[slot.id] = tempo;
+        tempo = undefined;
+        const branches = Array.from(collecting.entries());
+        voices = branches.length;
+        for (const [bid, p] of branches) {
+          // Attribution rides the hap value (withValue), not state controls:
+          // this pinned core never merges state controls into hap values,
+          // so setControls({id}) would silently vanish (verified: even
+          // single-program $: haps carry no id). each() still applies after.
+          const tag = `${slot.id}/${bid}`;
+          const named = p.fmap(value => value && typeof value === 'object' && !Array.isArray(value) ? { ...value, id: tag } : { note: value, id: tag });
+          merged.push([tag, eachTransform ? eachTransform(named) : named]);
+        }
+        if (!branches.length) merged.push([`${slot.id}`, eachTransform ? eachTransform(pattern) : pattern]);
+        for (const t of allTransforms) slotAllTransforms.push(t);
+      } catch (e) {
+        ok = false;
+        error = String((e && e.message) || e);
+        tempo = undefined;
+      }
+      slotResults.push({ id: slot.id, ok, error, voices, locationsBase });
+    }
+    const isSolo = ([bid]) => {
+      const label = bid.slice(bid.indexOf('/') + 1);
+      return label.length > 1 && label.startsWith('S');
+    };
+    const soloActive = merged.some(isSolo);
+    let pattern = merged.length
+      ? core.stack(...merged.filter(branch => !soloActive || isSolo(branch)).map(([, p]) => p))
+      : core.silence;
+    for (const transform of slotAllTransforms) pattern = transform(pattern);
+    const whole = visualProbes.length;
+    visualProbes.push({ key: '@all', mask: 0 });
+    selected = __observeBranch(whole, pattern);
+    source = slots.map(slot => slot.code).join('\n');
+    locations = allLocations;
+    if (pianoUsed) sampleCalls.unshift(['https://raw.githubusercontent.com/felixroos/dough-samples/main/piano.json']);
+    return JSON.stringify({ samples: sampleCalls, locations, visuals, visualSites, voices: Math.max(1, merged.length), csound: csoundUsed ? orchestraCalls : null, sliders: liveSliderReaders.size, slots: slotResults, tempoBySlot });
+  } finally {
+    Math.random = origRandom;
+  }
+};
+
 /* JSON turns non-finite numbers into null. Duck numeric conversion accepts
    their JS spellings, including inside arrays; non-finite onset spellings
    reject the same downward endpoint as numeric addition would. Keep OSC's

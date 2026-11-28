@@ -903,7 +903,7 @@ int collab_room_set_slot(int slot, const char *body, size_t bodylen,
     size_t length;
     char *copy=NULL;
     int at, i;
-    if (slot<0 || slot>1023 || !body) return 0;
+    if (slot<0 || slot>=CP_SLOTS_MAX || !body) return 0;
     length=strlen(body);
     if (length!=bodylen || length>COLLAB_ROOM_BODY_MAX) return 0;
     copy=malloc(length+1);

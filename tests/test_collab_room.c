@@ -197,6 +197,7 @@ static void test_room_reject(void) {
     /* No slots, bad cycles, oversized bodies and bad ids fail closed. */
     assert(!collab_room_apply(101.0,1,err,sizeof(err)));
     assert(!collab_room_set_slot(-1,"$: note(60)",strlen("$: note(60)"),0));
+    assert(!collab_room_set_slot(16,"$: note(60)",strlen("$: note(60)"),0));
     assert(!collab_room_set_slot(1024,"$: note(60)",strlen("$: note(60)"),0));
     assert(!collab_room_set_slot(0,"$: note(60)",strlen("$: note(60)")+1,0));
     assert(!collab_room_set_slot(0,NULL,0,0));

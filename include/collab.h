@@ -65,6 +65,8 @@ int collab_slot_from_id(const char *id);
    activation path. Not a transport action: callers feed it decrypted eval
    bodies. Returns nonzero when a program was staged. */
 void collab_room_reset(void);
+/* Slot ids are room slots, 0..CP_SLOTS_MAX-1. Bodies are the exact
+   evaluated text (NUL-terminated, bodylen must match strlen). */
 int collab_room_set_slot(int slot, const char *body, size_t bodylen,
     int remote);
 const char *collab_room_slot_error(int slot);

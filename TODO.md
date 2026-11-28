@@ -1157,6 +1157,16 @@ green, docs updated. Milestones map to brief §19 phases.
 
 ### M2 — Live shared eval (doing)
 
+- [x] E2E crypto (`src/collab_crypto.c`): master seed (`identity.key`,
+      0600), per-room member keys, admission key + bootstrap proof, auth
+      signatures, sealed control/frame records with bound AD, eval/profile
+      JSON, fingerprints. Derivations pinned in the brief (member subkey =
+      LE64(SHA-256(room)) under `"tpcroom1"`, admission = id 0 under
+      `"tpcadm01"`, content subkeys 1/2/3 under `"tpcsub01"`). New
+      `tests/test_collab_crypto.c` (roundtrips, tamper matrix, independent
+      raw-sodium known answers) plus committed
+      `tests/vectors/collab-crypto.json` for web parity. Room/wire slot ids
+      capped at `CP_SLOTS_MAX` (0..15) to match the director.
 - [x] Slot attribution end to end: M1 namespaced hap ids parse into
       `event.slot` in `audio_event_values` (single programs stay 0); the OSC
       gate passes the exact `host:port` target mirroring

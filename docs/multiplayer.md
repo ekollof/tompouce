@@ -2061,9 +2061,10 @@ dedicated security review.
 - **Identity:** a local 32-byte master seed in
   `~/.config/tompouce/collab/identity.key`. For each room the client derives a
   **per-room Ed25519 keypair** (`crypto_kdf_derive_from_key`, context
-  `"tpcroom1"`, subkey id from the room id), so rooms and servers cannot be
-  linked by public key. The `pk` is shown as a short fingerprint (first 10
-  bytes of SHA-256, base32) in `/collab status` and member lists.
+  `"tpcroom1"`, subkey id = LE64(SHA-256(room_id)[0..8])), so rooms and
+  servers cannot be linked by public key. The `pk` is shown as a short
+  fingerprint (first 10 bytes of SHA-256, lowercase base32, no padding)
+  in `/collab status` and member lists.
 - **Nick:** your display name is cosmetic, user-chosen and **sealed**
   (§14.5 type 2), so the director never sees it. It is one value per user,
   reused in every room, not a room name or a per-room setting. It grants
@@ -2212,7 +2213,7 @@ expiry, revocation, rotation, and the consequences for the rest of the system.
 | **Master seed** (32 B) | Each user, once | `~/.config/tompouce/collab/identity.key` (0600) | Derives per-room member keys. |
 | **Member key** `(sk, pk)`, Ed25519 | Derived per room | Memory, re-derived | Authenticates to the director, signs every sealed record. Its X25519 form receives rotation envelopes. |
 | **Owner key** `(osk, opk)`, Ed25519 | The room owner, at creation | Owner link, and `~/.config/tompouce/collab/rooms/<room>.json` (0600) | Trust root. Signs invite certificates, kick certificates and rekeys. `opk` is registered with the director and pinned in invites. |
-| **Room key** `K_e` (32 B) | The owner, per epoch `e` | Owner and member memory; invite links; wrapped invites | Seals all room content. Subkeys via `crypto_kdf`: 1 = frames, 2 = control records, 3 = blobs. **Never sent to the director.** |
+| **Room key** `K_e` (32 B) | The owner, per epoch `e` | Owner and member memory; invite links; wrapped invites | Seals all room content. Subkeys via `crypto_kdf` under context `"tpcsub01"`: id 1 = frames, 2 = control records, 3 = blobs. The admission key is `crypto_kdf(K_e, id 0, "tpcadm01")`. **Never sent to the director.** |
 | **Invite key** `(isk, ipk)`, Ed25519 | The owner, per invite | `isk` only in the link or the wrapped blob; `ipk` is public | Proves "I hold this invite" and lets peers verify the member was admitted by the owner. |
 | **Passphrase** | The owner's client, generated | Shared out of band | Wraps an invite for the join-code method. |
 
@@ -2413,11 +2414,16 @@ A profile record updates only the fields it carries: a `/nick` record changes
 the nick and leaves the member's color alone. Profile records use slot 0.
 
 **Eval record** (type 1, inside the seal): `{v:1, slot, seq, body}` where `seq`
-is the author's monotonic counter **per slot**. Receivers reject `seq ≤
+is the author's monotonic counter **per slot**. `slot` is 0..15, `seq` fits
+in 2^53, `body` caps at 256 KiB. Receivers reject `seq ≤
 last_seen(author, slot)`. The director's `eval_seq` and `at_cycle` sit outside
 the seal, so the director can order and schedule but cannot alter or forge
 code. The old outer `sha256` field no longer exists: the signature covers the
 body.
+
+**Profile record** (type 2, inside the seal): `{v:1, nick}` with optional
+`color`. `nick` is 1..32 bytes (semantic validation happens at apply time
+via the nick rules in §13.5); `color`, when present, is at most 64 bytes.
 
 **Receiver checks, in order:** epoch held → author is a verified member →
 role and ACL allow `kind`/`slot` → signature → AEAD → (evals) `seq` →
